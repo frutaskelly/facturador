@@ -29,6 +29,7 @@ from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
     Almacen,
     Cliente,
+    EsquemaImpuesto,
     Factura,
     LineaRemision,
     ListaPrecios,
@@ -39,6 +40,7 @@ from ...models import (
     Tenant,
 )
 from ...services import email as email_service
+from ...services.fiscal import calcular_linea_producto
 from ...services.precios import resolver_precio
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ...schemas.common import Page
@@ -59,6 +61,22 @@ _READ = "menu:remisiones"
 _WRITE = "remision:gestionar"
 _ZERO = Decimal("0")
 _DUP = "Folio de remisión duplicado"
+
+
+def _fiscal_por_producto(db: Session, producto_ids) -> dict:
+    """{producto_id: (Producto, EsquemaImpuesto|None)} para el cálculo fiscal
+    de líneas — una sola carga por request."""
+    ids = set(producto_ids)
+    productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(ids)).all()}
+    esq_ids = {p.esquema_impuesto_id for p in productos.values() if p.esquema_impuesto_id}
+    esquemas = (
+        {e.id: e for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.id.in_(esq_ids)).all()}
+        if esq_ids else {}
+    )
+    return {
+        pid: (p, esquemas.get(p.esquema_impuesto_id) if p.esquema_impuesto_id else None)
+        for pid, p in productos.items()
+    }
 
 
 def _next_folio(db: Session, tenant_id, *, sucursal_id=None, cliente_id=None, serie_id=None) -> str:
@@ -154,7 +172,10 @@ def create_remision(
     db.add(rem)
     db.flush()
 
+    fiscal = _fiscal_por_producto(db, [ln.producto_id for ln in payload.lineas])
     subtotal = _ZERO
+    iva_total = _ZERO
+    ieps_total = _ZERO
     for i, ln in enumerate(payload.lineas, start=1):
         # Precio: manual si se envía; si no, se resuelve por cliente/sucursal/volumen.
         precio = ln.precio_unitario
@@ -172,6 +193,10 @@ def create_remision(
             precio = res["precio"]
         importe = ln.cantidad_solicitada * precio
         subtotal += importe
+        prod, esq = fiscal.get(ln.producto_id, (None, None))
+        calc = calcular_linea_producto(prod, esq, importe, ln.cantidad_solicitada)
+        iva_total += calc["iva_importe"]
+        ieps_total += calc["ieps_importe"]
         db.add(LineaRemision(
             tenant_id=ctx.tenant_id,
             remision_id=rem.id,
@@ -181,10 +206,14 @@ def create_remision(
             cantidad_solicitada=ln.cantidad_solicitada,
             precio_unitario=precio,
             importe=importe,
+            iva_importe=calc["iva_importe"],
+            ieps_importe=calc["ieps_importe"],
             notas=ln.notas,
         ))
     rem.subtotal = subtotal
-    rem.total = subtotal - payload.descuento  # iva/ieps = 0 (FyV exenta; fiscal en Fase 6)
+    rem.iva = iva_total
+    rem.ieps = ieps_total
+    rem.total = subtotal - payload.descuento + iva_total + ieps_total
     flush_or_conflict(db, detail=_DUP)
     db.refresh(rem)
     return rem
@@ -376,7 +405,10 @@ def update_remision(
         for old in list(rem.lineas):
             db.delete(old)
         db.flush()
+        fiscal = _fiscal_por_producto(db, [ln["producto_id"] for ln in lineas_in])
         subtotal = _ZERO
+        iva_total = _ZERO
+        ieps_total = _ZERO
         for i, ln in enumerate(lineas_in, start=1):
             precio = ln.get("precio_unitario")
             if precio is None:
@@ -393,11 +425,16 @@ def update_remision(
                 precio = res["precio"]
             importe = ln["cantidad_solicitada"] * precio
             subtotal += importe
+            prod, esq = fiscal.get(ln["producto_id"], (None, None))
+            calc = calcular_linea_producto(prod, esq, importe, ln["cantidad_solicitada"])
+            iva_total += calc["iva_importe"]
+            ieps_total += calc["ieps_importe"]
             nueva = LineaRemision(
                 tenant_id=ctx.tenant_id, remision_id=rem.id, numero_linea=i,
                 producto_id=ln["producto_id"], presentacion=ln["presentacion"],
                 cantidad_solicitada=ln["cantidad_solicitada"], precio_unitario=precio,
-                importe=importe, notas=ln.get("notas"),
+                importe=importe, iva_importe=calc["iva_importe"],
+                ieps_importe=calc["ieps_importe"], notas=ln.get("notas"),
             )
             # Inventario sin cambios: hereda la reserva de la línea equivalente.
             if era_confirmada and not inv_cambio:
@@ -406,6 +443,8 @@ def update_remision(
                     nueva.lote_id, nueva.cantidad_surtida = heredadas.pop()
             db.add(nueva)
         rem.subtotal = subtotal
+        rem.iva = iva_total
+        rem.ieps = ieps_total
         # Reedición de una CONFIRMADA con cambio de inventario: re-reserva con
         # las líneas nuevas (queda CONFIRMADA). Sin existencia → 422 y revierte.
         if era_confirmada and inv_cambio:
@@ -521,6 +560,54 @@ def cancelar_remision(
     return rem
 
 
+class PreviewLineaIn(BaseModel):
+    producto_id: UUID
+    cantidad: Decimal = PydField(gt=0)
+    precio_unitario: Decimal = PydField(ge=0)
+    presentacion: Optional[str] = PydField(default=None, max_length=20)
+
+
+class PreviewTotalesIn(BaseModel):
+    lineas: list[PreviewLineaIn] = PydField(min_length=1, max_length=500)
+    descuento: Decimal = PydField(default=Decimal("0"), ge=0)
+
+
+@router.post("/preview-totales")
+def preview_totales(
+    payload: PreviewTotalesIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Totales calculados por el SERVIDOR para el preview del alta (remisión o
+    factura directa): el frontend nunca deriva impuestos por su cuenta — regla
+    "el backend calcula todo" (2026-07-29). Mismo cerebro que el documento real."""
+    fiscal = _fiscal_por_producto(db, [ln.producto_id for ln in payload.lineas])
+    subtotal = _ZERO
+    iva = _ZERO
+    ieps = _ZERO
+    por_linea = []
+    for ln in payload.lineas:
+        importe = ln.cantidad * ln.precio_unitario
+        subtotal += importe
+        prod, esq = fiscal.get(ln.producto_id, (None, None))
+        calc = calcular_linea_producto(prod, esq, importe, ln.cantidad)
+        iva += calc["iva_importe"]
+        ieps += calc["ieps_importe"]
+        por_linea.append({
+            "importe": importe,
+            "iva_importe": calc["iva_importe"],
+            "ieps_importe": calc["ieps_importe"],
+        })
+    return {
+        "subtotal": subtotal,
+        "descuento": payload.descuento,
+        "iva": iva,
+        "ieps": ieps,
+        "total": subtotal - payload.descuento + iva + ieps,
+        "lineas": por_linea,      # mismo orden que el payload
+    }
+
+
 class EnviarRemisionIn(BaseModel):
     to: Optional[str] = PydField(default=None, max_length=1000)
     mensaje: Optional[str] = PydField(default=None, max_length=5000)
@@ -580,8 +667,15 @@ def _build_remision_html(rem: Remision, cliente_nombre: str, lineas: list) -> st
         "</tr></thead><tbody>"
         + "".join(filas)
         + "</tbody></table>"
-        f"<p style='margin:16px 0 0;text-align:right;font-size:16px'>"
-        f"<strong>Total: {_fmt_money(total)}</strong></p>"
+        + (
+            f"<p style='margin:12px 0 0;text-align:right;font-size:13px;color:#555'>"
+            f"Subtotal: {_fmt_money(rem.subtotal or total)}"
+            + (f" · IVA: {_fmt_money(rem.iva)}" if rem.iva and Decimal(rem.iva) > 0 else "")
+            + (f" · IEPS: {_fmt_money(rem.ieps)}" if rem.ieps and Decimal(rem.ieps) > 0 else "")
+            + "</p>"
+        )
+        + f"<p style='margin:4px 0 0;text-align:right;font-size:16px'>"
+        f"<strong>Total: {_fmt_money(rem.total if rem.total is not None else total)}</strong></p>"
         "</div>"
     )
 
@@ -595,13 +689,16 @@ def _build_remisiones_lote_html(
     filas = []
     total_general = _ZERO
     for rem in rems:
-        subtotal = sum((ln.importe or _ZERO for ln in rem.lineas), _ZERO)
-        total_general += subtotal
+        # Total oficial del documento (con impuestos) — el mismo de lista/PDF.
+        total_rem = rem.total if rem.total is not None else sum(
+            (ln.importe or _ZERO for ln in rem.lineas), _ZERO
+        )
+        total_general += total_rem
         filas.append(
             "<tr>"
             f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{html_mod.escape(rem.folio_interno or '')}</td>"
             f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{rem.fecha_remision}</td>"
-            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{_fmt_money(subtotal)}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{_fmt_money(total_rem)}</td>"
             "</tr>"
         )
     n = len(rems)

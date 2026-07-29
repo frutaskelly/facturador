@@ -158,3 +158,53 @@ export function unidadBaseDesde(pres?: string): string {
     .find((u) => { const n = norm(u); return p.startsWith(n) || n.startsWith(p) || p.includes(n); });
   return hit ?? "KILO";
 }
+
+// ── Preview fiscal calculado por el SERVIDOR ──────────────────────────────────
+// Regla "el backend calcula todo": el frontend nunca deriva IVA/IEPS por su
+// cuenta; este helper pide los totales a /remisiones/preview-totales (el mismo
+// cerebro fiscal que guarda remisiones y facturas).
+export type FiscalPreview = {
+  subtotal: number;
+  iva: number;
+  ieps: number;
+  total: number;
+  /** Desglose por línea, indexado por la `key` de la línea enviada. */
+  porKey: Record<string, { iva: number; ieps: number }>;
+};
+
+type PreviewResp = {
+  subtotal: string; iva: string; ieps: string; total: string;
+  lineas: { importe: string; iva_importe: string; ieps_importe: string }[];
+};
+
+/** Pide al servidor los totales fiscales de las líneas completas (producto,
+ * cantidad > 0 y precio). Devuelve null si no hay líneas listas. */
+export async function fetchFiscalPreview(lineas: LineaForm[]): Promise<FiscalPreview | null> {
+  const listas = lineas.filter(
+    (l) => l.producto_id && Number(l.cantidad) > 0 && l.precio !== "" && Number(l.precio) >= 0,
+  );
+  if (!listas.length) return null;
+  const r = await apiFetch<PreviewResp>("/api/v1/remisiones/preview-totales", {
+    method: "POST",
+    body: JSON.stringify({
+      lineas: listas.map((l) => ({
+        producto_id: l.producto_id,
+        cantidad: l.cantidad,
+        precio_unitario: l.precio,
+        presentacion: l.presentacion || null,
+      })),
+    }),
+  });
+  return {
+    subtotal: Number(r.subtotal),
+    iva: Number(r.iva),
+    ieps: Number(r.ieps),
+    total: Number(r.total),
+    porKey: Object.fromEntries(
+      listas.map((l, i) => [
+        l.key,
+        { iva: Number(r.lineas[i]?.iva_importe ?? 0), ieps: Number(r.lineas[i]?.ieps_importe ?? 0) },
+      ]),
+    ),
+  };
+}

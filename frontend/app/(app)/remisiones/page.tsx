@@ -24,8 +24,9 @@ import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
 import {
-  NUEVO_PRODUCTO, lineaDesdePegado, matchPresentacion, norm, nuevaLinea,
-  pegarLocalFallback, unidadBaseDesde, type LineaForm,
+  NUEVO_PRODUCTO, fetchFiscalPreview, lineaDesdePegado, matchPresentacion, norm,
+  nuevaLinea, pegarLocalFallback, unidadBaseDesde,
+  type FiscalPreview, type LineaForm,
 } from "@/lib/lineas";
 import type { Almacen, Cliente, LineaPegada, MatchResult, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
@@ -146,10 +147,25 @@ export default function RemisionesPage() {
   }, [mode, editId, clienteId, sucursalId, serieOverride]);
 
   const folioPreview = serieResuelta ? `${serieResuelta.codigo}${serieResuelta.folio_actual + 1}` : "—";
-  const subtotalPreview = lineas.reduce((s, l) => s + (l.importe || 0), 0);
-  const iepsPreview = lineas.reduce((s, l) => s + (l.importe || 0) * Number(prodById[l.producto_id]?.ieps_tasa ?? 0), 0);
-  const ivaPreview = lineas.reduce((s, l) => s + (l.importe || 0) * Number(prodById[l.producto_id]?.iva_tasa ?? 0), 0);
-  const totalPreview = subtotalPreview + iepsPreview + ivaPreview;
+
+  // Totales del alta calculados por el SERVIDOR (regla "el backend calcula
+  // todo"): debounce por tecleo + secuencia contra respuestas fuera de orden.
+  const [fiscalPreview, setFiscalPreview] = useState<FiscalPreview | null>(null);
+  const fiscalSeq = useRef(0);
+  useEffect(() => {
+    const seq = ++fiscalSeq.current;
+    const t = setTimeout(() => {
+      fetchFiscalPreview(lineas)
+        .then((p) => { if (seq === fiscalSeq.current) setFiscalPreview(p); })
+        .catch(() => { if (seq === fiscalSeq.current) setFiscalPreview(null); });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [lineas]);
+
+  const subtotalPreview = fiscalPreview?.subtotal ?? lineas.reduce((s, l) => s + (l.importe || 0), 0);
+  const iepsPreview = fiscalPreview?.ieps ?? 0;
+  const ivaPreview = fiscalPreview?.iva ?? 0;
+  const totalPreview = fiscalPreview?.total ?? subtotalPreview;
 
   // opciones para los comboboxes
   const clienteOpts: ComboOption[] = useMemo(() => clientes.map((c) => ({ value: c.id, label: c.legal_name })), [clientes]);
@@ -699,12 +715,12 @@ export default function RemisionesPage() {
     if (!d) {
       return <div className="flex justify-center py-6"><Spinner /></div>;
     }
-    // Remisión no fiscal (encabezado guarda iva/ieps=0); el desglose se calcula
-    // desde las tasas del producto, consistente con las columnas por línea.
-    const subtotal = d.lineas.reduce((s, l) => s + Number(l.importe), 0);
-    const ieps = d.lineas.reduce((s, l) => s + Number(l.importe) * Number(prodById[l.producto_id]?.ieps_tasa ?? 0), 0);
-    const iva = d.lineas.reduce((s, l) => s + Number(l.importe) * Number(prodById[l.producto_id]?.iva_tasa ?? 0), 0);
-    const total = subtotal + ieps + iva;
+    // Totales OFICIALES guardados por el backend (mismo cerebro fiscal que la
+    // factura) — el frontend solo los muestra.
+    const subtotal = Number(d.subtotal);
+    const ieps = Number(d.ieps);
+    const iva = Number(d.iva);
+    const total = Number(d.total);
     return (
       <div className="rounded-xl border border-border bg-background p-4">
         <div className="mb-3 flex flex-wrap gap-4 text-sm">
@@ -721,8 +737,8 @@ export default function RemisionesPage() {
             { header: "Pres.", cell: (l) => l.presentacion },
             { header: "Descr.", cell: (l) => l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id },
             { header: "P/U", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.precio_unitario) },
-            { header: "IEPS", className: "text-right tabular-nums", cell: (l) => fmtMoney(Number(l.importe) * Number(prodById[l.producto_id]?.ieps_tasa ?? 0)) },
-            { header: "IVA", className: "text-right tabular-nums", cell: (l) => fmtMoney(Number(l.importe) * Number(prodById[l.producto_id]?.iva_tasa ?? 0)) },
+            { header: "IEPS", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.ieps_importe ?? 0) },
+            { header: "IVA", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.iva_importe ?? 0) },
             { header: "Importe", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.importe) },
           ]}
         />
@@ -1398,12 +1414,12 @@ export default function RemisionesPage() {
                 </div>
                 {!showMatchIA && (
                   <div className="col-span-2 flex items-center justify-end sm:col-span-1">
-                    <span className="text-sm tabular-nums">{fmtMoney((l.importe || 0) * Number(prodById[l.producto_id]?.ieps_tasa ?? 0))}</span>
+                    <span className="text-sm tabular-nums">{fmtMoney(fiscalPreview?.porKey[l.key]?.ieps ?? 0)}</span>
                   </div>
                 )}
                 {!showMatchIA && (
                   <div className="col-span-2 flex items-center justify-end sm:col-span-1">
-                    <span className="text-sm tabular-nums">{fmtMoney((l.importe || 0) * Number(prodById[l.producto_id]?.iva_tasa ?? 0))}</span>
+                    <span className="text-sm tabular-nums">{fmtMoney(fiscalPreview?.porKey[l.key]?.iva ?? 0)}</span>
                   </div>
                 )}
                 <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-1">

@@ -17,7 +17,7 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
-import type { Almacen, OrdenCompra, Producto, Proveedor } from "@/lib/types";
+import type { Almacen, OrdenCompra, OrdenCompraDetail, Producto, Proveedor } from "@/lib/types";
 
 type ResumenProducto = { producto_id: string; disponible: number | string; en_transito: number | string };
 
@@ -141,7 +141,7 @@ export default function ComprasPage() {
   }
 
   // ── detalle / acciones ──
-  const [detail, setDetail] = useState<OrdenCompra | null>(null);
+  const [detail, setDetail] = useState<OrdenCompraDetail | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Al abrir el detalle, carga el resumen de cada producto distinto de la orden.
@@ -152,13 +152,13 @@ export default function ComprasPage() {
   const [confirmCancelar, setConfirmCancelar] = useState(false);
   async function openDetail(id: string) {
     try {
-      setDetail(await apiFetch<OrdenCompra>(`${BASE}/${id}`));
+      setDetail(await apiFetch<OrdenCompraDetail>(`${BASE}/${id}`));
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo abrir la orden");
     }
   }
   async function refreshDetail(id: string) {
-    setDetail(await apiFetch<OrdenCompra>(`${BASE}/${id}`));
+    setDetail(await apiFetch<OrdenCompraDetail>(`${BASE}/${id}`));
     reload();
   }
   async function doTransition(to: string) {

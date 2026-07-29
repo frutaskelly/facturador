@@ -374,3 +374,23 @@ def test_series_folio_no_rebobina_bajo_lo_emitido(client, env, auth, fake_pac):
     r2 = client.patch(f"/api/v1/series/{serie['id']}", headers=_h(env), json={"folio_actual": 5})
     assert r2.status_code == 200, r2.text
     assert r2.json()["folio_actual"] == 5
+
+
+def test_remision_con_impuestos_y_preview_coinciden(client, env, auth):
+    """Decisión 2026-07-29: la remisión guarda IVA/IEPS (mismo cerebro fiscal
+    que facturas) y el preview del servidor coincide con lo que se guarda."""
+    body = {"cliente_facturacion_id": env["cli"], "almacen_id": env["alm"],
+            "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": "10",
+                        "precio_unitario": "20"}]}
+    rem = client.post("/api/v1/remisiones", headers=_h(env), json=body).json()
+    # producto con esquema IVA 16%: subtotal 200 → iva 32 → total 232
+    assert float(rem["subtotal"]) == 200.0
+    assert float(rem["iva"]) == 32.0
+    assert float(rem["total"]) == 232.0
+    assert float(rem["lineas"][0]["iva_importe"]) == 32.0
+
+    prev = client.post("/api/v1/remisiones/preview-totales", headers=_h(env), json={
+        "lineas": [{"producto_id": env["prod"], "cantidad": "10", "precio_unitario": "20"}]})
+    assert prev.status_code == 200, prev.text
+    p = prev.json()
+    assert float(p["subtotal"]) == 200.0 and float(p["iva"]) == 32.0 and float(p["total"]) == 232.0

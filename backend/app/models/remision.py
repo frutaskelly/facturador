@@ -105,6 +105,11 @@ class LineaRemision(Base):
     cantidad_surtida = Column(Numeric(18, 4))
     precio_unitario = Column(Numeric(18, 4), nullable=False)
     importe = Column(Numeric(18, 4), nullable=False, server_default="0")
+    # Impuestos informativos de la línea (decisión 2026-07-29: la remisión
+    # muestra impuestos). Calculados con services/fiscal.calcular_linea_producto
+    # — el mismo cerebro que las facturas; el CFDI recalcula al facturar.
+    iva_importe = Column(Numeric(18, 4), nullable=False, server_default="0")
+    ieps_importe = Column(Numeric(18, 4), nullable=False, server_default="0")
     lote_id = Column(UUID(as_uuid=True), ForeignKey("lotes_inventario.id", ondelete="SET NULL"))
     notas = Column(Text)
 

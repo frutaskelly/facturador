@@ -87,3 +87,23 @@ def totales(lineas: list[dict], descuento: Decimal = ZERO) -> dict:
         "ret_isr": _q(ret_isr),
         "total": _q(total),
     }
+
+
+def calcular_linea_producto(prod, esq, importe: Decimal, cantidad: Decimal) -> dict:
+    """Desglose fiscal (IVA/IEPS/retenciones) de una línea a partir del esquema
+    del producto. ÚNICO cerebro fiscal por-producto: lo comparten facturas
+    (desde-remisiones y directa), remisiones y el preview de totales del
+    frontend — nadie más deriva impuestos por su cuenta."""
+    iva_tasa = esq.iva_tasa if esq else (prod.iva_tasa if prod else ZERO)
+    iva_exento = bool(esq.iva_exento) if esq else False
+    tipo_ieps = esq.tipo_ieps if esq else None
+    ieps_tasa = esq.ieps_tasa if esq else ZERO
+    ieps_cuota = esq.ieps_cuota if esq else ZERO
+    ret_iva_tasa = esq.retencion_iva_tasa if esq else ZERO
+    ret_isr_tasa = esq.retencion_isr_tasa if esq else ZERO
+    litros = (cantidad * Decimal(prod.contenido_litros)) if (prod and prod.contenido_litros) else ZERO
+    return calcular_linea(
+        importe, iva_tasa=iva_tasa, iva_exento=iva_exento,
+        tipo_ieps=tipo_ieps, ieps_tasa=ieps_tasa, ieps_cuota=ieps_cuota,
+        litros_totales=litros, ret_iva_tasa=ret_iva_tasa, ret_isr_tasa=ret_isr_tasa,
+    )

@@ -201,6 +201,8 @@ export type LineaRemision = {
   cantidad_surtida?: string | null;
   precio_unitario: string;
   importe: string;
+  iva_importe?: string;
+  ieps_importe?: string;
   lote_id?: string | null;
   notas?: string | null;
 };
@@ -360,8 +362,10 @@ export type OrdenCompra = {
   notas?: string | null;
   created_at: string;
   updated_at: string;
-  lineas?: LineaOrdenCompra[];
 };
+
+// La LISTA de órdenes no trae líneas; solo el detalle (GET /{id}) las incluye.
+export type OrdenCompraDetail = OrdenCompra & { lineas: LineaOrdenCompra[] };
 
 export type Conversion = {
   id: string;

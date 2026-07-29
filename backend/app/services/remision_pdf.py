@@ -124,6 +124,10 @@ def _remision_story(doc, rem, tenant, cliente, nombres: dict) -> list:
     tot_rows = [["Subtotal", _money(rem.subtotal)]]
     if rem.descuento and Decimal(rem.descuento) > 0:
         tot_rows.append(["Descuento", _money(rem.descuento)])
+    if rem.iva and Decimal(rem.iva) > 0:
+        tot_rows.append(["IVA", _money(rem.iva)])
+    if rem.ieps and Decimal(rem.ieps) > 0:
+        tot_rows.append(["IEPS", _money(rem.ieps)])
     tot_rows.append(["TOTAL", _money(rem.total)])
     tot = Table([[_p(k), _p(f"<b>{v}</b>" if k == "TOTAL" else v)] for k, v in tot_rows],
                 colWidths=[70, 90], hAlign="RIGHT")

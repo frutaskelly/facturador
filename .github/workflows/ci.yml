@@ -48,6 +48,11 @@ jobs:
         run: alembic upgrade head
       - name: Run tests
         run: pytest
+      - name: OpenAPI al día (el contrato del frontend se genera de aquí)
+        run: |
+          python -m scripts.export_openapi
+          git diff --exit-code openapi.json || {
+            echo "::error::backend/openapi.json desfasado — corre 'python -m scripts.export_openapi' y 'npm run gen:api' y commitea"; exit 1; }
 
   # ─── Frontend: type-check via production build ─────────────────────────────
   frontend:
@@ -64,6 +69,11 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Tipos del API al día (generados de backend/openapi.json)
+        run: |
+          npm run gen:api
+          git diff --exit-code lib/api-types.gen.ts || {
+            echo "::error::lib/api-types.gen.ts desfasado — corre 'npm run gen:api' y commitea"; exit 1; }
       - name: Type check
         run: npm run typecheck
       - name: Build (real gate — type errors fail here)

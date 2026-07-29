@@ -53,7 +53,7 @@ from ...services import email as email_service
 from ...services.cfdi import build_payload
 from ...services.factura_pdf import build_factura_pdf
 from ...services.facturama import FacturamaClient, FacturamaError
-from ...services.fiscal import calcular_linea, totales
+from ...services.fiscal import calcular_linea_producto, totales
 from ...services.onboarding import compute_status
 from ...services.inventario import build_movimiento, presentacion_factor, presentacion_sat, resolve_lote
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
@@ -82,22 +82,9 @@ def _next_folio(db: Session, tenant_id, serie: str) -> int:
     return mx + 1
 
 
-def _fiscal_calc(prod, esq, importe: Decimal, cantidad: Decimal) -> dict:
-    """Desglose fiscal (IVA/IEPS/retenciones) de una línea desde el esquema del
-    producto. Compartido por factura-desde-remisiones y factura-directa."""
-    iva_tasa = esq.iva_tasa if esq else (prod.iva_tasa if prod else ZERO)
-    iva_exento = bool(esq.iva_exento) if esq else False
-    tipo_ieps = esq.tipo_ieps if esq else None
-    ieps_tasa = esq.ieps_tasa if esq else ZERO
-    ieps_cuota = esq.ieps_cuota if esq else ZERO
-    ret_iva_tasa = esq.retencion_iva_tasa if esq else ZERO
-    ret_isr_tasa = esq.retencion_isr_tasa if esq else ZERO
-    litros = (cantidad * Decimal(prod.contenido_litros)) if (prod and prod.contenido_litros) else ZERO
-    return calcular_linea(
-        importe, iva_tasa=iva_tasa, iva_exento=iva_exento,
-        tipo_ieps=tipo_ieps, ieps_tasa=ieps_tasa, ieps_cuota=ieps_cuota,
-        litros_totales=litros, ret_iva_tasa=ret_iva_tasa, ret_isr_tasa=ret_isr_tasa,
-    )
+# El desglose fiscal por producto vive en services/fiscal.py (único cerebro,
+# compartido con remisiones y el preview de totales).
+_fiscal_calc = calcular_linea_producto
 
 
 def _release_remision_stock(db: Session, rems, ctx, factura) -> None:

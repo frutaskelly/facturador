@@ -31,6 +31,8 @@ class LineaRemisionOut(ORMModel):
     cantidad_surtida: Optional[Decimal] = None
     precio_unitario: Decimal
     importe: Decimal
+    iva_importe: Decimal = Decimal("0")
+    ieps_importe: Decimal = Decimal("0")
     lote_id: Optional[uuid.UUID] = None
     notas: Optional[str] = None
 

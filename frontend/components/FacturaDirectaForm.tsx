@@ -17,8 +17,9 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
 import {
-  NUEVO_PRODUCTO, lineaDesdePegado, matchPresentacion, norm, nuevaLinea,
-  pegarLocalFallback, unidadBaseDesde, type LineaForm,
+  NUEVO_PRODUCTO, fetchFiscalPreview, lineaDesdePegado, matchPresentacion, norm,
+  nuevaLinea, pegarLocalFallback, unidadBaseDesde,
+  type FiscalPreview, type LineaForm,
 } from "@/lib/lineas";
 import {
   FORMA_PAGO_FALLBACK, FORMA_PAGO_OPTS, METODO_PAGO_FALLBACK, METODO_PAGO_OPTS,
@@ -92,10 +93,25 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
   }, [clienteId, serieOverride]);
 
   const folioPreview = serieResuelta ? `${serieResuelta.codigo}${serieResuelta.folio_actual + 1}` : "—";
-  const subtotalPreview = lineas.reduce((s, l) => s + (l.importe || 0), 0);
-  const iepsPreview = lineas.reduce((s, l) => s + (l.importe || 0) * Number(prodById[l.producto_id]?.ieps_tasa ?? 0), 0);
-  const ivaPreview = lineas.reduce((s, l) => s + (l.importe || 0) * Number(prodById[l.producto_id]?.iva_tasa ?? 0), 0);
-  const totalPreview = subtotalPreview + iepsPreview + ivaPreview;
+
+  // Totales calculados por el SERVIDOR (regla "el backend calcula todo"):
+  // mismo cerebro fiscal que guarda la factura; debounce + secuencia anti-race.
+  const [fiscalPreview, setFiscalPreview] = useState<FiscalPreview | null>(null);
+  const fiscalSeq = useRef(0);
+  useEffect(() => {
+    const seq = ++fiscalSeq.current;
+    const t = setTimeout(() => {
+      fetchFiscalPreview(lineas)
+        .then((p) => { if (seq === fiscalSeq.current) setFiscalPreview(p); })
+        .catch(() => { if (seq === fiscalSeq.current) setFiscalPreview(null); });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [lineas]);
+
+  const subtotalPreview = fiscalPreview?.subtotal ?? lineas.reduce((s, l) => s + (l.importe || 0), 0);
+  const iepsPreview = fiscalPreview?.ieps ?? 0;
+  const ivaPreview = fiscalPreview?.iva ?? 0;
+  const totalPreview = fiscalPreview?.total ?? subtotalPreview;
 
   const clienteOpts: ComboOption[] = useMemo(() => clientes.map((c) => ({ value: c.id, label: c.legal_name })), [clientes]);
   const almacenOpts: ComboOption[] = useMemo(() => almacenes.map((a) => ({ value: a.id, label: a.nombre })), [almacenes]);
@@ -662,12 +678,12 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
                 </div>
                 {!showMatchIA && (
                   <div className="col-span-2 flex items-center justify-end sm:col-span-1">
-                    <span className="text-sm tabular-nums">{fmtMoney((l.importe || 0) * Number(prodById[l.producto_id]?.ieps_tasa ?? 0))}</span>
+                    <span className="text-sm tabular-nums">{fmtMoney(fiscalPreview?.porKey[l.key]?.ieps ?? 0)}</span>
                   </div>
                 )}
                 {!showMatchIA && (
                   <div className="col-span-2 flex items-center justify-end sm:col-span-1">
-                    <span className="text-sm tabular-nums">{fmtMoney((l.importe || 0) * Number(prodById[l.producto_id]?.iva_tasa ?? 0))}</span>
+                    <span className="text-sm tabular-nums">{fmtMoney(fiscalPreview?.porKey[l.key]?.iva ?? 0)}</span>
                   </div>
                 )}
                 <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-1">
