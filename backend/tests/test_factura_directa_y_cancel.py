@@ -28,10 +28,20 @@ _PURGE = (
 class _FakePAC:
     """Stub de FacturamaClient: no llama al sandbox."""
     configured = True
+    env_label = "sandbox"
 
     @classmethod
     def from_settings(cls, settings):
         return cls()
+
+    def create_cfdi(self, payload):
+        return {"Id": "FAKE-ID", "Complement": {"TaxStamp": {"Uuid": str(uuid.uuid4())}}}
+
+    def download_xml(self, cfdi_id):
+        return b"<xml/>"
+
+    def buscar_cfdi(self, serie, folio):
+        return True, None
 
     def cancel_cfdi(self, cfdi_id, motive, uuid_replacement=None):
         return {"status": "canceled"}
@@ -161,8 +171,8 @@ def _remision_facturada_timbrada(client, env):
 
 def test_cancel_motivo_02_libera_para_refacturar(client, env, auth, fake_pac):
     rem_id, fac_id = _remision_facturada_timbrada(client, env)
-    disp_antes, res_antes = _disponible(env)        # 70 disp, 30 reservada
-    assert (disp_antes, res_antes) == (Decimal("70"), Decimal("30"))
+    disp_antes, res_antes = _disponible(env)        # 70 disp (salida directa), 0 reservada
+    assert (disp_antes, res_antes) == (Decimal("70"), Decimal("0"))
 
     r = client.post(f"/api/v1/facturas/{fac_id}/cancelar", headers=_h(env), json={"motivo": "02"})
     assert r.status_code == 200, r.text
@@ -183,7 +193,7 @@ def test_cancel_simulada_sin_pac(client, env, auth, monkeypatch):
     aplicando la lógica interna (motivo 03 → devuelve inventario)."""
     monkeypatch.setattr(facturas_mod.settings, "FACTURAMA_FAKE_CANCEL", True)
     rem_id, fac_id = _remision_facturada_timbrada(client, env)
-    assert _disponible(env) == (Decimal("70"), Decimal("30"))
+    assert _disponible(env) == (Decimal("70"), Decimal("0"))
     # sin fake_pac: si intentara llamar al PAC fallaría; el flag debe saltarlo
     r = client.post(f"/api/v1/facturas/{fac_id}/cancelar", headers=_h(env), json={"motivo": "03"})
     assert r.status_code == 200, r.text
@@ -193,7 +203,7 @@ def test_cancel_simulada_sin_pac(client, env, auth, monkeypatch):
 
 def test_cancel_motivo_03_devuelve_inventario(client, env, auth, fake_pac):
     rem_id, fac_id = _remision_facturada_timbrada(client, env)
-    assert _disponible(env) == (Decimal("70"), Decimal("30"))
+    assert _disponible(env) == (Decimal("70"), Decimal("0"))
 
     r = client.post(f"/api/v1/facturas/{fac_id}/cancelar", headers=_h(env), json={"motivo": "03"})
     assert r.status_code == 200, r.text
@@ -205,16 +215,162 @@ def test_cancel_motivo_03_devuelve_inventario(client, env, auth, fake_pac):
 
 
 def test_cancel_inventario_perdida_da_de_baja(client, env, auth, fake_pac):
-    """inventario='perdida': la mercancía NO regresa (reserva liberada, disponible
-    igual → se pierde) y la remisión queda CANCELADA (no refacturable)."""
+    """inventario='perdida': la mercancía NO regresa (disponible igual → se
+    pierde) y la remisión queda CANCELADA (no refacturable)."""
     rem_id, fac_id = _remision_facturada_timbrada(client, env)
-    assert _disponible(env) == (Decimal("70"), Decimal("30"))
+    assert _disponible(env) == (Decimal("70"), Decimal("0"))
 
     r = client.post(f"/api/v1/facturas/{fac_id}/cancelar", headers=_h(env),
                     json={"motivo": "02", "inventario": "perdida"})
     assert r.status_code == 200, r.text
-    # reserva liberada pero NO regresa a disponible: 70 disp, 0 reservada (30 perdidos)
+    # NO regresa a disponible: 70 disp (los 30 se perdieron)
     assert _disponible(env) == (Decimal("70"), Decimal("0"))
     # remisión CANCELADA (mercancía perdida, no refacturable)
     det = client.get(f"/api/v1/remisiones/{rem_id}", headers=_h(env)).json()
     assert det["estado"] == "CANCELADA"
+
+
+# ── Timbrado: stock/sobregiro (#4) y bitácora de intentos (#1) ────────────────
+def _factura_directa(client, env, cantidad="10"):
+    body = {"cliente_id": env["cli"], "almacen_id": env["alm"], "lineas": [
+        {"producto_id": env["prod"], "cantidad": cantidad, "precio_unitario": "20"}]}
+    r = client.post("/api/v1/facturas/directa", headers=_h(env), json=body)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _cargar_stock(client, env, cantidad="50"):
+    client.post("/api/v1/inventario/movimientos", headers=_h(env), json={
+        "tipo": "ENTRADA_COMPRA", "producto_id": env["prod"], "almacen_id": env["alm"],
+        "cantidad": cantidad, "costo_unitario": "5"})
+
+
+def test_timbrar_directa_sin_stock_frena_y_sobregiro_autoriza(client, env, auth, fake_pac):
+    """#4: sin existencia el timbrado frena con 422; con permitir_negativos
+    timbra y deja el inventario en negativo (política unificada con remisiones)."""
+    f = _factura_directa(client, env, "10")     # sin ENTRADA_COMPRA: no hay stock
+    r = client.post(f"/api/v1/facturas/{f['id']}/timbrar", headers=_h(env))
+    assert r.status_code == 422, r.text
+    assert "insuficiente" in r.json()["detail"].lower()
+
+    r2 = client.post(f"/api/v1/facturas/{f['id']}/timbrar", headers=_h(env),
+                     json={"permitir_negativos": True})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["estado"] == "TIMBRADA"
+    disp, _ = _disponible(env)
+    assert disp == Decimal("-10")
+
+
+def test_timbrar_deja_bitacora_timbrada(client, env, auth, fake_pac):
+    """#1: cada timbrado exitoso deja su intento en TIMBRADA."""
+    _cargar_stock(client, env)
+    f = _factura_directa(client, env, "10")
+    r = client.post(f"/api/v1/facturas/{f['id']}/timbrar", headers=_h(env))
+    assert r.status_code == 200, r.text
+    db = SessionLocal()
+    try:
+        from app.models import TimbradoIntento
+        intentos = db.query(TimbradoIntento).filter(
+            TimbradoIntento.factura_id == uuid.UUID(f["id"])).all()
+        assert len(intentos) == 1 and intentos[0].estado == "TIMBRADA"
+    finally:
+        db.close()
+
+
+def _insertar_intento(env, factura_id, *, viejo=False):
+    from sqlalchemy import text as sqltext
+    from app.models import TimbradoIntento
+    db = SessionLocal()
+    try:
+        i = TimbradoIntento(tenant_id=uuid.UUID(str(env["tenant_id"])),
+                            factura_id=uuid.UUID(factura_id), estado="PENDIENTE")
+        db.add(i); db.flush()
+        if viejo:
+            db.execute(sqltext(
+                "UPDATE timbrado_intentos SET created_at = now() - interval '10 minutes' "
+                "WHERE id = :iid"), {"iid": str(i.id)})
+        db.commit()
+        return str(i.id)
+    finally:
+        db.close()
+
+
+def test_timbrar_pendiente_fresco_bloquea_409(client, env, auth, fake_pac):
+    """#1: un intento PENDIENTE fresco = timbrado en vuelo → 409, no doble CFDI."""
+    _cargar_stock(client, env)
+    f = _factura_directa(client, env, "10")
+    _insertar_intento(env, f["id"])
+    r = client.post(f"/api/v1/facturas/{f['id']}/timbrar", headers=_h(env))
+    assert r.status_code == 409, r.text
+    assert "en curso" in r.json()["detail"].lower()
+
+
+def test_timbrar_pendiente_viejo_reconcilia_y_adopta(client, env, auth, monkeypatch):
+    """#1: intento PENDIENTE viejo + el CFDI SÍ existe en Facturama → se adopta
+    (jamás se re-timbra: create_cfdi explota si se llamara)."""
+    uuid_sat = str(uuid.uuid4())
+
+    class _PACReconcilia(_FakePAC):
+        def create_cfdi(self, payload):
+            raise AssertionError("no debe re-timbrar: el CFDI ya existía")
+
+        def buscar_cfdi(self, serie, folio):
+            return True, {"Id": "YA-EXISTIA", "Serie": serie, "Folio": str(folio),
+                          "Complement": {"TaxStamp": {"Uuid": uuid_sat}}}
+
+    monkeypatch.setattr(facturas_mod, "FacturamaClient", _PACReconcilia)
+    _cargar_stock(client, env)
+    f = _factura_directa(client, env, "10")
+    _insertar_intento(env, f["id"], viejo=True)
+    r = client.post(f"/api/v1/facturas/{f['id']}/timbrar", headers=_h(env))
+    assert r.status_code == 200, r.text
+    assert r.json()["estado"] == "TIMBRADA"
+    assert r.json()["uuid"] == uuid_sat
+    db = SessionLocal()
+    try:
+        from app.models import Factura
+        f_db = db.query(Factura).filter(Factura.id == uuid.UUID(f["id"])).one()
+        assert f_db.facturama_id == "YA-EXISTIA"    # adoptado, no re-timbrado
+    finally:
+        db.close()
+
+
+def test_timbrar_pendiente_viejo_sin_cfdi_marca_error_y_timbra(client, env, auth, fake_pac):
+    """#1: intento viejo + el CFDI NO existe en Facturama → el intento muerto se
+    marca ERROR y el timbrado procede normal."""
+    _cargar_stock(client, env)
+    f = _factura_directa(client, env, "10")
+    iid = _insertar_intento(env, f["id"], viejo=True)
+    r = client.post(f"/api/v1/facturas/{f['id']}/timbrar", headers=_h(env))
+    assert r.status_code == 200, r.text
+    db = SessionLocal()
+    try:
+        from app.models import TimbradoIntento
+        viejo = db.query(TimbradoIntento).filter(TimbradoIntento.id == uuid.UUID(iid)).one()
+        assert viejo.estado == "ERROR"
+    finally:
+        db.close()
+
+
+def test_series_folio_no_rebobina_bajo_lo_emitido(client, env, auth, fake_pac):
+    """#7: `folio_actual` es editable pero nunca por debajo del folio más alto
+    ya emitido con esa serie (evita folios duplicados)."""
+    s = client.post("/api/v1/series", headers=_h(env), json={
+        "codigo": "ZZ", "tipo_documento": "FACTURA", "nombre": "Serie ZZ"})
+    assert s.status_code == 201, s.text
+    serie = s.json()
+
+    _cargar_stock(client, env)
+    body = {"cliente_id": env["cli"], "almacen_id": env["alm"], "serie_id": serie["id"],
+            "lineas": [{"producto_id": env["prod"], "cantidad": "1", "precio_unitario": "20"}]}
+    f = client.post("/api/v1/facturas/directa", headers=_h(env), json=body).json()
+    assert f["serie"] == "ZZ" and int(f["folio"]) == 1
+
+    # Por debajo de lo emitido → 422 con el piso en el mensaje.
+    r = client.patch(f"/api/v1/series/{serie['id']}", headers=_h(env), json={"folio_actual": 0})
+    assert r.status_code == 422, r.text
+    assert "ZZ1" in r.json()["detail"]
+    # Hacia adelante (o corregir por encima del piso) → OK.
+    r2 = client.patch(f"/api/v1/series/{serie['id']}", headers=_h(env), json={"folio_actual": 5})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["folio_actual"] == 5

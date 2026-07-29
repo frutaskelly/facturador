@@ -19,7 +19,6 @@ Uso:
 from __future__ import annotations
 
 import base64
-import json as _json
 import logging
 from dataclasses import dataclass
 from typing import Optional
@@ -116,6 +115,30 @@ class FacturamaClient:
                 )
                 raise FacturamaError(f"create_cfdi failed: {r.status_code} {r.text}")
             return r.json()
+
+    def buscar_cfdi(self, serie: str, folio) -> tuple[bool, Optional[dict]]:
+        """Busca un CFDI emitido por serie+folio (reconciliación de intentos de
+        timbrado que quedaron PENDIENTE). Devuelve (búsqueda_ok, cfdi|None):
+        (True, None) = la búsqueda funcionó y NO existe; (False, None) = no se
+        pudo verificar (red/API) — el llamador NO debe re-timbrar en ese caso."""
+        try:
+            with self._client() as c:
+                r = c.get("/cfdi", params={"type": "issued", "keyword": str(folio)})
+                if r.status_code != 200:
+                    return False, None
+                data = r.json()
+                items = data if isinstance(data, list) else []
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    if (
+                        str(it.get("Serie") or "").strip() == str(serie).strip()
+                        and str(it.get("Folio") or "").strip() == str(folio).strip()
+                    ):
+                        return True, it
+                return True, None
+        except Exception:  # noqa: BLE001 — sin verificación no hay re-timbrado
+            return False, None
 
     def cancel_cfdi(self, cfdi_id: str, motive: str, uuid_replacement: Optional[str] = None) -> dict:
         params = {"type": "issued", "motive": motive}

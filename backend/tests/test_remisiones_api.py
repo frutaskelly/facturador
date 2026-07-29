@@ -117,7 +117,7 @@ def test_create_draft_and_folio(client, env, auth_as):
     assert _create_rem(client, h, env, "1", "1").json()["folio_interno"] == "R2"
 
 
-def test_confirm_reserves_then_cancel_releases(client, env, auth_as):
+def test_confirm_descuenta_then_cancel_restituye(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     _load_stock(client, h, env, "100", "4")
     rem_id = _create_rem(client, h, env, "30", "5").json()["id"]
@@ -127,7 +127,7 @@ def test_confirm_reserves_then_cancel_releases(client, env, auth_as):
     assert c.json()["estado"] == "CONFIRMADA"
     row = _disp(client, h, env)
     assert float(row["disponible"]) == 70.0
-    assert float(row["reservada"]) == 30.0
+    assert float(row["reservada"]) == 0.0   # salida directa: sin cubeta de apartado
     movs = client.get("/api/v1/inventario/movimientos", headers=h, params={"tipo": "SALIDA_REMISION"}).json()
     assert movs["total"] >= 1
 
@@ -138,9 +138,9 @@ def test_confirm_reserves_then_cancel_releases(client, env, auth_as):
     assert float(row2["reservada"]) == 0.0
 
 
-def test_confirm_with_presentation_reserves_base_units(client, env, auth_as):
-    """Selling in BULTO (1 BULTO = 20 KILO) reserves the base-unit equivalent:
-    100 KILO in stock, sell 2 BULTO → 40 KILO reserved. Cancel releases 40."""
+def test_confirm_with_presentation_descuenta_base_units(client, env, auth_as):
+    """Selling in BULTO (1 BULTO = 20 KILO) descuenta el equivalente en unidad
+    base: 100 KILO en stock, 2 BULTO → salen 40 KILO. Cancelar restituye 40."""
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     pid = env["prod_bulto_a"]
     client.post("/api/v1/inventario/movimientos", headers=h, json={
@@ -158,7 +158,7 @@ def test_confirm_with_presentation_reserves_base_units(client, env, auth_as):
     assert client.post(f"/api/v1/remisiones/{rem_id}/confirmar", headers=h).status_code == 200
     row = _row()
     assert float(row["disponible"]) == 60.0   # 100 − (2 × 20)
-    assert float(row["reservada"]) == 40.0
+    assert float(row["reservada"]) == 0.0   # salida directa: sin cubeta de apartado
 
     assert client.post(f"/api/v1/remisiones/{rem_id}/cancelar", headers=h).status_code == 200
     row2 = _row()
@@ -191,8 +191,8 @@ def test_auto_precio_sin_precio_disponible_422(client, env, auth_as):
 
 
 def test_confirm_with_real_weight_catch_weight(client, env, auth_as):
-    """Confirmar con peso real por línea (catch-weight): reserva 43 kg (no el
-    estimado 40 = 2×20), y cancelar libera exactamente esos 43."""
+    """Confirmar con peso real por línea (catch-weight): descuenta 43 kg (no el
+    estimado 40 = 2×20), y cancelar restituye exactamente esos 43."""
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     pid = env["prod_bulto_a"]
     client.post("/api/v1/inventario/movimientos", headers=h, json={
@@ -212,7 +212,7 @@ def test_confirm_with_real_weight_catch_weight(client, env, auth_as):
                     json={"pesos": [{"linea_id": linea_id, "cantidad_base": "43"}]})
     assert c.status_code == 200, c.text
     assert float(_row()["disponible"]) == 57.0   # 100 − 43 (real, no 40)
-    assert float(_row()["reservada"]) == 43.0
+    assert float(_row()["reservada"]) == 0.0   # salida directa: sin cubeta de apartado
 
     assert client.post(f"/api/v1/remisiones/{rem_id}/cancelar", headers=h).status_code == 200
     assert float(_row()["disponible"]) == 100.0 and float(_row()["reservada"]) == 0.0

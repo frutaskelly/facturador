@@ -65,6 +65,9 @@ class RemisionUpdate(BaseModel):
     notas: Optional[str] = None
     nota_entrega: Optional[str] = None
     lineas: Optional[list[LineaRemisionCreate]] = None
+    # Sobregiro autorizado al re-descontar inventario de una CONFIRMADA
+    # (misma política que confirmar/facturar — decisión 2026-07-29 #5).
+    permitir_negativos: bool = False
 
 
 class RemisionOut(ORMModel):

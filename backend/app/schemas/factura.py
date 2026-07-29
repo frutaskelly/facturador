@@ -30,6 +30,13 @@ class FacturaDesdeRemisionesIn(BaseModel):
     permitir_negativos: bool = Field(default=False)
 
 
+class TimbrarIn(BaseModel):
+    # Sobregiro autorizado: una factura DIRECTA sin existencia suficiente frena
+    # con 422 salvo que esto venga en true (misma política que remisiones —
+    # decisión 2026-07-29 #4). Ignorado en facturas desde remisiones.
+    permitir_negativos: bool = False
+
+
 class CancelarFacturaIn(BaseModel):
     # 01 errores con relación (requiere uuid_sustitucion) | 02 sin relación |
     # 03 no se llevó a cabo | 04 operación nominativa en factura global

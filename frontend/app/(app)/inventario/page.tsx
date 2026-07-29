@@ -97,6 +97,9 @@ export default function InventarioPage() {
       motivo: form.motivo || null,
     };
     if (form.tipo === "ENTRADA_COMPRA") payload.costo_unitario = form.costo_unitario || "0";
+    // AJUSTE positivo: costo opcional; si va vacío, el backend usa el último
+    // costo de compra del producto (decisión 2026-07-29 #9 — nada entra a $0).
+    if (form.tipo === "AJUSTE" && form.costo_unitario) payload.costo_unitario = form.costo_unitario;
     if (form.numero_lote) payload.numero_lote = form.numero_lote;
     if (form.tipo === "TRANSFERENCIA") payload.almacen_destino_id = form.almacen_destino_id || null;
     if (form.tipo === "MERMA") payload.merma_motivo = form.merma_motivo;
@@ -121,7 +124,8 @@ export default function InventarioPage() {
     },
     { header: "Almacén", cell: (r) => r.almacen_nombre ?? almName[r.almacen_id] ?? r.almacen_id },
     { header: "Disponible", cell: (r) => fmtNumber(r.disponible), className: "text-right" },
-    { header: "Reservada", cell: (r) => fmtNumber(r.reservada), className: "text-right" },
+    // "Reservada" ya no se muestra: confirmar = salida directa (decisión
+    // 2026-07-29 #2); la cubeta quedó siempre en 0.
     { header: "Costo prom.", cell: (r) => fmtMoney(r.costo_promedio), className: "text-right" },
     { header: "Valor", cell: (r) => fmtMoney(r.valor), className: "text-right" },
   ];
@@ -197,6 +201,11 @@ export default function InventarioPage() {
             </Field>
             {form.tipo === "ENTRADA_COMPRA" && (
               <Field label="Costo unitario" required>
+                <Input type="number" step="0.0001" value={form.costo_unitario} onChange={(e) => set("costo_unitario", e.target.value)} />
+              </Field>
+            )}
+            {form.tipo === "AJUSTE" && (
+              <Field label="Costo unitario" hint="Opcional: si se deja vacío se usa el último costo de compra del producto">
                 <Input type="number" step="0.0001" value={form.costo_unitario} onChange={(e) => set("costo_unitario", e.target.value)} />
               </Field>
             )}

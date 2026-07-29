@@ -441,15 +441,60 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
     try {
       await apiFetch(`/api/v1/facturas/${creada.id}/timbrar`, { method: "POST" });
       toast.success(`Factura ${creada.serie}${creada.folio} timbrada${ambiente === "producción" ? "" : " (sandbox)"}`);
+      onSaved(creada);
+      onClose();
     } catch (e) {
-      // El borrador quedó creado: se puede reintentar el timbrado desde la lista.
-      toast.error(
-        `${e instanceof ApiError ? e.message : "No se pudo timbrar"} — el borrador ${creada.serie}${creada.folio} quedó guardado`,
-      );
+      if (e instanceof ApiError && /existencia insuficiente/i.test(e.message)) {
+        // Política unificada de sobregiro: el backend frena y aquí se pregunta.
+        setSobregiroDe(creada);
+      } else {
+        // El borrador quedó creado: se puede reintentar el timbrado desde la lista.
+        toast.error(
+          `${e instanceof ApiError ? e.message : "No se pudo timbrar"} — el borrador ${creada.serie}${creada.folio} quedó guardado`,
+        );
+        onSaved(creada);
+        onClose();
+      }
     } finally {
       setTimbrando(false);
       submitRef.current = false;
-      onSaved(creada);
+    }
+  }
+
+  // Sobregiro: la directa no tiene existencia suficiente; el borrador ya quedó
+  // creado y aquí se decide timbrarlo en negativo o dejarlo como borrador.
+  const [sobregiroDe, setSobregiroDe] = useState<FacturaDetail | null>(null);
+
+  async function timbrarConSobregiro() {
+    if (!sobregiroDe || timbrando) return;
+    const f = sobregiroDe;
+    setTimbrando(true);
+    try {
+      await apiFetch(`/api/v1/facturas/${f.id}/timbrar`, {
+        method: "POST",
+        body: JSON.stringify({ permitir_negativos: true }),
+      });
+      toast.success(
+        `Factura ${f.serie}${f.folio} timbrada con sobregiro${ambiente === "producción" ? "" : " (sandbox)"}`,
+      );
+    } catch (e) {
+      toast.error(
+        `${e instanceof ApiError ? e.message : "No se pudo timbrar"} — el borrador ${f.serie}${f.folio} quedó guardado`,
+      );
+    } finally {
+      setTimbrando(false);
+      setSobregiroDe(null);
+      onSaved(f);
+      onClose();
+    }
+  }
+
+  function declinarSobregiro() {
+    const f = sobregiroDe;
+    setSobregiroDe(null);
+    if (f) {
+      toast.success(`El borrador ${f.serie}${f.folio} quedó guardado (sin timbrar)`);
+      onSaved(f);
       onClose();
     }
   }
@@ -690,6 +735,20 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
             {" "}y se <strong>descuenta el inventario</strong>{almacenNombre ? ` de ${almacenNombre}` : ""}.
           </li>
         </ul>
+      </Modal>
+
+      {/* Sobregiro: sin existencia suficiente para timbrar la directa */}
+      <Modal open={sobregiroDe !== null} onClose={declinarSobregiro} title="Existencia insuficiente"
+        footer={
+          <>
+            <Button variant="secondary" onClick={declinarSobregiro} disabled={timbrando}>Dejar como borrador</Button>
+            <Button variant="danger" onClick={timbrarConSobregiro} disabled={timbrando}>Timbrar con sobregiro</Button>
+          </>
+        }>
+        <p className="text-sm text-muted">
+          No hay existencia suficiente para timbrar {sobregiroDe?.serie}{sobregiroDe?.folio}.
+          Si timbras de todas formas, el inventario quedará en negativo (sobregiro).
+        </p>
       </Modal>
     </div>
   );

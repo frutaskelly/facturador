@@ -88,25 +88,23 @@ export default function RemisionesPage() {
     [clientes],
   );
 
-  // lista
-  const { data, loading, error, reload } = useResource<Page<Remision>>("/api/v1/remisiones?limit=50");
-  const rows = data?.items ?? EMPTY_REMISIONES;
-
-  // ── filtros de lista (cliente-side) ──
+  // ── filtros de lista (server-side: el backend filtra sobre TODO el
+  // historial, no solo la página cargada — decisión 2026-07-29 #6) ──
   const [fDesde, setFDesde] = useState("");
   const [fHasta, setFHasta] = useState("");
   const [fCliente, setFCliente] = useState("");
-  const filteredRows = useMemo(
-    () =>
-      rows.filter((r) => {
-        const fch = (r.fecha_remision ?? "").slice(0, 10);
-        if (fDesde && fch < fDesde) return false;
-        if (fHasta && fch > fHasta) return false;
-        if (fCliente && r.cliente_facturacion_id !== fCliente) return false;
-        return true;
-      }),
-    [rows, fDesde, fHasta, fCliente],
-  );
+  const listPath = useMemo(() => {
+    const p = new URLSearchParams({ limit: "200" });
+    if (fDesde) p.set("fecha_desde", fDesde);
+    if (fHasta) p.set("fecha_hasta", fHasta);
+    if (fCliente) p.set("cliente_id", fCliente);
+    return `/api/v1/remisiones?${p.toString()}`;
+  }, [fDesde, fHasta, fCliente]);
+
+  // lista
+  const { data, loading, error, reload } = useResource<Page<Remision>>(listPath);
+  const rows = data?.items ?? EMPTY_REMISIONES;
+  const filteredRows = rows;
 
   // ── selección de filas (acciones en lote) ──
   const [selected, setSelected] = useState<Remision[]>([]);
@@ -548,23 +546,34 @@ export default function RemisionesPage() {
   // si el segundo clic entra antes del re-render (serían dos POST y dos folios).
   const inFlight = useRef(false);
 
+  // Sobregiro al EDITAR una confirmada (misma política que confirmar/facturar):
+  // si el re-descuento no alcanza, se ofrece guardar dejando negativo.
+  const [editSobregiro, setEditSobregiro] = useState<Record<string, unknown> | null>(null);
+
   // Guarda la edición de una remisión CONFIRMADA: el backend libera la reserva
   // previa y re-reserva con las líneas nuevas (sigue CONFIRMADA, mismo folio).
-  async function guardarEdicionConfirmada() {
+  async function guardarEdicionConfirmada(permitirNegativos = false) {
     if (inFlight.current) return;
     const payload = construirPayload();
     if (!payload) return;
     inFlight.current = true;
     try {
-      const rem = await persistirRemision(payload);
+      const rem = await persistirRemision(
+        permitirNegativos ? { ...payload, permitir_negativos: true } : payload,
+      );
       invalidarDetalles([rem.id]);
       toast.success(`Remisión ${rem.folio_interno} actualizada`);
+      setEditSobregiro(null);
       setEditId(null); setEditEstado(null);
       resetForm();
       setMode("list");
       reload();
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la remisión");
+      if (e instanceof ApiError && /existencia insuficiente/i.test(e.message) && !permitirNegativos) {
+        setEditSobregiro(payload as Record<string, unknown>);
+      } else {
+        toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la remisión");
+      }
     } finally {
       inFlight.current = false;
     }
@@ -1577,6 +1586,13 @@ export default function RemisionesPage() {
         message={`No hay existencia suficiente para confirmar ${negStock?.folio}. ¿Deseas remisionar de todas formas? El inventario quedará en negativo (sobregiro).`}
         confirmLabel="Remisionar sin existencias" confirmVariant="primary"
         onConfirm={confirmarNegativo} onClose={() => setNegStock(null)} loading={saving} />
+
+      {/* Sobregiro al guardar la edición de una CONFIRMADA */}
+      <ConfirmDialog open={editSobregiro !== null} title="Existencia insuficiente"
+        message="Los cambios requieren más existencia de la disponible. ¿Guardar de todas formas? El inventario quedará en negativo (sobregiro)."
+        confirmLabel="Guardar con sobregiro" confirmVariant="danger"
+        onConfirm={() => void guardarEdicionConfirmada(true)}
+        onClose={() => setEditSobregiro(null)} loading={saving} />
 
       {/* Sobregiro al confirmar en lote: las que no tienen existencia */}
       <ConfirmDialog open={confirmarSobregiro !== null} title="Existencia insuficiente"

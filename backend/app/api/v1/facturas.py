@@ -12,16 +12,18 @@ en la unidad base; el resto factura la presentación con su unidad SAT.
 from __future__ import annotations
 
 import html as html_mod
+import logging
 
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.config import settings
+from ...core.db import set_role_tenant
 from ...core.ratelimit import enforce
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
@@ -35,6 +37,7 @@ from ...models import (
     Producto,
     Remision,
     Tenant,
+    TimbradoIntento,
 )
 from ...schemas.common import Page
 from ...schemas.factura import (
@@ -44,6 +47,7 @@ from ...schemas.factura import (
     FacturaDetailOut,
     FacturaDirectaIn,
     FacturaOut,
+    TimbrarIn,
 )
 from ...services import email as email_service
 from ...services.cfdi import build_payload
@@ -55,6 +59,8 @@ from ...services.inventario import build_movimiento, presentacion_factor, presen
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import ensure_fk, get_or_404, paginate
 from .remisiones import reservar_stock_remision
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/facturas", tags=["facturas"])
 
@@ -118,7 +124,6 @@ def _release_remision_stock(db: Session, rems, ctx, factura) -> None:
             else:
                 cantidad = Decimal(ln.cantidad_solicitada) * presentacion_factor(
                     productos.get(ln.producto_id), ln.presentacion)
-            lote.cantidad_reservada = max(ZERO, lote.cantidad_reservada - cantidad)
             lote.cantidad_disponible = lote.cantidad_disponible + cantidad
             db.add(build_movimiento(
                 ctx.tenant_id, ctx.user_id, lote, "CANCELACION_REMISION", cantidad,
@@ -156,8 +161,7 @@ def _writeoff_remision_stock(db: Session, rems, ctx, factura) -> None:
             else:
                 cantidad = Decimal(ln.cantidad_solicitada) * presentacion_factor(
                     productos.get(ln.producto_id), ln.presentacion)
-            # Libera la reserva pero NO regresa a disponible → la mercancía se pierde.
-            lote.cantidad_reservada = max(ZERO, lote.cantidad_reservada - cantidad)
+            # La mercancía NO regresa a disponible → se pierde (ya salió al confirmar).
             desc = f"Pérdida por cancelación factura {factura.serie}{factura.folio}"
             db.add(Merma(
                 tenant_id=ctx.tenant_id, lote_id=lote.id, cantidad=cantidad,
@@ -518,9 +522,63 @@ def factura_directa(
 
 
 # ─── Timbrado ─────────────────────────────────────────────────────────────────
+def _commit_seguro(db: Session, ctx) -> None:
+    """Commit intermedio + re-arma ROLE app_user y el GUC del tenant.
+
+    `set_config(..., is_local=true)` muere con cada commit; sin re-armarlo, todo
+    lo que siga correría sin scope de RLS. Se usa para persistir el resultado
+    del PAC en el instante (decisión 2026-07-29 #1): un timbre del SAT jamás
+    debe perderse por un rollback posterior."""
+    db.commit()
+    set_role_tenant(db, ctx.tenant_id)
+
+
+def _validar_stock_directa(db: Session, ctx, factura, *, permitir_negativos: bool) -> None:
+    """Pre-check de existencias de una factura DIRECTA, ANTES de llamar al PAC
+    (después ya no hay marcha atrás fiscal). Suma la necesidad por producto y
+    frena con 422 salvo sobregiro autorizado (decisión 2026-07-29 #4)."""
+    if factura.almacen_id is None or permitir_negativos:
+        return
+    lineas = db.query(LineaFactura).filter(LineaFactura.factura_id == factura.id).all()
+    necesidad: dict = {}
+    for ln in lineas:
+        base = Decimal(ln.cantidad_base) if ln.cantidad_base is not None else Decimal(ln.cantidad)
+        necesidad[ln.producto_id] = necesidad.get(ln.producto_id, ZERO) + base
+    nombres = dict(
+        db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(necesidad.keys())).all()
+    )
+    for pid, total in necesidad.items():
+        lote = resolve_lote(db, ctx.tenant_id, pid, factura.almacen_id, numero_lote=None, create=False)
+        disponible = lote.cantidad_disponible if lote is not None else ZERO
+        if disponible < total:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Existencia insuficiente para {nombres.get(pid, 'el producto')}",
+            )
+
+
+def _post_timbrado(db: Session, ctx, factura, client) -> None:
+    """Inventario + XML DESPUÉS de persistir el timbre. Si algo falla aquí, el
+    timbre ya está a salvo; se registra en el log para reconciliar el stock a
+    mano (preferible a perder el registro de un CFDI real)."""
+    try:
+        _descontar_factura_directa(db, ctx, factura)
+        if factura.facturama_id:
+            try:
+                factura.xml = client.download_xml(factura.facturama_id).decode("utf-8", "ignore")
+            except FacturamaError:
+                pass  # el timbre ya quedó; el XML se puede descargar luego
+    except Exception:  # noqa: BLE001 — el timbre manda; el stock se reconcilia
+        log.exception(
+            "Post-timbrado falló (factura %s%s): el timbre quedó guardado; revisar inventario",
+            factura.serie, factura.folio,
+        )
+
+
 @router.post("/{factura_id}/timbrar", response_model=FacturaDetailOut)
 def timbrar_factura(
     factura_id: UUID,
+    payload_in: TimbrarIn | None = Body(default=None),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
@@ -533,7 +591,7 @@ def timbrar_factura(
     enforce(f"timbrar:{ctx.tenant_id}", 300, 3600)
     # FOR UPDATE: dos timbrados simultáneos (doble clic / dos usuarios) generarían
     # DOS CFDI reales en el SAT y doble descuento de stock en directa. Con el lock,
-    # el segundo request espera y ve estado=TIMBRADA → 409.
+    # el segundo request espera y ve estado=TIMBRADA (o el intento fresco) → 409.
     factura = get_or_404(db, Factura, factura_id, for_update=True)
     if factura.estado == "TIMBRADA":
         raise HTTPException(status_code=409, detail="La factura ya está timbrada")
@@ -559,10 +617,67 @@ def timbrar_factura(
                 ),
             )
 
+    permitir_negativos = bool(payload_in.permitir_negativos) if payload_in else False
+    _validar_stock_directa(db, ctx, factura, permitir_negativos=permitir_negativos)
+
+    # ─── Bitácora de intentos (decisión 2026-07-29 #1) ───────────────────────
+    # Un PENDIENTE fresco = otro timbrado en vuelo AHORA (el mutex real: se
+    # inserta bajo el lock de la factura y se comitea antes de llamar al PAC).
+    # Un PENDIENTE viejo = un request que murió a media llamada: se reconcilia
+    # contra Facturama antes de permitir re-timbrar.
+    pendientes = (
+        db.query(TimbradoIntento)
+        .filter(TimbradoIntento.factura_id == factura.id, TimbradoIntento.estado == "PENDIENTE")
+        .all()
+    )
+    if pendientes:
+        ahora = db.query(func.now()).scalar()
+        if any((ahora - i.created_at).total_seconds() < 300 for i in pendientes):
+            raise HTTPException(
+                status_code=409,
+                detail="Hay un timbrado en curso para esta factura; espera un momento y recarga",
+            )
+        ok, existente = client.buscar_cfdi(factura.serie, factura.folio)
+        if not ok:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Hay un intento de timbrado previo sin confirmar y no se pudo "
+                    "verificar con el PAC; reintenta en unos minutos"
+                ),
+            )
+        if existente is not None:
+            # El CFDI ya existe ante el SAT: se adopta, NUNCA se re-timbra.
+            factura.facturama_id = existente.get("Id")
+            factura.uuid = (
+                ((existente.get("Complement") or {}).get("TaxStamp") or {}).get("Uuid")
+                or existente.get("Uuid")
+            )
+            factura.estado = "TIMBRADA"
+            factura.fecha_timbrado = func.now()
+            for i in pendientes:
+                i.estado = "TIMBRADA"
+                i.detalle = "Reconciliado: el CFDI ya existía en Facturama"
+            _commit_seguro(db, ctx)
+            _post_timbrado(db, ctx, factura, client)
+            db.flush()
+            db.refresh(factura)
+            return factura
+        for i in pendientes:
+            i.estado = "ERROR"
+            i.detalle = "Verificado con el PAC: el intento no llegó a timbrar"
+
     payload = build_payload(db, factura)
+    intento = TimbradoIntento(tenant_id=ctx.tenant_id, factura_id=factura.id, estado="PENDIENTE")
+    db.add(intento)
+    _commit_seguro(db, ctx)     # visible aunque este request muera a media llamada
+
     try:
         resp = client.create_cfdi(payload)
     except FacturamaError as exc:
+        intento.estado = "ERROR"
+        intento.detalle = str(exc)[:2000]
+        _commit_seguro(db, ctx)
         raise HTTPException(status_code=502, detail=f"Timbrado rechazado por el PAC: {exc}")
 
     uuid_sat = ((resp.get("Complement") or {}).get("TaxStamp") or {}).get("Uuid") or resp.get("Uuid")
@@ -570,13 +685,13 @@ def timbrar_factura(
     factura.uuid = uuid_sat
     factura.estado = "TIMBRADA"
     factura.fecha_timbrado = func.now()
+    intento.estado = "TIMBRADA"
+    # El timbre del SAT se persiste EN ESTE INSTANTE: cualquier falla posterior
+    # (inventario, XML, commit final) ya no puede dejar un CFDI real sin registro.
+    _commit_seguro(db, ctx)
     # Factura directa: al timbrar sale el inventario (las de remisión ya salieron
     # al confirmar; almacen_id es None en esas y el helper no hace nada).
-    _descontar_factura_directa(db, ctx, factura)
-    try:
-        factura.xml = client.download_xml(factura.facturama_id).decode("utf-8", "ignore")
-    except FacturamaError:
-        pass  # el timbre ya quedó; el XML se puede descargar luego
+    _post_timbrado(db, ctx, factura, client)
     db.flush()
     db.refresh(factura)
     return factura

@@ -60,6 +60,23 @@ _Q = Decimal("0.0001")
 _OC_ABIERTAS = ("ENVIADA", "ACEPTADA", "EN_TRANSITO", "RECIBIDA_PARCIAL")
 
 
+def _ultimo_costo_compra(db: Session, producto_id) -> Optional[Decimal]:
+    """Último costo de ENTRADA_COMPRA del producto (cualquier almacén), para
+    que un ajuste positivo no cree existencia a costo $0."""
+    row = (
+        db.query(MovimientoInventario.costo_unitario)
+        .join(LoteInventario, MovimientoInventario.lote_id == LoteInventario.id)
+        .filter(
+            LoteInventario.producto_id == producto_id,
+            MovimientoInventario.tipo == "ENTRADA_COMPRA",
+            MovimientoInventario.costo_unitario.isnot(None),
+        )
+        .order_by(MovimientoInventario.created_at.desc())
+        .first()
+    )
+    return row[0] if row else None
+
+
 # ─── existencias (aggregated view) ───────────────────────────────────────────
 @router.get("/existencias", response_model=list[ExistenciaRow])
 def existencias(
@@ -253,6 +270,13 @@ def create_movimiento(
         lote.cantidad_disponible = nueva
         if cantidad > 0:
             lote.cantidad_inicial = lote.cantidad_inicial + cantidad
+            # Decisión 2026-07-29 (#9): mercancía "encontrada" no entra a costo
+            # $0 (desploma el promedio y la valuación). Usa el costo capturado
+            # o, en su defecto, el último costo de compra del producto.
+            if not lote.costo_unitario:
+                costo = payload.costo_unitario or _ultimo_costo_compra(db, payload.producto_id)
+                if costo:
+                    lote.costo_unitario = costo
         movimientos.append(build_movimiento(ctx.tenant_id, ctx.user_id, lote, "AJUSTE", cantidad,
                                              motivo=payload.motivo, notas=payload.notas))
 

@@ -2,11 +2,13 @@
 
 Reads gated by `menu:remisiones`; writes by `remision:gestionar`.
 
-Lifecycle: BORRADOR (editable, no stock effect) → CONFIRMADA (reserves stock:
-disponible → reservada, one SALIDA_REMISION movement per line) → CANCELADA
-(releases any reservation: reservada → disponible, CANCELACION_REMISION). A
-draft cancels with no inventory effect. Reservation pulls from the default lot
-of (producto, almacén) — lot-selection/FIFO is a later refinement.
+Lifecycle: BORRADOR (editable, no stock effect) → CONFIRMADA (salida directa:
+disponible baja, one SALIDA_REMISION movement per line; la línea guarda
+lote_id/cantidad_surtida para poder restituir) → CANCELADA (restituye:
+disponible sube, CANCELACION_REMISION). A draft cancels with no inventory
+effect. La salida usa el lote default de (producto, almacén) — lot-selection/
+FIFO is a later refinement. `cantidad_reservada` ya no se usa (decisión
+2026-07-29: confirmar = el camión salió; la columna queda en 0).
 """
 from __future__ import annotations
 
@@ -242,9 +244,10 @@ def get_remision(
 
 
 def _liberar_reservas(db: Session, ctx: AuthContext, rem: Remision, *, motivo: str) -> None:
-    """Devuelve al inventario lo reservado por las líneas de una remisión
-    CONFIRMADA (reservada → disponible) y registra un movimiento por línea.
-    Lo usan cancelar y la reedición de una confirmada (que luego re-reserva)."""
+    """Restituye al inventario la salida de una remisión CONFIRMADA (disponible
+    sube exactamente lo que salió, según el stamp de cada línea) y registra un
+    movimiento por línea. Lo usan cancelar y la reedición de una confirmada
+    (que luego vuelve a descontar)."""
     prod_ids = {ln.producto_id for ln in rem.lineas if ln.lote_id is not None}
     productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
     for ln in rem.lineas:
@@ -265,7 +268,6 @@ def _liberar_reservas(db: Session, ctx: AuthContext, rem: Remision, *, motivo: s
         else:
             factor = presentacion_factor(productos.get(ln.producto_id), ln.presentacion)
             cantidad = ln.cantidad_solicitada * factor
-        lote.cantidad_reservada = max(_ZERO, lote.cantidad_reservada - cantidad)
         lote.cantidad_disponible = lote.cantidad_disponible + cantidad
         db.add(build_movimiento(
             ctx.tenant_id, ctx.user_id, lote, "CANCELACION_REMISION", cantidad,
@@ -301,6 +303,7 @@ def update_remision(
     almacen_anterior = rem.almacen_id           # para detectar cambio de almacén
     data = payload.model_dump(exclude_unset=True)
     lineas_in = data.pop("lineas", None)
+    permitir_negativos = bool(data.pop("permitir_negativos", False))
     almacen_cambio = "almacen_id" in data and data["almacen_id"] != almacen_anterior
 
     if data.get("almacen_id") is not None:
@@ -337,7 +340,7 @@ def update_remision(
             motivo=f"Cambio de almacén remisión {rem.folio_interno} (libera reserva previa)",
         )
         db.flush()
-        reservar_stock_remision(db, ctx, rem)
+        reservar_stock_remision(db, ctx, rem, permitir_negativos=permitir_negativos)
 
     # Reemplaza las líneas y recalcula el subtotal (mismo criterio que el alta).
     if lineas_in is not None:
@@ -408,7 +411,7 @@ def update_remision(
         if era_confirmada and inv_cambio:
             db.flush()
             db.refresh(rem)                          # recarga rem.lineas con las nuevas
-            reservar_stock_remision(db, ctx, rem)
+            reservar_stock_remision(db, ctx, rem, permitir_negativos=permitir_negativos)
 
     rem.total = (rem.subtotal or _ZERO) - (rem.descuento or _ZERO) + (rem.iva or _ZERO) + (rem.ieps or _ZERO)
     rem.updated_by = ctx.user_id
@@ -455,8 +458,11 @@ def reservar_stock_remision(
                 status_code=422,
                 detail=f"Existencia insuficiente para la línea {ln.numero_linea}",
             )
+        # Decisión de negocio 2026-07-29: confirmar = el camión salió → salida
+        # directa de disponible, SIN cubeta "reservada" (siempre queda en 0).
+        # El stamp lote_id/cantidad_surtida en la línea permite restituir
+        # exactamente lo mismo si la remisión se cancela.
         lote.cantidad_disponible = lote.cantidad_disponible - base_qty
-        lote.cantidad_reservada = lote.cantidad_reservada + base_qty
         ln.lote_id = lote.id
         ln.cantidad_surtida = base_qty
         db.add(build_movimiento(

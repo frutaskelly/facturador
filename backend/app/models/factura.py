@@ -117,3 +117,24 @@ class LineaFactura(Base):
     ret_isr_importe = Column(Numeric(18, 4), nullable=False, server_default="0")
 
     factura = relationship("Factura", back_populates="lineas")
+
+
+class TimbradoIntento(Base, TimestampMixin):
+    """Bitácora de intentos de timbrado (decisión 2026-07-29 #1).
+
+    Se persiste (commit propio) ANTES de llamar al PAC y se marca al terminar.
+    Un intento que queda en PENDIENTE = el servidor murió a media llamada; el
+    próximo timbrado primero reconcilia contra Facturama (¿el CFDI ya existe?)
+    antes de volver a timbrar, para no generar un duplicado ante el SAT.
+    """
+
+    __tablename__ = "timbrado_intentos"
+
+    id = uuid_pk()
+    tenant_id = tenant_fk()
+    factura_id = Column(
+        UUID(as_uuid=True), ForeignKey("facturas.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # PENDIENTE (en vuelo) | TIMBRADA (éxito) | ERROR (el PAC rechazó / no llegó)
+    estado = Column(String(10), nullable=False, server_default="PENDIENTE")
+    detalle = Column(Text)

@@ -9,10 +9,11 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Serie
+from ...models import Factura, Remision, Serie
 from ...schemas.common import Page
 from ...schemas.serie import SerieCreate, SerieOut, SeriePairCreate, SerieUpdate
 from ...services.series import resolver_serie
@@ -23,6 +24,31 @@ router = APIRouter(prefix="/series", tags=["series"])
 _READ = "menu:series"
 _WRITE = "serie:gestionar"
 _DUP = "Ya existe una serie con ese código para ese tipo de documento"
+
+
+def _max_folio_emitido(db: Session, serie: Serie) -> int:
+    """Folio más alto realmente emitido con el código de esta serie. Es el piso
+    al editar `folio_actual`: por debajo se generarían folios duplicados
+    (decisión 2026-07-29 #7)."""
+    if serie.tipo_documento == "FACTURA":
+        mx = (
+            db.query(func.max(Factura.folio))
+            .filter(Factura.serie == serie.codigo)
+            .scalar()
+        )
+        return int(mx or 0)
+    # Remisiones guardan "<codigo><folio>" en folio_interno.
+    mx = 0
+    rows = (
+        db.query(Remision.folio_interno)
+        .filter(Remision.folio_interno.ilike(f"{serie.codigo}%"))
+        .all()
+    )
+    for (f,) in rows:
+        num = (f or "")[len(serie.codigo):].lstrip("-")
+        if num.isdigit():
+            mx = max(mx, int(num))
+    return mx
 
 
 def _clear_default(db: Session, tenant_id, tipo_documento: str, *, except_id=None) -> None:
@@ -138,6 +164,16 @@ def update_serie(
     data = payload.model_dump(exclude_unset=True)
     if data.get("es_default"):
         _clear_default(db, ctx.tenant_id, obj.tipo_documento, except_id=obj.id)
+    if "folio_actual" in data and data["folio_actual"] is not None:
+        piso = _max_folio_emitido(db, obj)
+        if data["folio_actual"] < piso:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"El folio no puede quedar por debajo del último emitido "
+                    f"({obj.codigo}{piso}); el mínimo permitido es {piso}"
+                ),
+            )
     for key, value in data.items():
         setattr(obj, key, value)
     db.flush()

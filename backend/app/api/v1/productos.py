@@ -10,13 +10,13 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.ratelimit import enforce
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import CategoriaProducto, EsquemaImpuesto, Producto
+from ...models import CategoriaProducto, EsquemaImpuesto, Producto, ProductoAlias
 from ...schemas.producto import (
     AliasIn,
     CandidatoOut,
@@ -30,10 +30,11 @@ from ...schemas.producto import (
 )
 from ...schemas.common import Page
 from ...services.producto_match import (
-    productos_activos,
     aprender_alias,
     buscar,
+    normalizar,
     parsear_pegado,
+    productos_activos,
     sugerir_con_ia,
 )
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
@@ -220,8 +221,31 @@ def crear_alias(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    """Aprende un alias confirmado por el usuario: el próximo cruce lo resuelve solo."""
+    """Aprende un alias confirmado por el usuario: el próximo cruce lo resuelve solo.
+
+    Decisión 2026-07-29 (#3): ENSEÑAR un alias nuevo lo puede hacer cualquiera
+    con lectura (es el flujo natural de captura), pero RE-APUNTAR uno ya
+    aprendido a otro producto exige `producto:gestionar` — cambiar lo aprendido
+    envenenaría el cruce de todo el negocio."""
     ensure_fk(db, Producto, payload.producto_id, "producto_id")
+    existente = (
+        db.query(ProductoAlias)
+        .filter(ProductoAlias.alias_normalizado == normalizar(payload.texto))
+        .one_or_none()
+    )
+    if (
+        existente is not None
+        and existente.producto_id != payload.producto_id
+        and _WRITE not in ctx.permissions
+        and not ctx.is_owner
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "El alias ya apunta a otro producto; re-apuntarlo requiere el "
+                "permiso de gestión de productos"
+            ),
+        )
     aprender_alias(db, ctx.tenant_id, payload.texto, payload.producto_id, origen="MANUAL", user_id=ctx.user_id)
     return {"ok": True}
 

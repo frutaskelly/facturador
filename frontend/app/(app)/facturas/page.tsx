@@ -202,16 +202,29 @@ export default function FacturasPage() {
     );
   }
 
-  async function timbrar() {
-    if (!toTimbrar) return;
+  // Sobregiro al timbrar una DIRECTA sin existencia (política unificada con
+  // remisiones): el backend frena con 422 y aquí se ofrece autorizar.
+  const [timbrarSobregiro, setTimbrarSobregiro] = useState<Factura | null>(null);
+
+  async function timbrar(factura?: Factura, permitirNegativos = false) {
+    const f = factura ?? toTimbrar;
+    if (!f) return;
     setActBusy(true);
     try {
-      await apiFetch(`/api/v1/facturas/${toTimbrar.id}/timbrar`, { method: "POST" });
+      await apiFetch(`/api/v1/facturas/${f.id}/timbrar`, {
+        method: "POST",
+        body: JSON.stringify({ permitir_negativos: permitirNegativos }),
+      });
       toast.success(`Factura timbrada${sufijoAmbiente}`);
-      invalidar(toTimbrar.id);
-      setToTimbrar(null); reload();
+      invalidar(f.id);
+      setToTimbrar(null); setTimbrarSobregiro(null); reload();
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo timbrar");
+      if (e instanceof ApiError && /existencia insuficiente/i.test(e.message) && !permitirNegativos) {
+        setToTimbrar(null);
+        setTimbrarSobregiro(f);
+      } else {
+        toast.error(e instanceof ApiError ? e.message : "No se pudo timbrar");
+      }
     } finally { setActBusy(false); }
   }
   function abrirCancelar(f: Factura) {
@@ -408,7 +421,14 @@ export default function FacturasPage() {
             : `¿Timbrar ${toTimbrar?.serie}${toTimbrar?.folio}? Se enviará al PAC en modo sandbox (prueba).`
         }
         confirmLabel="Facturar" confirmVariant="success"
-        onConfirm={timbrar} onClose={() => setToTimbrar(null)} loading={actBusy} />
+        onConfirm={() => void timbrar()} onClose={() => setToTimbrar(null)} loading={actBusy} />
+
+      {/* Sobregiro: la directa no tiene existencia suficiente para timbrar */}
+      <ConfirmDialog open={timbrarSobregiro !== null} title="Existencia insuficiente"
+        message={`No hay existencia suficiente para timbrar ${timbrarSobregiro?.serie}${timbrarSobregiro?.folio}. ¿Timbrar de todas formas? El inventario quedará en negativo (sobregiro).`}
+        confirmLabel="Timbrar con sobregiro" confirmVariant="danger"
+        onConfirm={() => void timbrar(timbrarSobregiro ?? undefined, true)}
+        onClose={() => setTimbrarSobregiro(null)} loading={actBusy} />
       <ConfirmDialog
         open={toDescartar !== null}
         title={`Descartar borrador ${toDescartar?.serie ?? ""}${toDescartar?.folio ?? ""}`}
