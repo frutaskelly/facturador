@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
+
+// Selector de elementos enfocables para el trap de Tab.
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function Modal({
   open,
@@ -24,13 +28,56 @@ export function Modal({
    * de disparar el botón — se siente como que la app se congeló. */
   resizable?: boolean;
 }) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Trap de Tab: el foco circula dentro del modal (patrón de diálogo).
+      if (e.key === "Tab") {
+        const root = dialogRef.current;
+        if (!root) return;
+        const focusables = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
+        if (focusables.length === 0) {
+          e.preventDefault();
+          root.focus();
+          return;
+        }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        if (!(active instanceof Node) || !root.contains(active)) {
+          // Si el foco está en OTRO diálogo (modal anidado encima), su propio
+          // trap lo maneja; este no debe robárselo.
+          if (active instanceof Element && active.closest('[role="dialog"]')) return;
+          // El foco se escapó del modal: se recaptura.
+          e.preventDefault();
+          first.focus();
+        } else if (e.shiftKey && (active === first || active === root)) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     }
     if (open) document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  // Foco: al abrir, guarda el elemento activo y enfoca el contenedor del
+  // diálogo; al cerrar, lo restaura donde estaba.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialogRef.current?.focus();
+    return () => prev?.focus();
+  }, [open]);
 
   if (!open) return null;
 
@@ -46,6 +93,11 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose}>
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         style={{
           left: `max(1rem, calc(50vw - ${maxWidthRem / 2}rem))`,
           top: "6vh",
@@ -57,13 +109,13 @@ export function Modal({
         // arrastrar hasta desaparecer; max-width es el tamaño de arranque y
         // también el tope al agrandar (con clamp aparte para no desbordar en
         // pantallas angostas).
-        className={`fixed flex max-h-[90vh] w-full min-w-[22rem] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-xl ${
+        className={`fixed flex max-h-[90vh] w-full min-w-[22rem] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-xl outline-none ${
           resizable ? "min-h-[16rem] resize" : ""
         }`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
-          <h2 className="text-base font-semibold">{title}</h2>
+          <h2 id={titleId} className="text-base font-semibold">{title}</h2>
           <button onClick={onClose} aria-label="Cerrar" className="rounded-lg p-1.5 text-muted hover:bg-surface-2">
             <X size={18} />
           </button>

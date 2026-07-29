@@ -62,6 +62,10 @@ app = FastAPI(
     version=__version__,
     description="Plataforma SaaS multi-tenant — cadena de suministro gobierno-alimentos.",
     lifespan=lifespan,
+    # En producción no se publica la superficie completa del API (docs/openapi).
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
 )
 
 app.add_middleware(

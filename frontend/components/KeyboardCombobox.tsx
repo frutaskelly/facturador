@@ -24,6 +24,7 @@ export function KeyboardCombobox({
   placeholder = "Escribe para buscar…",
   disabled,
   emptyText = "Sin opciones",
+  ariaLabel,
 }: {
   options: ComboOption[];
   value: string;
@@ -34,6 +35,9 @@ export function KeyboardCombobox({
   placeholder?: string;
   disabled?: boolean;
   emptyText?: string;
+  /** Nombre accesible del campo (p. ej. "Cliente"). Sin él se usa el
+   *  placeholder, y "Buscar" solo como último recurso. */
+  ariaLabel?: string;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -113,7 +117,7 @@ export function KeyboardCombobox({
       <input
         ref={inputRef}
         className={BASE}
-        aria-label="Buscar"
+        aria-label={ariaLabel ?? (placeholder || "Buscar")}
         disabled={disabled}
         value={open ? query : selectedLabel}
         placeholder={selectedLabel || placeholder}

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from ...core.ratelimit import enforce
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import Tenant
 from ...schemas.correo import CorreoConfigIn, CorreoConfigOut, CorreoProbarIn
@@ -89,6 +90,8 @@ def probar_correo(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
+    # Envía un correo REAL por el SMTP del tenant — con tope por hora.
+    enforce(f"correo-probar:{ctx.tenant_id}", 10, 3600)
     tenant = _load_tenant(db, ctx.tenant_id)
     cfg = email_service.smtp_config(tenant)
     if not email_service.configured(tenant):

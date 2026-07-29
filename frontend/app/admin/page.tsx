@@ -45,6 +45,22 @@ const STATUS_STYLES: Record<string, string> = {
   CHURNED: "bg-gray-200 text-gray-600",
 };
 
+// Errores de Supabase Auth (vienen en inglés) → es-MX. Cubre los casos
+// comunes; cualquier otro cae en un mensaje genérico.
+function loginErrorMessage(error: { code?: string; message: string }): string {
+  const code = error.code ?? "";
+  const msg = error.message.toLowerCase();
+  if (code === "invalid_credentials" || msg.includes("invalid login credentials"))
+    return "Correo o contraseña incorrectos.";
+  if (code === "email_not_confirmed" || msg.includes("email not confirmed"))
+    return "Tu correo aún no está confirmado. Revisa tu bandeja de entrada.";
+  if (code === "over_request_rate_limit" || msg.includes("rate limit"))
+    return "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.";
+  if (msg.includes("fetch") || msg.includes("network"))
+    return "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.";
+  return "No se pudo iniciar sesión. Inténtalo de nuevo.";
+}
+
 export default function AdminPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
@@ -99,7 +115,7 @@ function LoginCard() {
     setError(null);
     const { error } = await getSupabase().auth.signInWithPassword({ email, password });
     setBusy(false);
-    if (error) setError(error.message);
+    if (error) setError(loginErrorMessage(error));
   }
 
   return (

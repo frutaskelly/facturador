@@ -16,10 +16,32 @@ import { OnboardingChecklist, useOnboarding } from "@/components/OnboardingCheck
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtDate } from "@/lib/format";
+import { REGIMENES_FISCALES } from "@/lib/sat";
 import { getSupabase } from "@/lib/supabaseClient";
 
 const WRITE = "membership:gestionar";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8011";
+
+// apiFetch fuerza Content-Type JSON, así que los endpoints binarios/multipart
+// (logo GET/POST, CSD POST) usan este fetch crudo con el mismo Bearer token.
+async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const supabase = getSupabase();
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers = new Headers(init.headers);
+  if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+  return fetch(`${API_URL}${path}`, { ...init, headers });
+}
+
+// Respuesta no-ok → ApiError con el `detail` del backend (o el statusText).
+async function toApiError(res: Response): Promise<ApiError> {
+  let detail = res.statusText;
+  try {
+    detail = (await res.json()).detail ?? detail;
+  } catch {
+    /* cuerpo no-JSON */
+  }
+  return new ApiError(res.status, detail);
+}
 
 // Catálogo de entidades federativas (clave de 3 letras del SAT c_Estado).
 const MX_ESTADOS: ComboOption[] = [
@@ -33,31 +55,6 @@ const MX_ESTADOS: ComboOption[] = [
   ["TAM", "Tamaulipas"], ["TLA", "Tlaxcala"], ["VER", "Veracruz"], ["YUC", "Yucatán"],
   ["ZAC", "Zacatecas"],
 ].map(([value, label]) => ({ value, label }));
-
-const REGIMEN_FISCAL_OPTS: { value: string; label: string }[] = [
-  { value: "601", label: "601 — General de Ley Personas Morales" },
-  { value: "603", label: "603 — Personas Morales con Fines no Lucrativos" },
-  { value: "605", label: "605 — Sueldos y Salarios e Ingresos Asimilados a Salarios" },
-  { value: "606", label: "606 — Arrendamiento" },
-  { value: "607", label: "607 — Régimen de Enajenación o Adquisición de Bienes" },
-  { value: "608", label: "608 — Demás ingresos" },
-  { value: "610", label: "610 — Residentes en el Extranjero sin Establecimiento Permanente en México" },
-  { value: "611", label: "611 — Ingresos por Dividendos" },
-  { value: "612", label: "612 — Personas Físicas con Actividades Empresariales y Profesionales" },
-  { value: "614", label: "614 — Ingresos por intereses" },
-  { value: "615", label: "615 — Régimen de los ingresos por obtención de premios" },
-  { value: "616", label: "616 — Sin obligaciones fiscales" },
-  { value: "620", label: "620 — Sociedades Cooperativas de Producción que optan por diferir ingresos" },
-  { value: "621", label: "621 — Incorporación Fiscal" },
-  { value: "622", label: "622 — Actividades Agrícolas, Ganaderas, Silvícolas y Pesqueras" },
-  { value: "623", label: "623 — Opcional para Grupos de Sociedades" },
-  { value: "624", label: "624 — Coordinados" },
-  { value: "625", label: "625 — Régimen de Actividades Empresariales con ingresos a través de Plataformas Tecnológicas" },
-  { value: "626", label: "626 — Régimen Simplificado de Confianza (RESICO)" },
-  { value: "628", label: "628 — Hidrocarburos" },
-  { value: "629", label: "629 — Regímenes Fiscales Preferentes y Empresas Multinacionales" },
-  { value: "630", label: "630 — Enajenación de acciones en bolsa de valores" },
-];
 
 type Empresa = {
   legal_name: string;
@@ -122,6 +119,10 @@ export default function EmpresaPage() {
 
   const [form, setForm] = useState<FormState>(emptyForm());
   const [loading, setLoading] = useState(true);
+  // Error real (500/red) al cargar los datos del emisor. Mientras esté activo
+  // el formulario queda bloqueado: guardar con el form vacío sobrescribiría
+  // los datos fiscales reales.
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verified, setVerified] = useState(false);
@@ -149,11 +150,7 @@ export default function EmpresaPage() {
 
   async function loadLogo() {
     try {
-      const supabase = getSupabase();
-      const { data: { session } } = await supabase.auth.getSession();
-      const headers = new Headers();
-      if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
-      const res = await fetch(`${API_URL}/api/v1/empresa/logo`, { headers });
+      const res = await authFetch("/api/v1/empresa/logo");
       if (!res.ok) { setLogoUrl((u) => { if (u) URL.revokeObjectURL(u); return null; }); return; }
       const blob = await res.blob();
       setLogoUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(blob); });
@@ -186,8 +183,14 @@ export default function EmpresaPage() {
         // Si ya hay datos fiscales guardados, arranca bloqueado.
         if ((e.legal_name || "").trim() || (e.rfc || "").trim()) setLocked(true);
       })
-      .catch(() => {
-        /* sin datos previos: deja el formulario vacío (modo edición) */
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 404) {
+          // Sin datos previos: deja el formulario vacío (modo edición).
+          return;
+        }
+        // Error real (500/red): NO tratarlo como "sin datos" — un guardado con
+        // el formulario vacío pisaría los datos fiscales reales del emisor.
+        setLoadError(true);
       })
       .finally(() => setLoading(false));
     loadCsds();
@@ -227,6 +230,10 @@ export default function EmpresaPage() {
   }
 
   async function guardar() {
+    if (loadError) {
+      toast.error("No se pudieron cargar los datos actuales; recarga la página antes de guardar");
+      return;
+    }
     if (!form.legal_name.trim()) {
       toast.error("La razón social es obligatoria");
       return;
@@ -277,33 +284,12 @@ export default function EmpresaPage() {
     }
     setUploading(true);
     try {
-      // apiFetch fuerza Content-Type JSON, así que para multipart usamos un
-      // fetch crudo con el mismo Bearer token que usa toda la app.
-      const supabase = getSupabase();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
       const fd = new FormData();
       fd.append("cer", cerFile);
       fd.append("key", keyFile);
       fd.append("password", csdPassword);
-      const headers = new Headers();
-      if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
-
-      const res = await fetch(`${API_URL}/api/v1/empresa/csd`, {
-        method: "POST",
-        headers,
-        body: fd,
-      });
-      if (!res.ok) {
-        let detail = res.statusText;
-        try {
-          detail = (await res.json()).detail ?? detail;
-        } catch {
-          /* cuerpo no-JSON */
-        }
-        throw new ApiError(res.status, detail);
-      }
+      const res = await authFetch("/api/v1/empresa/csd", { method: "POST", body: fd });
+      if (!res.ok) throw await toApiError(res);
       toast.success("CSD subido correctamente");
       setCerFile(null);
       setKeyFile(null);
@@ -324,22 +310,10 @@ export default function EmpresaPage() {
     }
     setLogoUploading(true);
     try {
-      const supabase = getSupabase();
-      const { data: { session } } = await supabase.auth.getSession();
       const fd = new FormData();
       fd.append("logo", logoFile);
-      const headers = new Headers();
-      if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
-      const res = await fetch(`${API_URL}/api/v1/empresa/logo`, { method: "POST", headers, body: fd });
-      if (!res.ok) {
-        let detail = res.statusText;
-        try {
-          detail = (await res.json()).detail ?? detail;
-        } catch {
-          /* cuerpo no-JSON */
-        }
-        throw new ApiError(res.status, detail);
-      }
+      const res = await authFetch("/api/v1/empresa/logo", { method: "POST", body: fd });
+      if (!res.ok) throw await toApiError(res);
       toast.success("Logo actualizado");
       setLogoFile(null);
       loadLogo();
@@ -363,8 +337,9 @@ export default function EmpresaPage() {
     }
   }
 
-  // Solo lectura mientras no se esté editando (loading, sin permiso o bloqueado).
-  const ro = !canWrite || loading || locked;
+  // Solo lectura mientras no se esté editando (loading, sin permiso, bloqueado
+  // o con error de carga: sin los datos actuales no es seguro editar/guardar).
+  const ro = !canWrite || loading || locked || loadError;
 
   return (
     <div className="space-y-4">
@@ -376,7 +351,13 @@ export default function EmpresaPage() {
       <OnboardingChecklist refreshKey={onboardingKey} />
 
       <Card title="Datos fiscales" subtitle="Información del emisor que aparece en los CFDIs">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {loadError && (
+          <Alert tone="danger" title="No se pudieron cargar los datos fiscales">
+            El formulario queda bloqueado para no sobrescribir la información real del emisor.
+            Recarga la página e inténtalo de nuevo.
+          </Alert>
+        )}
+        <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${loadError ? "mt-4" : ""}`}>
           <div className="sm:col-span-2">
             <Field label="Razón social" required>
               <Input
@@ -406,7 +387,7 @@ export default function EmpresaPage() {
                 <Button
                   variant="secondary"
                   onClick={verificarRfc}
-                  disabled={verifying || loading || locked}
+                  disabled={verifying || loading || locked || loadError}
                 >
                   <ShieldCheck size={16} /> {verifying ? "Verificando…" : "Verificar RFC"}
                 </Button>
@@ -420,7 +401,7 @@ export default function EmpresaPage() {
               disabled={ro}
             >
               <option value="">— Selecciona —</option>
-              {REGIMEN_FISCAL_OPTS.map((o) => (
+              {REGIMENES_FISCALES.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
                 </option>
@@ -484,7 +465,7 @@ export default function EmpresaPage() {
                 <Pencil size={16} /> Editar
               </Button>
             ) : (
-              <Button onClick={guardar} disabled={saving || loading}>
+              <Button onClick={guardar} disabled={saving || loading || loadError}>
                 <Building2 size={16} /> {saving ? "Guardando…" : "Guardar"}
               </Button>
             )}

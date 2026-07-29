@@ -21,7 +21,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
 
 from ..core.db import Base
 from .base import SoftDeleteMixin, TimestampMixin, uuid_pk
@@ -48,7 +48,9 @@ class Tenant(Base, TimestampMixin, SoftDeleteMixin):
     domicilio_fiscal = Column(JSONB, nullable=False, server_default="{}")
     config = Column(JSONB, nullable=False, server_default="{}")
     # Logo del emisor para la representación impresa (subido en Ajustes › Empresa).
-    logo = Column(LargeBinary)
+    # deferred: el BYTEA (hasta 2 MB) NO se carga en cada SELECT de tenants —
+    # rbac resuelve la fila del tenant en cada request autenticado.
+    logo = deferred(Column(LargeBinary))
     logo_mime = Column(String(50))
     plan = Column(String(50), nullable=False, server_default="trial")
     seats_limit = Column(Integer, nullable=False, server_default="3")

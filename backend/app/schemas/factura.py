@@ -15,7 +15,7 @@ class EnviarFacturaIn(BaseModel):
 
 
 class FacturaDesdeRemisionesIn(BaseModel):
-    remision_ids: List[uuid.UUID] = Field(min_length=1)
+    remision_ids: List[uuid.UUID] = Field(min_length=1, max_length=200)
     # Override manual de serie al emitir; si es None se resuelve por sucursal/cliente/default.
     serie_id: Optional[uuid.UUID] = None
     serie: Optional[str] = Field(default=None, max_length=10)  # back-compat por código

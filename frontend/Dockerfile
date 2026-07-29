@@ -31,12 +31,16 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     NEXT_TELEMETRY_DISABLED=1
 
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/public ./public
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+
+# Sin root (la imagen node trae el usuario `node`).
+USER node
 
 EXPOSE 3000
+# "/" redirige 307 a /dashboard; /login responde 200 sin auth.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000',(r)=>{if(r.statusCode!==200)throw new Error(''+r.statusCode)})" || exit 1
+    CMD node -e "require('http').get('http://localhost:3000/login',(r)=>{if(r.statusCode>=400)throw new Error(''+r.statusCode)})" || exit 1
 
 CMD ["node", "server.js"]

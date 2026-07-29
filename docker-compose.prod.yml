@@ -50,11 +50,10 @@ services:
       - .env.prod
     environment:
       ENVIRONMENT: production
-      # Supabase connection pooler (Supavisor), session mode :5432 — IPv4. La
-      # conexión directa db.<ref>.supabase.co:5432 es solo IPv6 y no es
-      # alcanzable desde el contenedor. Usuario pooler = postgres.<project_ref>.
-      DATABASE_URL: postgresql+psycopg2://postgres.qwffsaxoeehwwdzaytqb:Lxh95hTkkoksLwEy@aws-1-us-east-1.pooler.supabase.com:5432/postgres
-      DATABASE_URL_ASYNC: postgresql+asyncpg://postgres.qwffsaxoeehwwdzaytqb:Lxh95hTkkoksLwEy@aws-1-us-east-1.pooler.supabase.com:5432/postgres
+      # DATABASE_URL / DATABASE_URL_ASYNC vienen del .env.prod (gitignored):
+      # pooler Supabase (Supavisor) session mode :5432 — IPv4. La conexión
+      # directa db.<ref>.supabase.co:5432 es solo IPv6 y no es alcanzable desde
+      # el contenedor. Usuario pooler = postgres.<project_ref>.
       REDIS_URL: redis://redis:6379/0
       ALLOWED_ORIGINS: "https://app.smartsupply.mx,https://admin.smartsupply.mx,https://smartsupply.mx,https://api.smartsupply.mx"
     depends_on:
@@ -97,19 +96,30 @@ services:
     image: smartsupplyv2-landing:prod
     container_name: smartsupplyv2_landing
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks: [ssv2]
 
   tunnel:
-    image: cloudflare/cloudflared:latest
+    # Pineada (era :latest): el túnel es el único punto de entrada a prod; un
+    # pull sorpresa con breaking change lo tumbaría. Subir la versión a propósito.
+    image: cloudflare/cloudflared:2026.5.2
     container_name: smartsupplyv2_tunnel
     restart: unless-stopped
     command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
       - ./cloudflared-config:/etc/cloudflared:ro
     depends_on:
-      - backend
-      - frontend
-      - landing
+      backend:
+        condition: service_started
+      frontend:
+        condition: service_healthy
+      landing:
+        condition: service_healthy
     networks: [ssv2]
 
 volumes:

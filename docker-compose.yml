@@ -16,7 +16,9 @@ services:
       POSTGRES_DB: smartsupply_v2
       POSTGRES_INITDB_ARGS: "-c timezone=UTC"
     ports:
-      - "5434:5432"
+      # Solo loopback: el Mini también es el host de prod; no exponer la BD de
+      # dev (password trivial) a la LAN.
+      - "127.0.0.1:5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -32,7 +34,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "6380:6379"
+      - "127.0.0.1:6380:6379"
     volumes:
       - redisdata:/data
     healthcheck:

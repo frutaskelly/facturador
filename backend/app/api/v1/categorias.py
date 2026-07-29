@@ -17,6 +17,7 @@ from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import CategoriaProducto
 from ...schemas.categoria import CategoriaCreate, CategoriaOut, CategoriaUpdate
 from ...schemas.common import Page
+from ...services.categoria_codigo import generate_unique_codigo
 from ._helpers import flush_or_conflict, get_or_404, paginate
 
 router = APIRouter(prefix="/categorias", tags=["categorías"])
@@ -53,7 +54,11 @@ def create_categoria(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
-    obj = CategoriaProducto(**payload.model_dump(), tenant_id=ctx.tenant_id)
+    data = payload.model_dump()
+    # Sin código explícito, se deriva del nombre con sufijo anticolisión.
+    if not data.get("codigo"):
+        data["codigo"] = generate_unique_codigo(db, ctx.tenant_id, data["nombre"])
+    obj = CategoriaProducto(**data, tenant_id=ctx.tenant_id)
     db.add(obj)
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)

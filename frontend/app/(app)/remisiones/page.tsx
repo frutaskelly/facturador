@@ -117,6 +117,7 @@ export default function RemisionesPage() {
   const [mode, setMode] = useState<"list" | "create">("list");
   const [editId, setEditId] = useState<string | null>(null);
   const [editEstado, setEditEstado] = useState<string | null>(null);   // estado de la remisión editada
+  const [editFolio, setEditFolio] = useState<string | null>(null);     // folio real de la remisión editada
   const [clienteId, setClienteId] = useState("");
   const [sucursalId, setSucursalId] = useState("");
   const [almacenId, setAlmacenId] = useState("");
@@ -134,14 +135,17 @@ export default function RemisionesPage() {
   const seriesRem = seriesRemRes.data?.items ?? [];
   const [serieResuelta, setSerieResuelta] = useState<Serie | null>(null);
   useEffect(() => {
-    if (mode !== "create" || !clienteId) { setSerieResuelta(null); return; }
+    // En edición el folio ya está fijo: no se resuelve serie (se muestra el real).
+    if (mode !== "create" || editId || !clienteId) { setSerieResuelta(null); return; }
+    let active = true; // descarta la respuesta si los parámetros cambian antes de llegar
     const p = new URLSearchParams({ tipo_documento: "REMISION", cliente_id: clienteId });
     if (sucursalId) p.set("sucursal_id", sucursalId);
     if (serieOverride) p.set("serie_id", serieOverride);
     apiFetch<Serie | null>(`/api/v1/series/resolver?${p.toString()}`)
-      .then(setSerieResuelta)
-      .catch(() => setSerieResuelta(null));
-  }, [mode, clienteId, sucursalId, serieOverride]);
+      .then((s) => { if (active) setSerieResuelta(s); })
+      .catch(() => { if (active) setSerieResuelta(null); });
+    return () => { active = false; };
+  }, [mode, editId, clienteId, sucursalId, serieOverride]);
 
   const folioPreview = serieResuelta ? `${serieResuelta.codigo}${serieResuelta.folio_actual + 1}` : "—";
   const subtotalPreview = lineas.reduce((s, l) => s + (l.importe || 0), 0);
@@ -182,7 +186,12 @@ export default function RemisionesPage() {
     setLineFocus({ key: lineas[0]?.key, field: "cantidad" });   // enfoca la primera línea (Cantidad)
   }
 
+  // Secuencia de la carga de sucursales: si el usuario cambia de cliente antes
+  // de que llegue la respuesta, solo la petición más reciente aplica su resultado.
+  const selectClienteSeq = useRef(0);
+
   async function selectCliente(v: string) {
+    const seq = ++selectClienteSeq.current;
     setClienteId(v);
     setStep(null);
     const cli = clientes.find((c) => c.id === v);
@@ -193,6 +202,7 @@ export default function RemisionesPage() {
     } catch {
       sucs = [];
     }
+    if (seq !== selectClienteSeq.current) return;    // ya se eligió otro cliente
     setSucursales(sucs);
     resolveFrom("sucursal", sucs);
   }
@@ -209,6 +219,7 @@ export default function RemisionesPage() {
   function openCreate() {
     setEditId(null);
     setEditEstado(null);
+    setEditFolio(null);
     resetForm();
     setMode("create");
   }
@@ -249,6 +260,7 @@ export default function RemisionesPage() {
       setStep(null);                              // no auto-abre el cliente al editar
       setEditId(r.id);
       setEditEstado(r.estado);
+      setEditFolio(det.folio_interno);
       setMode("create");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo cargar la remisión");
@@ -294,13 +306,21 @@ export default function RemisionesPage() {
     return setLineFocus({ key: lineas[idx + 1].key, field: "cantidad" });
   }
 
+  // Secuencia por línea: cada llamada a cotizar (aunque no llegue a pedir precio)
+  // invalida las anteriores en vuelo, para que una respuesta vieja no pise el
+  // precio/importe calculados con la cantidad más reciente.
+  const cotizaSeq = useRef<Record<string, number>>({});
+
   async function cotizar(key: string, producto_id: string, presentacion: string, cantidad: string) {
+    const seq = (cotizaSeq.current[key] ?? 0) + 1;
+    cotizaSeq.current[key] = seq;
     if (!producto_id || !Number(cantidad)) return;
     try {
       const p = new URLSearchParams({ producto_id, presentacion, cantidad });
       if (clienteId) p.set("cliente_id", clienteId);
       if (sucursalId) p.set("sucursal_id", sucursalId);
       const r = await apiFetch<{ precio: string | null }>(`/api/v1/precios/cotizar?${p.toString()}`);
+      if (cotizaSeq.current[key] !== seq) return;   // hay una cotización más nueva en curso
       setLineas((ls) =>
         ls.map((l) => {
           if (l.key !== key) return l;
@@ -316,7 +336,9 @@ export default function RemisionesPage() {
 
   function onPickProducto(key: string, pick: ProductoPick | null, texto: string) {
     if (!pick) {
-      setLinea(key, { producto_id: "", label: "", texto });
+      // Sin producto no hay precio: se limpian también precio/importe para que
+      // la línea no siga sumando en los totales.
+      setLinea(key, { producto_id: "", label: "", texto, precio: "", precioManual: false, importe: 0 });
       return;
     }
     // La presentación viene del propio producto (no de un fetch separado), así el
@@ -462,29 +484,29 @@ export default function RemisionesPage() {
     } catch {
       matches = [];
     }
+    // Todo se calcula FUERA del updater: React puede invocarlo dos veces
+    // (StrictMode) y duplicaría nuevaLinea() y la lista a cotizar.
     const paraCotizar: LineaForm[] = [];
-    setLineas((ls) => {
-      const next = [...ls];
-      valores.forEach((texto, i) => {
-        const pos = idx + i;
-        const base = pos < next.length ? next[pos] : nuevaLinea();
-        const top = matches[i]?.candidatos?.[0];
-        const auto = top && (top.origen === "exacto" || top.origen === "alias" || top.score >= 85) ? top : null;
-        let linea: LineaForm;
-        if (auto) {
-          const presKeys = Object.keys(auto.presentaciones ?? {});
-          const def = auto.presentacion_default ?? auto.unidad_base ?? presKeys[0] ?? "PIEZA";
-          const presentacion = presKeys.includes(def) ? def : presKeys[0] ?? def;
-          linea = { ...base, texto, producto_id: auto.producto_id, label: auto.nombre, presentaciones: presKeys, presentacion };
-          paraCotizar.push(linea);
-        } else {
-          linea = { ...base, texto, producto_id: "", label: "" };
-        }
-        if (pos < next.length) next[pos] = linea;
-        else next.push(linea);
-      });
-      return next;
+    const next = [...lineas];
+    valores.forEach((texto, i) => {
+      const pos = idx + i;
+      const base = pos < next.length ? next[pos] : nuevaLinea();
+      const top = matches[i]?.candidatos?.[0];
+      const auto = top && (top.origen === "exacto" || top.origen === "alias" || top.score >= 85) ? top : null;
+      let linea: LineaForm;
+      if (auto) {
+        const presKeys = Object.keys(auto.presentaciones ?? {});
+        const def = auto.presentacion_default ?? auto.unidad_base ?? presKeys[0] ?? "PIEZA";
+        const presentacion = presKeys.includes(def) ? def : presKeys[0] ?? def;
+        linea = { ...base, texto, producto_id: auto.producto_id, label: auto.nombre, presentaciones: presKeys, presentacion };
+        paraCotizar.push(linea);
+      } else {
+        linea = { ...base, texto, producto_id: "", label: "" };
+      }
+      if (pos < next.length) next[pos] = linea;
+      else next.push(linea);
     });
+    setLineas(next);
     paraCotizar.forEach((l) => cotizar(l.key, l.producto_id, l.presentacion, l.cantidad));
     toast.success(`${valores.length} productos pegados`);
   }
@@ -500,7 +522,9 @@ export default function RemisionesPage() {
       sucursal_id: sucursalId || null,
       almacen_id: almacenId || null,
       serie_id: serieOverride || null,
-      fecha_remision: fecha || null,
+      // La columna es NOT NULL: con fecha vacía se omite el campo (mandar null
+      // en el PATCH provoca un 500); el backend conserva/asigna la suya.
+      ...(fecha ? { fecha_remision: fecha } : {}),
       notas: notas || null,
       lineas: lns.map((l) => ({
         producto_id: l.producto_id,
@@ -520,14 +544,20 @@ export default function RemisionesPage() {
     setGuardarChoiceOpen(true);
   }
 
+  // Guard síncrono contra doble clic en Guardar: el estado `saving` llega tarde
+  // si el segundo clic entra antes del re-render (serían dos POST y dos folios).
+  const inFlight = useRef(false);
+
   // Guarda la edición de una remisión CONFIRMADA: el backend libera la reserva
   // previa y re-reserva con las líneas nuevas (sigue CONFIRMADA, mismo folio).
   async function guardarEdicionConfirmada() {
-    if (saving) return;
+    if (inFlight.current) return;
     const payload = construirPayload();
     if (!payload) return;
+    inFlight.current = true;
     try {
       const rem = await persistirRemision(payload);
+      invalidarDetalles([rem.id]);
       toast.success(`Remisión ${rem.folio_interno} actualizada`);
       setEditId(null); setEditEstado(null);
       resetForm();
@@ -535,17 +565,21 @@ export default function RemisionesPage() {
       reload();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la remisión");
+    } finally {
+      inFlight.current = false;
     }
   }
 
   // Opción "Borrador": crea la remisión en BORRADOR, sin afectar inventario.
   async function guardarBorrador() {
-    if (saving) return; // evita doble envío
+    if (inFlight.current) return; // evita doble envío
     const payload = construirPayload();
     if (!payload) return;
+    inFlight.current = true;
     setGuardarChoiceOpen(false);
     try {
       const rem = await persistirRemision(payload);
+      invalidarDetalles([rem.id]);
       toast.success(`Remisión ${rem.folio_interno} ${editId ? "actualizada" : "guardada (borrador)"}`);
       setEditId(null);
       resetForm();
@@ -553,6 +587,8 @@ export default function RemisionesPage() {
       reload();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la remisión");
+    } finally {
+      inFlight.current = false;
     }
   }
 
@@ -561,12 +597,14 @@ export default function RemisionesPage() {
   // popup de sobregiro. Pase lo que pase salimos al listado: el borrador ya
   // existe, así un reintento no duplica (el popup flota sobre la lista).
   async function guardarYConfirmar() {
-    if (saving) return;
+    if (inFlight.current) return;
     const payload = construirPayload();
     if (!payload) return;
+    inFlight.current = true;
     setGuardarChoiceOpen(false);
     try {
       const rem = await persistirRemision(payload);
+      invalidarDetalles([rem.id]);
       await confirmarRemision(rem.id, rem.folio_interno);
       setEditId(null);
       resetForm();
@@ -574,18 +612,22 @@ export default function RemisionesPage() {
       reload();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la remisión");
+    } finally {
+      inFlight.current = false;
     }
   }
 
   // Opción "Timbrar": crea la remisión y abre el popup de facturar apuntando a
   // ESA remisión (facturar auto-confirma y timbra de inmediato ante el PAC).
   async function guardarYTimbrar() {
-    if (saving) return;
+    if (inFlight.current) return;
     const payload = construirPayload();
     if (!payload) return;
+    inFlight.current = true;
     setGuardarChoiceOpen(false);
     try {
       const rem = await persistirRemision(payload);
+      invalidarDetalles([rem.id]);
       setEditId(null);
       resetForm();
       setMode("list");
@@ -601,6 +643,8 @@ export default function RemisionesPage() {
       }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo crear la remisión");
+    } finally {
+      inFlight.current = false;
     }
   }
 
@@ -615,6 +659,17 @@ export default function RemisionesPage() {
   // Sobregiro: cuando confirmar falla por existencia insuficiente, ofrecemos
   // confirmar de todas formas dejando el inventario en negativo.
   const [negStock, setNegStock] = useState<{ remId: string; folio: string } | null>(null);
+
+  // Saca del caché el detalle de las remisiones que acaban de mutar (editar,
+  // confirmar, cancelar, facturar): el slide-down y getDetalle vuelven a pedir
+  // datos frescos en el siguiente uso.
+  function invalidarDetalles(ids: string[]) {
+    setDetalles((m) => {
+      const n = { ...m };
+      for (const id of ids) delete n[id];
+      return n;
+    });
+  }
 
   async function verDetalle(r: Remision) {
     if (detalles[r.id] || detalleLoading.has(r.id)) return; // ya cargado / en curso
@@ -678,6 +733,7 @@ export default function RemisionesPage() {
   async function confirmarRemision(remId: string, folio: string): Promise<boolean> {
     try {
       await post(`/api/v1/remisiones/${remId}/confirmar`, {});
+      invalidarDetalles([remId]);
       toast.success(`Remisión ${folio} confirmada (inventario reservado)`);
       reload();
       return true;
@@ -702,6 +758,7 @@ export default function RemisionesPage() {
     if (!negStock) return;
     try {
       await post(`/api/v1/remisiones/${negStock.remId}/confirmar`, { permitir_negativos: true });
+      invalidarDetalles([negStock.remId]);
       toast.success(`Remisión ${negStock.folio} confirmada (inventario en negativo)`);
       setNegStock(null);
       setMode("list");
@@ -714,6 +771,7 @@ export default function RemisionesPage() {
     if (!toCancel) return;
     try {
       await post(`/api/v1/remisiones/${toCancel.id}/cancelar`, {});
+      invalidarDetalles([toCancel.id]);
       toast.success("Remisión cancelada");
       setToCancel(null); reload();
     } catch (e) {
@@ -825,6 +883,7 @@ export default function RemisionesPage() {
     const results = await Promise.allSettled(
       rems.map((r) => post(`/api/v1/remisiones/${r.id}/confirmar`, { permitir_negativos })),
     );
+    invalidarDetalles(rems.map((r) => r.id));
     const sinStock: Remision[] = [];
     let ok = 0;
     let otras = 0;
@@ -891,7 +950,9 @@ export default function RemisionesPage() {
 
   // Cancelar en lote (libera inventario de las confirmadas). Doble verificación.
   async function bulkCancelar() {
-    const elegibles = selected.filter((r) => r.estado !== "CANCELADA");
+    // Mismo criterio que `cancelablesSel` (y los diálogos): las FACTURADAS se
+    // omiten; POSTearlas solo produce 409 del backend y un conteo de errores falso.
+    const elegibles = selected.filter((r) => r.estado !== "CANCELADA" && r.estado !== "FACTURADA");
     if (elegibles.length === 0) {
       toast.error("No hay remisiones cancelables en la selección");
       setCancelBulkStep(0);
@@ -902,6 +963,7 @@ export default function RemisionesPage() {
       const results = await Promise.allSettled(
         elegibles.map((r) => post(`/api/v1/remisiones/${r.id}/cancelar`, {})),
       );
+      invalidarDetalles(elegibles.map((r) => r.id));
       const ok = results.filter((x) => x.status === "fulfilled").length;
       const fail = results.length - ok;
       const partes = [`Canceladas: ${ok}`];
@@ -997,6 +1059,7 @@ export default function RemisionesPage() {
         }
       }),
     );
+    invalidarDetalles(grupos.flat());
     const sinStock: string[][] = [];
     let timbradas = 0, borrador = 0, otras = 0;
     resultados.forEach((r, i) => {
@@ -1221,6 +1284,8 @@ export default function RemisionesPage() {
           <Field label="Fecha">
             <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
           </Field>
+          {/* En edición el folio ya está asignado: el backend ignora serie_id en
+              el PATCH, así que la Serie se bloquea y se muestra el folio real. */}
           <Field label="Serie">
             <KeyboardCombobox
               options={serieOpts}
@@ -1229,10 +1294,11 @@ export default function RemisionesPage() {
               onAdvance={() => resolveFrom("lineas")}
               autoOpen={step === "serie"}
               placeholder="Serie…"
+              disabled={editId != null}
             />
           </Field>
           <Field label="Consecutivo (informativo)">
-            <Input value={folioPreview} readOnly disabled aria-label="Folio consecutivo" />
+            <Input value={editId ? editFolio ?? "—" : folioPreview} readOnly disabled aria-label="Folio consecutivo" />
           </Field>
         </div>
 

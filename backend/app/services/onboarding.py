@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
+from .facturama import csd_public_fields
+
 # RFC: 3-4 letras (3 PM, 4 PF) + 6 dígitos de fecha + 3 de homoclave.
 _RFC_RE = re.compile(r"^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$")
 
@@ -78,11 +80,18 @@ def compute_status(client, tenant, *, multiemisor: bool) -> dict[str, Any]:
         },
     ]
 
+    # El CSD crudo de Facturama incluye Certificate/PrivateKey/PrivateKeyPassword;
+    # al navegador solo van los campos públicos (RFC, serie, vigencia).
+    csd_publico: Optional[dict] = None
+    if csd_obj is not None:
+        publicos = csd_public_fields([csd_obj])
+        csd_publico = publicos[0] if publicos else None
+
     return {
         "datos_fiscales_completos": datos_completos,
         "rfc": rfc,
         "csd_cargado": csd_cargado,
-        "csd": csd_obj,
+        "csd": csd_publico,
         "multiemisor": multiemisor,
         "listo_para_facturar": listo,
         "pasos": pasos,

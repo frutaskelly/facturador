@@ -26,6 +26,11 @@ FROM base AS runtime
 COPY --from=deps /install /usr/local
 COPY . .
 
+# Sin root: un RCE en la app no debe dar root dentro del contenedor.
+RUN useradd --system --no-create-home --uid 1001 app \
+    && chown -R app:app /app
+USER app
+
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -fsS http://localhost:8000/health || exit 1

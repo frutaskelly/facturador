@@ -108,9 +108,11 @@ class FacturamaClient:
         with self._client() as c:
             r = c.post("/3/cfdis", json=payload)
             if r.status_code >= 400:
+                # Solo serie/folio + error del PAC: el payload completo trae PII
+                # fiscal del receptor (RFC, nombre, domicilio) y no va a logs.
                 log.error(
-                    "Facturama /3/cfdis %s | PAYLOAD=%s | RESPONSE=%s",
-                    r.status_code, _json.dumps(payload, default=str)[:2000], r.text[:1000],
+                    "Facturama /3/cfdis %s | Serie=%s Folio=%s | RESPONSE=%s",
+                    r.status_code, payload.get("Serie"), payload.get("Folio"), r.text[:1000],
                 )
                 raise FacturamaError(f"create_cfdi failed: {r.status_code} {r.text}")
             return r.json()

@@ -373,11 +373,21 @@ export function DataTable<T>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rows, selectedKeys],
   );
-  // Notifica al padre cuando cambia la selección (objetos de fila).
+  // Notifica al padre cuando cambia la selección (objetos de fila). Compara el
+  // CONTENIDO (las claves seleccionadas presentes en `rows`) antes de llamar:
+  // `selectedRows` cambia de identidad con cada identidad nueva de `rows`, y un
+  // caller que pase `rows={data?.items ?? []}` inline + `selectable` entraría
+  // en loop infinito (notificar → setState del padre → re-render → nuevo
+  // `rows` → volver a notificar…).
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
+  const lastSelectionSigRef = useRef("[]");
   useEffect(() => {
+    const sig = JSON.stringify(rows.map((row, i) => keyOf(row, i)).filter((k) => selectedKeys.has(k)));
+    if (sig === lastSelectionSigRef.current) return;
+    lastSelectionSigRef.current = sig;
     onSelectionChangeRef.current?.(selectedRows);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ver nota de `selectedRows` sobre `rowKey`
   }, [selectedRows]);
 
   // Casilla de cabecera: marca/indeterminada según las filas FILTRADAS.

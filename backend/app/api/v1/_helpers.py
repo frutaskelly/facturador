@@ -26,14 +26,20 @@ M = TypeVar("M")
 T = TypeVar("T")
 
 
-def get_or_404(db: Session, model: Type[M], obj_id: UUID, *, soft: bool = True) -> M:
+def get_or_404(
+    db: Session, model: Type[M], obj_id: UUID, *, soft: bool = True, for_update: bool = False
+) -> M:
     """Fetch a row by id within the current tenant scope, or raise 404.
 
-    Soft-deleted rows (deleted_at set) are treated as absent.
+    Soft-deleted rows (deleted_at set) are treated as absent. `for_update=True`
+    takes a row lock (SELECT … FOR UPDATE): úsalo en transiciones de estado no
+    idempotentes (timbrar/cancelar) para serializar requests concurrentes.
     """
     query = db.query(model).filter(model.id == obj_id)
     if soft and hasattr(model, "deleted_at"):
         query = query.filter(model.deleted_at.is_(None))
+    if for_update:
+        query = query.with_for_update()
     obj = query.one_or_none()
     if obj is None:
         raise HTTPException(

@@ -9,9 +9,10 @@ cd "$(dirname "$0")"
 
 # Settings del backend desde .env, PERO forzando la BD Supabase cloud (el .env y
 # el compose de dev apuntan al postgres local vacío → "Usuario no provisionado").
+# Las URLs de la BD cloud viven SOLO en .env.prod (gitignored), nunca en git.
 set -a; source .env; set +a
-export DATABASE_URL=$(grep -m1 'DATABASE_URL:' docker-compose.prod.yml | sed 's/.*DATABASE_URL: *//')
-export DATABASE_URL_ASYNC=$(grep -m1 'DATABASE_URL_ASYNC:' docker-compose.prod.yml | sed 's/.*DATABASE_URL_ASYNC: *//')
+export DATABASE_URL=$(grep -m1 '^DATABASE_URL=' .env.prod | sed 's/^DATABASE_URL=//')
+export DATABASE_URL_ASYNC=$(grep -m1 '^DATABASE_URL_ASYNC=' .env.prod | sed 's/^DATABASE_URL_ASYNC=//')
 
 # Libera puertos por si quedaron procesos viejos (BSD xargs no tiene -r).
 for p in 8011 3000; do

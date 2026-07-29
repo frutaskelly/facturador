@@ -11,6 +11,23 @@ export class ApiError extends Error {
   }
 }
 
+/** Aplana el `detail` del backend a texto legible: en los 422 de validación,
+ *  pydantic devuelve una LISTA de objetos (mostrarla tal cual da "[object Object]"). */
+function detailToMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) =>
+        d && typeof d === "object" && typeof (d as { msg?: unknown }).msg === "string"
+          ? (d as { msg: string }).msg
+          : JSON.stringify(d)
+      )
+      .join("; ");
+  }
+  if (detail != null) return JSON.stringify(detail);
+  return fallback;
+}
+
 /**
  * Authenticated fetch against the backend. Attaches the current Supabase
  * access token as a Bearer JWT. The backend derives identity + tenant from
@@ -31,13 +48,27 @@ export async function apiFetch<T = unknown>(
     headers.set("Authorization", `Bearer ${session.access_token}`);
   }
 
-  const res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  // Timeout por defecto para no dejar un spinner eterno si el backend se
+  // cuelga. 60 s: el timbrado con el PAC puede tardar ~30 s. Si el caller pasa
+  // su propio `signal`, se respeta tal cual (y su abort se propaga sin traducir).
+  const ownTimeout = init.signal == null;
+  const signal = init.signal ?? AbortSignal.timeout(60_000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, { ...init, headers, signal });
+  } catch (e) {
+    if (ownTimeout && e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
+      throw new ApiError(0, "El servidor tardó demasiado en responder. Revisa tu conexión e intenta de nuevo.");
+    }
+    throw e;
+  }
 
   if (!res.ok) {
     let detail = res.statusText;
     try {
       const body = await res.json();
-      detail = body.detail ?? detail;
+      detail = detailToMessage(body.detail, detail);
     } catch {
       /* non-JSON error body */
     }
@@ -61,7 +92,7 @@ export async function apiDownload(path: string, filename: string): Promise<void>
   if (!res.ok) {
     let detail = res.statusText;
     try {
-      detail = (await res.json()).detail ?? detail;
+      detail = detailToMessage((await res.json()).detail, detail);
     } catch {
       /* binario o vacío */
     }
@@ -85,6 +116,14 @@ export async function apiDownload(path: string, filename: string): Promise<void>
  * asigna la URL del blob una vez descargado.
  */
 export async function apiOpenInTab(path: string, win: Window | null): Promise<void> {
+  if (!win) {
+    // Pop-up bloqueado: sin pestaña no hay dónde mostrar el archivo. Se lanza
+    // como ApiError para que las páginas lo muestren con su toast de error.
+    throw new ApiError(
+      0,
+      "El navegador bloqueó la ventana emergente. Permite las ventanas emergentes para este sitio e intenta de nuevo."
+    );
+  }
   const supabase = getSupabase();
   const {
     data: { session },
@@ -94,10 +133,10 @@ export async function apiOpenInTab(path: string, win: Window | null): Promise<vo
 
   const res = await fetch(`${API_URL}${path}`, { headers });
   if (!res.ok) {
-    win?.close();
+    win.close();
     let detail = res.statusText;
     try {
-      detail = (await res.json()).detail ?? detail;
+      detail = detailToMessage((await res.json()).detail, detail);
     } catch {
       /* binario o vacío */
     }
@@ -105,5 +144,8 @@ export async function apiOpenInTab(path: string, win: Window | null): Promise<vo
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
-  if (win) win.location.href = url;
+  win.location.href = url;
+  // Libera el blob cuando la pestaña ya tuvo tiempo de sobra para cargarlo
+  // (revocarlo de inmediato rompería la carga del PDF).
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

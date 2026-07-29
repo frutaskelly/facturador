@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -23,7 +24,7 @@ from ...core.rbac import AuthContext, require_permission
 from ...models import Tenant
 from ...schemas.empresa import EmpresaOnboardingOut, EmpresaOut, EmpresaUpdate
 from ...services.facturama import FacturamaClient, FacturamaError, csd_public_fields
-from ...services.onboarding import compute_status
+from ...services.onboarding import compute_status, rfc_valido
 
 router = APIRouter(prefix="/empresa", tags=["empresa"])
 
@@ -74,6 +75,9 @@ def put_empresa(
     cp = payload.domicilio_fiscal_cp.strip()
     if not rfc:
         raise HTTPException(status_code=422, detail="El RFC es obligatorio")
+    # El RFC va en cada CFDI emitido; formato inválido = timbrado rechazado después.
+    if not rfc_valido(rfc):
+        raise HTTPException(status_code=422, detail="El RFC no tiene un formato válido del SAT")
     if not cp:
         raise HTTPException(status_code=422, detail="El código postal es obligatorio")
 
@@ -84,7 +88,11 @@ def put_empresa(
     # Reasignar el dict para que SQLAlchemy detecte el cambio del JSONB.
     tenant.domicilio_fiscal = dict(payload.domicilio_fiscal or {})
     flag_modified(tenant, "domicilio_fiscal")
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Ya existe una empresa registrada con ese RFC")
     db.refresh(tenant)
 
     return _empresa_out(tenant)
@@ -100,7 +108,9 @@ def subir_logo(
     mime = (logo.content_type or "").lower()
     if mime not in _LOGO_MIMES:
         raise HTTPException(status_code=422, detail="El logo debe ser PNG, JPG o WebP")
-    data = logo.file.read()
+    # Leer con tope: sin él, un archivo gigante se carga completo a memoria
+    # ANTES de poder rechazarlo.
+    data = logo.file.read(_LOGO_MAX_BYTES + 1)
     if not data:
         raise HTTPException(status_code=422, detail="El archivo está vacío")
     if len(data) > _LOGO_MAX_BYTES:
@@ -156,8 +166,15 @@ def subir_csd(
     if not client.configured:
         raise HTTPException(status_code=503, detail="Facturama no está configurado")
 
-    cer_b64 = base64.b64encode(cer.file.read()).decode()
-    key_b64 = base64.b64encode(key.file.read()).decode()
+    # Un .cer/.key real mide unos KB; 1 MB de tope corta archivos equivocados
+    # (o abusivos) sin cargarlos completos a memoria.
+    _CSD_MAX = 1024 * 1024
+    cer_data = cer.file.read(_CSD_MAX + 1)
+    key_data = key.file.read(_CSD_MAX + 1)
+    if len(cer_data) > _CSD_MAX or len(key_data) > _CSD_MAX:
+        raise HTTPException(status_code=422, detail="El .cer/.key no debe exceder 1 MB")
+    cer_b64 = base64.b64encode(cer_data).decode()
+    key_b64 = base64.b64encode(key_data).decode()
     try:
         return client.subir_csd(tenant.rfc, cer_b64, key_b64, password)
     except FacturamaError as exc:

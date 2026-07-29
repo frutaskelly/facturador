@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from .config import settings
 
@@ -58,14 +58,25 @@ def hit(key: str, limit: int, window_s: int) -> tuple[bool, int]:
         return True, 0
 
 
+def enforce(key: str, limit: int, window_s: int, *, detail: str | None = None) -> None:
+    """`hit()` + 429 con Retry-After si se excede. Para endpoints que cuestan
+    dinero o recursos externos (correo real, IA, folios del PAC): límites
+    generosos que el uso legítimo no alcanza, pero que cortan loops/abuso."""
+    ok, retry = hit(key, limit, window_s)
+    if not ok:
+        raise HTTPException(
+            status_code=429,
+            detail=detail or "Demasiadas solicitudes; intenta de nuevo en unos minutos",
+            headers={"Retry-After": str(retry)},
+        )
+
+
 def client_ip(request: Request) -> str:
     """IP real del cliente. Detrás de Cloudflare/tunnel viene en CF-Connecting-IP;
-    si no, el primer salto de X-Forwarded-For; si no, la conexión directa."""
-    h = request.headers
-    cf = h.get("cf-connecting-ip")
+    si no, la conexión directa. X-Forwarded-For NO se usa: cualquiera que alcance
+    el origen sin pasar por Cloudflare (LAN, puerto expuesto) puede falsificarlo
+    por request y evadir el rate limit."""
+    cf = request.headers.get("cf-connecting-ip")
     if cf:
         return cf.strip()
-    xff = h.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
     return request.client.host if request.client else "unknown"

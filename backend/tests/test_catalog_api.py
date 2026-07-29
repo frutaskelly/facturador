@@ -164,18 +164,20 @@ def test_admin_full_crud_categoria(client, env, auth_as):
     assert client.get("/api/v1/categorias", headers=h).json()["total"] == 0
 
 
-def test_categoria_codigo_manual_required(client, env, auth_as):
-    # El código de categoría es MANUAL y obligatorio: el cliente lo escribe.
+def test_categoria_codigo_autogenerado(client, env, auth_as):
+    # Convención del proyecto: el código se genera del nombre en el servidor
+    # (services/categoria_codigo.py); si el cliente manda uno, se respeta.
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
-    # Sin código → 422.
+    # Sin código → se deriva del nombre ("Lácteos" → "LACTE").
     r0 = client.post("/api/v1/categorias", headers=h, json={"nombre": "Lácteos"})
-    assert r0.status_code == 422, r0.text
-    # Con código → se respeta tal cual.
-    r1 = client.post("/api/v1/categorias", headers=h, json={"codigo": "LACTE", "nombre": "Lácteos"})
+    assert r0.status_code == 201, r0.text
+    assert r0.json()["codigo"] == "LACTE"
+    # Mismo prefijo → sufijo anticolisión, no 409.
+    r1 = client.post("/api/v1/categorias", headers=h, json={"nombre": "Lacteos Premium"})
     assert r1.status_code == 201, r1.text
-    assert r1.json()["codigo"] == "LACTE"
-    # Código duplicado → 409.
+    assert r1.json()["codigo"] == "LACTE2"
+    # Código explícito duplicado → 409.
     r2 = client.post("/api/v1/categorias", headers=h, json={"codigo": "LACTE", "nombre": "Otra"})
     assert r2.status_code == 409, r2.text
 

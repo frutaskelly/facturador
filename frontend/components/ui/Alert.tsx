@@ -19,7 +19,12 @@ export function Alert({
   children?: ReactNode;
 }) {
   return (
-    <div className={`rounded-lg border px-3 py-2 text-sm ${TONES[tone]}`}>
+    // role="alert" anuncia errores/avisos a lectores de pantalla; los tonos
+    // informativos usan "status" (cortés, no interrumpe).
+    <div
+      role={tone === "danger" || tone === "warning" ? "alert" : "status"}
+      className={`rounded-lg border px-3 py-2 text-sm ${TONES[tone]}`}
+    >
       {title && <div className="font-medium">{title}</div>}
       {children && <div className={title ? "mt-0.5 opacity-90" : ""}>{children}</div>}
     </div>

@@ -18,7 +18,8 @@ from dataclasses import dataclass
 from typing import Optional
 from uuid import UUID
 
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
@@ -58,17 +59,29 @@ def _cand(p: Producto, score: int, origen: str) -> "Candidato":
     )
 
 
-def _productos_activos(db: Session) -> list[Producto]:
+def productos_activos(db: Session) -> list[Producto]:
     return db.query(Producto).filter(Producto.deleted_at.is_(None), Producto.activo.is_(True)).all()
 
 
-def buscar(db: Session, tenant_id: UUID, texto: str, *, limit: int = 5) -> list[Candidato]:
-    """Devuelve candidatos ordenados por confianza para un texto libre."""
+def buscar(
+    db: Session,
+    tenant_id: UUID,
+    texto: str,
+    *,
+    limit: int = 5,
+    prods: Optional[list[Producto]] = None,
+) -> list[Candidato]:
+    """Devuelve candidatos ordenados por confianza para un texto libre.
+
+    `prods` permite pasar el catálogo ya cargado: /productos/match resuelve hasta
+    200 textos por request y sin esto haría 200 SELECT del catálogo completo.
+    """
     norm = normalizar(texto)
     if not norm:
         return []
 
-    prods = _productos_activos(db)
+    if prods is None:
+        prods = productos_activos(db)
     by_id = {p.id: p for p in prods}
 
     out: list[Candidato] = []
@@ -132,7 +145,9 @@ def aprender_alias(
     db: Session, tenant_id: UUID, texto: str, producto_id: UUID, *, origen: str = "MANUAL", user_id=None
 ) -> Optional[ProductoAlias]:
     """Guarda (o reapunta) el alias normalizado → producto. Idempotente."""
-    norm = normalizar(texto)
+    # NFKD puede ALARGAR el texto (ligaduras); sin truncar, un alias de 254
+    # chars revienta la columna String(254) con DataError 500.
+    norm = normalizar(texto)[:254]
     if not norm:
         return None
     existing = (
@@ -149,9 +164,24 @@ def aprender_alias(
         tenant_id=tenant_id, producto_id=producto_id, alias=texto.strip()[:254],
         alias_normalizado=norm, origen=origen, created_by=user_id,
     )
-    db.add(alias)
-    db.flush()
-    return alias
+    try:
+        # Savepoint: si otro request insertó el mismo alias en paralelo, el
+        # UNIQUE (tenant, alias_normalizado) truena aquí sin tirar la transacción.
+        with db.begin_nested():
+            db.add(alias)
+            db.flush()
+        return alias
+    except IntegrityError:
+        existing = (
+            db.query(ProductoAlias)
+            .filter(ProductoAlias.alias_normalizado == norm)
+            .one_or_none()
+        )
+        if existing is not None:
+            existing.producto_id = producto_id
+            existing.origen = origen
+            db.flush()
+        return existing
 
 
 # ─── IA: sinónimos regionales / typos que el difuso no alcanza ────────────────
@@ -188,7 +218,7 @@ def sugerir_con_ia(db: Session, tenant_id: UUID, textos: list[str]) -> dict[str,
     except ImportError:  # pragma: no cover
         return {}
 
-    prods = _productos_activos(db)
+    prods = productos_activos(db)
     by_sku = {p.sku: p.id for p in prods}
     catalogo = "\n".join(
         f"- {p.sku}: {p.nombre}" + (f" (sinónimos: {', '.join(p.sinonimos)})" if p.sinonimos else "")

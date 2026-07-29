@@ -15,8 +15,9 @@ class CategoriaBase(BaseModel):
 
 
 class CategoriaCreate(CategoriaBase):
-    # `codigo` es manual y obligatorio para categorías.
-    codigo: str = Field(min_length=1, max_length=10)
+    # `codigo` opcional: si no viene, el servidor lo deriva del nombre
+    # (services/categoria_codigo.py), igual que proveedores/sucursales.
+    codigo: Optional[str] = Field(default=None, min_length=1, max_length=10)
 
 
 class CategoriaUpdate(BaseModel):

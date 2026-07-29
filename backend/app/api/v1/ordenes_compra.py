@@ -188,7 +188,9 @@ def recibir_orden(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
-    oc = get_or_404(db, OrdenCompra, oc_id)
+    # FOR UPDATE: dos recepciones simultáneas leerían la misma cantidad_recibida
+    # y duplicarían la entrada de stock.
+    oc = get_or_404(db, OrdenCompra, oc_id, for_update=True)
     if oc.estado not in _RECEIVABLE:
         raise HTTPException(status_code=409, detail=f"No se puede recibir una orden en estado {oc.estado}")
 

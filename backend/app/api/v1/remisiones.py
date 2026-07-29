@@ -10,13 +10,16 @@ of (producto, almacén) — lot-selection/FIFO is a later refinement.
 """
 from __future__ import annotations
 
+import html as html_mod
+
 from datetime import date
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
+from email_validator import EmailNotValidError, validate_email
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field as PydField
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
@@ -204,6 +207,8 @@ def remisiones_pdf_lote(
             continue
     if not id_list:
         raise HTTPException(status_code=422, detail="Sin remisiones para imprimir")
+    if len(id_list) > 200:
+        raise HTTPException(status_code=422, detail="Máximo 200 remisiones por PDF")
     rems = db.query(Remision).filter(
         Remision.id.in_(id_list), Remision.deleted_at.is_(None)
     ).order_by(Remision.folio_interno).all()
@@ -305,15 +310,34 @@ def update_remision(
     if data.get("cliente_facturacion_id") is not None:
         ensure_fk(db, Cliente, data["cliente_facturacion_id"], "cliente_facturacion_id")
 
-    # Cliente/sucursal coherentes (la sucursal debe ser del cliente).
+    # Cliente/sucursal coherentes (la sucursal debe ser del cliente). Se valida
+    # también la sucursal HEREDADA: cambiar solo el cliente no debe dejar una
+    # sucursal de otro cliente (precio/serie se resolverían con datos mezclados).
     nuevo_cliente = data.get("cliente_facturacion_id", rem.cliente_facturacion_id)
-    if data.get("sucursal_id") is not None:
-        suc = get_or_404(db, Sucursal, data["sucursal_id"])
+    sucursal_efectiva = data["sucursal_id"] if "sucursal_id" in data else rem.sucursal_id
+    if sucursal_efectiva is not None and ("sucursal_id" in data or "cliente_facturacion_id" in data):
+        suc = get_or_404(db, Sucursal, sucursal_efectiva)
         if suc.cliente_id != nuevo_cliente:
-            raise HTTPException(status_code=422, detail="La sucursal no pertenece al cliente de la remisión")
+            if "sucursal_id" in data:
+                raise HTTPException(status_code=422, detail="La sucursal no pertenece al cliente de la remisión")
+            raise HTTPException(
+                status_code=422,
+                detail="La sucursal actual no pertenece al nuevo cliente; cámbiala o quítala en la misma edición",
+            )
 
     for key, value in data.items():
         setattr(rem, key, value)
+
+    # Cambio de almacén SIN reenviar líneas en una CONFIRMADA: la reserva vive en
+    # lotes del almacén anterior → se libera y se re-reserva en el nuevo (el mismo
+    # tratamiento que el bloque de líneas hace vía `almacen_cambio`).
+    if era_confirmada and almacen_cambio and lineas_in is None:
+        _liberar_reservas(
+            db, ctx, rem,
+            motivo=f"Cambio de almacén remisión {rem.folio_interno} (libera reserva previa)",
+        )
+        db.flush()
+        reservar_stock_remision(db, ctx, rem)
 
     # Reemplaza las líneas y recalcula el subtotal (mismo criterio que el alta).
     if lineas_in is not None:
@@ -492,19 +516,32 @@ def cancelar_remision(
 
 
 class EnviarRemisionIn(BaseModel):
-    to: Optional[str] = None
-    mensaje: Optional[str] = None
+    to: Optional[str] = PydField(default=None, max_length=1000)
+    mensaje: Optional[str] = PydField(default=None, max_length=5000)
 
 
 class EnviarRemisionesLoteIn(BaseModel):
     """Un solo correo con varias remisiones (todas del mismo cliente)."""
-    ids: list[UUID]
-    to: Optional[str] = None
-    mensaje: Optional[str] = None
+    ids: list[UUID] = PydField(min_length=1, max_length=100)
+    to: Optional[str] = PydField(default=None, max_length=1000)
+    mensaje: Optional[str] = PydField(default=None, max_length=5000)
 
 
 def _fmt_money(value: Decimal) -> str:
     return f"${value:,.2f}"
+
+
+def _validar_destinatarios(destinatarios: list[str]) -> list[str]:
+    """Cada token debe ser un correo válido: un valor arbitrario llegaría hasta
+    el header `To` del SMTP (502 críptico en el mejor caso, inyección de headers
+    en el peor)."""
+    limpios: list[str] = []
+    for d in destinatarios:
+        try:
+            limpios.append(validate_email(d, check_deliverability=False).normalized)
+        except EmailNotValidError:
+            raise HTTPException(status_code=422, detail=f"Correo inválido: {d}")
+    return limpios
 
 
 def _build_remision_html(rem: Remision, cliente_nombre: str, lineas: list) -> str:
@@ -515,8 +552,8 @@ def _build_remision_html(rem: Remision, cliente_nombre: str, lineas: list) -> st
         total += importe
         filas.append(
             "<tr>"
-            f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{ln.producto_nombre or ''}</td>"
-            f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{ln.presentacion}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{html_mod.escape(ln.producto_nombre or '')}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{html_mod.escape(str(ln.presentacion or ''))}</td>"
             f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{ln.cantidad_solicitada:,.2f}</td>"
             f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{_fmt_money(ln.precio_unitario or _ZERO)}</td>"
             f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{_fmt_money(importe)}</td>"
@@ -524,8 +561,8 @@ def _build_remision_html(rem: Remision, cliente_nombre: str, lineas: list) -> st
         )
     return (
         "<div style='font-family:Arial,Helvetica,sans-serif;color:#222'>"
-        f"<h2 style='margin:0 0 4px'>Remisión {rem.folio_interno}</h2>"
-        f"<p style='margin:0 0 2px'><strong>Cliente:</strong> {cliente_nombre}</p>"
+        f"<h2 style='margin:0 0 4px'>Remisión {html_mod.escape(rem.folio_interno or '')}</h2>"
+        f"<p style='margin:0 0 2px'><strong>Cliente:</strong> {html_mod.escape(cliente_nombre)}</p>"
         f"<p style='margin:0 0 16px'><strong>Fecha:</strong> {rem.fecha_remision}</p>"
         "<table style='border-collapse:collapse;width:100%;font-size:14px'>"
         "<thead><tr style='background:#f5f5f5'>"
@@ -556,7 +593,7 @@ def _build_remisiones_lote_html(
         total_general += subtotal
         filas.append(
             "<tr>"
-            f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{rem.folio_interno}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{html_mod.escape(rem.folio_interno or '')}</td>"
             f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{rem.fecha_remision}</td>"
             f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{_fmt_money(subtotal)}</td>"
             "</tr>"
@@ -566,13 +603,13 @@ def _build_remisiones_lote_html(
     mensaje_html = (
         "<div style='background:#f5f7ff;border-left:3px solid #4f6bed;"
         "padding:10px 14px;margin:0 0 16px;border-radius:4px;white-space:pre-line'>"
-        f"{mensaje}</div>"
+        f"{html_mod.escape(mensaje)}</div>"
         if mensaje else ""
     )
     return (
         "<div style='font-family:Arial,Helvetica,sans-serif;color:#222;max-width:640px'>"
-        f"<h2 style='margin:0 0 4px'>{emisor_nombre}</h2>"
-        f"<p style='margin:0 0 16px;color:#555'>Estimado(a) <strong>{cliente_nombre}</strong>:</p>"
+        f"<h2 style='margin:0 0 4px'>{html_mod.escape(emisor_nombre)}</h2>"
+        f"<p style='margin:0 0 16px;color:#555'>Estimado(a) <strong>{html_mod.escape(cliente_nombre)}</strong>:</p>"
         + mensaje_html
         + f"<p style='margin:0 0 16px'>Le compartimos {n} {etiqueta}. "
         "El detalle completo de cada una se encuentra en el PDF adjunto correspondiente.</p>"
@@ -600,6 +637,8 @@ def enviar_remision(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     rem = get_or_404(db, Remision, rem_id)
+    if rem.estado == "CANCELADA":
+        raise HTTPException(status_code=409, detail="La remisión está cancelada; no se envía por correo")
     cliente = db.query(Cliente).filter(Cliente.id == rem.cliente_facturacion_id).one_or_none()
 
     # Destinatarios: los que vengan en el payload (uno o varios, coma/espacio) o,
@@ -616,6 +655,7 @@ def enviar_remision(
             destinatarios = [str(dom["email"]).strip()]
     if not destinatarios:
         raise HTTPException(status_code=422, detail="El cliente no tiene correo")
+    destinatarios = _validar_destinatarios(destinatarios)
 
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one_or_none()
     if not email_service.configured(tenant):
@@ -628,7 +668,7 @@ def enviar_remision(
         ln.producto_nombre = names.get(ln.producto_id)
 
     cliente_nombre = cliente.legal_name if cliente else ""
-    mensaje_html = f"<p>{payload.mensaje}</p>" if (payload and payload.mensaje) else ""
+    mensaje_html = f"<p>{html_mod.escape(payload.mensaje)}</p>" if (payload and payload.mensaje) else ""
     html = mensaje_html + _build_remision_html(rem, cliente_nombre, rem.lineas)
 
     # Se adjunta el PDF de la remisión (mismo diseño que la factura).
@@ -668,6 +708,12 @@ def enviar_remisiones_lote(
     )
     if not rems:
         raise HTTPException(status_code=404, detail="No se encontraron remisiones")
+    canceladas = [r.folio_interno for r in rems if r.estado == "CANCELADA"]
+    if canceladas:
+        raise HTTPException(
+            status_code=409,
+            detail="Remisiones canceladas en la selección: " + ", ".join(canceladas),
+        )
 
     # El envío masivo agrupa por cliente, así que todas deben ser del mismo.
     cli_ids = {r.cliente_facturacion_id for r in rems}
@@ -689,6 +735,7 @@ def enviar_remisiones_lote(
             destinatarios = [str(dom["email"]).strip()]
     if not destinatarios:
         raise HTTPException(status_code=422, detail="El cliente no tiene correo")
+    destinatarios = _validar_destinatarios(destinatarios)
 
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one_or_none()
     if not email_service.configured(tenant):

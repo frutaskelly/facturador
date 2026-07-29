@@ -1,8 +1,10 @@
 # ─── Web framework ────────────────────────────────────────────────────────────
-fastapi==0.115.0
+# starlette ≥0.40 (CVE-2024-47874, DoS multipart) y python-multipart ≥0.0.18
+# (CVE-2024-53981); fastapi 0.115.12 es el pin de la serie que los permite.
+fastapi==0.115.12
 uvicorn[standard]==0.46.0
-starlette==0.38.6
-python-multipart==0.0.12
+starlette==0.41.3
+python-multipart==0.0.20
 email-validator==2.3.0
 
 # ─── Settings / validation ────────────────────────────────────────────────────

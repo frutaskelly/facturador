@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Annotated, Optional
 
 from pydantic import BaseModel, Field
 
@@ -84,7 +84,7 @@ class ProductoOut(ORMModel, ProductoBase):
 
 # ─── Cruce de productos (match / alias aprendidos) ───────────────────────────
 class MatchIn(BaseModel):
-    textos: list[str] = Field(min_length=1, max_length=200)
+    textos: list[Annotated[str, Field(max_length=500)]] = Field(min_length=1, max_length=200)
     usar_ia: bool = False         # complementa con IA los textos sin buen candidato
     limit: int = Field(default=5, ge=1, le=20)
 

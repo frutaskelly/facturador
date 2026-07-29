@@ -4,6 +4,33 @@
 
 export type SatOption = { value: string; label: string };
 
+// Catálogo SAT c_RegimenFiscal (CFDI 4.0). Única fuente para signup,
+// Ajustes › Empresa y el alta de clientes (antes cada página traía su copia).
+export const REGIMENES_FISCALES: SatOption[] = [
+  { value: "601", label: "601 — General de Ley Personas Morales" },
+  { value: "603", label: "603 — Personas Morales con Fines no Lucrativos" },
+  { value: "605", label: "605 — Sueldos y Salarios e Ingresos Asimilados a Salarios" },
+  { value: "606", label: "606 — Arrendamiento" },
+  { value: "607", label: "607 — Régimen de Enajenación o Adquisición de Bienes" },
+  { value: "608", label: "608 — Demás ingresos" },
+  { value: "610", label: "610 — Residentes en el Extranjero sin Establecimiento Permanente en México" },
+  { value: "611", label: "611 — Ingresos por Dividendos" },
+  { value: "612", label: "612 — Personas Físicas con Actividades Empresariales y Profesionales" },
+  { value: "614", label: "614 — Ingresos por intereses" },
+  { value: "615", label: "615 — Régimen de los ingresos por obtención de premios" },
+  { value: "616", label: "616 — Sin obligaciones fiscales" },
+  { value: "620", label: "620 — Sociedades Cooperativas de Producción que optan por diferir ingresos" },
+  { value: "621", label: "621 — Incorporación Fiscal" },
+  { value: "622", label: "622 — Actividades Agrícolas, Ganaderas, Silvícolas y Pesqueras" },
+  { value: "623", label: "623 — Opcional para Grupos de Sociedades" },
+  { value: "624", label: "624 — Coordinados" },
+  { value: "625", label: "625 — Régimen de Actividades Empresariales con ingresos a través de Plataformas Tecnológicas" },
+  { value: "626", label: "626 — Régimen Simplificado de Confianza (RESICO)" },
+  { value: "628", label: "628 — Hidrocarburos" },
+  { value: "629", label: "629 — Regímenes Fiscales Preferentes y Empresas Multinacionales" },
+  { value: "630", label: "630 — Enajenación de acciones en bolsa de valores" },
+];
+
 // Catálogo SAT c_UsoCFDI (CFDI 4.0).
 export const USO_CFDI_OPTS: SatOption[] = [
   { value: "G01", label: "G01 — Adquisición de mercancías" },

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ...core.ratelimit import enforce
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import CategoriaProducto, EsquemaImpuesto, Producto
 from ...schemas.producto import (
@@ -28,7 +29,13 @@ from ...schemas.producto import (
     ProductoUpdate,
 )
 from ...schemas.common import Page
-from ...services.producto_match import aprender_alias, buscar, parsear_pegado, sugerir_con_ia
+from ...services.producto_match import (
+    productos_activos,
+    aprender_alias,
+    buscar,
+    parsear_pegado,
+    sugerir_con_ia,
+)
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 router = APIRouter(prefix="/productos", tags=["productos"])
@@ -116,10 +123,14 @@ def match_productos(
 ):
     """Cruza textos libres (tecleados/pegados) contra el catálogo: exacto → alias
     aprendido → difuso, y opcionalmente IA para los que no resuelvan."""
+    if payload.usar_ia:
+        # La rama IA manda el catálogo completo como contexto (cuesta dinero).
+        enforce(f"producto-ia:{ctx.tenant_id}", 120, 3600)
+    catalogo = productos_activos(db)   # una sola carga para todos los textos
     resultados: list[dict] = []
     sin_match: list[str] = []
     for texto in payload.textos:
-        cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit)
+        cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit, prods=catalogo)
         resultados.append({"texto": texto, "candidatos": [
             CandidatoOut(
                 producto_id=c.producto_id, sku=c.sku, nombre=c.nombre, score=c.score, origen=c.origen,
@@ -157,15 +168,18 @@ def parse_pegado(
     columnas en cualquier orden y salta el encabezado, con IA) y cruza cada
     producto contra el catálogo (exacto → alias → difuso → IA). Declarado antes
     de /{producto_id} para no capturarse como UUID."""
+    if payload.usar_ia:
+        enforce(f"producto-ia:{ctx.tenant_id}", 120, 3600)
     filas = parsear_pegado(payload.texto, usar_ia=payload.usar_ia)
     if not filas:
         return []
 
+    catalogo = productos_activos(db)   # una sola carga para todas las filas
     resultados: list[dict] = []
     sin_match: list[str] = []
     for f in filas:
         # Varios candidatos para poblar el desplegable Match IA (el front muestra ≥80%).
-        cands = buscar(db, ctx.tenant_id, f["producto"], limit=8)
+        cands = buscar(db, ctx.tenant_id, f["producto"], limit=8, prods=catalogo)
         resultados.append({
             "texto": f["producto"],
             "cantidad": f["cantidad"],

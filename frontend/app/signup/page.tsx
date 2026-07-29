@@ -9,30 +9,8 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input, PasswordInput, Select } from "@/components/ui/Field";
 import { ApiError, apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { REGIMENES_FISCALES } from "@/lib/sat";
 import { getSupabase } from "@/lib/supabaseClient";
-
-// Regímenes fiscales SAT (c_RegimenFiscal). Se puede afinar luego en Ajustes › Empresa.
-const REGIMEN_FISCAL_OPTS: { value: string; label: string }[] = [
-  { value: "601", label: "601 — General de Ley Personas Morales" },
-  { value: "603", label: "603 — Personas Morales con Fines no Lucrativos" },
-  { value: "605", label: "605 — Sueldos y Salarios" },
-  { value: "606", label: "606 — Arrendamiento" },
-  { value: "607", label: "607 — Enajenación o Adquisición de Bienes" },
-  { value: "608", label: "608 — Demás ingresos" },
-  { value: "610", label: "610 — Residentes en el Extranjero" },
-  { value: "611", label: "611 — Ingresos por Dividendos" },
-  { value: "612", label: "612 — Personas Físicas con Actividades Empresariales y Profesionales" },
-  { value: "614", label: "614 — Ingresos por intereses" },
-  { value: "615", label: "615 — Ingresos por obtención de premios" },
-  { value: "616", label: "616 — Sin obligaciones fiscales" },
-  { value: "620", label: "620 — Sociedades Cooperativas de Producción" },
-  { value: "621", label: "621 — Incorporación Fiscal" },
-  { value: "622", label: "622 — Actividades Agrícolas, Ganaderas, Silvícolas y Pesqueras" },
-  { value: "623", label: "623 — Opcional para Grupos de Sociedades" },
-  { value: "624", label: "624 — Coordinados" },
-  { value: "625", label: "625 — Actividades con ingresos vía Plataformas Tecnológicas" },
-  { value: "626", label: "626 — Régimen Simplificado de Confianza (RESICO)" },
-];
 
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
 
@@ -226,7 +204,7 @@ export default function SignupPage() {
           <Field label="Régimen fiscal SAT" required>
             <Select value={regimen} onChange={(e) => setRegimen(e.target.value)} required>
               <option value="">— Selecciona —</option>
-              {REGIMEN_FISCAL_OPTS.map((o) => (
+              {REGIMENES_FISCALES.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
                 </option>

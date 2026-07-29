@@ -149,6 +149,7 @@ export default function ComprasPage() {
     for (const l of detail?.lineas ?? []) ensureResumen(l.producto_id);
   }, [detail, ensureResumen]);
   const [confirmRecibir, setConfirmRecibir] = useState(false);
+  const [confirmCancelar, setConfirmCancelar] = useState(false);
   async function openDetail(id: string) {
     try {
       setDetail(await apiFetch<OrdenCompra>(`${BASE}/${id}`));
@@ -181,6 +182,20 @@ export default function ComprasPage() {
       toast.success("Mercancía recibida y sumada a inventario");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo recibir");
+    } finally { setBusy(false); }
+  }
+  // Cancelar es un estado terminal (no se puede revertir), así que pasa por
+  // confirmación, igual que "Recibir todo".
+  async function doCancelar() {
+    if (!detail) return;
+    setBusy(true);
+    try {
+      await post(`${BASE}/${detail.id}/transition`, { nuevo_estado: "CANCELADA" });
+      await refreshDetail(detail.id);
+      setConfirmCancelar(false);
+      toast.success("Orden cancelada");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo cancelar la orden");
     } finally { setBusy(false); }
   }
 
@@ -324,7 +339,7 @@ export default function ComprasPage() {
           <div className="flex w-full items-center justify-between gap-2">
             <div>
               {canWrite && !TERMINAL.has(detail.estado) && (
-                <Button variant="danger" disabled={busy} onClick={() => doTransition("CANCELADA")}>Cancelar orden</Button>
+                <Button variant="danger" disabled={busy} onClick={() => setConfirmCancelar(true)}>Cancelar orden</Button>
               )}
             </div>
             <div className="flex gap-2">
@@ -389,6 +404,16 @@ export default function ComprasPage() {
         confirmVariant="primary"
         onConfirm={doRecibir}
         onClose={() => setConfirmRecibir(false)}
+        loading={busy}
+      />
+
+      <ConfirmDialog
+        open={confirmCancelar}
+        title="Cancelar orden de compra"
+        message={`¿Cancelar la orden ${detail?.folio ?? ""}? Esta acción es definitiva: la orden ya no podrá enviarse ni recibirse.`}
+        confirmLabel="Cancelar orden"
+        onConfirm={doCancelar}
+        onClose={() => setConfirmCancelar(false)}
         loading={busy}
       />
     </div>

@@ -45,6 +45,10 @@ export default function FacturasPage() {
   }, []);
   const { status: onboardingStatus } = useOnboarding();
   const ambiente = onboardingStatus?.ambiente ?? "sandbox";
+  // Sufijo para los toasts de timbrado/cancelación: "(sandbox)" solo cuando el
+  // ambiente ya cargó y de verdad es sandbox — en producción (o mientras carga)
+  // afirmarlo haría creer que el CFDI no fue real.
+  const sufijoAmbiente = onboardingStatus && ambiente !== "producción" ? " (sandbox)" : "";
 
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=500");
   const clientes = clientesRes.data?.items ?? [];
@@ -78,12 +82,24 @@ export default function FacturasPage() {
 
   useEffect(() => {
     if (!genCliente) { setRemisiones([]); setSel({}); return; }
+    // Al cambiar rápido de cliente, la respuesta del anterior no debe pisar la
+    // lista (se facturaría al cliente equivocado).
+    let active = true;
     apiFetch<Page<Remision>>(`/api/v1/remisiones?cliente_id=${genCliente}&limit=200`)
-      .then((r) => setRemisiones(r.items.filter(
-        (x) => (x.estado === "BORRADOR" || x.estado === "CONFIRMADA") &&
-          (!x.factura_id || x.factura_estado === "CANCELADA"))))
-      .catch(() => setRemisiones([]));
+      .then((r) => {
+        if (!active) return;
+        setRemisiones(r.items.filter(
+          (x) => (x.estado === "BORRADOR" || x.estado === "CONFIRMADA") &&
+            (!x.factura_id || x.factura_estado === "CANCELADA")));
+      })
+      .catch((e) => {
+        if (!active) return;
+        // Un error de red no es "no hay remisiones": se avisa en vez de fingir lista vacía.
+        setRemisiones([]);
+        toast.error(e instanceof ApiError ? e.message : "No se pudieron cargar las remisiones del cliente");
+      });
     setSel({});
+    return () => { active = false; };
   }, [genCliente]);
 
   const selIds = Object.entries(sel).filter(([, v]) => v).map(([k]) => k);
@@ -191,7 +207,7 @@ export default function FacturasPage() {
     setActBusy(true);
     try {
       await apiFetch(`/api/v1/facturas/${toTimbrar.id}/timbrar`, { method: "POST" });
-      toast.success("Factura timbrada (sandbox)");
+      toast.success(`Factura timbrada${sufijoAmbiente}`);
       invalidar(toTimbrar.id);
       setToTimbrar(null); reload();
     } catch (e) {
@@ -201,6 +217,9 @@ export default function FacturasPage() {
   function abrirCancelar(f: Factura) {
     setCancelMotivo("02");
     setCancelSustitucion("");
+    // Siempre arranca en devolución: si la cancelación anterior fue merma, un
+    // default pegajoso daría de baja inventario sin que el usuario lo note.
+    setCancelInventario("devolucion");
     setToCancel(f);
   }
   async function cancelar() {
@@ -217,7 +236,7 @@ export default function FacturasPage() {
       await apiFetch(`/api/v1/facturas/${toCancel.id}/cancelar`, {
         method: "POST", body: JSON.stringify(body),
       });
-      toast.success("Factura cancelada (sandbox)");
+      toast.success(`Factura cancelada${sufijoAmbiente}`);
       invalidar(toCancel.id);
       setToCancel(null); reload();
     } catch (e) {

@@ -82,11 +82,13 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
   const [serieResuelta, setSerieResuelta] = useState<Serie | null>(null);
   useEffect(() => {
     if (!clienteId) { setSerieResuelta(null); return; }
+    let active = true; // evita que una respuesta vieja pise a la del cliente/serie actual
     const p = new URLSearchParams({ tipo_documento: "FACTURA", cliente_id: clienteId });
     if (serieOverride) p.set("serie_id", serieOverride);
     apiFetch<Serie | null>(`/api/v1/series/resolver?${p.toString()}`)
-      .then(setSerieResuelta)
-      .catch(() => setSerieResuelta(null));
+      .then((s) => { if (active) setSerieResuelta(s); })
+      .catch(() => { if (active) setSerieResuelta(null); });
+    return () => { active = false; };
   }, [clienteId, serieOverride]);
 
   const folioPreview = serieResuelta ? `${serieResuelta.codigo}${serieResuelta.folio_actual + 1}` : "—";
@@ -114,6 +116,12 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
     setUsoCfdi(cli?.uso_cfdi_default ?? USO_CFDI_FALLBACK);
     setFormaPago(cli?.forma_pago_default ?? FORMA_PAGO_FALLBACK);
     setMetodoPago(cli?.metodo_pago_default ?? METODO_PAGO_FALLBACK);
+    // Re-cotiza las líneas ya capturadas con la lista del nuevo cliente (si se
+    // capturaron sin cliente, o al cambiar de cliente, traían el precio de
+    // lista genérico y así se timbraría). Los precios manuales se respetan.
+    lineas.forEach((l) => {
+      if (l.producto_id && !l.precioManual) cotizar(l.key, l.producto_id, l.presentacion, l.cantidad, v);
+    });
     if (almacenes.length > 1) { setStep("almacen"); return; }
     setStep(null);
     setLineFocus({ key: lineas[0]?.key, field: "cantidad" });
@@ -158,14 +166,24 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
     return setLineFocus({ key: lineas[idx + 1].key, field: "cantidad" });
   }
 
+  // Secuencia por línea para descartar cotizaciones obsoletas: con precio por
+  // volumen, al teclear "15" salen dos requests y la respuesta de "1" puede
+  // llegar al final → quedaría (y se timbraría) el precio del tier equivocado.
+  const cotizaSeq = useRef<Record<string, number>>({});
+
   // Cotiza el precio de lista del cliente. Sin sucursal: la factura directa no
   // la tiene, así que el precio sale de la lista del cliente / del producto.
-  async function cotizar(key: string, producto_id: string, presentacion: string, cantidad: string) {
+  // `cliente` permite cotizar con un cliente recién elegido antes de que el
+  // estado `clienteId` se actualice.
+  async function cotizar(key: string, producto_id: string, presentacion: string, cantidad: string, cliente: string = clienteId) {
     if (!producto_id || !Number(cantidad)) return;
+    const seq = (cotizaSeq.current[key] ?? 0) + 1;
+    cotizaSeq.current[key] = seq;
     try {
       const p = new URLSearchParams({ producto_id, presentacion, cantidad });
-      if (clienteId) p.set("cliente_id", clienteId);
+      if (cliente) p.set("cliente_id", cliente);
       const r = await apiFetch<{ precio: string | null }>(`/api/v1/precios/cotizar?${p.toString()}`);
+      if (cotizaSeq.current[key] !== seq) return; // ya salió una cotización más nueva para esta línea
       setLineas((ls) =>
         ls.map((l) => {
           if (l.key !== key) return l;
@@ -181,7 +199,9 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
 
   function onPickProducto(key: string, pick: ProductoPick | null, texto: string) {
     if (!pick) {
-      setLinea(key, { producto_id: "", label: "", texto });
+      // Sin producto no hay precio: se limpia para no inflar los totales con
+      // el importe de la selección anterior.
+      setLinea(key, { producto_id: "", label: "", texto, precio: "", precioManual: false, importe: 0 });
       return;
     }
     const pres = Object.keys(pick.presentaciones ?? {});
@@ -311,29 +331,29 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
     } catch {
       matches = [];
     }
+    // Calculado FUERA del updater: en StrictMode el updater corre dos veces y
+    // duplicaría `paraCotizar` y las líneas creadas con `nuevaLinea()`.
     const paraCotizar: LineaForm[] = [];
-    setLineas((ls) => {
-      const next = [...ls];
-      valores.forEach((texto, i) => {
-        const pos = idx + i;
-        const base = pos < next.length ? next[pos] : nuevaLinea();
-        const top = matches[i]?.candidatos?.[0];
-        const auto = top && (top.origen === "exacto" || top.origen === "alias" || top.score >= 85) ? top : null;
-        let linea: LineaForm;
-        if (auto) {
-          const presKeys = Object.keys(auto.presentaciones ?? {});
-          const def = auto.presentacion_default ?? auto.unidad_base ?? presKeys[0] ?? "PIEZA";
-          const presentacion = presKeys.includes(def) ? def : presKeys[0] ?? def;
-          linea = { ...base, texto, producto_id: auto.producto_id, label: auto.nombre, presentaciones: presKeys, presentacion };
-          paraCotizar.push(linea);
-        } else {
-          linea = { ...base, texto, producto_id: "", label: "" };
-        }
-        if (pos < next.length) next[pos] = linea;
-        else next.push(linea);
-      });
-      return next;
+    const next = [...lineas];
+    valores.forEach((texto, i) => {
+      const pos = idx + i;
+      const base = pos < next.length ? next[pos] : nuevaLinea();
+      const top = matches[i]?.candidatos?.[0];
+      const auto = top && (top.origen === "exacto" || top.origen === "alias" || top.score >= 85) ? top : null;
+      let linea: LineaForm;
+      if (auto) {
+        const presKeys = Object.keys(auto.presentaciones ?? {});
+        const def = auto.presentacion_default ?? auto.unidad_base ?? presKeys[0] ?? "PIEZA";
+        const presentacion = presKeys.includes(def) ? def : presKeys[0] ?? def;
+        linea = { ...base, texto, producto_id: auto.producto_id, label: auto.nombre, presentaciones: presKeys, presentacion };
+        paraCotizar.push(linea);
+      } else {
+        linea = { ...base, texto, producto_id: "", label: "" };
+      }
+      if (pos < next.length) next[pos] = linea;
+      else next.push(linea);
     });
+    setLineas(next);
     paraCotizar.forEach((l) => cotizar(l.key, l.producto_id, l.presentacion, l.cantidad));
     toast.success(`${valores.length} productos pegados`);
   }
@@ -371,6 +391,9 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
   const [choiceOpen, setChoiceOpen] = useState(false);
   const [timbrando, setTimbrando] = useState(false);
   const busy = saving || timbrando;
+  // Guard SÍNCRONO contra doble clic: `saving`/`timbrando` son estado async y
+  // llegan tarde — sin esto un doble clic crea dos facturas.
+  const submitRef = useRef(false);
 
   function abrirGuardar() {
     if (busy) return;
@@ -380,9 +403,10 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
 
   // "Borrador": crea la factura sin timbrar y sin tocar el inventario.
   async function guardarBorrador() {
-    if (busy) return;
+    if (busy || submitRef.current) return;
     const payload = construirPayload();
     if (!payload) return;
+    submitRef.current = true;
     setChoiceOpen(false);
     try {
       const f = await post<FacturaDetail>("/api/v1/facturas/directa", payload);
@@ -391,6 +415,8 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
       onClose();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la factura");
+    } finally {
+      submitRef.current = false;
     }
   }
 
@@ -398,15 +424,17 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
   // el inventario del almacén elegido. Si el timbrado falla, el borrador YA
   // existe: salimos al listado para reintentar desde ahí sin duplicarlo.
   async function guardarYTimbrar() {
-    if (busy) return;
+    if (busy || submitRef.current) return;
     const payload = construirPayload();
     if (!payload) return;
+    submitRef.current = true;
     setChoiceOpen(false);
     let creada: FacturaDetail;
     try {
       creada = await post<FacturaDetail>("/api/v1/facturas/directa", payload);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo crear la factura");
+      submitRef.current = false;
       return;
     }
     setTimbrando(true);
@@ -420,6 +448,7 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
       );
     } finally {
       setTimbrando(false);
+      submitRef.current = false;
       onSaved(creada);
       onClose();
     }

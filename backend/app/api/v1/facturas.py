@@ -11,6 +11,8 @@ en la unidad base; el resto factura la presentación con su unidad SAT.
 """
 from __future__ import annotations
 
+import html as html_mod
+
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -20,6 +22,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.config import settings
+from ...core.ratelimit import enforce
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
     Almacen,
@@ -160,6 +163,14 @@ def _writeoff_remision_stock(db: Session, rems, ctx, factura) -> None:
                 tenant_id=ctx.tenant_id, lote_id=lote.id, cantidad=cantidad,
                 motivo="OTRO", descripcion=desc, created_by=ctx.user_id,
             ))
+            # Par balanceado: al confirmar ya se emitió SALIDA_REMISION -q (y
+            # disponible bajó). Aquí disponible NO cambia, así que se emite
+            # +q/-q para que la suma del kardex siga cuadrando con disponible
+            # y a la vez quede rastro de que la salida terminó en merma.
+            db.add(build_movimiento(
+                ctx.tenant_id, ctx.user_id, lote, "CANCELACION_REMISION", cantidad,
+                ref_tipo="FACTURA", ref_id=factura.id, motivo=desc,
+            ))
             db.add(build_movimiento(
                 ctx.tenant_id, ctx.user_id, lote, "MERMA", -cantidad,
                 ref_tipo="FACTURA", ref_id=factura.id, motivo=desc,
@@ -218,7 +229,16 @@ def _revertir_factura_directa(db: Session, ctx, factura, *, perdida: bool) -> No
                     ref_tipo="FACTURA", ref_id=factura.id,
                     motivo=f"Cancelación factura {factura.serie}{factura.folio}",
                 ))
-        ln.lote_id = None               # pérdida: los bienes ya salieron al timbrar
+        else:
+            # Pérdida: los bienes ya salieron al timbrar (disponible no cambia,
+            # sin movimiento), pero la mercancía perdida SÍ debe constar en el
+            # registro de mermas — igual que el flujo por remisiones.
+            db.add(Merma(
+                tenant_id=ctx.tenant_id, lote_id=ln.lote_id, cantidad=base,
+                motivo="OTRO", created_by=ctx.user_id,
+                descripcion=f"Pérdida por cancelación factura {factura.serie}{factura.folio}",
+            ))
+        ln.lote_id = None
 
 
 @router.get("", response_model=Page[FacturaOut])
@@ -255,7 +275,15 @@ def factura_desde_remisiones(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     ids = list(dict.fromkeys(payload.remision_ids))
-    rems = db.query(Remision).filter(Remision.id.in_(ids), Remision.deleted_at.is_(None)).all()
+    # FOR UPDATE: sin lock, dos "Facturar" simultáneos pasan ambos el check de
+    # "ya facturada" → dos facturas vivas por la misma mercancía (y doble reserva
+    # si venían en BORRADOR). Con el lock, el segundo ve el estado ya actualizado.
+    rems = (
+        db.query(Remision)
+        .filter(Remision.id.in_(ids), Remision.deleted_at.is_(None))
+        .with_for_update()
+        .all()
+    )
     if len(rems) != len(ids):
         raise HTTPException(status_code=404, detail="Una o más remisiones no existen")
 
@@ -405,9 +433,23 @@ def factura_directa(
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
 
     prod_ids = {ln.producto_id for ln in payload.lineas}
-    productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+    productos = {
+        p.id: p
+        for p in db.query(Producto)
+        .filter(Producto.id.in_(prod_ids), Producto.deleted_at.is_(None))
+        .all()
+    }
     if len(productos) != len(prod_ids):
         raise HTTPException(status_code=404, detail="Uno o más productos no existen")
+    # Presentación desconocida caería a factor 1 y descontaría inventario con la
+    # magnitud equivocada (p. ej. "ARPILLA" mal tecleada = 1 kg en vez de 20).
+    for ln in payload.lineas:
+        prod = productos.get(ln.producto_id)
+        if ln.presentacion and prod is not None and ln.presentacion not in (prod.presentaciones or {}):
+            raise HTTPException(
+                status_code=422,
+                detail=f"El producto {prod.nombre} no tiene la presentación '{ln.presentacion}'",
+            )
     esq_ids = {p.esquema_impuesto_id for p in productos.values() if p.esquema_impuesto_id}
     esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.id.in_(esq_ids)).all()}
 
@@ -487,7 +529,12 @@ def timbrar_factura(
     El ambiente (sandbox/producción) lo decide FACTURAMA_BASE_URL; en producción
     el timbre es REAL ante el SAT.
     """
-    factura = get_or_404(db, Factura, factura_id)
+    # Cada timbre consume un folio del PAC — tope generoso contra loops/abuso.
+    enforce(f"timbrar:{ctx.tenant_id}", 300, 3600)
+    # FOR UPDATE: dos timbrados simultáneos (doble clic / dos usuarios) generarían
+    # DOS CFDI reales en el SAT y doble descuento de stock en directa. Con el lock,
+    # el segundo request espera y ve estado=TIMBRADA → 409.
+    factura = get_or_404(db, Factura, factura_id, for_update=True)
     if factura.estado == "TIMBRADA":
         raise HTTPException(status_code=409, detail="La factura ya está timbrada")
     if factura.estado == "CANCELADA":
@@ -547,7 +594,7 @@ def cancelar_factura(
     Con FACTURAMA_FAKE_CANCEL=true la cancelación es interna (no llama al PAC);
     en producción debe ser false para que la cancelación llegue al SAT.
     """
-    factura = get_or_404(db, Factura, factura_id)
+    factura = get_or_404(db, Factura, factura_id, for_update=True)
     if factura.estado != "TIMBRADA":
         raise HTTPException(status_code=409, detail="Solo se cancela una factura timbrada")
     if payload.motivo == "01" and payload.uuid_sustitucion is None:
@@ -695,13 +742,16 @@ def enviar_factura(
     pdf = build_factura_pdf(factura, tenant, cliente)
     nombre_archivo = f"{factura.serie}{factura.folio}"
     subject = f"Factura {nombre_archivo}" + (f" — {tenant.legal_name}" if tenant.legal_name else "")
-    mensaje_html = f"<p>{payload.mensaje}</p>" if payload.mensaje else ""
+    # html.escape en todo dato dinámico: sin esto, un mensaje o nombre de cliente
+    # con HTML se inyecta tal cual en el correo saliente (phishing con el SMTP
+    # del tenant).
+    mensaje_html = f"<p>{html_mod.escape(payload.mensaje)}</p>" if payload.mensaje else ""
     html = (
         f"{mensaje_html}"
-        f"<p>Adjunto la factura <strong>{nombre_archivo}</strong>"
-        + (f" a nombre de {cliente.legal_name}" if cliente else "")
+        f"<p>Adjunto la factura <strong>{html_mod.escape(nombre_archivo)}</strong>"
+        + (f" a nombre de {html_mod.escape(cliente.legal_name)}" if cliente else "")
         + f" por un total de <strong>${factura.total:,.2f} {factura.moneda}</strong>.</p>"
-        f"<p>UUID: <span style=\"font-family:monospace\">{factura.uuid or ''}</span></p>"
+        f"<p>UUID: <span style=\"font-family:monospace\">{html_mod.escape(factura.uuid or '')}</span></p>"
     )
     attachments: list[tuple[str, bytes, str]] = [(f"{nombre_archivo}.pdf", pdf, "application/pdf")]
     if xml:
