@@ -451,6 +451,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/facturas/enviar-lote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enviar Facturas Lote */
+        post: operations["enviar_facturas_lote_api_v1_facturas_enviar_lote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/facturas/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Facturas Pdf Lote
+         * @description PDF de varias facturas (una por página) para imprimir/guardar en lote.
+         *     Definido ANTES de /{factura_id} para que la ruta estática gane.
+         */
+        get: operations["facturas_pdf_lote_api_v1_facturas_pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/facturas/{factura_id}": {
         parameters: {
             query?: never;
@@ -2315,6 +2353,19 @@ export interface components {
             mensaje?: string | null;
             /** To */
             to: string[];
+        };
+        /**
+         * EnviarFacturasLoteIn
+         * @description Un solo correo con varias facturas TIMBRADAS (todas del mismo cliente):
+         *     un PDF + XML adjunto por factura, como el enviar-lote de remisiones.
+         */
+        EnviarFacturasLoteIn: {
+            /** Ids */
+            ids: string[];
+            /** Mensaje */
+            mensaje?: string | null;
+            /** To */
+            to?: string | null;
         };
         /** EnviarRemisionIn */
         EnviarRemisionIn: {
@@ -6209,6 +6260,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FacturaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enviar_facturas_lote_api_v1_facturas_enviar_lote_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnviarFacturasLoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    facturas_pdf_lote_api_v1_facturas_pdf_get: {
+        parameters: {
+            query: {
+                /** @description IDs de factura separados por coma */
+                ids: string;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

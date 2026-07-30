@@ -19,6 +19,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel, Field as PydField
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -51,14 +52,14 @@ from ...schemas.factura import (
 )
 from ...services import email as email_service
 from ...services.cfdi import build_payload
-from ...services.factura_pdf import build_factura_pdf
+from ...services.factura_pdf import build_factura_pdf, build_facturas_pdf
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea_producto, totales
 from ...services.onboarding import compute_status
 from ...services.inventario import build_movimiento, presentacion_factor, presentacion_sat, resolve_lote
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import ensure_fk, get_or_404, paginate
-from .remisiones import reservar_stock_remision
+from .remisiones import _validar_destinatarios, reservar_stock_remision
 
 log = logging.getLogger(__name__)
 
@@ -248,6 +249,43 @@ def list_facturas(
         query = query.filter(Factura.cliente_id == cliente_id)
     query = query.order_by(Factura.fecha.desc(), Factura.folio.desc())
     return paginate(query, FacturaOut, limit, offset)
+
+
+@router.get("/pdf")
+def facturas_pdf_lote(
+    ids: str = Query(..., description="IDs de factura separados por coma"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """PDF de varias facturas (una por página) para imprimir/guardar en lote.
+    Definido ANTES de /{factura_id} para que la ruta estática gane."""
+    id_list: list[UUID] = []
+    for raw in ids.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            id_list.append(UUID(raw))
+        except ValueError:
+            continue
+    if not id_list:
+        raise HTTPException(status_code=422, detail="Sin facturas para imprimir")
+    if len(id_list) > 200:
+        raise HTTPException(status_code=422, detail="Máximo 200 facturas por PDF")
+    facturas = (
+        db.query(Factura)
+        .filter(Factura.id.in_(id_list), Factura.deleted_at.is_(None))
+        .order_by(Factura.serie, Factura.folio)
+        .all()
+    )
+    if not facturas:
+        raise HTTPException(status_code=404, detail="No se encontraron facturas")
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    cli_ids = {f.cliente_id for f in facturas}
+    clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.id.in_(cli_ids)).all()}
+    pdf = build_facturas_pdf([(f, clientes.get(f.cliente_id)) for f in facturas], tenant)
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": 'inline; filename="facturas.pdf"'})
 
 
 @router.get("/{factura_id}", response_model=FacturaDetailOut)
@@ -864,3 +902,120 @@ def enviar_factura(
     except Exception as exc:  # noqa: BLE001 — superficie del error al cliente
         raise HTTPException(status_code=502, detail=str(exc))
     return {"ok": True}
+
+
+class EnviarFacturasLoteIn(BaseModel):
+    """Un solo correo con varias facturas TIMBRADAS (todas del mismo cliente):
+    un PDF + XML adjunto por factura, como el enviar-lote de remisiones."""
+    ids: list[UUID] = PydField(min_length=1, max_length=100)
+    to: Optional[str] = PydField(default=None, max_length=1000)
+    mensaje: Optional[str] = PydField(default=None, max_length=5000)
+
+
+@router.post("/enviar-lote")
+def enviar_facturas_lote(
+    payload: EnviarFacturasLoteIn = Body(...),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    facturas = (
+        db.query(Factura)
+        .filter(Factura.id.in_(payload.ids), Factura.deleted_at.is_(None))
+        .order_by(Factura.serie, Factura.folio)
+        .all()
+    )
+    if not facturas:
+        raise HTTPException(status_code=404, detail="No se encontraron facturas")
+    no_timbradas = [f"{f.serie}{f.folio}" for f in facturas if f.estado != "TIMBRADA"]
+    if no_timbradas:
+        raise HTTPException(
+            status_code=409,
+            detail="Solo se envían facturas timbradas; sin timbrar: " + ", ".join(no_timbradas),
+        )
+    cli_ids = {f.cliente_id for f in facturas}
+    if len(cli_ids) > 1:
+        raise HTTPException(status_code=422, detail="Las facturas deben ser del mismo cliente")
+    cliente = db.query(Cliente).filter(Cliente.id == next(iter(cli_ids))).one_or_none()
+
+    # Destinatarios: payload (coma/espacio) o los correos del cliente.
+    destinatarios: list[str] = []
+    if payload.to:
+        destinatarios = [c for c in payload.to.replace(",", " ").split() if c]
+    if not destinatarios and cliente is not None:
+        dom = cliente.domicilio_fiscal or {}
+        correos = dom.get("correos")
+        if isinstance(correos, list):
+            destinatarios = [str(c).strip() for c in correos if str(c).strip()]
+        elif dom.get("email"):
+            destinatarios = [str(dom["email"]).strip()]
+    if not destinatarios:
+        raise HTTPException(status_code=422, detail="El cliente no tiene correo")
+    destinatarios = _validar_destinatarios(destinatarios)
+
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    if not email_service.configured(tenant):
+        raise HTTPException(
+            status_code=503,
+            detail="Configura una cuenta de correo en Ajustes › Correo antes de enviar facturas.",
+        )
+
+    emisor_nombre = tenant.trade_name or tenant.legal_name or "SmartSupply"
+    cliente_nombre = cliente.legal_name if cliente else ""
+    n = len(facturas)
+    filas = []
+    total_general = Decimal("0")
+    attachments: list[tuple[str, bytes, str]] = []
+    for f in facturas:
+        total_general += Decimal(f.total or 0)
+        filas.append(
+            "<tr>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{html_mod.escape(f'{f.serie}{f.folio}')}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;font-family:monospace;font-size:11px'>{html_mod.escape(f.uuid or '')}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>${Decimal(f.total or 0):,.2f}</td>"
+            "</tr>"
+        )
+        nombre_archivo = f"{f.serie}{f.folio}"
+        attachments.append((f"{nombre_archivo}.pdf", build_factura_pdf(f, tenant, cliente), "application/pdf"))
+        xml = _xml_de(f)
+        if xml:
+            attachments.append((f"{nombre_archivo}.xml", xml.encode("utf-8"), "application/xml"))
+
+    mensaje_html = (
+        "<div style='background:#f5f7ff;border-left:3px solid #4f6bed;"
+        "padding:10px 14px;margin:0 0 16px;border-radius:4px;white-space:pre-line'>"
+        f"{html_mod.escape(payload.mensaje)}</div>"
+        if payload.mensaje else ""
+    )
+    etiqueta = "factura" if n == 1 else "facturas"
+    html = (
+        "<div style='font-family:Arial,Helvetica,sans-serif;color:#222;max-width:640px'>"
+        f"<h2 style='margin:0 0 4px'>{html_mod.escape(emisor_nombre)}</h2>"
+        f"<p style='margin:0 0 16px;color:#555'>Estimado(a) <strong>{html_mod.escape(cliente_nombre)}</strong>:</p>"
+        + mensaje_html
+        + f"<p style='margin:0 0 16px'>Le compartimos {n} {etiqueta}. "
+        "El PDF y XML de cada una van adjuntos.</p>"
+        "<table style='border-collapse:collapse;width:100%;font-size:14px'>"
+        "<thead><tr style='background:#f5f5f5'>"
+        "<th style='padding:6px 10px;text-align:left'>Factura</th>"
+        "<th style='padding:6px 10px;text-align:left'>UUID</th>"
+        "<th style='padding:6px 10px;text-align:right'>Total</th>"
+        "</tr></thead><tbody>"
+        + "".join(filas)
+        + "</tbody></table>"
+        f"<p style='margin:16px 0 0;text-align:right;font-size:16px'>"
+        f"<strong>Total general: ${total_general:,.2f}</strong></p>"
+        "<p style='margin:24px 0 0;color:#999;font-size:12px'>"
+        "Correo enviado automáticamente por SmartSupply.</p>"
+        "</div>"
+    )
+    asunto = (
+        f"Factura {facturas[0].serie}{facturas[0].folio}" if n == 1
+        else f"{n} facturas — {emisor_nombre}"
+    )
+    try:
+        email_service.send_email(
+            email_service.smtp_config(tenant), destinatarios, asunto, html, attachments=attachments,
+        )
+    except Exception as exc:  # noqa: BLE001 — superficie del error al cliente
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "to": ", ".join(destinatarios), "facturas": n}

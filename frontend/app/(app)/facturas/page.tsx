@@ -307,6 +307,149 @@ export default function FacturasPage() {
     }
   }
 
+  // ── Acciones en lote (Objetivo 2): selección múltiple estilo remisiones ──
+  const [selected, setSelected] = useState<Factura[]>([]);
+  const [selectionResetKey, setSelectionResetKey] = useState(0);
+  const clearSelection = () => { setSelected([]); setSelectionResetKey((k) => k + 1); };
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const borradoresSel = selected.filter((f) => f.estado === "BORRADOR");
+  const timbradasSel = selected.filter((f) => f.estado === "TIMBRADA");
+
+  // Timbrar N (solo borradores). Las que fallen por existencia insuficiente se
+  // reofrecen con sobregiro; el resto de errores se reporta en el toast.
+  const [timbrarBulkOpen, setTimbrarBulkOpen] = useState(false);
+  const [timbrarBulkSobregiro, setTimbrarBulkSobregiro] = useState<Factura[]>([]);
+
+  async function bulkTimbrar(objetivo: Factura[], permitirNegativos = false) {
+    if (objetivo.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const res = await Promise.allSettled(objetivo.map((f) =>
+        apiFetch(`/api/v1/facturas/${f.id}/timbrar`, {
+          method: "POST",
+          body: JSON.stringify({ permitir_negativos: permitirNegativos }),
+        })));
+      const sinStock: Factura[] = [];
+      let ok = 0, otras = 0;
+      res.forEach((r, i) => {
+        if (r.status === "fulfilled") ok += 1;
+        else if (r.reason instanceof ApiError && /existencia insuficiente/i.test(r.reason.message)) sinStock.push(objetivo[i]);
+        else otras += 1;
+      });
+      objetivo.forEach((f) => invalidar(f.id));
+      const partes = [`Timbradas: ${ok}${sufijoAmbiente}`];
+      if (sinStock.length) partes.push(`${sinStock.length} sin existencia`);
+      if (otras) partes.push(`${otras} con error`);
+      toast[sinStock.length === 0 && otras === 0 ? "success" : "error"](partes.join(" · "));
+      setTimbrarBulkOpen(false);
+      setTimbrarBulkSobregiro(permitirNegativos ? [] : sinStock);
+      if (sinStock.length === 0 || permitirNegativos) clearSelection();
+      reload();
+    } finally { setBulkBusy(false); }
+  }
+
+  // Cancelar N (solo timbradas). El motivo 01 exige un UUID de sustitución POR
+  // factura, así que en lote solo se ofrecen 02/03/04.
+  const [cancelBulkOpen, setCancelBulkOpen] = useState(false);
+  const [bulkCancelMotivo, setBulkCancelMotivo] = useState("02");
+  const [bulkCancelInventario, setBulkCancelInventario] = useState<"devolucion" | "perdida">("devolucion");
+
+  function abrirCancelBulk() {
+    setBulkCancelMotivo("02");
+    setBulkCancelInventario("devolucion");
+    setCancelBulkOpen(true);
+  }
+
+  async function bulkCancelar() {
+    const objetivo = timbradasSel;
+    if (objetivo.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const res = await Promise.allSettled(objetivo.map((f) =>
+        apiFetch(`/api/v1/facturas/${f.id}/cancelar`, {
+          method: "POST",
+          body: JSON.stringify({ motivo: bulkCancelMotivo, inventario: bulkCancelInventario }),
+        })));
+      const ok = res.filter((r) => r.status === "fulfilled").length;
+      const fail = res.length - ok;
+      objetivo.forEach((f) => invalidar(f.id));
+      const partes = [`Canceladas: ${ok}${sufijoAmbiente}`];
+      if (fail) partes.push(`${fail} con error`);
+      toast[fail === 0 ? "success" : "error"](partes.join(" · "));
+      setCancelBulkOpen(false);
+      clearSelection();
+      reload();
+    } finally { setBulkBusy(false); }
+  }
+
+  // Imprimir N: un solo PDF (una factura por página), pestaña síncrona anti-popup.
+  function bulkPdf() {
+    if (selected.length === 0) return;
+    const win = window.open("", "_blank");
+    apiOpenInTab(`/api/v1/facturas/pdf?ids=${selected.map((f) => f.id).join(",")}`, win)
+      .catch((e) => toast.error(e instanceof ApiError ? e.message : "No se pudo abrir el PDF"));
+  }
+
+  // XML N: descargas individuales secuenciales (solo timbradas tienen XML).
+  async function bulkXml() {
+    setBulkBusy(true);
+    try {
+      let fail = 0;
+      for (const f of timbradasSel) {
+        try { await apiDownload(`/api/v1/facturas/${f.id}/xml`, `${f.serie}${f.folio}.xml`); }
+        catch { fail += 1; }
+      }
+      if (fail) toast.error(`${fail} XML no se pudieron descargar`);
+    } finally { setBulkBusy(false); }
+  }
+
+  // Enviar N: un correo POR CLIENTE con todas sus facturas (PDF+XML adjuntos),
+  // correos editables por renglón — mismo patrón que remisiones.
+  const [bulkSendOpen, setBulkSendOpen] = useState(false);
+  const [bulkSendRows, setBulkSendRows] = useState<{ clienteId: string; nombre: string; facIds: string[]; correos: string }[]>([]);
+  const [bulkSendMensaje, setBulkSendMensaje] = useState("");
+
+  function bulkEnviar() {
+    if (timbradasSel.length === 0) return;
+    const byCliente = new Map<string, string[]>();
+    for (const f of timbradasSel) {
+      const arr = byCliente.get(f.cliente_id) ?? [];
+      arr.push(f.id);
+      byCliente.set(f.cliente_id, arr);
+    }
+    setBulkSendRows([...byCliente.entries()].map(([clienteId, facIds]) => ({
+      clienteId, nombre: cliName[clienteId] ?? "—", facIds, correos: cliCorreos[clienteId] ?? "",
+    })));
+    setBulkSendMensaje("");
+    setBulkSendOpen(true);
+  }
+
+  async function confirmarBulkEnvio() {
+    const activos = bulkSendRows.filter((row) => row.correos.trim());
+    if (activos.length === 0) { toast.error("No hay correos: agrega al menos uno o cancela"); return; }
+    const mensaje = bulkSendMensaje.trim() || undefined;
+    setBulkBusy(true);
+    let ok = 0, fail = 0;
+    try {
+      for (const row of activos) {
+        try {
+          await apiFetch("/api/v1/facturas/enviar-lote", {
+            method: "POST",
+            body: JSON.stringify({ ids: row.facIds, to: row.correos.trim(), mensaje }),
+          });
+          ok += 1;
+        } catch { fail += 1; }
+      }
+      const ignorados = bulkSendRows.length - activos.length;
+      const partes = [`Correos enviados: ${ok}`];
+      if (fail) partes.push(`${fail} fallidos`);
+      if (ignorados) partes.push(`${ignorados} cliente(s) ignorado(s)`);
+      toast[fail === 0 ? "success" : "error"](partes.join(" · "));
+      setBulkSendOpen(false);
+      clearSelection();
+    } finally { setBulkBusy(false); }
+  }
+
   const columns: Column<Factura>[] = [
     { header: "Folio", cell: (f) => <span className="font-medium">{f.serie}{f.folio}</span> },
     { header: "Cliente", cell: (f) => cliName[f.cliente_id] ?? "—" },
@@ -359,6 +502,46 @@ export default function FacturasPage() {
         ) : undefined}
       />
 
+      {/* Barra de acciones en lote */}
+      {selected.length > 0 && (
+        <div className="sticky top-2 z-10 mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface-2 px-4 py-2.5 shadow-sm">
+          <span className="text-sm font-medium">{selected.length} seleccionada(s)</span>
+          <span className="text-sm text-muted">·</span>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={bulkPdf} disabled={bulkBusy}>
+              <FileText size={16} /> Imprimir ({selected.length})
+            </Button>
+            {timbradasSel.length > 0 && (
+              <Button variant="secondary" onClick={() => { void bulkXml(); }} disabled={bulkBusy}>
+                <FileCode2 size={16} /> XML ({timbradasSel.length})
+              </Button>
+            )}
+            {canWrite && timbradasSel.length > 0 && (
+              <Button variant="secondary" onClick={bulkEnviar} disabled={bulkBusy}>
+                <Mail size={16} /> Enviar por correo ({timbradasSel.length})
+              </Button>
+            )}
+            {canWrite && borradoresSel.length > 0 && (
+              <Button variant="success" onClick={() => setTimbrarBulkOpen(true)} disabled={bulkBusy}>
+                <Stamp size={16} /> Timbrar ({borradoresSel.length})
+              </Button>
+            )}
+            {canWrite && timbradasSel.length > 0 && (
+              <Button variant="danger" onClick={abrirCancelBulk} disabled={bulkBusy}>
+                <X size={16} /> Cancelar ({timbradasSel.length})
+              </Button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={clearSelection}
+            className="ml-auto text-sm text-muted hover:text-foreground"
+          >
+            Limpiar selección
+          </button>
+        </div>
+      )}
+
       <DataTableSmart
         columns={columns}
         rows={rows}
@@ -371,6 +554,9 @@ export default function FacturasPage() {
         renderExpanded={renderDetalle}
         initialExpandedKey={verId}
         storageKey="facturas"
+        selectable
+        onSelectionChange={setSelected}
+        selectionResetKey={selectionResetKey}
       />
 
       {/* generar */}
@@ -429,6 +615,92 @@ export default function FacturasPage() {
         confirmLabel="Timbrar con sobregiro" confirmVariant="danger"
         onConfirm={() => void timbrar(timbrarSobregiro ?? undefined, true)}
         onClose={() => setTimbrarSobregiro(null)} loading={actBusy} />
+
+      {/* ── Lote: timbrar N ── */}
+      <ConfirmDialog open={timbrarBulkOpen}
+        title={ambiente === "producción" ? "Timbrar facturas" : "Timbrar facturas (sandbox)"}
+        message={
+          ambiente === "producción"
+            ? `¿Timbrar ${borradoresSel.length} factura(s) en borrador? Se enviarán al PAC en producción — los CFDI serán reales ante el SAT.`
+            : `¿Timbrar ${borradoresSel.length} factura(s) en borrador? Se enviarán al PAC en modo sandbox (prueba).`
+        }
+        confirmLabel={`Timbrar ${borradoresSel.length}`} confirmVariant="success"
+        onConfirm={() => void bulkTimbrar(borradoresSel)}
+        onClose={() => setTimbrarBulkOpen(false)} loading={bulkBusy} />
+
+      {/* Lote: sobregiro de las que no tuvieron existencia */}
+      <ConfirmDialog open={timbrarBulkSobregiro.length > 0} title="Existencia insuficiente"
+        message={`${timbrarBulkSobregiro.length} factura(s) no tienen existencia suficiente (${timbrarBulkSobregiro.map((f) => `${f.serie}${f.folio}`).join(", ")}). ¿Timbrarlas de todas formas? El inventario quedará en negativo (sobregiro).`}
+        confirmLabel="Timbrar con sobregiro" confirmVariant="danger"
+        onConfirm={() => void bulkTimbrar(timbrarBulkSobregiro, true)}
+        onClose={() => { setTimbrarBulkSobregiro([]); clearSelection(); }} loading={bulkBusy} />
+
+      {/* ── Lote: cancelar N ── */}
+      <Modal open={cancelBulkOpen} onClose={() => setCancelBulkOpen(false)}
+        title={`Cancelar ${timbradasSel.length} factura(s)`}
+        footer={<>
+          <Button variant="secondary" onClick={() => setCancelBulkOpen(false)} disabled={bulkBusy}>Cerrar</Button>
+          <Button variant="danger" onClick={() => void bulkCancelar()} disabled={bulkBusy}>
+            {bulkBusy ? "Cancelando…" : `Cancelar ${timbradasSel.length}`}
+          </Button>
+        </>}>
+        <div className="space-y-4">
+          <p className="text-sm text-muted">
+            Se cancelará ante el {ambiente === "producción" ? "SAT" : "PAC (sandbox)"} cada una de:
+            {" "}{timbradasSel.map((f) => `${f.serie}${f.folio}`).join(", ")}.
+          </p>
+          <Field label="Motivo SAT" hint="El motivo 01 (con sustitución) requiere un UUID por factura; cancélalas una por una desde la fila">
+            <Select value={bulkCancelMotivo} onChange={(e) => setBulkCancelMotivo(e.target.value)}>
+              <option value="02">02 — Comprobante sin relación</option>
+              <option value="03">03 — No se llevó a cabo la operación</option>
+              <option value="04">04 — Operación nominativa en factura global</option>
+            </Select>
+          </Field>
+          <Field label="Inventario">
+            <Select value={bulkCancelInventario} onChange={(e) => setBulkCancelInventario(e.target.value as "devolucion" | "perdida")}>
+              <option value="devolucion">Devolución — la mercancía regresa al almacén</option>
+              <option value="perdida">Pérdida (merma) — la mercancía NO regresa</option>
+            </Select>
+          </Field>
+          {bulkCancelInventario === "perdida" && (
+            <Alert tone="warning">La mercancía de TODAS las facturas seleccionadas se dará de baja como merma.</Alert>
+          )}
+        </div>
+      </Modal>
+
+      {/* ── Lote: enviar por correo (un correo por cliente) ── */}
+      <Modal open={bulkSendOpen} onClose={() => setBulkSendOpen(false)} title="Enviar facturas por correo" wide
+        footer={<>
+          <Button variant="secondary" onClick={() => setBulkSendOpen(false)} disabled={bulkBusy}>Cancelar</Button>
+          <Button onClick={() => void confirmarBulkEnvio()} disabled={bulkBusy}>
+            {bulkBusy ? "Enviando…" : "Enviar correos"}
+          </Button>
+        </>}>
+        <p className="mb-3 text-sm text-muted">
+          Cada cliente recibe <strong>un solo correo</strong> con todas sus facturas (PDF y XML adjuntos).
+          Edita los correos por renglón; un renglón vacío se ignora.
+        </p>
+        <div className="space-y-2">
+          {bulkSendRows.map((row, i) => (
+            <div key={row.clienteId} className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_2fr]">
+              <div className="text-sm">
+                <span className="font-medium">{row.nombre}</span>
+                <span className="text-muted"> · {row.facIds.length} factura(s)</span>
+              </div>
+              <Input
+                value={row.correos}
+                placeholder="correo@cliente.mx, otro@cliente.mx"
+                onChange={(e) => setBulkSendRows((rs) => rs.map((r, j) => (j === i ? { ...r, correos: e.target.value } : r)))}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="mt-4">
+          <Field label="Mensaje (opcional, va en todos los correos)">
+            <Textarea rows={2} value={bulkSendMensaje} onChange={(e) => setBulkSendMensaje(e.target.value)} />
+          </Field>
+        </div>
+      </Modal>
       <ConfirmDialog
         open={toDescartar !== null}
         title={`Descartar borrador ${toDescartar?.serie ?? ""}${toDescartar?.folio ?? ""}`}

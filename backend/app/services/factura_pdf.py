@@ -23,6 +23,7 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     Image,
+    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -138,10 +139,6 @@ def _domicilio(dom: dict, cp: str) -> str:
 
 
 def build_factura_pdf(factura, tenant, cliente) -> bytes:
-    fx = _parse_xml(getattr(factura, "xml", None))
-    tfd = fx.get("tfd")
-    timbrada = bool(tfd and tfd.get("uuid"))
-
     folio_negocio = f"{factura.serie or ''}{factura.folio}"
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -149,6 +146,32 @@ def build_factura_pdf(factura, tenant, cliente) -> bytes:
         leftMargin=15 * mm, rightMargin=15 * mm, topMargin=12 * mm, bottomMargin=12 * mm,
         title=f"Factura {folio_negocio}",
     )
+    doc.build(_factura_story(doc, factura, tenant, cliente))
+    return buf.getvalue()
+
+
+def build_facturas_pdf(items: list, tenant) -> bytes:
+    """PDF con varias facturas, una por página. items = [(factura, cliente), …]."""
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=letter,
+        leftMargin=15 * mm, rightMargin=15 * mm, topMargin=12 * mm, bottomMargin=12 * mm,
+        title="Facturas",
+    )
+    story: list = []
+    for i, (factura, cliente) in enumerate(items):
+        if i > 0:
+            story.append(PageBreak())
+        story.extend(_factura_story(doc, factura, tenant, cliente))
+    doc.build(story)
+    return buf.getvalue()
+
+
+def _factura_story(doc, factura, tenant, cliente) -> list:
+    fx = _parse_xml(getattr(factura, "xml", None))
+    tfd = fx.get("tfd")
+    timbrada = bool(tfd and tfd.get("uuid"))
+    folio_negocio = f"{factura.serie or ''}{factura.folio}"
     story: list = []
 
     # ── Encabezado: emisor (izq) + logo (der) ──
@@ -310,5 +333,4 @@ def build_factura_pdf(factura, tenant, cliente) -> bytes:
         story.append(Spacer(1, 4))
         story.append(_p("Este documento es una representación impresa de un CFDI.", _ESTILO))
 
-    doc.build(story)
-    return buf.getvalue()
+    return story

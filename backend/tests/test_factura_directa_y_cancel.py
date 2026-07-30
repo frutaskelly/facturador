@@ -394,3 +394,21 @@ def test_remision_con_impuestos_y_preview_coinciden(client, env, auth):
     assert prev.status_code == 200, prev.text
     p = prev.json()
     assert float(p["subtotal"]) == 200.0 and float(p["iva"]) == 32.0 and float(p["total"]) == 232.0
+
+
+# ── Lote: PDF y correo (Objetivo 2) ──────────────────────────────────────────
+def test_facturas_pdf_lote(client, env, auth):
+    f1 = _factura_directa(client, env, "1")
+    f2 = _factura_directa(client, env, "2")
+    r = client.get(f"/api/v1/facturas/pdf?ids={f1['id']},{f2['id']}", headers=_h(env))
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("application/pdf")
+    assert r.content[:4] == b"%PDF"
+    assert client.get("/api/v1/facturas/pdf?ids=,", headers=_h(env)).status_code == 422
+
+
+def test_enviar_lote_rechaza_no_timbradas(client, env, auth):
+    f = _factura_directa(client, env, "1")   # BORRADOR
+    r = client.post("/api/v1/facturas/enviar-lote", headers=_h(env), json={"ids": [f["id"]]})
+    assert r.status_code == 409, r.text
+    assert f"{f['serie']}{f['folio']}" in r.json()["detail"]

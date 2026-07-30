@@ -2064,6 +2064,50 @@
     "title": "EnviarFacturaIn",
     "type": "object"
    },
+   "EnviarFacturasLoteIn": {
+    "description": "Un solo correo con varias facturas TIMBRADAS (todas del mismo cliente):\nun PDF + XML adjunto por factura, como el enviar-lote de remisiones.",
+    "properties": {
+     "ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Ids",
+      "type": "array"
+     },
+     "mensaje": {
+      "anyOf": [
+       {
+        "maxLength": 5000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mensaje"
+     },
+     "to": {
+      "anyOf": [
+       {
+        "maxLength": 1000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "To"
+     }
+    },
+    "required": [
+     "ids"
+    ],
+    "title": "EnviarFacturasLoteIn",
+    "type": "object"
+   },
    "EnviarRemisionIn": {
     "properties": {
      "mensaje": {
@@ -12193,6 +12237,132 @@
      }
     ],
     "summary": "Factura Directa",
+    "tags": [
+     "facturas"
+    ]
+   }
+  },
+  "/api/v1/facturas/enviar-lote": {
+   "post": {
+    "operationId": "enviar_facturas_lote_api_v1_facturas_enviar_lote_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EnviarFacturasLoteIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Enviar Facturas Lote",
+    "tags": [
+     "facturas"
+    ]
+   }
+  },
+  "/api/v1/facturas/pdf": {
+   "get": {
+    "description": "PDF de varias facturas (una por página) para imprimir/guardar en lote.\nDefinido ANTES de /{factura_id} para que la ruta estática gane.",
+    "operationId": "facturas_pdf_lote_api_v1_facturas_pdf_get",
+    "parameters": [
+     {
+      "description": "IDs de factura separados por coma",
+      "in": "query",
+      "name": "ids",
+      "required": true,
+      "schema": {
+       "description": "IDs de factura separados por coma",
+       "title": "Ids",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Facturas Pdf Lote",
     "tags": [
      "facturas"
     ]
