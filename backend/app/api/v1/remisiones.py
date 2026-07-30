@@ -20,7 +20,7 @@ from typing import Optional
 from uuid import UUID
 
 from email_validator import EmailNotValidError, validate_email
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, Field as PydField
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -43,6 +43,8 @@ from ...models import (
 )
 from ...services import email as email_service
 from ...services.fiscal import calcular_linea_producto
+from ...services.importar_remisiones import ImportError_, agrupar_por_folio, normalizar_folio, parsear_excel
+from ...services.producto_match import buscar, productos_activos
 from ...services.precios import resolver_precio
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ...schemas.common import Page
@@ -560,6 +562,84 @@ def cancelar_remision(
     db.flush()
     db.refresh(rem)
     return rem
+
+
+@router.post("/importar-preview")
+def importar_preview(
+    archivo: UploadFile = File(...),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Importación masiva estilo SAE: parsea el Excel, agrupa por FOLIO (una
+    remisión por folio del archivo) y cruza cliente (código) y productos (CLAVE/
+    SKU exacto; si no, candidatos del cruce). NO crea nada: la UI muestra el
+    preview, el usuario resuelve lo no cruzado y crea con POST /remisiones."""
+    _MAX = 5 * 1024 * 1024
+    data = archivo.file.read(_MAX + 1)
+    if len(data) > _MAX:
+        raise HTTPException(status_code=422, detail="El archivo no debe exceder 5 MB")
+    try:
+        grupos = agrupar_por_folio(parsear_excel(data, archivo.filename or "archivo"))
+    except ImportError_ as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if len(grupos) > 200:
+        raise HTTPException(status_code=422, detail="Máximo 200 remisiones por archivo")
+
+    # Cruce de clientes por código (exacto y sin ceros a la izquierda).
+    clientes = db.query(Cliente).filter(Cliente.deleted_at.is_(None)).all()
+    por_codigo: dict[str, Cliente] = {}
+    for c in clientes:
+        cod = (c.codigo or "").strip().upper()
+        if cod:
+            por_codigo.setdefault(cod, c)
+            por_codigo.setdefault(normalizar_folio(cod).upper(), c)
+
+    # Cruce de productos por CLAVE = SKU (exacto); si no, candidatos del cruce.
+    catalogo = productos_activos(db)
+    por_sku = {p.sku.strip().upper(): p for p in catalogo if p.sku}
+
+    sin_cliente = 0
+    sin_producto = 0
+    out = []
+    for g in grupos:
+        cod = str(g["cliente"]).strip().upper()
+        cli = por_codigo.get(cod) or por_codigo.get(normalizar_folio(cod).upper())
+        if cli is None:
+            sin_cliente += 1
+        lineas = []
+        for ln in g["lineas"]:
+            prod = por_sku.get(ln["clave"].strip().upper())
+            candidatos = []
+            if prod is None:
+                sin_producto += 1
+                candidatos = [
+                    {"producto_id": c.producto_id, "sku": c.sku, "nombre": c.nombre, "score": c.score}
+                    for c in buscar(db, ctx.tenant_id, ln["clave"], limit=3, prods=catalogo)
+                ]
+            lineas.append({
+                "clave": ln["clave"],
+                "cantidad": ln["cantidad"],
+                "precio": ln["precio"],
+                "producto_id": prod.id if prod else None,
+                "producto_nombre": prod.nombre if prod else None,
+                "presentacion": (prod.presentacion_default if prod else None),
+                "candidatos": candidatos,
+            })
+        out.append({
+            "folio_ref": g["folio_ref"],
+            "fecha": g["fecha"],
+            "su_pedido": g["su_pedido"],
+            "observaciones": g["observaciones"],
+            "cliente_codigo": g["cliente"],
+            "cliente_id": cli.id if cli else None,
+            "cliente_nombre": cli.legal_name if cli else None,
+            "lineas": lineas,
+        })
+    return {
+        "grupos": out,
+        "clientes_sin_cruce": sin_cliente,
+        "productos_sin_cruce": sin_producto,
+    }
 
 
 class DevolucionLineaIn(BaseModel):

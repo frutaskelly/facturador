@@ -818,6 +818,84 @@ export default function RemisionesPage() {
   }
 
   // Carga el detalle de una remisión (usa caché `detalles` si está disponible).
+  // ── Importación masiva estilo SAE (Excel → varias remisiones) ──
+  type ImportLinea = {
+    clave: string; cantidad: string; precio: string | null;
+    producto_id: string | null; producto_nombre: string | null; presentacion: string | null;
+    candidatos: { producto_id: string; sku: string; nombre: string; score: number }[];
+    omitir?: boolean;
+  };
+  type ImportGrupo = {
+    folio_ref: string; fecha: string | null; su_pedido: string | null; observaciones: string | null;
+    cliente_codigo: string; cliente_id: string | null; cliente_nombre: string | null;
+    lineas: ImportLinea[];
+  };
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importGrupos, setImportGrupos] = useState<ImportGrupo[] | null>(null);
+  const [importAlmacen, setImportAlmacen] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
+
+  async function importarArchivo(file: File) {
+    const fd = new FormData();
+    fd.append("archivo", file);
+    setImportBusy(true);
+    try {
+      const p = await apiFetch<{ grupos: ImportGrupo[] }>("/api/v1/remisiones/importar-preview", {
+        method: "POST", body: fd,
+      });
+      setImportAlmacen(almacenes[0]?.id ?? "");
+      setImportGrupos(p.grupos);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo leer el archivo");
+    } finally {
+      setImportBusy(false);
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  }
+
+  const importListo = (importGrupos ?? []).every(
+    (g) => g.cliente_id && g.lineas.every((l) => l.omitir || l.producto_id),
+  );
+
+  async function crearImportadas() {
+    if (!importGrupos || importBusy) return;
+    setImportBusy(true);
+    try {
+      let ok = 0, fail = 0;
+      for (const g of importGrupos) {
+        const lineas = g.lineas.filter((l) => !l.omitir && l.producto_id).map((l) => ({
+          producto_id: l.producto_id,
+          cantidad_solicitada: l.cantidad,
+          ...(l.precio != null && l.precio !== "" ? { precio_unitario: l.precio } : {}),
+          ...(l.presentacion ? { presentacion: l.presentacion } : {}),
+        }));
+        if (!g.cliente_id || lineas.length === 0) { fail += 1; continue; }
+        const notas = [
+          `Ref SAE ${g.folio_ref}`,
+          g.su_pedido ? `Su pedido: ${g.su_pedido}` : null,
+          g.observaciones,
+        ].filter(Boolean).join(" · ");
+        try {
+          await post("/api/v1/remisiones", {
+            cliente_facturacion_id: g.cliente_id,
+            ...(importAlmacen ? { almacen_id: importAlmacen } : {}),
+            ...(g.fecha ? { fecha_remision: g.fecha } : {}),
+            notas,
+            lineas,
+          });
+          ok += 1;
+        } catch { fail += 1; }
+      }
+      const partes = [`Remisiones creadas: ${ok}`];
+      if (fail) partes.push(`${fail} con error`);
+      toast[fail === 0 ? "success" : "error"](partes.join(" · "));
+      setImportGrupos(null);
+      reload();
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   // ── Devolución de una CONFIRMADA (ajusta la remisión a lo neto entregado) ──
   const [devolucionDe, setDevolucionDe] = useState<RemisionDetail | null>(null);
   const [devolCant, setDevolCant] = useState<Record<string, string>>({});
@@ -1556,7 +1634,14 @@ export default function RemisionesPage() {
       <PageHeader
         title="Remisiones"
         subtitle="Notas de entrega (no fiscales)"
-        actions={canWrite ? <Button onClick={openCreate}><Plus size={16} /> Nueva remisión</Button> : undefined}
+        actions={canWrite ? (
+          <>
+            <Button variant="secondary" onClick={() => importInputRef.current?.click()}>
+              <ClipboardPaste size={16} /> Importar Excel
+            </Button>
+            <Button onClick={openCreate}><Plus size={16} /> Nueva remisión</Button>
+          </>
+        ) : undefined}
       />
 
       {/* Filtros */}
@@ -1654,6 +1739,101 @@ export default function RemisionesPage() {
         message={`No hay existencia suficiente para confirmar ${negStock?.folio}. ¿Deseas remisionar de todas formas? El inventario quedará en negativo (sobregiro).`}
         confirmLabel="Remisionar sin existencias" confirmVariant="primary"
         onConfirm={confirmarNegativo} onClose={() => setNegStock(null)} loading={saving} />
+
+      {/* ── Importación masiva (SAE → remisiones) ── */}
+      <input
+        ref={importInputRef} type="file" accept=".xls,.xlsx" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void importarArchivo(f); }}
+      />
+      <Modal open={importGrupos !== null} onClose={() => setImportGrupos(null)}
+        title={`Importar ${importGrupos?.length ?? 0} remisión(es) desde Excel`} wide
+        footer={<>
+          <Button variant="secondary" onClick={() => setImportGrupos(null)} disabled={importBusy}>Cancelar</Button>
+          <Button onClick={() => void crearImportadas()} disabled={importBusy || !importListo}>
+            {importBusy ? "Creando…" : `Crear ${importGrupos?.length ?? 0} remisiones`}
+          </Button>
+        </>}>
+        <p className="mb-3 text-sm text-muted">
+          Los folios los asigna el sistema con tu serie (sin capturas ni choques); el folio del
+          archivo queda como referencia en las notas, sin ceros. Resuelve lo marcado en ámbar
+          antes de crear.
+        </p>
+        <div className="mb-3 max-w-xs">
+          <Field label="Almacén (para todas)" hint="Necesario para confirmar la salida después">
+            <Select value={importAlmacen} onChange={(e) => setImportAlmacen(e.target.value)}>
+              <option value="">— Sin almacén —</option>
+              {almacenes.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+            </Select>
+          </Field>
+        </div>
+        <div className="max-h-[50vh] space-y-3 overflow-auto pr-1">
+          {(importGrupos ?? []).map((g, gi) => {
+            const cruzadas = g.lineas.filter((l) => l.producto_id && !l.omitir).length;
+            const pendientes = g.lineas.filter((l) => !l.producto_id && !l.omitir);
+            return (
+              <div key={g.folio_ref} className="rounded-xl border border-border p-3">
+                <div className="flex flex-wrap items-center gap-3 text-sm">
+                  <span className="font-medium">Ref SAE {g.folio_ref}</span>
+                  {g.fecha && <span className="text-muted">{fmtDate(g.fecha)}</span>}
+                  {g.su_pedido && <span className="text-muted">Su pedido: {g.su_pedido}</span>}
+                  <span className="text-muted">· {cruzadas} línea(s) cruzada(s)</span>
+                  {g.cliente_id ? (
+                    <Badge tone="success">{g.cliente_nombre}</Badge>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <Badge tone="warning">Cliente {g.cliente_codigo} sin cruce</Badge>
+                      <Select
+                        value=""
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          const nombre = clientes.find((c) => c.id === id)?.legal_name ?? null;
+                          setImportGrupos((gs) => (gs ?? []).map((x, j) =>
+                            j === gi ? { ...x, cliente_id: id || null, cliente_nombre: nombre } : x));
+                        }}>
+                        <option value="">— Elegir cliente —</option>
+                        {clientes.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
+                      </Select>
+                    </span>
+                  )}
+                </div>
+                {pendientes.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {g.lineas.map((l, li) => (!l.producto_id && !l.omitir) ? (
+                      <div key={`${g.folio_ref}-${li}`} className="flex flex-wrap items-center gap-2 text-sm">
+                        <Badge tone="warning">{l.clave}</Badge>
+                        <span className="text-muted">x{fmtNumber(l.cantidad)}</span>
+                        <Select
+                          value=""
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setImportGrupos((gs) => (gs ?? []).map((x, j) => {
+                              if (j !== gi) return x;
+                              const lineas = x.lineas.map((y, k) => {
+                                if (k !== li) return y;
+                                if (v === "__omitir__") return { ...y, omitir: true };
+                                const cand = y.candidatos.find((c) => c.producto_id === v);
+                                return v ? { ...y, producto_id: v, producto_nombre: cand?.nombre ?? null } : y;
+                              });
+                              return { ...x, lineas };
+                            }));
+                          }}>
+                          <option value="">— Elegir producto —</option>
+                          {l.candidatos.map((c) => (
+                            <option key={c.producto_id} value={c.producto_id}>
+                              {c.sku} · {c.nombre} ({c.score}%)
+                            </option>
+                          ))}
+                          <option value="__omitir__">Omitir esta línea</option>
+                        </Select>
+                      </div>
+                    ) : null)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Modal>
 
       {/* ── Devolución (ajusta la remisión a lo neto) ── */}
       <Modal open={devolucionDe !== null} onClose={() => setDevolucionDe(null)}

@@ -43,7 +43,10 @@ export async function apiFetch<T = unknown>(
   } = await supabase.auth.getSession();
 
   const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
+  // Con FormData el navegador pone el multipart boundary; forzar JSON lo rompe.
+  if (!(init.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
   if (session?.access_token) {
     headers.set("Authorization", `Bearer ${session.access_token}`);
   }

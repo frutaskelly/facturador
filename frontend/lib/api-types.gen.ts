@@ -1283,6 +1283,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/remisiones/importar-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Importar Preview
+         * @description Importación masiva estilo SAE: parsea el Excel, agrupa por FOLIO (una
+         *     remisión por folio del archivo) y cruza cliente (código) y productos (CLAVE/
+         *     SKU exacto; si no, candidatos del cruce). NO crea nada: la UI muestra el
+         *     preview, el usuario resuelve lo no cruzado y crea con POST /remisiones.
+         */
+        post: operations["importar_preview_api_v1_remisiones_importar_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/remisiones/pdf": {
         parameters: {
             query?: never;
@@ -1739,6 +1762,14 @@ export interface components {
             estado?: string | null;
             /** Nombre */
             nombre?: string | null;
+        };
+        /** Body_importar_preview_api_v1_remisiones_importar_preview_post */
+        Body_importar_preview_api_v1_remisiones_importar_preview_post: {
+            /**
+             * Archivo
+             * Format: binary
+             */
+            archivo: string;
         };
         /** Body_subir_csd_api_v1_empresa_csd_post */
         Body_subir_csd_api_v1_empresa_csd_post: {
@@ -8470,6 +8501,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["EnviarRemisionesLoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    importar_preview_api_v1_remisiones_importar_preview_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_importar_preview_api_v1_remisiones_importar_preview_post"];
             };
         };
         responses: {

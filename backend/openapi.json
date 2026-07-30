@@ -329,6 +329,20 @@
     "title": "AlmacenUpdate",
     "type": "object"
    },
+   "Body_importar_preview_api_v1_remisiones_importar_preview_post": {
+    "properties": {
+     "archivo": {
+      "format": "binary",
+      "title": "Archivo",
+      "type": "string"
+     }
+    },
+    "required": [
+     "archivo"
+    ],
+    "title": "Body_importar_preview_api_v1_remisiones_importar_preview_post",
+    "type": "object"
+   },
    "Body_subir_csd_api_v1_empresa_csd_post": {
     "properties": {
      "cer": {
@@ -17036,6 +17050,69 @@
      }
     ],
     "summary": "Enviar Remisiones Lote",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
+  "/api/v1/remisiones/importar-preview": {
+   "post": {
+    "description": "Importación masiva estilo SAE: parsea el Excel, agrupa por FOLIO (una\nremisión por folio del archivo) y cruza cliente (código) y productos (CLAVE/\nSKU exacto; si no, candidatos del cruce). NO crea nada: la UI muestra el\npreview, el usuario resuelve lo no cruzado y crea con POST /remisiones.",
+    "operationId": "importar_preview_api_v1_remisiones_importar_preview_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_importar_preview_api_v1_remisiones_importar_preview_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Importar Preview",
     "tags": [
      "remisiones"
     ]

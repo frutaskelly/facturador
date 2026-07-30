@@ -255,3 +255,49 @@ def test_remisiones_isolated_between_tenants(client, env, auth_as):
         "cliente_facturacion_id": env["cli_a"],
         "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "1", "precio_unitario": "1"}]})
     assert cross.status_code == 422
+
+
+# ── Importación masiva estilo SAE (Excel → varias remisiones) ────────────────
+def _xlsx_sae(rows):
+    """Construye un .xlsx en memoria con el layout SAE (FOLIO/CLIENTE/…)."""
+    import io
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["FOLIO", "CLIENTE", "FECHA", "SU PEDIDO", "CLAVE", "CANTIDAD", "PRECIO", "Observaciones"])
+    for r in rows:
+        ws.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_importar_preview_agrupa_y_cruza(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    sku = client.get("/api/v1/productos", headers=h, params={"limit": 1}).json()["items"][0]
+    data = _xlsx_sae([
+        ["0000001230", "C-X", "29/07/2026", "OC 1", sku["sku"], "2", "10", "entrega lunes"],
+        ["0000001230", "C-X", "29/07/2026", None, "SKU-QUE-NO-EXISTE", "1", "5", None],
+        ["ZHGO9",      "C-X", "29/07/2026", None, sku["sku"], "3", "12", None],
+    ])
+    r = client.post("/api/v1/remisiones/importar-preview", headers=h,
+                    files={"archivo": ("pedidos.xlsx", data,
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert r.status_code == 200, r.text
+    p = r.json()
+    assert len(p["grupos"]) == 2
+    g1 = next(g for g in p["grupos"] if g["folio_ref"] == "1230")   # sin ceros
+    assert g1["su_pedido"] == "OC 1"
+    assert len(g1["lineas"]) == 2
+    cruzada = next(l for l in g1["lineas"] if l["clave"] == sku["sku"])
+    assert cruzada["producto_id"] == sku["id"]                       # CLAVE = SKU exacto
+    sin_cruce = next(l for l in g1["lineas"] if l["clave"] == "SKU-QUE-NO-EXISTE")
+    assert sin_cruce["producto_id"] is None
+    assert p["productos_sin_cruce"] == 1
+
+
+def test_importar_preview_rechaza_formato_invalido(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    r = client.post("/api/v1/remisiones/importar-preview", headers=h,
+                    files={"archivo": ("nota.txt", b"esto no es excel", "text/plain")})
+    assert r.status_code == 422
