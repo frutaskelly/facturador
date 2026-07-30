@@ -1905,6 +1905,102 @@
     "title": "CrearUsuarioIn",
     "type": "object"
    },
+   "DevolucionIn": {
+    "properties": {
+     "lineas": {
+      "items": {
+       "$ref": "#/components/schemas/DevolucionLineaIn"
+      },
+      "maxItems": 200,
+      "minItems": 1,
+      "title": "Lineas",
+      "type": "array"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "maxLength": 500,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     }
+    },
+    "required": [
+     "lineas"
+    ],
+    "title": "DevolucionIn",
+    "type": "object"
+   },
+   "DevolucionLineaIn": {
+    "properties": {
+     "cantidad": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Cantidad"
+     },
+     "linea_id": {
+      "format": "uuid",
+      "title": "Linea Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "linea_id",
+     "cantidad"
+    ],
+    "title": "DevolucionLineaIn",
+    "type": "object"
+   },
+   "DevolucionOut": {
+    "properties": {
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "lineas": {
+      "default": [],
+      "items": {
+       "$ref": "#/components/schemas/LineaDevolucionOut"
+      },
+      "title": "Lineas",
+      "type": "array"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     }
+    },
+    "required": [
+     "id",
+     "created_at"
+    ],
+    "title": "DevolucionOut",
+    "type": "object"
+   },
    "EmpresaOnboardingOut": {
     "description": "Estado de la configuración fiscal del emisor (wizard de onboarding).",
     "properties": {
@@ -3258,6 +3354,41 @@
      }
     },
     "title": "HTTPValidationError",
+    "type": "object"
+   },
+   "LineaDevolucionOut": {
+    "properties": {
+     "cantidad": {
+      "title": "Cantidad",
+      "type": "string"
+     },
+     "cantidad_base": {
+      "title": "Cantidad Base",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "presentacion": {
+      "title": "Presentacion",
+      "type": "string"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "producto_id",
+     "presentacion",
+     "cantidad",
+     "cantidad_base"
+    ],
+    "title": "LineaDevolucionOut",
     "type": "object"
    },
    "LineaFacturaDirectaIn": {
@@ -7641,6 +7772,14 @@
      "descuento": {
       "title": "Descuento",
       "type": "string"
+     },
+     "devoluciones": {
+      "default": [],
+      "items": {
+       "$ref": "#/components/schemas/DevolucionOut"
+      },
+      "title": "Devoluciones",
+      "type": "array"
      },
      "estado": {
       "title": "Estado",
@@ -17360,6 +17499,81 @@
      }
     ],
     "summary": "Confirmar Remision",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
+  "/api/v1/remisiones/{rem_id}/devolucion": {
+   "post": {
+    "description": "Devolución parcial o total de una remisión CONFIRMADA (el camión ya salió).\n\nDecisión 2026-07-29: la devolución AJUSTA la remisión a lo neto entregado —\nreduce cantidades/importes/impuestos de las líneas (la factura posterior sale\npor lo neto), regresa el inventario a disponible (ENTRADA_DEVOLUCION) y deja\nel rastro en `devoluciones`.",
+    "operationId": "devolucion_remision_api_v1_remisiones__rem_id__devolucion_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rem_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Rem Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DevolucionIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RemisionDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Devolucion Remision",
     "tags": [
      "remisiones"
     ]

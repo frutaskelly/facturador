@@ -233,7 +233,22 @@ export type Remision = {
   updated_at: string;
 };
 
-export type RemisionDetail = Remision & { lineas: LineaRemision[] };
+export type LineaDevolucion = {
+  id: string;
+  producto_id: string;
+  presentacion: string;
+  cantidad: string;
+  cantidad_base: string;
+};
+
+export type Devolucion = {
+  id: string;
+  motivo?: string | null;
+  created_at: string;
+  lineas: LineaDevolucion[];
+};
+
+export type RemisionDetail = Remision & { lineas: LineaRemision[]; devoluciones?: Devolucion[] };
 
 export type LineaFactura = {
   numero_linea: number;

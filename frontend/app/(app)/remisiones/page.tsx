@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, Sparkles, Trash2, X } from "lucide-react";
+import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, Sparkles, Trash2, Undo2, X } from "lucide-react";
 
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
@@ -748,6 +748,19 @@ export default function RemisionesPage() {
           <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fmtMoney(iva)}</span></div>
           <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fmtMoney(total)}</span></div>
         </div>
+        {(d.devoluciones?.length ?? 0) > 0 && (
+          <div className="mt-3 rounded-lg border border-border bg-surface-2 p-3 text-sm">
+            <div className="mb-1 font-medium">Devoluciones registradas</div>
+            {d.devoluciones!.map((dev) => (
+              <div key={dev.id} className="text-muted">
+                {fmtDate(dev.created_at)} — {dev.lineas.map((l) =>
+                  `${fmtNumber(l.cantidad)} ${l.presentacion || ""} ${prodById[l.producto_id]?.nombre ?? ""}`.trim()
+                ).join(", ")}
+                {dev.motivo ? ` · ${dev.motivo}` : ""}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -805,6 +818,42 @@ export default function RemisionesPage() {
   }
 
   // Carga el detalle de una remisión (usa caché `detalles` si está disponible).
+  // ── Devolución de una CONFIRMADA (ajusta la remisión a lo neto entregado) ──
+  const [devolucionDe, setDevolucionDe] = useState<RemisionDetail | null>(null);
+  const [devolCant, setDevolCant] = useState<Record<string, string>>({});
+  const [devolMotivo, setDevolMotivo] = useState("");
+  const [devolBusy, setDevolBusy] = useState(false);
+
+  async function abrirDevolucion(r: Remision) {
+    const d = await getDetalle(r);
+    if (!d) { toast.error("No se pudo cargar la remisión"); return; }
+    setDevolCant({});
+    setDevolMotivo("");
+    setDevolucionDe(d);
+  }
+
+  async function confirmarDevolucion() {
+    if (!devolucionDe || devolBusy) return;
+    const lineas = Object.entries(devolCant)
+      .map(([linea_id, v]) => ({ linea_id, cantidad: v.trim() }))
+      .filter((l) => Number(l.cantidad) > 0);
+    if (lineas.length === 0) { toast.error("Indica al menos una cantidad a devolver"); return; }
+    setDevolBusy(true);
+    try {
+      await post(`/api/v1/remisiones/${devolucionDe.id}/devolucion`, {
+        lineas, motivo: devolMotivo.trim() || undefined,
+      });
+      toast.success(`Devolución registrada — ${devolucionDe.folio_interno} quedó por lo neto entregado`);
+      invalidarDetalles([devolucionDe.id]);
+      setDevolucionDe(null);
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo registrar la devolución");
+    } finally {
+      setDevolBusy(false);
+    }
+  }
+
   async function getDetalle(r: Remision): Promise<RemisionDetail | null> {
     if (detalles[r.id]) return detalles[r.id];
     try {
@@ -1255,6 +1304,9 @@ export default function RemisionesPage() {
       onClick: (r) => setToConfirm(r), hidden: (r) => !(canWrite && r.estado === "BORRADOR") },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
       onClick: (r) => setToCancel(r), hidden: (r) => !(canWrite && r.estado !== "CANCELADA" && r.estado !== "FACTURADA") },
+    { id: "devolucion", label: "Devolución", icon: <Undo2 size={15} />,
+      onClick: (r) => { void abrirDevolucion(r); },
+      hidden: (r) => !(canWrite && r.estado === "CONFIRMADA") },
     { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => { void imprimirRemision(r); } },
     { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />, onClick: enviarRemision,
       hidden: () => !canWrite },
@@ -1602,6 +1654,44 @@ export default function RemisionesPage() {
         message={`No hay existencia suficiente para confirmar ${negStock?.folio}. ¿Deseas remisionar de todas formas? El inventario quedará en negativo (sobregiro).`}
         confirmLabel="Remisionar sin existencias" confirmVariant="primary"
         onConfirm={confirmarNegativo} onClose={() => setNegStock(null)} loading={saving} />
+
+      {/* ── Devolución (ajusta la remisión a lo neto) ── */}
+      <Modal open={devolucionDe !== null} onClose={() => setDevolucionDe(null)}
+        title={`Devolución — ${devolucionDe?.folio_interno ?? ""}`} wide
+        footer={<>
+          <Button variant="secondary" onClick={() => setDevolucionDe(null)} disabled={devolBusy}>Cancelar</Button>
+          <Button onClick={() => void confirmarDevolucion()} disabled={devolBusy}>
+            {devolBusy ? "Registrando…" : "Registrar devolución"}
+          </Button>
+        </>}>
+        <p className="mb-3 text-sm text-muted">
+          Captura cuánto regresó de cada línea. La remisión quedará por lo <strong>neto entregado</strong>
+          {" "}(si luego la facturas, el CFDI sale por lo neto) y el inventario regresa al almacén.
+        </p>
+        <div className="space-y-2">
+          {(devolucionDe?.lineas ?? []).filter((l) => Number(l.cantidad_solicitada) > 0).map((l) => (
+            <div key={l.id} className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[2fr_1fr_1fr]">
+              <div className="text-sm">
+                <span className="font-medium">{l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? "—"}</span>
+                {l.presentacion && <span className="text-muted"> · {l.presentacion}</span>}
+              </div>
+              <div className="text-sm text-muted">Entregado: {fmtNumber(l.cantidad_solicitada)}</div>
+              <Input
+                type="number" min="0" max={l.cantidad_solicitada} step="0.01"
+                placeholder="0"
+                value={devolCant[l.id] ?? ""}
+                onChange={(e) => setDevolCant((m) => ({ ...m, [l.id]: e.target.value }))}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="mt-4">
+          <Field label="Motivo (opcional)">
+            <Input value={devolMotivo} placeholder="Rechazo del cliente, producto dañado…"
+              onChange={(e) => setDevolMotivo(e.target.value)} />
+          </Field>
+        </div>
+      </Modal>
 
       {/* Sobregiro al guardar la edición de una CONFIRMADA */}
       <ConfirmDialog open={editSobregiro !== null} title="Existencia insuficiente"

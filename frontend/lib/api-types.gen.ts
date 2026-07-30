@@ -1379,6 +1379,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/remisiones/{rem_id}/devolucion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Devolucion Remision
+         * @description Devolución parcial o total de una remisión CONFIRMADA (el camión ya salió).
+         *
+         *     Decisión 2026-07-29: la devolución AJUSTA la remisión a lo neto entregado —
+         *     reduce cantidades/importes/impuestos de las líneas (la factura posterior sale
+         *     por lo neto), regresa el inventario a disponible (ENTRADA_DEVOLUCION) y deja
+         *     el rastro en `devoluciones`.
+         */
+        post: operations["devolucion_remision_api_v1_remisiones__rem_id__devolucion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/remisiones/{rem_id}/enviar": {
         parameters: {
             query?: never;
@@ -2276,6 +2301,43 @@ export interface components {
              */
             role_id: string;
         };
+        /** DevolucionIn */
+        DevolucionIn: {
+            /** Lineas */
+            lineas: components["schemas"]["DevolucionLineaIn"][];
+            /** Motivo */
+            motivo?: string | null;
+        };
+        /** DevolucionLineaIn */
+        DevolucionLineaIn: {
+            /** Cantidad */
+            cantidad: number | string;
+            /**
+             * Linea Id
+             * Format: uuid
+             */
+            linea_id: string;
+        };
+        /** DevolucionOut */
+        DevolucionOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Lineas
+             * @default []
+             */
+            lineas: components["schemas"]["LineaDevolucionOut"][];
+            /** Motivo */
+            motivo?: string | null;
+        };
         /**
          * EmpresaOnboardingOut
          * @description Estado de la configuración fiscal del emisor (wizard de onboarding).
@@ -2779,6 +2841,25 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** LineaDevolucionOut */
+        LineaDevolucionOut: {
+            /** Cantidad */
+            cantidad: string;
+            /** Cantidad Base */
+            cantidad_base: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Presentacion */
+            presentacion: string;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
         };
         /** LineaFacturaDirectaIn */
         LineaFacturaDirectaIn: {
@@ -4276,6 +4357,11 @@ export interface components {
             created_at: string;
             /** Descuento */
             descuento: string;
+            /**
+             * Devoluciones
+             * @default []
+             */
+            devoluciones: components["schemas"]["DevolucionOut"][];
             /** Estado */
             estado: string;
             /** Factura Estado */
@@ -8624,6 +8710,43 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["ConfirmarRemisionIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemisionDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    devolucion_remision_api_v1_remisiones__rem_id__devolucion_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                rem_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DevolucionIn"];
             };
         };
         responses: {

@@ -412,3 +412,71 @@ def test_enviar_lote_rechaza_no_timbradas(client, env, auth):
     r = client.post("/api/v1/facturas/enviar-lote", headers=_h(env), json={"ids": [f["id"]]})
     assert r.status_code == 409, r.text
     assert f"{f['serie']}{f['folio']}" in r.json()["detail"]
+
+
+# ── Devoluciones desde remisión (decisión 2026-07-29: ajustan a lo neto) ─────
+def _remision_confirmada(client, env, cantidad="30"):
+    h = _h(env)
+    client.post("/api/v1/inventario/movimientos", headers=h, json={
+        "tipo": "ENTRADA_COMPRA", "producto_id": env["prod"], "almacen_id": env["alm"],
+        "cantidad": "100", "costo_unitario": "5"})
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "almacen_id": env["alm"],
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": cantidad,
+                    "precio_unitario": "20"}]}).json()
+    assert client.post(f"/api/v1/remisiones/{rem['id']}/confirmar", headers=h).status_code == 200
+    return rem
+
+
+def test_devolucion_parcial_ajusta_neto_e_inventario(client, env, auth):
+    rem = _remision_confirmada(client, env, "30")     # sale 30 → disponible 70
+    linea_id = rem["lineas"][0]["id"]
+    r = client.post(f"/api/v1/remisiones/{rem['id']}/devolucion", headers=_h(env), json={
+        "lineas": [{"linea_id": linea_id, "cantidad": "10"}], "motivo": "Rechazo del cliente"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    # Neto: 20 × $20 = 400 + IVA 64 = 464 (mismo cerebro fiscal)
+    assert float(d["lineas"][0]["cantidad_solicitada"]) == 20.0
+    assert float(d["subtotal"]) == 400.0
+    assert float(d["iva"]) == 64.0
+    assert float(d["total"]) == 464.0
+    assert len(d["devoluciones"]) == 1
+    assert float(d["devoluciones"][0]["lineas"][0]["cantidad_base"]) == 10.0
+    disp, _ = _disponible(env)
+    assert disp == Decimal("80")                       # 70 + 10 devueltos
+    movs = client.get("/api/v1/inventario/movimientos", headers=_h(env),
+                      params={"tipo": "ENTRADA_DEVOLUCION"}).json()
+    assert movs["total"] >= 1
+
+
+def test_devolucion_total_y_factura_sin_lineas(client, env, auth):
+    rem = _remision_confirmada(client, env, "30")
+    linea_id = rem["lineas"][0]["id"]
+    r = client.post(f"/api/v1/remisiones/{rem['id']}/devolucion", headers=_h(env), json={
+        "lineas": [{"linea_id": linea_id, "cantidad": "30"}]})
+    assert r.status_code == 200, r.text
+    assert float(r.json()["total"]) == 0.0
+    disp, _ = _disponible(env)
+    assert disp == Decimal("100")                      # todo regresó
+    # Facturar una remisión totalmente devuelta → 422 (nada que facturar)
+    f = client.post("/api/v1/facturas/desde-remisiones", headers=_h(env),
+                    json={"remision_ids": [rem["id"]]})
+    assert f.status_code == 422, f.text
+
+
+def test_devolucion_valida_estado_y_cantidad(client, env, auth):
+    h = _h(env)
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "almacen_id": env["alm"],
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": "5",
+                    "precio_unitario": "20"}]}).json()
+    linea_id = rem["lineas"][0]["id"]
+    # BORRADOR → 409 (no ha salido mercancía)
+    r = client.post(f"/api/v1/remisiones/{rem['id']}/devolucion", headers=h, json={
+        "lineas": [{"linea_id": linea_id, "cantidad": "1"}]})
+    assert r.status_code == 409
+    # CONFIRMADA pero devolver más de lo entregado → 422
+    rem2 = _remision_confirmada(client, env, "5")
+    r2 = client.post(f"/api/v1/remisiones/{rem2['id']}/devolucion", headers=h, json={
+        "lineas": [{"linea_id": rem2["lineas"][0]["id"], "cantidad": "6"}]})
+    assert r2.status_code == 422

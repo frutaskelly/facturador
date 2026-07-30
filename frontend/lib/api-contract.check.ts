@@ -16,7 +16,7 @@
  */
 import type { components } from "./api-types.gen";
 import type {
-  Almacen, Categoria, Cliente, EsquemaImpuesto, Factura, FacturaDetail,
+  Almacen, Categoria, Cliente, Devolucion, EsquemaImpuesto, Factura, FacturaDetail,
   LineaFactura, LineaOrdenCompra, LineaRemision, ListaPrecios, Membership,
   OrdenCompra, OrdenCompraDetail, Precio, Producto, Proveedor, Remision,
   RemisionDetail, Role, Serie, Sucursal,
@@ -32,6 +32,7 @@ type Ok<T extends never> = T;
 type _Remision = Ok<MissingIn<Remision, S["RemisionOut"]>>;
 type _RemisionDetail = Ok<MissingIn<RemisionDetail, S["RemisionDetailOut"]>>;
 type _LineaRemision = Ok<MissingIn<LineaRemision, S["LineaRemisionOut"]>>;
+type _Devolucion = Ok<MissingIn<Devolucion, S["DevolucionOut"]>>;
 type _Factura = Ok<MissingIn<Factura, S["FacturaOut"]>>;
 type _FacturaDetail = Ok<MissingIn<FacturaDetail, S["FacturaDetailOut"]>>;
 type _LineaFactura = Ok<MissingIn<LineaFactura, S["LineaFacturaOut"]>>;

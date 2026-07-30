@@ -29,8 +29,10 @@ from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
     Almacen,
     Cliente,
+    Devolucion,
     EsquemaImpuesto,
     Factura,
+    LineaDevolucion,
     LineaRemision,
     ListaPrecios,
     LoteInventario,
@@ -554,6 +556,114 @@ def cancelar_remision(
         _liberar_reservas(db, ctx, rem, motivo=f"Cancelación remisión {rem.folio_interno}")
 
     rem.estado = "CANCELADA"
+    rem.updated_by = ctx.user_id
+    db.flush()
+    db.refresh(rem)
+    return rem
+
+
+class DevolucionLineaIn(BaseModel):
+    linea_id: UUID
+    # En unidades de la PRESENTACIÓN de la línea (igual que se capturó).
+    cantidad: Decimal = PydField(gt=0)
+
+
+class DevolucionIn(BaseModel):
+    lineas: list[DevolucionLineaIn] = PydField(min_length=1, max_length=200)
+    motivo: Optional[str] = PydField(default=None, max_length=500)
+
+
+@router.post("/{rem_id}/devolucion", response_model=RemisionDetailOut)
+def devolucion_remision(
+    rem_id: UUID,
+    payload: DevolucionIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Devolución parcial o total de una remisión CONFIRMADA (el camión ya salió).
+
+    Decisión 2026-07-29: la devolución AJUSTA la remisión a lo neto entregado —
+    reduce cantidades/importes/impuestos de las líneas (la factura posterior sale
+    por lo neto), regresa el inventario a disponible (ENTRADA_DEVOLUCION) y deja
+    el rastro en `devoluciones`.
+    """
+    rem = get_or_404(db, Remision, rem_id, for_update=True)
+    if rem.estado != "CONFIRMADA":
+        detalle = {
+            "BORRADOR": "La remisión está en borrador: aún no sale mercancía que devolver",
+            "FACTURADA": "La remisión ya está facturada; cancela la factura primero",
+            "CANCELADA": "La remisión está cancelada",
+        }.get(rem.estado, f"No se puede devolver en estado {rem.estado}")
+        raise HTTPException(status_code=409, detail=detalle)
+
+    por_id = {l.id: l for l in rem.lineas}
+    fiscal = _fiscal_por_producto(db, [l.producto_id for l in rem.lineas])
+
+    dev = Devolucion(
+        tenant_id=ctx.tenant_id, remision_id=rem.id,
+        motivo=(payload.motivo or "").strip() or None, created_by=ctx.user_id,
+    )
+    db.add(dev)
+    db.flush()
+
+    for item in payload.lineas:
+        ln = por_id.get(item.linea_id)
+        if ln is None:
+            raise HTTPException(status_code=422, detail="Una línea no pertenece a la remisión")
+        if item.cantidad > ln.cantidad_solicitada:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"La línea {ln.numero_linea} tiene {ln.cantidad_solicitada} y se "
+                    f"intentan devolver {item.cantidad}"
+                ),
+            )
+        prod, esq = fiscal.get(ln.producto_id, (None, None))
+        factor = presentacion_factor(prod, ln.presentacion)
+        base = item.cantidad * factor
+        if ln.cantidad_surtida is not None:
+            # Catch-weight: nunca regresar al inventario más de lo que salió.
+            base = min(base, Decimal(ln.cantidad_surtida))
+
+        # Inventario: regresa a disponible en el lote del que salió.
+        lote = None
+        if ln.lote_id is not None:
+            lote = (
+                db.query(LoteInventario)
+                .filter(LoteInventario.id == ln.lote_id)
+                .with_for_update()
+                .one_or_none()
+            )
+        if lote is None:
+            lote = resolve_lote(
+                db, ctx.tenant_id, ln.producto_id, rem.almacen_id, numero_lote=None, create=True
+            )
+        lote.cantidad_disponible = lote.cantidad_disponible + base
+        db.add(build_movimiento(
+            ctx.tenant_id, ctx.user_id, lote, "ENTRADA_DEVOLUCION", base,
+            ref_tipo="REMISION", ref_id=rem.id,
+            motivo=f"Devolución remisión {rem.folio_interno}",
+        ))
+
+        # La línea queda por lo NETO entregado (misma regla fiscal del alta).
+        ln.cantidad_solicitada = ln.cantidad_solicitada - item.cantidad
+        if ln.cantidad_surtida is not None:
+            ln.cantidad_surtida = max(_ZERO, Decimal(ln.cantidad_surtida) - base)
+        ln.importe = ln.cantidad_solicitada * ln.precio_unitario
+        calc = calcular_linea_producto(prod, esq, ln.importe, ln.cantidad_solicitada)
+        ln.iva_importe = calc["iva_importe"]
+        ln.ieps_importe = calc["ieps_importe"]
+
+        db.add(LineaDevolucion(
+            tenant_id=ctx.tenant_id, devolucion_id=dev.id, linea_remision_id=ln.id,
+            producto_id=ln.producto_id, presentacion=ln.presentacion,
+            cantidad=item.cantidad, cantidad_base=base,
+        ))
+
+    rem.subtotal = sum((l.importe or _ZERO for l in rem.lineas), _ZERO)
+    rem.iva = sum((l.iva_importe or _ZERO for l in rem.lineas), _ZERO)
+    rem.ieps = sum((l.ieps_importe or _ZERO for l in rem.lineas), _ZERO)
+    rem.total = rem.subtotal - (rem.descuento or _ZERO) + rem.iva + rem.ieps
     rem.updated_by = ctx.user_id
     db.flush()
     db.refresh(rem)

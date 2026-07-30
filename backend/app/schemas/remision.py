@@ -100,8 +100,24 @@ class RemisionOut(ORMModel):
     updated_at: datetime
 
 
+class LineaDevolucionOut(ORMModel):
+    id: uuid.UUID
+    producto_id: uuid.UUID
+    presentacion: str
+    cantidad: Decimal
+    cantidad_base: Decimal
+
+
+class DevolucionOut(ORMModel):
+    id: uuid.UUID
+    motivo: Optional[str] = None
+    created_at: datetime
+    lineas: list[LineaDevolucionOut] = []
+
+
 class RemisionDetailOut(RemisionOut):
     lineas: list[LineaRemisionOut] = []
+    devoluciones: list[DevolucionOut] = []
 
 
 class PesoLinea(BaseModel):

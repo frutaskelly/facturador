@@ -399,12 +399,21 @@ def factura_desde_remisiones(
             else:
                 cantidad = Decimal(ln.cantidad_solicitada)
                 clave_unidad = presentacion_sat(prod, ln.presentacion) or (prod.unidad_sat if prod else "H87")
+            if cantidad <= 0:
+                # Línea devuelta por completo: no se factura (el PAC rechaza
+                # conceptos con cantidad 0).
+                continue
             specs.append({"producto_id": ln.producto_id, "prod": prod, "esq": esq,
                           "cantidad": cantidad, "clave_unidad": clave_unidad, "importe": importe})
         r.factura_id = factura.id
         r.estado = "FACTURADA"
 
     # agrupar_productos: suma cantidad/importe de líneas con mismo producto+unidad.
+    if not specs:
+        raise HTTPException(
+            status_code=422,
+            detail="Las remisiones no tienen líneas facturables (todo fue devuelto)",
+        )
     if payload.agrupar_productos:
         merged: dict = {}
         order: list = []

@@ -74,6 +74,7 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     # cancelarla (para poder mostrar su folio/estado en la lista). La
     # refacturabilidad se deriva del estado de esa factura (CANCELADA → libre).
     factura = relationship("Factura", foreign_keys=[factura_id])
+    devoluciones = relationship("Devolucion", order_by="Devolucion.created_at")
 
     @property
     def factura_folio(self) -> Optional[str]:
