@@ -139,3 +139,11 @@ export function can(me: Me | null, permission?: string): boolean {
   if (me.active_tenant.is_owner) return true;
   return me.permissions.includes(permission);
 }
+
+/** True si el usuario tiene AL MENOS UNO de los permisos (o es OWNER). */
+export function canAny(me: Me | null, permissions?: string[]): boolean {
+  if (!me) return false;
+  if (!permissions || permissions.length === 0) return true;
+  if (me.active_tenant.is_owner) return true;
+  return permissions.some((p) => me.permissions.includes(p));
+}

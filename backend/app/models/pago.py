@@ -15,6 +15,7 @@ class Pago(Base):
         UUID(as_uuid=True), ForeignKey("clientes.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     remision_id = Column(UUID(as_uuid=True), ForeignKey("remisiones.id", ondelete="SET NULL"))
+    corte_id = Column(UUID(as_uuid=True), ForeignKey("pos_cortes.id", ondelete="SET NULL"))
     factura_id = Column(UUID(as_uuid=True), ForeignKey("facturas.id", ondelete="SET NULL"))
     fecha = Column(Date, nullable=False, server_default=text("CURRENT_DATE"))
     monto = Column(Numeric(18, 4), nullable=False)

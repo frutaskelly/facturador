@@ -23,7 +23,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export type NavItem = { label: string; href: string; perm?: string; icon: LucideIcon };
+export type NavItem = { label: string; href: string; perm?: string; anyPerm?: string[]; icon: LucideIcon };
 export type NavSection = { section: string; items: NavItem[] };
 
 /** Sidebar model. Each item is shown only if the user holds `perm` (or is OWNER).
@@ -48,7 +48,8 @@ export const NAV: NavSection[] = [
   {
     section: "Operaciones",
     items: [
-      { label: "Punto de venta", href: "/pos", perm: "menu:pos.pedido", icon: Store },
+      { label: "Punto de venta", href: "/pos",
+        anyPerm: ["menu:pos.pedido", "menu:pos.caja", "menu:pos.almacen", "menu:pos.salida"], icon: Store },
       { label: "Inventario", href: "/inventario", perm: "menu:inventario", icon: Boxes },
       { label: "Almacenes", href: "/almacenes", perm: "menu:inventario", icon: Warehouse },
       { label: "Compras", href: "/compras", perm: "menu:compras", icon: ShoppingCart },

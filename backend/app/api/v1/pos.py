@@ -11,18 +11,21 @@ edita con `membership:gestionar` (misma perm admin que Empresa/Correo).
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.orm.attributes import flag_modified
 
 from ...core.rbac import AuthContext, get_auth_context, get_tenant_db, require_permission
-from ...models import Remision, Tenant
+from ...models import Cliente, Pago, PosCorte, Remision, Tenant
 from ...schemas.common import Page
 from ...schemas.remision import RemisionOut
+from ...services import credito as credito_svc
 from ...services.pos import (
     COMPLETADO,
     SALE_AL_CREAR,
@@ -211,11 +214,184 @@ def avanzar(
             detail=f"El pedido está en la etapa {rem.pos_etapa or 'ninguna'}, no en {payload.etapa}",
         )
 
-    _estampar(rem, payload.etapa, ctx)
-    if etapa_salida_inventario(cfg) == payload.etapa:
-        _salida_inventario(db, ctx, rem, cfg)
-    rem.pos_etapa = siguiente_etapa(cfg, payload.etapa)
-    rem.updated_by = ctx.user_id
+    _completar_etapa(db, ctx, rem, cfg, payload.etapa)
     db.flush()
     db.refresh(rem)
     return rem
+
+
+def _completar_etapa(db: Session, ctx: AuthContext, rem: Remision, cfg: dict, etapa: str) -> None:
+    """Marca la etapa completada: estampa quién/cuándo, dispara la salida de
+    inventario si toca, y avanza el pedido a la siguiente etapa del flujo."""
+    _estampar(rem, etapa, ctx)
+    if etapa_salida_inventario(cfg) == etapa:
+        _salida_inventario(db, ctx, rem, cfg)
+    rem.pos_etapa = siguiente_etapa(cfg, etapa)
+    rem.updated_by = ctx.user_id
+
+
+# ─── Caja: cobro (efectivo / tarjeta / crédito) ──────────────────────────────
+_FORMA_SAT = {"efectivo": "01", "tarjeta": "04", "credito": "99"}
+
+
+class PagoIn(BaseModel):
+    forma: str = Field(max_length=12)          # efectivo | tarjeta | credito
+    monto: Decimal = Field(gt=0)
+    referencia: Optional[str] = Field(default=None, max_length=100)
+
+
+class CobrarIn(BaseModel):
+    pagos: list[PagoIn] = Field(min_length=1, max_length=6)
+
+
+@router.post("/remisiones/{rem_id}/cobrar", response_model=RemisionOut)
+def cobrar(
+    rem_id: UUID,
+    payload: CobrarIn = Body(...),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Cobra un pedido en la etapa de caja: registra los pagos (efectivo/tarjeta/
+    crédito), valida que sumen el total, aplica el crédito al saldo del cliente
+    y completa la etapa. El efectivo entra al corte abierto del cajero (si hay).
+    """
+    cfg = pos_config(_cargar_tenant(db, ctx.tenant_id))
+    _exigir(ctx, permiso_accion(cfg, "caja"))
+    if "caja" not in etapas_flujo(cfg):
+        raise HTTPException(status_code=422, detail="El flujo del POS no tiene etapa de caja")
+    rem = get_or_404(db, Remision, rem_id, for_update=True)
+    if rem.pos_etapa != "caja":
+        raise HTTPException(
+            status_code=409,
+            detail=f"El pedido no está en caja (etapa {rem.pos_etapa or 'ninguna'})",
+        )
+
+    formas = {p.forma for p in payload.pagos}
+    invalidas = formas - set(_FORMA_SAT)
+    if invalidas:
+        raise HTTPException(status_code=422, detail=f"Forma de pago no soportada: {', '.join(invalidas)}")
+    total = Decimal(rem.total or 0)
+    pagado = sum((Decimal(p.monto) for p in payload.pagos), Decimal("0"))
+    if not cfg.get("credito") and "credito" in formas:
+        raise HTTPException(status_code=422, detail="La venta a crédito está desactivada (Ajustes › Punto de venta)")
+    # El pago debe cuadrar con el total (el efectivo puede exceder → cambio, se
+    # informa; el resto no debe sobrar).
+    credito_monto = sum((Decimal(p.monto) for p in payload.pagos if p.forma == "credito"), Decimal("0"))
+    no_efectivo = sum((Decimal(p.monto) for p in payload.pagos if p.forma != "efectivo"), Decimal("0"))
+    if no_efectivo > total:
+        raise HTTPException(status_code=422, detail="Tarjeta/crédito no pueden exceder el total")
+    if pagado < total:
+        raise HTTPException(status_code=422, detail=f"Falta cobrar ${total - pagado:,.2f}")
+
+    cliente = db.query(Cliente).filter(Cliente.id == rem.cliente_facturacion_id).one()
+    if credito_monto > 0:
+        credito_svc.validar_credito_disponible(cliente, credito_monto)
+        credito_svc.aplicar_cargo_credito(cliente, credito_monto)
+    credito_svc.registrar_venta(cliente, total)
+
+    corte = _corte_abierto(db, ctx)
+    for p in payload.pagos:
+        db.add(Pago(
+            tenant_id=ctx.tenant_id, cliente_id=cliente.id, remision_id=rem.id,
+            corte_id=corte.id if (corte is not None and p.forma == "efectivo") else None,
+            monto=Decimal(p.monto), forma_pago=_FORMA_SAT[p.forma],
+            referencia=p.referencia, created_by=ctx.user_id,
+        ))
+
+    _completar_etapa(db, ctx, rem, cfg, "caja")
+    db.flush()
+    db.refresh(rem)
+    return rem
+
+
+# ─── Corte de caja (turno con fondo inicial + arqueo) ────────────────────────
+def _corte_abierto(db: Session, ctx: AuthContext) -> Optional[PosCorte]:
+    return (
+        db.query(PosCorte)
+        .filter(PosCorte.user_id == ctx.user_id, PosCorte.estado == "ABIERTO")
+        .one_or_none()
+    )
+
+
+def _resumen_corte(db: Session, corte: PosCorte) -> dict:
+    """Totales por forma de pago del turno + efectivo esperado y descuadre."""
+    filas = (
+        db.query(Pago.forma_pago, func.coalesce(func.sum(Pago.monto), 0))
+        .filter(Pago.corte_id == corte.id)
+        .group_by(Pago.forma_pago)
+        .all()
+    )
+    por_forma = {f: Decimal(m) for f, m in filas}
+    # Solo el efectivo se enlaza al corte; tarjeta/crédito no tocan la caja física.
+    efectivo = por_forma.get("01", Decimal("0"))
+    esperado = Decimal(corte.fondo_inicial or 0) + efectivo
+    contado = Decimal(corte.efectivo_contado) if corte.efectivo_contado is not None else None
+    return {
+        "id": str(corte.id),
+        "estado": corte.estado,
+        "fondo_inicial": corte.fondo_inicial,
+        "efectivo_ventas": efectivo,
+        "efectivo_esperado": esperado,
+        "efectivo_contado": contado,
+        "descuadre": (contado - esperado) if contado is not None else None,
+        "abierto_at": corte.abierto_at,
+        "cerrado_at": corte.cerrado_at,
+    }
+
+
+class AbrirCorteIn(BaseModel):
+    fondo_inicial: Decimal = Field(default=Decimal("0"), ge=0)
+
+
+@router.post("/corte/abrir")
+def abrir_corte(
+    payload: AbrirCorteIn = Body(default=AbrirCorteIn()),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Abre el turno de caja del cajero con su fondo inicial."""
+    _exigir(ctx, "pedido:cobrar")
+    if _corte_abierto(db, ctx) is not None:
+        raise HTTPException(status_code=409, detail="Ya tienes un corte abierto; ciérralo primero")
+    corte = PosCorte(tenant_id=ctx.tenant_id, user_id=ctx.user_id,
+                     fondo_inicial=Decimal(payload.fondo_inicial))
+    db.add(corte)
+    db.flush()
+    return _resumen_corte(db, corte)
+
+
+@router.get("/corte/actual")
+def corte_actual(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Corte abierto del cajero con su resumen en vivo (null si no hay)."""
+    _exigir(ctx, "pedido:cobrar")
+    corte = _corte_abierto(db, ctx)
+    return _resumen_corte(db, corte) if corte is not None else None
+
+
+class CerrarCorteIn(BaseModel):
+    efectivo_contado: Decimal = Field(ge=0)
+    notas: Optional[str] = Field(default=None, max_length=500)
+
+
+@router.post("/corte/cerrar")
+def cerrar_corte(
+    payload: CerrarCorteIn = Body(...),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Cierra el turno declarando el efectivo contado; devuelve el arqueo con
+    el descuadre (contado − esperado)."""
+    _exigir(ctx, "pedido:cobrar")
+    corte = _corte_abierto(db, ctx)
+    if corte is None:
+        raise HTTPException(status_code=409, detail="No tienes un corte abierto")
+    corte.efectivo_contado = Decimal(payload.efectivo_contado)
+    corte.notas = (payload.notas or "").strip() or None
+    corte.estado = "CERRADO"
+    corte.cerrado_at = func.now()
+    db.flush()
+    db.refresh(corte)
+    return _resumen_corte(db, corte)

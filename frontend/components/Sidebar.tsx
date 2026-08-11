@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Star } from "lucide-react";
 
-import { can, type Me } from "@/lib/auth";
+import { can, canAny, type Me } from "@/lib/auth";
 import { useFavorites } from "@/lib/favorites";
 import { NAV, type NavItem } from "@/lib/nav";
 
@@ -18,7 +18,7 @@ export function Sidebar({ me }: { me: Me }) {
     const map = new Map<string, NavItem>();
     for (const section of NAV) {
       for (const it of section.items) {
-        if (can(me, it.perm)) map.set(it.href, it);
+        if (can(me, it.perm) && canAny(me, it.anyPerm)) map.set(it.href, it);
       }
     }
     return map;
@@ -64,7 +64,7 @@ export function Sidebar({ me }: { me: Me }) {
         )}
 
         {NAV.map((section) => {
-          const items = section.items.filter((it) => can(me, it.perm));
+          const items = section.items.filter((it) => can(me, it.perm) && canAny(me, it.anyPerm));
           if (items.length === 0) return null;
           return (
             <div key={section.section} className="mt-5 first:mt-2">

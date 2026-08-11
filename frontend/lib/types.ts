@@ -229,6 +229,8 @@ export type Remision = {
   total: string;
   notas?: string | null;
   nota_entrega?: string | null;
+  pos_etapa?: string | null;
+  pos_asignaciones?: Record<string, { user_id: string; at: string }>;
   created_at: string;
   updated_at: string;
 };

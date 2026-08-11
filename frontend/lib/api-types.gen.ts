@@ -1050,6 +1050,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/corte/abrir": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Abrir Corte
+         * @description Abre el turno de caja del cajero con su fondo inicial.
+         */
+        post: operations["abrir_corte_api_v1_pos_corte_abrir_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/corte/actual": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Corte Actual
+         * @description Corte abierto del cajero con su resumen en vivo (null si no hay).
+         */
+        get: operations["corte_actual_api_v1_pos_corte_actual_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/corte/cerrar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cerrar Corte
+         * @description Cierra el turno declarando el efectivo contado; devuelve el arqueo con
+         *     el descuadre (contado − esperado).
+         */
+        post: operations["cerrar_corte_api_v1_pos_corte_cerrar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/remisiones/{rem_id}/avanzar": {
         parameters: {
             query?: never;
@@ -1069,6 +1130,28 @@ export interface paths {
          *     /cobrar (exigirá el pago); por ahora avanza sin registrar pago.
          */
         post: operations["avanzar_api_v1_pos_remisiones__rem_id__avanzar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/remisiones/{rem_id}/cobrar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cobrar
+         * @description Cobra un pedido en la etapa de caja: registra los pagos (efectivo/tarjeta/
+         *     crédito), valida que sumen el total, aplica el crédito al saldo del cliente
+         *     y completa la etapa. El efectivo entra al corte abierto del cajero (si hay).
+         */
+        post: operations["cobrar_api_v1_pos_remisiones__rem_id__cobrar_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1757,6 +1840,14 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AbrirCorteIn */
+        AbrirCorteIn: {
+            /**
+             * Fondo Inicial
+             * @default 0
+             */
+            fondo_inicial: number | string;
+        };
         /** AliasIn */
         AliasIn: {
             /**
@@ -1991,6 +2082,13 @@ export interface components {
             /** Nombre */
             nombre?: string | null;
         };
+        /** CerrarCorteIn */
+        CerrarCorteIn: {
+            /** Efectivo Contado */
+            efectivo_contado: number | string;
+            /** Notas */
+            notas?: string | null;
+        };
         /** ClienteCreate */
         ClienteCreate: {
             /** Codigo */
@@ -2173,6 +2271,11 @@ export interface components {
             tipo?: ("PRINCIPAL_GOV" | "SUB" | "PRIVADO" | "OTRO") | null;
             /** Uso Cfdi Default */
             uso_cfdi_default?: string | null;
+        };
+        /** CobrarIn */
+        CobrarIn: {
+            /** Pagos */
+            pagos: components["schemas"]["PagoIn"][];
         };
         /**
          * ConfirmarRemisionIn
@@ -3783,6 +3886,15 @@ export interface components {
             offset: number;
             /** Total */
             total: number;
+        };
+        /** PagoIn */
+        PagoIn: {
+            /** Forma */
+            forma: string;
+            /** Monto */
+            monto: number | string;
+            /** Referencia */
+            referencia?: string | null;
         };
         /** ParsePegadoIn */
         ParsePegadoIn: {
@@ -8028,6 +8140,107 @@ export interface operations {
             };
         };
     };
+    abrir_corte_api_v1_pos_corte_abrir_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AbrirCorteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    corte_actual_api_v1_pos_corte_actual_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cerrar_corte_api_v1_pos_corte_cerrar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CerrarCorteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     avanzar_api_v1_pos_remisiones__rem_id__avanzar_post: {
         parameters: {
             query?: never;
@@ -8042,6 +8255,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AvanzarIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cobrar_api_v1_pos_remisiones__rem_id__cobrar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                rem_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CobrarIn"];
             };
         };
         responses: {

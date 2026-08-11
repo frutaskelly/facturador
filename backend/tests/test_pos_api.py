@@ -249,3 +249,98 @@ def test_inventario_sale_al_crear(client, env, auth):
     assert r.json()["pos_etapa"] == "caja"
     assert r.json()["estado"] == "CONFIRMADA"          # salió al crear
     assert _disponible(env) == Decimal("90")
+
+
+# ── Caja: cobro (efectivo/tarjeta/crédito) + corte con arqueo ────────────────
+def _en_caja(client, env):
+    """Config 2 etapas (pedido→caja, inventario al crear) y un pedido en caja."""
+    _config(client, env, etapas=["pedido", "caja"], inventario_sale_en="crear", credito=True)
+    rem = _remision(client, env, "10")            # total = 10×20 + IVA0 = 200
+    h = _h(env)
+    r = client.post(f"/api/v1/pos/remisiones/{rem['id']}/iniciar", headers=h)
+    assert r.json()["pos_etapa"] == "caja", r.text
+    return rem
+
+
+def _saldo(env):
+    db = SessionLocal()
+    try:
+        from app.models import Cliente
+        c = db.query(Cliente).filter(Cliente.id == uuid.UUID(env["cli"])).one()
+        return Decimal(c.saldo_actual), Decimal(c.ventas_ytd)
+    finally:
+        db.close()
+
+
+def test_cobro_efectivo_completa_y_acumula(client, env, auth):
+    rem = _en_caja(client, env)
+    h = _h(env)
+    r = client.post(f"/api/v1/pos/remisiones/{rem['id']}/cobrar", headers=h,
+                    json={"pagos": [{"forma": "efectivo", "monto": "200"}]})
+    assert r.status_code == 200, r.text
+    assert r.json()["pos_etapa"] == "completado"
+    saldo, ytd = _saldo(env)
+    assert saldo == Decimal("0")            # contado no deja deuda
+    assert ytd == Decimal("200")            # sí acumula venta
+
+
+def test_cobro_mixto_efectivo_mas_tarjeta(client, env, auth):
+    rem = _en_caja(client, env)
+    h = _h(env)
+    r = client.post(f"/api/v1/pos/remisiones/{rem['id']}/cobrar", headers=h,
+                    json={"pagos": [{"forma": "tarjeta", "monto": "120"},
+                                    {"forma": "efectivo", "monto": "80"}]})
+    assert r.status_code == 200, r.text
+    # falta cobrar → 422
+    rem2 = _en_caja(client, env)
+    bad = client.post(f"/api/v1/pos/remisiones/{rem2['id']}/cobrar", headers=h,
+                      json={"pagos": [{"forma": "efectivo", "monto": "50"}]})
+    assert bad.status_code == 422 and "Falta cobrar" in bad.json()["detail"]
+
+
+def test_cobro_credito_valida_limite(client, env, auth):
+    h = _h(env)
+    # Sin límite → crédito rechazado
+    rem = _en_caja(client, env)
+    r = client.post(f"/api/v1/pos/remisiones/{rem['id']}/cobrar", headers=h,
+                    json={"pagos": [{"forma": "credito", "monto": "200"}]})
+    assert r.status_code == 422 and "crédito" in r.json()["detail"].lower()
+    # Con límite 500 → pasa y deja saldo
+    client.patch(f"/api/v1/clientes/{env['cli']}", headers=h, json={"limite_credito": "500"})
+    rem2 = _en_caja(client, env)
+    r2 = client.post(f"/api/v1/pos/remisiones/{rem2['id']}/cobrar", headers=h,
+                     json={"pagos": [{"forma": "credito", "monto": "200"}]})
+    assert r2.status_code == 200, r2.text
+    saldo, _ = _saldo(env)
+    assert saldo == Decimal("200")
+    # Otra venta a crédito de 400 excede (200+400 > 500) → 422
+    rem3 = _remision(client, env, "20")   # total 400
+    client.post(f"/api/v1/pos/remisiones/{rem3['id']}/iniciar", headers=h)
+    r3 = client.post(f"/api/v1/pos/remisiones/{rem3['id']}/cobrar", headers=h,
+                     json={"pagos": [{"forma": "credito", "monto": "400"}]})
+    assert r3.status_code == 422 and "insuficiente" in r3.json()["detail"].lower()
+
+
+def test_corte_con_fondo_y_arqueo(client, env, auth):
+    _config(client, env, etapas=["pedido", "caja"], inventario_sale_en="crear")
+    h = _h(env)
+    ab = client.post("/api/v1/pos/corte/abrir", headers=h, json={"fondo_inicial": "500"})
+    assert ab.status_code == 200, ab.text
+    # doble apertura → 409
+    assert client.post("/api/v1/pos/corte/abrir", headers=h, json={"fondo_inicial": "0"}).status_code == 409
+
+    rem = _remision(client, env, "10")
+    client.post(f"/api/v1/pos/remisiones/{rem['id']}/iniciar", headers=h)
+    client.post(f"/api/v1/pos/remisiones/{rem['id']}/cobrar", headers=h,
+                json={"pagos": [{"forma": "efectivo", "monto": "200"}]})
+
+    act = client.get("/api/v1/pos/corte/actual", headers=h).json()
+    assert float(act["efectivo_ventas"]) == 200.0
+    assert float(act["efectivo_esperado"]) == 700.0     # 500 fondo + 200
+
+    resp = client.post("/api/v1/pos/corte/cerrar", headers=h, json={"efectivo_contado": "690"})
+    assert resp.status_code == 200, resp.text
+    cerr = resp.json()
+    assert float(cerr["descuadre"]) == -10.0            # faltaron 10
+    assert cerr["estado"] == "CERRADO"
+    assert client.get("/api/v1/pos/corte/actual", headers=h).json() is None

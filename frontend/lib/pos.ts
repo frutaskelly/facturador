@@ -63,3 +63,24 @@ export function slugEtapa(nombre: string): string {
     .replace(/^_+|_+$/g, "")
     .slice(0, 30);
 }
+
+// ── Caja (Fase 2) ────────────────────────────────────────────────────────────
+export type FormaPago = "efectivo" | "tarjeta" | "credito";
+
+export const FORMA_LABEL: Record<FormaPago, string> = {
+  efectivo: "Efectivo",
+  tarjeta: "Tarjeta",
+  credito: "Crédito (fiado)",
+};
+
+export type CorteResumen = {
+  id: string;
+  estado: "ABIERTO" | "CERRADO";
+  fondo_inicial: string;
+  efectivo_ventas: string;
+  efectivo_esperado: string;
+  efectivo_contado: string | null;
+  descuadre: string | null;
+  abierto_at: string;
+  cerrado_at: string | null;
+};

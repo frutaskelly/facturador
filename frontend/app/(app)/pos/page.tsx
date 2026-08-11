@@ -32,6 +32,7 @@ const FASE: Record<string, string> = {
 // Estaciones cuya pantalla ya existe (tarjeta navegable).
 const LISTO: Record<string, string> = {
   pedido: "/pos/pedido",
+  caja: "/pos/caja",
 };
 
 export default function Page() {

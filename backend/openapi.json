@@ -1,6 +1,25 @@
 {
  "components": {
   "schemas": {
+   "AbrirCorteIn": {
+    "properties": {
+     "fondo_inicial": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "default": "0",
+      "title": "Fondo Inicial"
+     }
+    },
+    "title": "AbrirCorteIn",
+    "type": "object"
+   },
    "AliasIn": {
     "properties": {
      "producto_id": {
@@ -657,6 +676,39 @@
      }
     },
     "title": "CategoriaUpdate",
+    "type": "object"
+   },
+   "CerrarCorteIn": {
+    "properties": {
+     "efectivo_contado": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Efectivo Contado"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "maxLength": 500,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     }
+    },
+    "required": [
+     "efectivo_contado"
+    ],
+    "title": "CerrarCorteIn",
     "type": "object"
    },
    "ClienteCreate": {
@@ -1321,6 +1373,24 @@
      }
     },
     "title": "ClienteUpdate",
+    "type": "object"
+   },
+   "CobrarIn": {
+    "properties": {
+     "pagos": {
+      "items": {
+       "$ref": "#/components/schemas/PagoIn"
+      },
+      "maxItems": 6,
+      "minItems": 1,
+      "title": "Pagos",
+      "type": "array"
+     }
+    },
+    "required": [
+     "pagos"
+    ],
+    "title": "CobrarIn",
     "type": "object"
    },
    "ConfirmarRemisionIn": {
@@ -5635,6 +5705,45 @@
      "offset"
     ],
     "title": "Page[SucursalOut]",
+    "type": "object"
+   },
+   "PagoIn": {
+    "properties": {
+     "forma": {
+      "maxLength": 12,
+      "title": "Forma",
+      "type": "string"
+     },
+     "monto": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Monto"
+     },
+     "referencia": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Referencia"
+     }
+    },
+    "required": [
+     "forma",
+     "monto"
+    ],
+    "title": "PagoIn",
     "type": "object"
    },
    "ParsePegadoIn": {
@@ -15687,6 +15796,187 @@
     ]
    }
   },
+  "/api/v1/pos/corte/abrir": {
+   "post": {
+    "description": "Abre el turno de caja del cajero con su fondo inicial.",
+    "operationId": "abrir_corte_api_v1_pos_corte_abrir_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AbrirCorteIn",
+        "default": {
+         "fondo_inicial": "0"
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Abrir Corte",
+    "tags": [
+     "pos"
+    ]
+   }
+  },
+  "/api/v1/pos/corte/actual": {
+   "get": {
+    "description": "Corte abierto del cajero con su resumen en vivo (null si no hay).",
+    "operationId": "corte_actual_api_v1_pos_corte_actual_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Corte Actual",
+    "tags": [
+     "pos"
+    ]
+   }
+  },
+  "/api/v1/pos/corte/cerrar": {
+   "post": {
+    "description": "Cierra el turno declarando el efectivo contado; devuelve el arqueo con\nel descuadre (contado − esperado).",
+    "operationId": "cerrar_corte_api_v1_pos_corte_cerrar_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CerrarCorteIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cerrar Corte",
+    "tags": [
+     "pos"
+    ]
+   }
+  },
   "/api/v1/pos/remisiones/{rem_id}/avanzar": {
    "post": {
     "description": "Completa la etapa actual del pedido y lo pasa a la siguiente del flujo\nconfigurado. Side-effect: al completar la etapa mapeada de\n`inventario_sale_en`, sale el inventario (salida directa).\n\nNota Fase 2: cuando la etapa es `caja`, este endpoint será reemplazado por\n/cobrar (exigirá el pago); por ahora avanza sin registrar pago.",
@@ -15757,6 +16047,81 @@
      }
     ],
     "summary": "Avanzar",
+    "tags": [
+     "pos"
+    ]
+   }
+  },
+  "/api/v1/pos/remisiones/{rem_id}/cobrar": {
+   "post": {
+    "description": "Cobra un pedido en la etapa de caja: registra los pagos (efectivo/tarjeta/\ncrédito), valida que sumen el total, aplica el crédito al saldo del cliente\ny completa la etapa. El efectivo entra al corte abierto del cajero (si hay).",
+    "operationId": "cobrar_api_v1_pos_remisiones__rem_id__cobrar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rem_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Rem Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CobrarIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RemisionOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cobrar",
     "tags": [
      "pos"
     ]
