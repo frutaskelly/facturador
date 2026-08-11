@@ -29,6 +29,11 @@ const FASE: Record<string, string> = {
   salida: "Fase 3",
 };
 
+// Estaciones cuya pantalla ya existe (tarjeta navegable).
+const LISTO: Record<string, string> = {
+  pedido: "/pos/pedido",
+};
+
 export default function Page() {
   const [cfg, setCfg] = useState<PosConfig | null>(null);
   const [error, setError] = useState(false);
@@ -67,25 +72,31 @@ export default function Page() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {(cfg.etapas_visibles ?? []).map((e) => (
-            <Card key={e}>
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="rounded-lg bg-surface-2 p-2">{ICONO[e] ?? <Layers size={18} />}</span>
-                  <div>
-                    <div className="font-medium">{etiquetaDe(cfg, e)}</div>
-                    <div className="text-sm text-muted">
-                      {ETAPA_DESC[e as EtapaCanonica] ?? "Etapa propia de este negocio"}
+          {(cfg.etapas_visibles ?? []).map((e) => {
+            const href = LISTO[e];   // estación ya construida → tarjeta clickeable
+            const inner = (
+              <Card key={e} className={href ? "transition hover:border-accent" : undefined}>
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="rounded-lg bg-surface-2 p-2">{ICONO[e] ?? <Layers size={18} />}</span>
+                    <div>
+                      <div className="font-medium">{etiquetaDe(cfg, e)}</div>
+                      <div className="text-sm text-muted">
+                        {ETAPA_DESC[e as EtapaCanonica] ?? "Etapa propia de este negocio"}
+                      </div>
                     </div>
                   </div>
+                  {!href && <Badge tone="muted">{FASE[e] ?? "Fase 3"}</Badge>}
                 </div>
-                <Badge tone="muted">{FASE[e] ?? "Fase 3"}</Badge>
-              </div>
-              <p className="mt-3 text-sm text-muted">
-                La pantalla de esta estación se construye en la {FASE[e] ?? "Fase 3"} del plan del POS.
-              </p>
-            </Card>
-          ))}
+                <p className="mt-3 text-sm text-muted">
+                  {href
+                    ? "Abrir esta estación →"
+                    : `La pantalla de esta estación se construye en la ${FASE[e] ?? "Fase 3"} del plan del POS.`}
+                </p>
+              </Card>
+            );
+            return href ? <Link key={e} href={href}>{inner}</Link> : inner;
+          })}
           {(cfg.etapas_visibles ?? []).length === 0 && (
             <Alert tone="warning">
               Tu rol no tiene acceso a ninguna estación del flujo activo. Pide a un
