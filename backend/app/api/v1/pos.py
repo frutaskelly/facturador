@@ -26,6 +26,7 @@ from ...models import Cliente, Pago, PosCorte, Remision, Tenant
 from ...schemas.common import Page
 from ...schemas.remision import RemisionOut
 from ...services import credito as credito_svc
+from ...services import pos_pulse
 from ...services.pos import (
     COMPLETADO,
     SALE_AL_CREAR,
@@ -159,6 +160,7 @@ def iniciar_en_pos(
     if destino == COMPLETADO or etapa_salida_inventario(cfg) == SALE_AL_CREAR:
         _salida_inventario(db, ctx, rem, cfg)
     rem.updated_by = ctx.user_id
+    pos_pulse.bump(ctx.tenant_id)
     db.flush()
     db.refresh(rem)
     return rem
@@ -244,6 +246,7 @@ def _completar_etapa(
         _salida_inventario(db, ctx, rem, cfg, pesos=pesos)
     rem.pos_etapa = siguiente_etapa(cfg, etapa)
     rem.updated_by = ctx.user_id
+    pos_pulse.bump(ctx.tenant_id)   # realtime: avisa a las estaciones
 
 
 # ─── Caja: cobro (efectivo / tarjeta / crédito) ──────────────────────────────
@@ -411,3 +414,109 @@ def cerrar_corte(
     db.flush()
     db.refresh(corte)
     return _resumen_corte(db, corte)
+
+
+# ─── Realtime: pulso + tablero de Operaciones ────────────────────────────────
+@router.get("/pulse")
+def pulse(
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Contador de cambios del POS del tenant. Las estaciones lo consultan cada
+    pocos segundos y recargan su cola solo cuando cambia (casi-tiempo-real sin
+    WebSocket). Sin Redis devuelve 0 (las estaciones caen a recarga periódica)."""
+    return {"v": pos_pulse.read(ctx.tenant_id)}
+
+
+@router.get("/operaciones")
+def operaciones(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Tablero de supervisión: conteo por etapa del flujo, ventas y cobros del
+    día por forma de pago, y los pedidos activos con su progreso. Requiere ver
+    alguna estación del POS."""
+    cfg = pos_config(_cargar_tenant(db, ctx.tenant_id))
+    flujo = etapas_flujo(cfg)
+    if not any(_tiene(ctx, permiso_menu(cfg, e)) for e in flujo):
+        raise HTTPException(status_code=403, detail="Sin acceso a estaciones del POS")
+
+    # Conteo de pedidos esperando en cada etapa activa.
+    filas = (
+        db.query(Remision.pos_etapa, func.count(Remision.id))
+        .filter(Remision.deleted_at.is_(None), Remision.pos_etapa.isnot(None))
+        .group_by(Remision.pos_etapa)
+        .all()
+    )
+    por_etapa = {e: 0 for e in flujo}
+    completados_activos = 0
+    for etapa, n in filas:
+        if etapa == COMPLETADO:
+            completados_activos = int(n)
+        elif etapa in por_etapa:
+            por_etapa[etapa] = int(n)
+
+    # Cobros de HOY por forma de pago (SAT → etiqueta).
+    _ETIQUETA_FORMA = {"01": "efectivo", "04": "tarjeta", "99": "credito"}
+    cobros = (
+        db.query(Pago.forma_pago, func.coalesce(func.sum(Pago.monto), 0))
+        .filter(Pago.fecha == func.current_date())
+        .group_by(Pago.forma_pago)
+        .all()
+    )
+    cobrado = {"efectivo": 0.0, "tarjeta": 0.0, "credito": 0.0}
+    cobrado_total = 0.0
+    for forma, monto in cobros:
+        m = float(monto)
+        cobrado_total += m
+        etiqueta_forma = _ETIQUETA_FORMA.get(forma)
+        if etiqueta_forma:
+            cobrado[etiqueta_forma] += m
+
+    # Ventas del día (remisiones que iniciaron hoy en el POS).
+    ventas_hoy = (
+        db.query(func.coalesce(func.sum(Remision.total), 0), func.count(Remision.id))
+        .filter(
+            Remision.deleted_at.is_(None),
+            Remision.pos_etapa.isnot(None),
+            func.date(Remision.created_at) == func.current_date(),
+        )
+        .one()
+    )
+
+    # Pedidos activos (en alguna cola) con su progreso.
+    activos = (
+        db.query(Remision)
+        .options(joinedload(Remision.factura))
+        .filter(
+            Remision.deleted_at.is_(None),
+            Remision.pos_etapa.isnot(None),
+            Remision.pos_etapa != COMPLETADO,
+        )
+        .order_by(Remision.created_at.asc())
+        .limit(100)
+        .all()
+    )
+    activos_out = [
+        {
+            "id": str(r.id),
+            "folio_interno": r.folio_interno,
+            "cliente_id": str(r.cliente_facturacion_id),
+            "total": r.total,
+            "pos_etapa": r.pos_etapa,
+            "pos_asignaciones": r.pos_asignaciones or {},
+            "created_at": r.created_at,
+        }
+        for r in activos
+    ]
+
+    return {
+        "flujo": flujo,
+        "etiquetas": {e: etiqueta(cfg, e) for e in flujo},
+        "por_etapa": por_etapa,
+        "completados_activos": completados_activos,
+        "cobrado_hoy": cobrado,
+        "cobrado_hoy_total": cobrado_total,
+        "ventas_hoy_total": float(ventas_hoy[0]),
+        "pedidos_hoy": int(ventas_hoy[1]),
+        "activos": activos_out,
+    }

@@ -19,6 +19,7 @@ import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { fmtMoney } from "@/lib/format";
 import { useResource, type Page } from "@/lib/hooks";
+import { usePosPulse } from "@/lib/usePosPulse";
 import { FORMA_LABEL, type CorteResumen, type FormaPago, type PosConfig } from "@/lib/pos";
 import type { Cliente, Remision } from "@/lib/types";
 
@@ -39,9 +40,10 @@ export default function Page() {
   // Cola de caja (polling cada 10 s — el realtime llega en Fase 4).
   const cola = useResource<Page<Remision>>("/api/v1/pos/cola/caja?limit=100");
   useEffect(() => {
-    const t = setInterval(() => cola.reload(), 10_000);
+    const t = setInterval(() => cola.reload(), 30_000);   // backstop
     return () => clearInterval(t);
   }, [cola]);
+  usePosPulse(() => cola.reload());   // realtime: recarga al detectar cambios
 
   const cargarCorte = useCallback(() => {
     apiFetch<CorteResumen | null>("/api/v1/pos/corte/actual").then(setCorte).catch(() => {});

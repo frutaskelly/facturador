@@ -16,14 +16,16 @@ import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { fmtMoney } from "@/lib/format";
 import { useResource, type Page } from "@/lib/hooks";
+import { usePosPulse } from "@/lib/usePosPulse";
 import type { Cliente, Remision } from "@/lib/types";
 
 export default function Page() {
   const cola = useResource<Page<Remision>>("/api/v1/pos/cola/salida?limit=100");
   useEffect(() => {
-    const t = setInterval(() => cola.reload(), 10_000);
+    const t = setInterval(() => cola.reload(), 30_000);   // backstop
     return () => clearInterval(t);
   }, [cola]);
+  usePosPulse(() => cola.reload());   // realtime: recarga al detectar cambios
 
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=1000");
   const cliName = useMemo(

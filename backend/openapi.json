@@ -16030,6 +16030,112 @@
     ]
    }
   },
+  "/api/v1/pos/operaciones": {
+   "get": {
+    "description": "Tablero de supervisión: conteo por etapa del flujo, ventas y cobros del\ndía por forma de pago, y los pedidos activos con su progreso. Requiere ver\nalguna estación del POS.",
+    "operationId": "operaciones_api_v1_pos_operaciones_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Operaciones",
+    "tags": [
+     "pos"
+    ]
+   }
+  },
+  "/api/v1/pos/pulse": {
+   "get": {
+    "description": "Contador de cambios del POS del tenant. Las estaciones lo consultan cada\npocos segundos y recargan su cola solo cuando cambia (casi-tiempo-real sin\nWebSocket). Sin Redis devuelve 0 (las estaciones caen a recarga periódica).",
+    "operationId": "pulse_api_v1_pos_pulse_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Pulse",
+    "tags": [
+     "pos"
+    ]
+   }
+  },
   "/api/v1/pos/remisiones/{rem_id}/avanzar": {
    "post": {
     "description": "Completa la etapa actual del pedido y lo pasa a la siguiente del flujo\nconfigurado. Side-effect: al completar la etapa mapeada de\n`inventario_sale_en`, sale el inventario (salida directa).\n\nNota Fase 2: cuando la etapa es `caja`, este endpoint será reemplazado por\n/cobrar (exigirá el pago); por ahora avanza sin registrar pago.",

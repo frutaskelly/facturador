@@ -5,7 +5,7 @@
 // las pantallas de cada estación llegan en las Fases 1-3.
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ClipboardList, Layers, Settings, Store, Truck, Wallet, Warehouse } from "lucide-react";
+import { Activity, ClipboardList, Layers, Settings, Store, Truck, Wallet, Warehouse } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -100,6 +100,21 @@ export default function Page() {
             );
             return href ? <Link key={e} href={href}>{inner}</Link> : inner;
           })}
+          {/* Operaciones: tablero de supervisión (no es una etapa del flujo) */}
+          {(cfg.etapas_visibles ?? []).length > 0 && (
+            <Link href="/pos/operaciones">
+              <Card className="transition hover:border-accent">
+                <div className="flex items-center gap-3">
+                  <span className="rounded-lg bg-surface-2 p-2"><Activity size={18} /></span>
+                  <div>
+                    <div className="font-medium">Operaciones</div>
+                    <div className="text-sm text-muted">Tablero del día y pedidos en curso</div>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm text-muted">Abrir tablero →</p>
+              </Card>
+            </Link>
+          )}
           {(cfg.etapas_visibles ?? []).length === 0 && (
             <Alert tone="warning">
               Tu rol no tiene acceso a ninguna estación del flujo activo. Pide a un

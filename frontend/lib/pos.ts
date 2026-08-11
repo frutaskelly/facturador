@@ -84,3 +84,20 @@ export type CorteResumen = {
   abierto_at: string;
   cerrado_at: string | null;
 };
+
+// ── Realtime (pulso) + tablero de Operaciones ────────────────────────────────
+export type OperacionesData = {
+  flujo: string[];
+  etiquetas: Record<string, string>;
+  por_etapa: Record<string, number>;
+  completados_activos: number;
+  cobrado_hoy: { efectivo: number; tarjeta: number; credito: number };
+  cobrado_hoy_total: number;
+  ventas_hoy_total: number;
+  pedidos_hoy: number;
+  activos: {
+    id: string; folio_interno: string; cliente_id: string; total: string;
+    pos_etapa: string; pos_asignaciones: Record<string, { user_id: string; at: string; nota?: string }>;
+    created_at: string;
+  }[];
+};

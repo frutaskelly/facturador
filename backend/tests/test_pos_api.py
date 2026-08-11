@@ -375,3 +375,31 @@ def test_salida_nota_quien_recibe(client, env, auth):
         "etapa": "salida", "nota": "Recibió: Juan Pérez"})
     assert r.status_code == 200, r.text
     assert r.json()["pos_asignaciones"]["salida"]["nota"] == "Recibió: Juan Pérez"
+
+
+def test_pulse_y_operaciones(client, env, auth):
+    _config(client, env, etapas=["pedido", "caja"], inventario_sale_en="crear", credito=True)
+    h = _h(env)
+    p0 = client.get("/api/v1/pos/pulse", headers=h).json()["v"]
+    rem = _remision(client, env, "10")
+    client.post(f"/api/v1/pos/remisiones/{rem['id']}/iniciar", headers=h)
+    # el pulso avanza al iniciar (si hay Redis; sin Redis queda en 0 — no rompe)
+    p1 = client.get("/api/v1/pos/pulse", headers=h).json()["v"]
+    assert p1 >= p0
+
+    # tablero: 1 pedido en caja, ventas del día
+    r = client.get("/api/v1/pos/operaciones", headers=h)
+    assert r.status_code == 200, r.text
+    op = r.json()
+    assert op["por_etapa"]["caja"] == 1
+    assert op["pedidos_hoy"] == 1
+    assert float(op["ventas_hoy_total"]) == 200.0
+    assert len(op["activos"]) == 1 and op["activos"][0]["pos_etapa"] == "caja"
+
+    # cobra → sale de la cola, entra a cobrado_hoy
+    client.post(f"/api/v1/pos/remisiones/{rem['id']}/cobrar", headers=h,
+                json={"pagos": [{"forma": "efectivo", "monto": "200"}]})
+    op2 = client.get("/api/v1/pos/operaciones", headers=h).json()
+    assert op2["por_etapa"]["caja"] == 0
+    assert float(op2["cobrado_hoy"]["efectivo"]) == 200.0
+    assert float(op2["cobrado_hoy_total"]) == 200.0
