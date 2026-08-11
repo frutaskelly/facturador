@@ -344,3 +344,34 @@ def test_corte_con_fondo_y_arqueo(client, env, auth):
     assert float(cerr["descuadre"]) == -10.0            # faltaron 10
     assert cerr["estado"] == "CERRADO"
     assert client.get("/api/v1/pos/corte/actual", headers=h).json() is None
+
+
+def test_almacen_peso_real_surtido(client, env, auth):
+    """Al surtir con peso real (catch-weight), la salida usa ese peso, no el
+    teórico: pedido de 10, se surten 12 kg reales → disponible baja 12."""
+    _config(client, env, etapas=["pedido", "almacen"], inventario_sale_en="surtido")
+    h = _h(env)
+    rem = _remision(client, env, "10")   # teórico 10
+    linea_id = rem["lineas"][0]["id"]
+    r = client.post(f"/api/v1/pos/remisiones/{rem['id']}/iniciar", headers=h)
+    assert r.json()["pos_etapa"] == "almacen", r.text
+    assert _disponible(env) == Decimal("100")           # aún no sale
+
+    r = client.post(f"/api/v1/pos/remisiones/{rem['id']}/avanzar", headers=h, json={
+        "etapa": "almacen",
+        "pesos": [{"linea_id": linea_id, "cantidad_base": "12"}]})
+    assert r.status_code == 200, r.text
+    assert r.json()["pos_etapa"] == "completado"
+    assert _disponible(env) == Decimal("88")            # 100 − 12 real
+
+
+def test_salida_nota_quien_recibe(client, env, auth):
+    """La entrega guarda quién recibe en la asignación de la etapa."""
+    _config(client, env, etapas=["pedido", "salida"], inventario_sale_en="crear")
+    h = _h(env)
+    rem = _remision(client, env, "5")
+    client.post(f"/api/v1/pos/remisiones/{rem['id']}/iniciar", headers=h)
+    r = client.post(f"/api/v1/pos/remisiones/{rem['id']}/avanzar", headers=h, json={
+        "etapa": "salida", "nota": "Recibió: Juan Pérez"})
+    assert r.status_code == 200, r.text
+    assert r.json()["pos_asignaciones"]["salida"]["nota"] == "Recibió: Juan Pérez"

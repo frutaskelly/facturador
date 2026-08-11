@@ -116,18 +116,21 @@ def put_config(
 
 
 # ─── Motor: iniciar / cola / avanzar ─────────────────────────────────────────
-def _estampar(rem: Remision, etapa: str, ctx: AuthContext) -> None:
-    rem.pos_asignaciones = {
-        **(rem.pos_asignaciones or {}),
-        etapa: {"user_id": str(ctx.user_id), "at": datetime.now(timezone.utc).isoformat()},
-    }
+def _estampar(rem: Remision, etapa: str, ctx: AuthContext, *, nota: Optional[str] = None) -> None:
+    marca = {"user_id": str(ctx.user_id), "at": datetime.now(timezone.utc).isoformat()}
+    if nota:
+        marca["nota"] = nota[:200]
+    rem.pos_asignaciones = {**(rem.pos_asignaciones or {}), etapa: marca}
 
 
-def _salida_inventario(db: Session, ctx: AuthContext, rem: Remision, cfg: dict) -> None:
-    """Salida directa (mismo motor de remisiones); idempotente: solo BORRADOR."""
+def _salida_inventario(
+    db: Session, ctx: AuthContext, rem: Remision, cfg: dict, pesos: dict | None = None
+) -> None:
+    """Salida directa (mismo motor de remisiones); idempotente: solo BORRADOR.
+    `pesos` (linea_id → cantidad_base real) permite el peso real del surtido."""
     if rem.estado == "BORRADOR":
         reservar_stock_remision(
-            db, ctx, rem, permitir_negativos=bool(cfg.get("permitir_sobregiro")),
+            db, ctx, rem, permitir_negativos=bool(cfg.get("permitir_sobregiro")), pesos=pesos,
         )
 
 
@@ -183,10 +186,19 @@ def cola(
     return paginate(query, RemisionOut, min(limit, 200), max(offset, 0))
 
 
+class PesoLineaIn(BaseModel):
+    linea_id: UUID
+    cantidad_base: Decimal = Field(gt=0)   # peso/medida real en unidad base
+
+
 class AvanzarIn(BaseModel):
     # Protección contra doble clic / carreras: la etapa que el cliente CREE que
     # completa debe ser la etapa real del pedido.
     etapa: str = Field(max_length=30)
+    # Almacén: peso real del surtido (catch-weight) si la salida ocurre aquí.
+    pesos: Optional[list[PesoLineaIn]] = None
+    # Salida: quién recibe / referencia de entrega (queda en la asignación).
+    nota: Optional[str] = Field(default=None, max_length=200)
 
 
 @router.post("/remisiones/{rem_id}/avanzar", response_model=RemisionOut)
@@ -214,18 +226,22 @@ def avanzar(
             detail=f"El pedido está en la etapa {rem.pos_etapa or 'ninguna'}, no en {payload.etapa}",
         )
 
-    _completar_etapa(db, ctx, rem, cfg, payload.etapa)
+    pesos = {p.linea_id: p.cantidad_base for p in (payload.pesos or [])}
+    _completar_etapa(db, ctx, rem, cfg, payload.etapa, pesos=pesos or None, nota=payload.nota)
     db.flush()
     db.refresh(rem)
     return rem
 
 
-def _completar_etapa(db: Session, ctx: AuthContext, rem: Remision, cfg: dict, etapa: str) -> None:
-    """Marca la etapa completada: estampa quién/cuándo, dispara la salida de
-    inventario si toca, y avanza el pedido a la siguiente etapa del flujo."""
-    _estampar(rem, etapa, ctx)
+def _completar_etapa(
+    db: Session, ctx: AuthContext, rem: Remision, cfg: dict, etapa: str,
+    *, pesos: dict | None = None, nota: Optional[str] = None,
+) -> None:
+    """Marca la etapa completada: estampa quién/cuándo (con nota opcional),
+    dispara la salida de inventario si toca, y avanza a la siguiente etapa."""
+    _estampar(rem, etapa, ctx, nota=nota)
     if etapa_salida_inventario(cfg) == etapa:
-        _salida_inventario(db, ctx, rem, cfg)
+        _salida_inventario(db, ctx, rem, cfg, pesos=pesos)
     rem.pos_etapa = siguiente_etapa(cfg, etapa)
     rem.updated_by = ctx.user_id
 

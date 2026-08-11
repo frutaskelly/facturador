@@ -424,6 +424,7 @@ export type Producto = {
   cold_chain: boolean;
   requiere_lote: boolean;
   requiere_caducidad: boolean;
+  peso_variable: boolean;
   vida_util_dias?: number | null;
   sinonimos: string[];
   activo: boolean;

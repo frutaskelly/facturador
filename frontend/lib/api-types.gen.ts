@@ -1945,6 +1945,10 @@ export interface components {
         AvanzarIn: {
             /** Etapa */
             etapa: string;
+            /** Nota */
+            nota?: string | null;
+            /** Pesos */
+            pesos?: components["schemas"]["PesoLineaIn"][] | null;
         };
         /** Body_importar_preview_api_v1_remisiones_importar_preview_post */
         Body_importar_preview_api_v1_remisiones_importar_preview_post: {
@@ -3921,6 +3925,16 @@ export interface components {
         };
         /** PesoLinea */
         PesoLinea: {
+            /** Cantidad Base */
+            cantidad_base: number | string;
+            /**
+             * Linea Id
+             * Format: uuid
+             */
+            linea_id: string;
+        };
+        /** PesoLineaIn */
+        PesoLineaIn: {
             /** Cantidad Base */
             cantidad_base: number | string;
             /**

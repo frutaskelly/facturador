@@ -33,6 +33,8 @@ const FASE: Record<string, string> = {
 const LISTO: Record<string, string> = {
   pedido: "/pos/pedido",
   caja: "/pos/caja",
+  almacen: "/pos/almacen",
+  salida: "/pos/salida",
 };
 
 export default function Page() {

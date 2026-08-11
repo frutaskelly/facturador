@@ -354,6 +354,32 @@
       "maxLength": 30,
       "title": "Etapa",
       "type": "string"
+     },
+     "nota": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nota"
+     },
+     "pesos": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/PesoLineaIn"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pesos"
      }
     },
     "required": [
@@ -5836,6 +5862,33 @@
      "cantidad_base"
     ],
     "title": "PesoLinea",
+    "type": "object"
+   },
+   "PesoLineaIn": {
+    "properties": {
+     "cantidad_base": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Cantidad Base"
+     },
+     "linea_id": {
+      "format": "uuid",
+      "title": "Linea Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "linea_id",
+     "cantidad_base"
+    ],
+    "title": "PesoLineaIn",
     "type": "object"
    },
    "PosConfigIn": {
