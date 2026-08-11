@@ -24,7 +24,7 @@ from sqlalchemy import (
 )
 from typing import Optional
 
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from ..core.db import Base
@@ -63,6 +63,12 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     factura_id = Column(UUID(as_uuid=True), ForeignKey("facturas.id", ondelete="SET NULL"))
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+
+    # POS (Fase 0): estación donde el pedido ESPERA (pedido/caja/almacen/salida/
+    # completado); NULL = remisión normal fuera del POS. El pipeline activo lo
+    # define tenants.config.pos. `pos_asignaciones` = {etapa: {user_id, at}}.
+    pos_etapa = Column(String(12), index=True)
+    pos_asignaciones = Column(JSONB, nullable=False, server_default="{}")
 
     lineas = relationship(
         "LineaRemision",

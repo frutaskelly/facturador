@@ -76,6 +76,9 @@ class RemisionOut(ORMModel):
     id: uuid.UUID
     tenant_id: uuid.UUID
     folio_interno: str
+    # POS: estación donde espera (None = fuera del POS) y quién completó qué.
+    pos_etapa: Optional[str] = None
+    pos_asignaciones: dict = {}
     cliente_facturacion_id: uuid.UUID
     almacen_id: Optional[uuid.UUID] = None
     sucursal_id: Optional[uuid.UUID] = None

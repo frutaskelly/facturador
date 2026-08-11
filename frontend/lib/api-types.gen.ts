@@ -1009,6 +1009,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/cola/{etapa}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cola
+         * @description Pedidos esperando en una estación (los más viejos primero).
+         */
+        get: operations["cola_api_v1_pos_cola__etapa__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Config
+         * @description Config vigente + qué etapas puede VER este usuario (para armar el nav).
+         */
+        get: operations["get_config_api_v1_pos_config_get"];
+        /** Put Config */
+        put: operations["put_config_api_v1_pos_config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/remisiones/{rem_id}/avanzar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Avanzar
+         * @description Completa la etapa actual del pedido y lo pasa a la siguiente del flujo
+         *     configurado. Side-effect: al completar la etapa mapeada de
+         *     `inventario_sale_en`, sale el inventario (salida directa).
+         *
+         *     Nota Fase 2: cuando la etapa es `caja`, este endpoint será reemplazado por
+         *     /cobrar (exigirá el pago); por ahora avanza sin registrar pago.
+         */
+        post: operations["avanzar_api_v1_pos_remisiones__rem_id__avanzar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/remisiones/{rem_id}/iniciar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Iniciar En Pos
+         * @description Mete una remisión BORRADOR al pipeline del POS (cae en la primera cola).
+         *     La captura nativa del POS (Fase 1) crea la remisión y llama esto mismo.
+         */
+        post: operations["iniciar_en_pos_api_v1_pos_remisiones__rem_id__iniciar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/precios/cotizar": {
         parameters: {
             query?: never;
@@ -1762,6 +1849,11 @@ export interface components {
             estado?: string | null;
             /** Nombre */
             nombre?: string | null;
+        };
+        /** AvanzarIn */
+        AvanzarIn: {
+            /** Etapa */
+            etapa: string;
         };
         /** Body_importar_preview_api_v1_remisiones_importar_preview_post */
         Body_importar_preview_api_v1_remisiones_importar_preview_post: {
@@ -3725,6 +3817,53 @@ export interface components {
              */
             linea_id: string;
         };
+        /** PosConfigIn */
+        PosConfigIn: {
+            /**
+             * Activo
+             * @default false
+             */
+            activo: boolean;
+            /**
+             * Credito
+             * @default false
+             */
+            credito: boolean;
+            /** Etapas */
+            etapas?: string[];
+            /**
+             * Inventario Sale En
+             * @default surtido
+             */
+            inventario_sale_en: string;
+            /**
+             * Permitir Sobregiro
+             * @default false
+             */
+            permitir_sobregiro: boolean;
+            /** Serie Id */
+            serie_id?: string | null;
+            /**
+             * @default {
+             *       "auto_imprimir": false,
+             *       "formato": "80mm"
+             *     }
+             */
+            ticket: components["schemas"]["PosTicketIn"];
+        };
+        /** PosTicketIn */
+        PosTicketIn: {
+            /**
+             * Auto Imprimir
+             * @default false
+             */
+            auto_imprimir: boolean;
+            /**
+             * Formato
+             * @default 80mm
+             */
+            formato: string;
+        };
         /** PrecioBulkItem */
         PrecioBulkItem: {
             /**
@@ -4430,6 +4569,13 @@ export interface components {
             nota_entrega?: string | null;
             /** Notas */
             notas?: string | null;
+            /**
+             * Pos Asignaciones
+             * @default {}
+             */
+            pos_asignaciones: Record<string, never>;
+            /** Pos Etapa */
+            pos_etapa?: string | null;
             /** Subtotal */
             subtotal: string;
             /** Sucursal Id */
@@ -4497,6 +4643,13 @@ export interface components {
             nota_entrega?: string | null;
             /** Notas */
             notas?: string | null;
+            /**
+             * Pos Asignaciones
+             * @default {}
+             */
+            pos_asignaciones: Record<string, never>;
+            /** Pos Etapa */
+            pos_etapa?: string | null;
             /** Subtotal */
             subtotal: string;
             /** Sucursal Id */
@@ -7755,6 +7908,178 @@ export interface operations {
                 };
                 content: {
                     "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    cola_api_v1_pos_cola__etapa__get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                etapa: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_RemisionOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_config_api_v1_pos_config_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_config_api_v1_pos_config_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosConfigIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    avanzar_api_v1_pos_remisiones__rem_id__avanzar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                rem_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AvanzarIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    iniciar_en_pos_api_v1_pos_remisiones__rem_id__iniciar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                rem_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

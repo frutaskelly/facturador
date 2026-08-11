@@ -329,6 +329,20 @@
     "title": "AlmacenUpdate",
     "type": "object"
    },
+   "AvanzarIn": {
+    "properties": {
+     "etapa": {
+      "maxLength": 12,
+      "title": "Etapa",
+      "type": "string"
+     }
+    },
+    "required": [
+     "etapa"
+    ],
+    "title": "AvanzarIn",
+    "type": "object"
+   },
    "Body_importar_preview_api_v1_remisiones_importar_preview_post": {
     "properties": {
      "archivo": {
@@ -5715,6 +5729,77 @@
     "title": "PesoLinea",
     "type": "object"
    },
+   "PosConfigIn": {
+    "properties": {
+     "activo": {
+      "default": false,
+      "title": "Activo",
+      "type": "boolean"
+     },
+     "credito": {
+      "default": false,
+      "title": "Credito",
+      "type": "boolean"
+     },
+     "etapas": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 4,
+      "title": "Etapas",
+      "type": "array"
+     },
+     "inventario_sale_en": {
+      "default": "surtido",
+      "maxLength": 10,
+      "title": "Inventario Sale En",
+      "type": "string"
+     },
+     "permitir_sobregiro": {
+      "default": false,
+      "title": "Permitir Sobregiro",
+      "type": "boolean"
+     },
+     "serie_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Id"
+     },
+     "ticket": {
+      "$ref": "#/components/schemas/PosTicketIn",
+      "default": {
+       "auto_imprimir": false,
+       "formato": "80mm"
+      }
+     }
+    },
+    "title": "PosConfigIn",
+    "type": "object"
+   },
+   "PosTicketIn": {
+    "properties": {
+     "auto_imprimir": {
+      "default": false,
+      "title": "Auto Imprimir",
+      "type": "boolean"
+     },
+     "formato": {
+      "default": "80mm",
+      "maxLength": 10,
+      "title": "Formato",
+      "type": "string"
+     }
+    },
+    "title": "PosTicketIn",
+    "type": "object"
+   },
    "PrecioBulkItem": {
     "properties": {
      "cantidad_minima": {
@@ -7909,6 +7994,22 @@
       ],
       "title": "Notas"
      },
+     "pos_asignaciones": {
+      "default": {},
+      "title": "Pos Asignaciones",
+      "type": "object"
+     },
+     "pos_etapa": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pos Etapa"
+     },
      "subtotal": {
       "title": "Subtotal",
       "type": "string"
@@ -8096,6 +8197,22 @@
        }
       ],
       "title": "Notas"
+     },
+     "pos_asignaciones": {
+      "default": {},
+      "title": "Pos Asignaciones",
+      "type": "object"
+     },
+     "pos_etapa": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pos Etapa"
      },
      "subtotal": {
       "title": "Subtotal",
@@ -15336,6 +15453,343 @@
     "summary": "List Tenants",
     "tags": [
      "platform"
+    ]
+   }
+  },
+  "/api/v1/pos/cola/{etapa}": {
+   "get": {
+    "description": "Pedidos esperando en una estación (los más viejos primero).",
+    "operationId": "cola_api_v1_pos_cola__etapa__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "etapa",
+      "required": true,
+      "schema": {
+       "title": "Etapa",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Page_RemisionOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cola",
+    "tags": [
+     "pos"
+    ]
+   }
+  },
+  "/api/v1/pos/config": {
+   "get": {
+    "description": "Config vigente + qué etapas puede VER este usuario (para armar el nav).",
+    "operationId": "get_config_api_v1_pos_config_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Get Config",
+    "tags": [
+     "pos"
+    ]
+   },
+   "put": {
+    "operationId": "put_config_api_v1_pos_config_put",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PosConfigIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Put Config",
+    "tags": [
+     "pos"
+    ]
+   }
+  },
+  "/api/v1/pos/remisiones/{rem_id}/avanzar": {
+   "post": {
+    "description": "Completa la etapa actual del pedido y lo pasa a la siguiente del flujo\nconfigurado. Side-effect: al completar la etapa mapeada de\n`inventario_sale_en`, sale el inventario (salida directa).\n\nNota Fase 2: cuando la etapa es `caja`, este endpoint será reemplazado por\n/cobrar (exigirá el pago); por ahora avanza sin registrar pago.",
+    "operationId": "avanzar_api_v1_pos_remisiones__rem_id__avanzar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rem_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Rem Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AvanzarIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RemisionOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Avanzar",
+    "tags": [
+     "pos"
+    ]
+   }
+  },
+  "/api/v1/pos/remisiones/{rem_id}/iniciar": {
+   "post": {
+    "description": "Mete una remisión BORRADOR al pipeline del POS (cae en la primera cola).\nLa captura nativa del POS (Fase 1) crea la remisión y llama esto mismo.",
+    "operationId": "iniciar_en_pos_api_v1_pos_remisiones__rem_id__iniciar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rem_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Rem Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RemisionOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Iniciar En Pos",
+    "tags": [
+     "pos"
     ]
    }
   },

@@ -8,6 +8,7 @@ from .conversion import ConversionProducto
 from .esquema_impuesto import EsquemaImpuesto
 from .devolucion import Devolucion, LineaDevolucion
 from .factura import Factura, LineaFactura, TimbradoIntento
+from .pago import Pago
 from .inventario import LoteInventario, Merma, MovimientoInventario
 from .orden_compra import LineaOrdenCompra, OrdenCompra
 from .permission import Permission
@@ -53,6 +54,7 @@ __all__ = [
     "Factura",
     "LineaDevolucion",
     "LineaFactura",
+    "Pago",
     "TimbradoIntento",
     # ── precios v2 ──
     "Sucursal",

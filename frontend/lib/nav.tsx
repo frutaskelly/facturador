@@ -13,6 +13,7 @@ import {
   Receipt,
   Repeat,
   Shield,
+  Store,
   ShoppingCart,
   Tag,
   Truck,
@@ -47,6 +48,7 @@ export const NAV: NavSection[] = [
   {
     section: "Operaciones",
     items: [
+      { label: "Punto de venta", href: "/pos", perm: "menu:pos.pedido", icon: Store },
       { label: "Inventario", href: "/inventario", perm: "menu:inventario", icon: Boxes },
       { label: "Almacenes", href: "/almacenes", perm: "menu:inventario", icon: Warehouse },
       { label: "Compras", href: "/compras", perm: "menu:compras", icon: ShoppingCart },
@@ -62,6 +64,7 @@ export const NAV: NavSection[] = [
       { label: "Empresa", href: "/ajustes/empresa", perm: "membership:gestionar", icon: Building2 },
       { label: "Series y folios", href: "/ajustes/series", perm: "menu:series", icon: Hash },
       { label: "Correo", href: "/ajustes/correo", perm: "membership:gestionar", icon: Mail },
+      { label: "Punto de venta", href: "/ajustes/pos", perm: "membership:gestionar", icon: Store },
       { label: "Usuarios", href: "/ajustes/usuarios", perm: "menu:ajustes.usuarios", icon: UserCog },
       { label: "Roles", href: "/ajustes/roles", perm: "menu:ajustes.roles", icon: Shield },
       { label: "Sistema de diseño", href: "/ajustes/sistema-diseno", perm: "menu:configuraciones", icon: Palette },

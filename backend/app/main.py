@@ -24,6 +24,7 @@ from .api.v1 import (
     ordenes_compra,
     permissions,
     platform,
+    pos,
     precios,
     productos,
     proveedores,
@@ -122,3 +123,4 @@ app.include_router(correo.router, prefix="/api/v1")
 app.include_router(platform.router, prefix="/api/v1")
 # empresa / emisor — datos fiscales del tenant + CSD
 app.include_router(empresa.router, prefix="/api/v1")
+app.include_router(pos.router, prefix="/api/v1")
