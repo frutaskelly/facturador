@@ -67,7 +67,7 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     # POS (Fase 0): estación donde el pedido ESPERA (pedido/caja/almacen/salida/
     # completado); NULL = remisión normal fuera del POS. El pipeline activo lo
     # define tenants.config.pos. `pos_asignaciones` = {etapa: {user_id, at}}.
-    pos_etapa = Column(String(12), index=True)
+    pos_etapa = Column(String(30), index=True)
     pos_asignaciones = Column(JSONB, nullable=False, server_default="{}")
 
     lineas = relationship(

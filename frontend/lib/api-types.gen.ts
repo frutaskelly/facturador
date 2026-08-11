@@ -3831,9 +3831,11 @@ export interface components {
             credito: boolean;
             /** Etapas */
             etapas?: string[];
+            /** Etapas Custom */
+            etapas_custom?: components["schemas"]["PosEtapaCustomIn"][];
             /**
              * Inventario Sale En
-             * @default surtido
+             * @default almacen
              */
             inventario_sale_en: string;
             /**
@@ -3850,6 +3852,18 @@ export interface components {
              *     }
              */
             ticket: components["schemas"]["PosTicketIn"];
+        };
+        /** PosEtapaCustomIn */
+        PosEtapaCustomIn: {
+            /** Id */
+            id: string;
+            /** Nombre */
+            nombre: string;
+            /**
+             * Permiso
+             * @default pedido:surtir
+             */
+            permiso: string;
         };
         /** PosTicketIn */
         PosTicketIn: {

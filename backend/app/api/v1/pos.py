@@ -25,11 +25,12 @@ from ...schemas.common import Page
 from ...schemas.remision import RemisionOut
 from ...services.pos import (
     COMPLETADO,
-    ETAPAS_ORDEN,
-    PERMISO_ACCION,
-    PERMISO_MENU,
+    SALE_AL_CREAR,
     etapa_salida_inventario,
-    etapas_activas,
+    etapas_flujo,
+    etiqueta,
+    permiso_accion,
+    permiso_menu,
     pos_config,
     primera_cola,
     siguiente_etapa,
@@ -62,11 +63,19 @@ class PosTicketIn(BaseModel):
     auto_imprimir: bool = False
 
 
+class PosEtapaCustomIn(BaseModel):
+    id: str = Field(max_length=30)
+    nombre: str = Field(max_length=40)
+    # Quién la trabaja (permiso de acción del seed 0003).
+    permiso: str = Field(default="pedido:surtir", max_length=30)
+
+
 class PosConfigIn(BaseModel):
     activo: bool = False
-    etapas: list[str] = Field(default_factory=lambda: list(ETAPAS_ORDEN), max_length=4)
+    etapas: list[str] = Field(default_factory=lambda: ["pedido", "caja", "almacen", "salida"], max_length=8)
+    etapas_custom: list[PosEtapaCustomIn] = Field(default_factory=list, max_length=6)
     credito: bool = False
-    inventario_sale_en: str = Field(default="surtido", max_length=10)
+    inventario_sale_en: str = Field(default="almacen", max_length=30)
     serie_id: Optional[UUID] = None
     permitir_sobregiro: bool = False
     ticket: PosTicketIn = PosTicketIn()
@@ -79,9 +88,9 @@ def get_config(
 ):
     """Config vigente + qué etapas puede VER este usuario (para armar el nav)."""
     cfg = pos_config(_cargar_tenant(db, ctx.tenant_id))
-    cfg["etapas_visibles"] = [
-        e for e in etapas_activas(cfg) if _tiene(ctx, PERMISO_MENU[e])
-    ]
+    flujo = etapas_flujo(cfg)
+    cfg["etapas_visibles"] = [e for e in flujo if _tiene(ctx, permiso_menu(cfg, e))]
+    cfg["etiquetas"] = {e: etiqueta(cfg, e) for e in flujo}
     cfg["puede_configurar"] = _tiene(ctx, _ADMIN)
     return cfg
 
@@ -127,8 +136,8 @@ def iniciar_en_pos(
 ):
     """Mete una remisión BORRADOR al pipeline del POS (cae en la primera cola).
     La captura nativa del POS (Fase 1) crea la remisión y llama esto mismo."""
-    _exigir(ctx, PERMISO_ACCION["pedido"])
     cfg = pos_config(_cargar_tenant(db, ctx.tenant_id))
+    _exigir(ctx, permiso_accion(cfg, "pedido"))
     if not cfg.get("activo"):
         raise HTTPException(status_code=409, detail="El POS está desactivado (Ajustes › Punto de venta)")
     rem = get_or_404(db, Remision, rem_id, for_update=True)
@@ -140,8 +149,8 @@ def iniciar_en_pos(
     _estampar(rem, "pedido", ctx)
     destino = primera_cola(cfg)
     rem.pos_etapa = destino
-    if destino == COMPLETADO:
-        # Mostrador exprés (flujo de solo captura): la salida ocurre al crear.
+    # Sale al crear si así se configuró, o si el flujo es de pura captura.
+    if destino == COMPLETADO or etapa_salida_inventario(cfg) == SALE_AL_CREAR:
         _salida_inventario(db, ctx, rem, cfg)
     rem.updated_by = ctx.user_id
     db.flush()
@@ -158,12 +167,10 @@ def cola(
     ctx: AuthContext = Depends(get_auth_context),
 ):
     """Pedidos esperando en una estación (los más viejos primero)."""
-    if etapa not in ETAPAS_ORDEN:
-        raise HTTPException(status_code=422, detail=f"Etapa desconocida: {etapa}")
-    _exigir(ctx, PERMISO_MENU[etapa])
     cfg = pos_config(_cargar_tenant(db, ctx.tenant_id))
-    if etapa not in etapas_activas(cfg):
-        raise HTTPException(status_code=422, detail=f"La etapa {etapa} no está activa en el flujo")
+    if etapa not in etapas_flujo(cfg):
+        raise HTTPException(status_code=422, detail=f"La etapa {etapa} no está en el flujo")
+    _exigir(ctx, permiso_menu(cfg, etapa))
     query = (
         db.query(Remision)
         .options(joinedload(Remision.factura))
@@ -176,7 +183,7 @@ def cola(
 class AvanzarIn(BaseModel):
     # Protección contra doble clic / carreras: la etapa que el cliente CREE que
     # completa debe ser la etapa real del pedido.
-    etapa: str = Field(max_length=12)
+    etapa: str = Field(max_length=30)
 
 
 @router.post("/remisiones/{rem_id}/avanzar", response_model=RemisionOut)
@@ -193,10 +200,10 @@ def avanzar(
     Nota Fase 2: cuando la etapa es `caja`, este endpoint será reemplazado por
     /cobrar (exigirá el pago); por ahora avanza sin registrar pago.
     """
-    if payload.etapa not in ETAPAS_ORDEN:
-        raise HTTPException(status_code=422, detail=f"Etapa desconocida: {payload.etapa}")
-    _exigir(ctx, PERMISO_ACCION[payload.etapa])
     cfg = pos_config(_cargar_tenant(db, ctx.tenant_id))
+    if payload.etapa not in etapas_flujo(cfg):
+        raise HTTPException(status_code=422, detail=f"La etapa {payload.etapa} no está en el flujo")
+    _exigir(ctx, permiso_accion(cfg, payload.etapa))
     rem = get_or_404(db, Remision, rem_id, for_update=True)
     if rem.pos_etapa != payload.etapa:
         raise HTTPException(

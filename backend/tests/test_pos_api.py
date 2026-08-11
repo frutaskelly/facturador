@@ -189,3 +189,63 @@ def test_cola_lista_y_valida(client, env, auth):
     # etapa válida pero apagada en el flujo → 422
     _config(client, env, etapas=["pedido", "caja"])
     assert client.get("/api/v1/pos/cola/almacen", headers=h).status_code == 422
+
+
+def test_flujo_reordenado_con_etapa_custom(client, env, auth):
+    """Orden libre + etapa propia: pedido → almacén → Empaque (custom) → caja,
+    con el inventario saliendo al completar Empaque."""
+    _config(client, env,
+            etapas=["pedido", "almacen", "empaque", "caja"],
+            etapas_custom=[{"id": "empaque", "nombre": "Empaque", "permiso": "pedido:surtir"}],
+            inventario_sale_en="empaque")
+    rem = _remision(client, env, "10")
+    h = _h(env)
+
+    r = client.post(f"/api/v1/pos/remisiones/{rem['id']}/iniciar", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["pos_etapa"] == "almacen"          # el orden configurado manda
+
+    r = client.post(f"/api/v1/pos/remisiones/{rem['id']}/avanzar", headers=h, json={"etapa": "almacen"})
+    assert r.json()["pos_etapa"] == "empaque"
+    assert _disponible(env) == Decimal("100")          # aún no sale
+
+    r = client.post(f"/api/v1/pos/remisiones/{rem['id']}/avanzar", headers=h, json={"etapa": "empaque"})
+    assert r.status_code == 200, r.text
+    assert r.json()["pos_etapa"] == "caja"
+    assert r.json()["estado"] == "CONFIRMADA"          # salió en la etapa custom
+    assert _disponible(env) == Decimal("90")
+
+    r = client.post(f"/api/v1/pos/remisiones/{rem['id']}/avanzar", headers=h, json={"etapa": "caja"})
+    assert r.json()["pos_etapa"] == "completado"
+
+    cfg = client.get("/api/v1/pos/config", headers=h).json()
+    assert cfg["etiquetas"]["empaque"] == "Empaque"
+    assert cfg["etapas"] == ["pedido", "almacen", "empaque", "caja"]
+
+
+def test_config_rechaza_custom_invalida(client, env, auth):
+    h = _h(env)
+    base = {"activo": True, "etapas": ["pedido", "caja"]}
+    # id con mayúsculas/símbolos → 422
+    r = client.put("/api/v1/pos/config", headers=h, json={
+        **base, "etapas_custom": [{"id": "Empaque!", "nombre": "Empaque"}]})
+    assert r.status_code == 422
+    # id reservado → 422
+    r = client.put("/api/v1/pos/config", headers=h, json={
+        **base, "etapas_custom": [{"id": "caja", "nombre": "Otra caja"}]})
+    assert r.status_code == 422
+    # sin nombre → 422
+    r = client.put("/api/v1/pos/config", headers=h, json={
+        **base, "etapas_custom": [{"id": "empaque", "nombre": ""}]})
+    assert r.status_code == 422
+
+
+def test_inventario_sale_al_crear(client, env, auth):
+    _config(client, env, etapas=["pedido", "caja"], inventario_sale_en="crear")
+    rem = _remision(client, env, "10")
+    h = _h(env)
+    r = client.post(f"/api/v1/pos/remisiones/{rem['id']}/iniciar", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["pos_etapa"] == "caja"
+    assert r.json()["estado"] == "CONFIRMADA"          # salió al crear
+    assert _disponible(env) == Decimal("90")

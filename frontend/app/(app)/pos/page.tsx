@@ -1,11 +1,11 @@
 "use client";
 
-// POS — hub de estaciones (Fase 0). Las pestañas se dibujan según las etapas
-// ACTIVAS en la config del tenant ∩ los permisos del usuario; las pantallas de
-// cada estación llegan en las Fases 1-3 (aquí va el esqueleto navegable).
+// POS — hub de estaciones (Fase 0). Las tarjetas se dibujan según el flujo
+// configurado (orden y etapas propias incluidos) ∩ los permisos del usuario;
+// las pantallas de cada estación llegan en las Fases 1-3.
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ClipboardList, Settings, Store, Truck, Wallet, Warehouse } from "lucide-react";
+import { ClipboardList, Layers, Settings, Store, Truck, Wallet, Warehouse } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -13,16 +13,16 @@ import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { apiFetch } from "@/lib/api";
-import { ETAPA_DESC, ETAPA_LABEL, type Etapa, type PosConfig } from "@/lib/pos";
+import { ETAPA_DESC, type EtapaCanonica, type PosConfig, etiquetaDe } from "@/lib/pos";
 
-const ICONO: Record<Etapa, React.ReactNode> = {
+const ICONO: Record<string, React.ReactNode> = {
   pedido: <ClipboardList size={18} />,
   caja: <Wallet size={18} />,
   almacen: <Warehouse size={18} />,
   salida: <Truck size={18} />,
 };
 
-const FASE: Record<Etapa, string> = {
+const FASE: Record<string, string> = {
   pedido: "Fase 1",
   caja: "Fase 2",
   almacen: "Fase 3",
@@ -60,7 +60,7 @@ export default function Page() {
             <div className="font-medium">El POS está desactivado para este negocio</div>
             <p className="max-w-md text-sm text-muted">
               {cfg.puede_configurar
-                ? "Actívalo y elige las etapas del flujo en Ajustes › Punto de venta."
+                ? "Actívalo y arma las etapas del flujo en Ajustes › Punto de venta."
                 : "Pide a un administrador activarlo en Ajustes › Punto de venta."}
             </p>
           </div>
@@ -71,16 +71,18 @@ export default function Page() {
             <Card key={e}>
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <span className="rounded-lg bg-surface-2 p-2">{ICONO[e]}</span>
+                  <span className="rounded-lg bg-surface-2 p-2">{ICONO[e] ?? <Layers size={18} />}</span>
                   <div>
-                    <div className="font-medium">{ETAPA_LABEL[e]}</div>
-                    <div className="text-sm text-muted">{ETAPA_DESC[e]}</div>
+                    <div className="font-medium">{etiquetaDe(cfg, e)}</div>
+                    <div className="text-sm text-muted">
+                      {ETAPA_DESC[e as EtapaCanonica] ?? "Etapa propia de este negocio"}
+                    </div>
                   </div>
                 </div>
-                <Badge tone="muted">{FASE[e]}</Badge>
+                <Badge tone="muted">{FASE[e] ?? "Fase 3"}</Badge>
               </div>
               <p className="mt-3 text-sm text-muted">
-                La pantalla de esta estación se construye en la {FASE[e]} del plan del POS.
+                La pantalla de esta estación se construye en la {FASE[e] ?? "Fase 3"} del plan del POS.
               </p>
             </Card>
           ))}

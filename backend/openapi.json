@@ -332,7 +332,7 @@
    "AvanzarIn": {
     "properties": {
      "etapa": {
-      "maxLength": 12,
+      "maxLength": 30,
       "title": "Etapa",
       "type": "string"
      }
@@ -5745,13 +5745,21 @@
       "items": {
        "type": "string"
       },
-      "maxItems": 4,
+      "maxItems": 8,
       "title": "Etapas",
       "type": "array"
      },
+     "etapas_custom": {
+      "items": {
+       "$ref": "#/components/schemas/PosEtapaCustomIn"
+      },
+      "maxItems": 6,
+      "title": "Etapas Custom",
+      "type": "array"
+     },
      "inventario_sale_en": {
-      "default": "surtido",
-      "maxLength": 10,
+      "default": "almacen",
+      "maxLength": 30,
       "title": "Inventario Sale En",
       "type": "string"
      },
@@ -5781,6 +5789,32 @@
      }
     },
     "title": "PosConfigIn",
+    "type": "object"
+   },
+   "PosEtapaCustomIn": {
+    "properties": {
+     "id": {
+      "maxLength": 30,
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "maxLength": 40,
+      "title": "Nombre",
+      "type": "string"
+     },
+     "permiso": {
+      "default": "pedido:surtir",
+      "maxLength": 30,
+      "title": "Permiso",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "nombre"
+    ],
+    "title": "PosEtapaCustomIn",
     "type": "object"
    },
    "PosTicketIn": {

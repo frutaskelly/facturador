@@ -1,110 +1,182 @@
-"""POS — motor del pipeline configurable por tenant (Fase 0).
+"""POS — motor del pipeline configurable por tenant.
 
-El flujo NO está en código: cada tenant prende/apaga etapas en
-`tenants.config.pos` (Ajustes › Punto de venta) y este módulo deriva la máquina
-de estados de esa configuración. Agregar o quitar etapas para un cliente jamás
-toca código.
+El flujo NO está en código: cada tenant define en `tenants.config.pos`
+(Ajustes › Punto de venta) QUÉ etapas usa, EN QUÉ ORDEN, y puede agregar
+etapas PROPIAS ("Empaque", "Verificación"…). Este módulo deriva la máquina de
+estados de esa configuración; cambiar el flujo de un cliente jamás toca código.
 
 Convenciones:
-- `pos_etapa` de la remisión = estación donde el pedido ESPERA.
-- El orden de etapas es fijo (pedido → caja → almacén → salida); lo configurable
-  es CUÁLES están activas ("pedido" siempre). Orden libre: solo si un cliente
-  real lo pide (decisión #1 del plan).
-- El inventario sale al COMPLETAR la etapa `inventario_sale_en` (mapeada a la
-  primera etapa activa igual-o-posterior; si no hay, a la última activa) — así
-  un mostrador de 2 etapas y una bodega de 4 usan el mismo motor.
+- `etapas` es la lista ORDENADA del flujo real; "pedido" siempre va primero.
+- Las 4 etapas canónicas conservan su semántica (caja = cobro en Fase 2,
+  almacén = surtido, salida = entrega). Las etapas custom son checkpoints puros
+  (estampan quién/cuándo, sin side-effects) y declaran qué rol las trabaja vía
+  `permiso` (uno de los 4 permisos de acción del seed 0003 — sin RBAC nuevo).
+- El inventario sale al COMPLETAR la etapa `inventario_sale_en` (id de etapa
+  del flujo, o "crear"); si esa etapa no está en el flujo, sale al cerrar la
+  última etapa. Valores legados (cobro/surtido/entrega) se traducen.
 """
 from __future__ import annotations
 
+import re
 from typing import Optional
 
-ETAPAS_ORDEN = ["pedido", "caja", "almacen", "salida"]
+ETAPAS_CANONICAS = ["pedido", "caja", "almacen", "salida"]
 COMPLETADO = "completado"
+SALE_AL_CREAR = "crear"
 
-# A qué etapa corresponde cada momento de salida de inventario.
-_SALE_EN_ETAPA = {"cobro": "caja", "surtido": "almacen", "entrega": "salida"}
+_LEGACY_SALE_EN = {"cobro": "caja", "surtido": "almacen", "entrega": "salida"}
+_SLUG_RE = re.compile(r"^[a-z0-9_]{2,30}$")
 
-# Permiso de ACCIÓN para completar cada etapa (seed 0003; OWNER bypassa).
-PERMISO_ACCION = {
+ETIQUETA_CANONICA = {"pedido": "Pedido", "caja": "Caja", "almacen": "Almacén", "salida": "Salida"}
+
+# Permiso de ACCIÓN por etapa canónica (seed 0003; OWNER bypassa).
+_ACCION_CANONICA = {
     "pedido": "pedido:capturar",
     "caja": "pedido:cobrar",
     "almacen": "pedido:surtir",
     "salida": "pedido:entregar",
 }
-# Permiso de MENÚ para ver la cola de cada etapa.
-PERMISO_MENU = {e: f"menu:pos.{e}" for e in ETAPAS_ORDEN}
+ACCIONES_VALIDAS = set(_ACCION_CANONICA.values())
+# Permiso de MENÚ (ver la cola) correspondiente a cada permiso de acción.
+_MENU_DE_ACCION = {
+    "pedido:capturar": "menu:pos.pedido",
+    "pedido:cobrar": "menu:pos.caja",
+    "pedido:surtir": "menu:pos.almacen",
+    "pedido:entregar": "menu:pos.salida",
+}
 
 DEFAULT_CONFIG = {
     "activo": False,
     "etapas": ["pedido", "caja", "almacen", "salida"],
+    "etapas_custom": [],               # [{id, nombre, permiso}]
     "credito": False,
-    "inventario_sale_en": "surtido",   # "cobro" | "surtido" | "entrega"
+    "inventario_sale_en": "almacen",   # id de etapa del flujo | "crear"
     "serie_id": None,
     "permitir_sobregiro": False,
     "ticket": {"formato": "80mm", "auto_imprimir": False},
 }
 
 
+def _customs(cfg: dict) -> dict[str, dict]:
+    return {
+        c["id"]: c
+        for c in (cfg.get("etapas_custom") or [])
+        if isinstance(c, dict) and c.get("id")
+    }
+
+
 def pos_config(tenant) -> dict:
-    """Config del POS del tenant: defaults + lo guardado en `config.pos`."""
+    """Config del POS del tenant: defaults + lo guardado, normalizado."""
     guardado = ((tenant.config or {}).get("pos") or {}) if tenant is not None else {}
     cfg = {**DEFAULT_CONFIG, **guardado}
     cfg["ticket"] = {**DEFAULT_CONFIG["ticket"], **(guardado.get("ticket") or {})}
-    cfg["etapas"] = etapas_activas(cfg)
+    cfg["etapas"] = etapas_flujo(cfg)
+    # Back-compat: los valores viejos (cobro/surtido/entrega) se traducen a etapa.
+    sale = cfg.get("inventario_sale_en") or "almacen"
+    cfg["inventario_sale_en"] = _LEGACY_SALE_EN.get(sale, sale)
     return cfg
 
 
-def etapas_activas(cfg: dict) -> list[str]:
-    """Etapas prendidas, en el orden canónico. 'pedido' siempre presente."""
-    pedidas = set(cfg.get("etapas") or [])
-    pedidas.add("pedido")
-    return [e for e in ETAPAS_ORDEN if e in pedidas]
+def etapas_flujo(cfg: dict) -> list[str]:
+    """El flujo real: la lista configurada, deduplicada, con 'pedido' SIEMPRE al
+    frente y sin etapas desconocidas (ni canónicas ni custom declaradas)."""
+    customs = _customs(cfg)
+    vistas: set[str] = set()
+    flujo: list[str] = []
+    for e in cfg.get("etapas") or []:
+        if e in vistas or e == "pedido":
+            continue
+        if e in ETAPAS_CANONICAS or e in customs:
+            vistas.add(e)
+            flujo.append(e)
+    return ["pedido"] + flujo
+
+
+def etiqueta(cfg: dict, etapa: str) -> str:
+    if etapa in ETIQUETA_CANONICA:
+        return ETIQUETA_CANONICA[etapa]
+    if etapa == COMPLETADO:
+        return "Completado"
+    c = _customs(cfg).get(etapa)
+    return (c or {}).get("nombre") or etapa
+
+
+def permiso_accion(cfg: dict, etapa: str) -> str:
+    """Permiso para COMPLETAR una etapa. Custom: el declarado en su config
+    (default pedido:surtir — estación operativa)."""
+    if etapa in _ACCION_CANONICA:
+        return _ACCION_CANONICA[etapa]
+    c = _customs(cfg).get(etapa) or {}
+    p = c.get("permiso") or "pedido:surtir"
+    return p if p in ACCIONES_VALIDAS else "pedido:surtir"
+
+
+def permiso_menu(cfg: dict, etapa: str) -> str:
+    """Permiso para VER la cola de una etapa (derivado de su permiso de acción)."""
+    return _MENU_DE_ACCION[permiso_accion(cfg, etapa)]
 
 
 def primera_cola(cfg: dict) -> str:
-    """Etapa donde cae un pedido recién creado (la primera activa después de
-    'pedido'); si el flujo es solo captura, nace COMPLETADO."""
-    activas = etapas_activas(cfg)
-    return activas[1] if len(activas) > 1 else COMPLETADO
+    flujo = etapas_flujo(cfg)
+    return flujo[1] if len(flujo) > 1 else COMPLETADO
 
 
 def siguiente_etapa(cfg: dict, actual: str) -> str:
-    """Etapa a la que pasa el pedido al COMPLETAR `actual`."""
-    activas = etapas_activas(cfg)
-    if actual not in activas:
-        raise ValueError(f"Etapa '{actual}' no está activa en el flujo")
-    i = activas.index(actual)
-    return activas[i + 1] if i + 1 < len(activas) else COMPLETADO
+    flujo = etapas_flujo(cfg)
+    if actual not in flujo:
+        raise ValueError(f"Etapa '{actual}' no está en el flujo")
+    i = flujo.index(actual)
+    return flujo[i + 1] if i + 1 < len(flujo) else COMPLETADO
 
 
 def etapa_salida_inventario(cfg: dict) -> Optional[str]:
     """Etapa cuyo COMPLETAR dispara la salida de inventario.
 
-    Regla: la etapa mapeada de `inventario_sale_en` si está activa; si no, la
-    primera activa POSTERIOR a ella; si tampoco hay, la última etapa activa
-    (el cierre del flujo). None solo si el flujo es únicamente 'pedido'
-    (mostrador exprés: sale al crear — lo maneja el llamador).
+    - `inventario_sale_en == "crear"` → SALE_AL_CREAR (al iniciar el pedido).
+    - Si la etapa configurada está en el flujo → esa.
+    - Si no está (o el flujo cambió) → la última etapa del flujo (el cierre).
+    - Flujo de solo 'pedido' → None (el llamador saca al crear).
     """
-    activas = etapas_activas(cfg)
-    colas = [e for e in activas if e != "pedido"]
+    if (cfg.get("inventario_sale_en") or "") == SALE_AL_CREAR:
+        return SALE_AL_CREAR
+    flujo = etapas_flujo(cfg)
+    colas = [e for e in flujo if e != "pedido"]
     if not colas:
         return None
-    objetivo = _SALE_EN_ETAPA.get(cfg.get("inventario_sale_en") or "surtido", "almacen")
-    idx = ETAPAS_ORDEN.index(objetivo)
-    for e in ETAPAS_ORDEN[idx:]:
-        if e in colas:
-            return e
-    return colas[-1]
+    objetivo = cfg.get("inventario_sale_en")
+    return objetivo if objetivo in colas else colas[-1]
 
 
 def validar_config(cfg: dict) -> Optional[str]:
     """Mensaje de error si la config es inválida; None si está bien."""
-    etapas = cfg.get("etapas") or []
-    invalidas = [e for e in etapas if e not in ETAPAS_ORDEN]
+    customs = cfg.get("etapas_custom") or []
+    ids_custom = set()
+    for c in customs:
+        cid = (c.get("id") or "").strip()
+        nombre = (c.get("nombre") or "").strip()
+        if not _SLUG_RE.fullmatch(cid):
+            return f"Id de etapa inválido: '{cid}' (minúsculas/números/_, 2-30 caracteres)"
+        if cid in ETAPAS_CANONICAS or cid in (COMPLETADO, SALE_AL_CREAR):
+            return f"El id '{cid}' está reservado"
+        if cid in ids_custom:
+            return f"Id de etapa duplicado: '{cid}'"
+        if not nombre or len(nombre) > 40:
+            return f"La etapa '{cid}' necesita nombre (máx. 40 caracteres)"
+        if c.get("permiso") and c["permiso"] not in ACCIONES_VALIDAS:
+            return f"Permiso desconocido para la etapa '{cid}'"
+        ids_custom.add(cid)
+
+    conocidas = set(ETAPAS_CANONICAS) | ids_custom
+    invalidas = [e for e in (cfg.get("etapas") or []) if e not in conocidas]
     if invalidas:
-        return f"Etapas desconocidas: {', '.join(invalidas)}"
-    if cfg.get("inventario_sale_en") not in _SALE_EN_ETAPA:
-        return "inventario_sale_en debe ser cobro, surtido o entrega"
+        return f"Etapas desconocidas en el flujo: {', '.join(invalidas)}"
+    if len(cfg.get("etapas") or []) > 8:
+        return "Máximo 8 etapas en el flujo"
+
+    sale = cfg.get("inventario_sale_en") or "almacen"
+    sale = _LEGACY_SALE_EN.get(sale, sale)
+    if sale != SALE_AL_CREAR and sale not in conocidas:
+        return "inventario_sale_en debe ser una etapa del flujo o 'crear'"
     formato = ((cfg.get("ticket") or {}).get("formato") or "80mm")
     if formato not in ("80mm", "carta"):
         return "ticket.formato debe ser 80mm o carta"
