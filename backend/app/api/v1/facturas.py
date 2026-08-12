@@ -88,6 +88,12 @@ def _next_folio(db: Session, tenant_id, serie: str) -> int:
 _fiscal_calc = calcular_linea_producto
 
 
+def _iniciar_saldo_insoluto(factura) -> None:
+    """Al timbrar: una PPD queda por cobrar (saldo = total); PUE / no-PPD en 0.
+    Base del estado de cuenta y de los complementos de pago (REP)."""
+    factura.saldo_insoluto = Decimal(factura.total) if factura.metodo_pago == "PPD" else ZERO
+
+
 def _release_remision_stock(db: Session, rems, ctx, factura) -> None:
     """Devuelve a 'disponible' el stock reservado por remisiones CONFIRMADAS/
     FACTURADAS al cancelar su factura (quedan liberadas como BORRADOR)."""
@@ -689,6 +695,7 @@ def timbrar_factura(
             )
             factura.estado = "TIMBRADA"
             factura.fecha_timbrado = func.now()
+            _iniciar_saldo_insoluto(factura)
             for i in pendientes:
                 i.estado = "TIMBRADA"
                 i.detalle = "Reconciliado: el CFDI ya existía en Facturama"
@@ -719,6 +726,7 @@ def timbrar_factura(
     factura.uuid = uuid_sat
     factura.estado = "TIMBRADA"
     factura.fecha_timbrado = func.now()
+    _iniciar_saldo_insoluto(factura)
     intento.estado = "TIMBRADA"
     # El timbre del SAT se persiste EN ESTE INSTANTE: cualquier falla posterior
     # (inventario, XML, commit final) ya no puede dejar un CFDI real sin registro.

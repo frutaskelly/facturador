@@ -184,6 +184,27 @@ export interface paths {
         patch: operations["update_cliente_api_v1_clientes__cliente_id__patch"];
         trace?: never;
     };
+    "/api/v1/cobranza/estado-cuenta/{cliente_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estado Cuenta
+         * @description Estado de cuenta de un cliente: sus facturas PPD timbradas con saldo
+         *     pendiente + antigüedad de saldos por fecha de vencimiento.
+         */
+        get: operations["estado_cuenta_api_v1_cobranza_estado_cuenta__cliente_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conversiones": {
         parameters: {
             query?: never;
@@ -2980,6 +3001,11 @@ export interface components {
             ret_isr: string;
             /** Ret Iva */
             ret_iva: string;
+            /**
+             * Saldo Insoluto
+             * @default 0
+             */
+            saldo_insoluto: string;
             /** Serie */
             serie: string;
             /** Subtotal */
@@ -3088,6 +3114,11 @@ export interface components {
             ret_isr: string;
             /** Ret Iva */
             ret_iva: string;
+            /**
+             * Saldo Insoluto
+             * @default 0
+             */
+            saldo_insoluto: string;
             /** Serie */
             serie: string;
             /** Subtotal */
@@ -5869,6 +5900,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClienteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    estado_cuenta_api_v1_cobranza_estado_cuenta__cliente_id__get: {
+        parameters: {
+            query?: {
+                /** @description Fecha de corte (default hoy) */
+                corte?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                cliente_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

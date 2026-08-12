@@ -109,6 +109,7 @@ class FacturaOut(ORMModel):
     ret_iva: Decimal
     ret_isr: Decimal
     total: Decimal
+    saldo_insoluto: Decimal = Decimal("0")
     estado: str
     uuid: Optional[str] = None
     fecha_timbrado: Optional[datetime] = None

@@ -59,6 +59,9 @@ class Factura(Base, TimestampMixin, SoftDeleteMixin):
     ret_iva = Column(Numeric(18, 4), nullable=False, server_default="0")
     ret_isr = Column(Numeric(18, 4), nullable=False, server_default="0")
     total = Column(Numeric(18, 4), nullable=False, server_default="0")
+    # Cobranza: lo que falta cobrar de una PPD (arranca = total al timbrar, baja
+    # con cada abono/REP). PUE / no-PPD quedan en 0. Base del estado de cuenta.
+    saldo_insoluto = Column(Numeric(18, 4), nullable=False, server_default="0")
 
     # ── timbrado (lo llena el PAC en P6.2) ──
     estado = Column(FACTURA_ESTADO, nullable=False, server_default="BORRADOR")

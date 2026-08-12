@@ -1,8 +1,11 @@
 "use client";
 
+import Link from "next/link";
+
 import { CrudPage, type CrudConfig } from "@/components/crud/CrudPage";
 import { Badge } from "@/components/ui/Badge";
 import { apiFetch } from "@/lib/api";
+import { fmtMoney } from "@/lib/format";
 import { FORMA_PAGO_OPTS, METODO_PAGO_OPTS, REGIMENES_FISCALES, USO_CFDI_OPTS } from "@/lib/sat";
 import type { Cliente } from "@/lib/types";
 
@@ -18,7 +21,15 @@ const config: CrudConfig<Cliente> = {
     { header: "Código", cell: (c) => c.codigo ?? "—" },
     { header: "Razón social", cell: (c) => <span className="font-medium">{c.legal_name}</span> },
     { header: "RFC", cell: (c) => c.rfc },
+    { header: "Saldo", className: "text-right tabular-nums",
+      cell: (c) => Number(c.saldo_actual) > 0
+        ? <span className="font-medium text-danger">{fmtMoney(c.saldo_actual)}</span>
+        : <span className="text-muted">—</span> },
     { header: "Estado", cell: (c) => <Badge tone={c.status === "ACTIVO" ? "success" : "muted"}>{c.status}</Badge> },
+    { header: "", cell: (c) => (
+      <Link href={`/clientes/${c.id}/estado-cuenta`} onClick={(e) => e.stopPropagation()}
+        className="text-sm text-accent hover:underline">Estado de cuenta</Link>
+    ) },
   ],
   fields: [
     { name: "codigo", label: "Código", readonly: true, hint: "Se genera automáticamente" },

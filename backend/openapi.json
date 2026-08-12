@@ -3100,6 +3100,11 @@
       "title": "Ret Iva",
       "type": "string"
      },
+     "saldo_insoluto": {
+      "default": "0",
+      "title": "Saldo Insoluto",
+      "type": "string"
+     },
      "serie": {
       "title": "Serie",
       "type": "string"
@@ -3397,6 +3402,11 @@
      },
      "ret_iva": {
       "title": "Ret Iva",
+      "type": "string"
+     },
+     "saldo_insoluto": {
+      "default": "0",
+      "title": "Saldo Insoluto",
       "type": "string"
      },
      "serie": {
@@ -11024,6 +11034,88 @@
     "summary": "Update Cliente",
     "tags": [
      "clientes"
+    ]
+   }
+  },
+  "/api/v1/cobranza/estado-cuenta/{cliente_id}": {
+   "get": {
+    "description": "Estado de cuenta de un cliente: sus facturas PPD timbradas con saldo\npendiente + antigüedad de saldos por fecha de vencimiento.",
+    "operationId": "estado_cuenta_api_v1_cobranza_estado_cuenta__cliente_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Fecha de corte (default hoy)",
+      "in": "query",
+      "name": "corte",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Fecha de corte (default hoy)",
+       "title": "Corte"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Estado Cuenta",
+    "tags": [
+     "cobranza"
     ]
    }
   },

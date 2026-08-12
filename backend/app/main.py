@@ -13,6 +13,7 @@ from .api.v1 import (
     auth,
     categorias,
     clientes,
+    cobranza,
     conversiones,
     correo,
     empresa,
@@ -99,6 +100,7 @@ app.include_router(esquemas_impuesto.router, prefix="/api/v1")
 app.include_router(productos.router, prefix="/api/v1")
 app.include_router(listas_precios.router, prefix="/api/v1")
 app.include_router(clientes.router, prefix="/api/v1")
+app.include_router(cobranza.router, prefix="/api/v1")
 # Phase 4 — operaciones
 app.include_router(proveedores.router, prefix="/api/v1")
 app.include_router(almacenes.router, prefix="/api/v1")
