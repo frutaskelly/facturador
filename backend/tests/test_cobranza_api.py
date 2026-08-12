@@ -16,7 +16,7 @@ from app.core.db import SessionLocal
 from app.main import app
 from app.models import Cliente, Factura, Membership, Role, Tenant, User
 
-_PURGE = ("lineas_factura", "facturas", "clientes")
+_PURGE = ("recibo_pago_facturas", "recibos_pago", "timbrado_intentos", "lineas_factura", "facturas", "clientes")
 
 
 @pytest.fixture
@@ -113,3 +113,98 @@ def test_estado_cuenta_vacio(client, env, auth):
     assert r.status_code == 200, r.text
     assert float(r.json()["saldo_total"]) == 0.0
     assert r.json()["facturas"] == []
+
+
+# ── Recibos de Pago (REP) F2 ─────────────────────────────────────────────────
+import app.api.v1.cobranza as cobranza_mod
+
+
+class _FakePAC:
+    configured = True
+    env_label = "sandbox"
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls()
+
+    def create_cfdi_pago(self, payload):
+        return {"Id": "REP-FAKE", "Complement": {"TaxStamp": {"Uuid": str(uuid.uuid4())}}}
+
+    def download_xml(self, cfdi_id):
+        return b"<xml/>"
+
+    def buscar_cfdi(self, serie, folio):
+        return True, None
+
+
+@pytest.fixture
+def fake_pac(monkeypatch):
+    monkeypatch.setattr(cobranza_mod, "FacturamaClient", _FakePAC)
+
+
+def _saldo_factura(fid):
+    db = SessionLocal()
+    try:
+        return Decimal(db.query(Factura).filter(Factura.id == uuid.UUID(fid)).one().saldo_insoluto)
+    finally:
+        db.close()
+
+
+def test_rep_registrar_timbrar_descuenta_saldo(client, env, auth, fake_pac):
+    # Factura PPD de $1160 con saldo full.
+    fid = _factura_ppd_timbrada(env, total=1160, dias_atras=40, folio=10)
+    h = _h(env)
+    hoy = datetime.now(timezone.utc).isoformat()
+    # Pago parcial de $500 → abono, saldo 660.
+    r = client.post("/api/v1/cobranza/recibos-pago", headers=h, json={
+        "cliente_id": env["cli"], "fecha_pago": hoy, "forma_pago": "03", "monto": "500",
+        "facturas": [{"factura_id": fid, "importe": "500"}]})
+    assert r.status_code == 201, r.text
+    rec = r.json()
+    assert rec["estado"] == "BORRADOR"
+    assert rec["facturas"][0]["num_parcialidad"] == 1
+    assert float(rec["facturas"][0]["saldo_anterior"]) == 1160.0
+    assert float(rec["facturas"][0]["saldo_insoluto"]) == 660.0
+    assert _saldo_factura(fid) == Decimal("1160")     # aún no timbrado, no descuenta
+
+    t = client.post(f"/api/v1/cobranza/recibos-pago/{rec['id']}/timbrar", headers=h)
+    assert t.status_code == 200, t.text
+    assert t.json()["estado"] == "TIMBRADO" and t.json()["uuid"]
+    assert _saldo_factura(fid) == Decimal("660")      # timbrado → descuenta
+
+    # Segundo abono de $660 → parcialidad 2, salda la factura.
+    r2 = client.post("/api/v1/cobranza/recibos-pago", headers=h, json={
+        "cliente_id": env["cli"], "fecha_pago": hoy, "forma_pago": "03", "monto": "660",
+        "facturas": [{"factura_id": fid, "importe": "660"}]})
+    assert r2.json()["facturas"][0]["num_parcialidad"] == 2
+    t2 = client.post(f"/api/v1/cobranza/recibos-pago/{r2.json()['id']}/timbrar", headers=h)
+    assert t2.status_code == 200, t2.text
+    assert _saldo_factura(fid) == Decimal("0")        # saldada
+    # Ya no aparece en el estado de cuenta.
+    ec = client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli']}", headers=h).json()
+    assert all(d["factura_id"] != fid for d in ec["facturas"])
+
+
+def test_rep_valida_monto_y_saldo(client, env, auth):
+    fid = _factura_ppd_timbrada(env, total=1000, dias_atras=10, folio=11)
+    h = _h(env); hoy = datetime.now(timezone.utc).isoformat()
+    # suma no cuadra con monto → 422
+    r = client.post("/api/v1/cobranza/recibos-pago", headers=h, json={
+        "cliente_id": env["cli"], "fecha_pago": hoy, "forma_pago": "03", "monto": "500",
+        "facturas": [{"factura_id": fid, "importe": "300"}]})
+    assert r.status_code == 422 and "cuadra" in r.json()["detail"]
+    # importe excede saldo → 422
+    r2 = client.post("/api/v1/cobranza/recibos-pago", headers=h, json={
+        "cliente_id": env["cli"], "fecha_pago": hoy, "forma_pago": "03", "monto": "2000",
+        "facturas": [{"factura_id": fid, "importe": "2000"}]})
+    assert r2.status_code == 422 and "excede el saldo" in r2.json()["detail"]
+
+
+def test_rep_solo_ppd_timbrada(client, env, auth):
+    # PUE timbrada → no aplica REP.
+    fid = _factura_ppd_timbrada(env, total=500, dias_atras=5, metodo="PUE", folio=12)
+    h = _h(env); hoy = datetime.now(timezone.utc).isoformat()
+    r = client.post("/api/v1/cobranza/recibos-pago", headers=h, json={
+        "cliente_id": env["cli"], "fecha_pago": hoy, "forma_pago": "03", "monto": "500",
+        "facturas": [{"factura_id": fid, "importe": "500"}]})
+    assert r.status_code == 422 and "PPD timbrada" in r.json()["detail"]

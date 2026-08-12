@@ -9,18 +9,29 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ...core.config import settings
+from ...core.db import set_role_tenant
+from ...core.ratelimit import enforce
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Cliente, Factura
+from ...models import Cliente, Factura, ReciboPago, ReciboPagoFactura, Tenant, TimbradoIntento
+from ...services.facturama import FacturamaClient, FacturamaError
+from ...services.rep import build_payload_rep
+from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import get_or_404
 
 router = APIRouter(prefix="/cobranza", tags=["cobranza"])
 
-_READ = "menu:facturas"   # quien ve facturas ve la cobranza (F1); permiso propio en F2
+_READ = "menu:facturas"      # ver cobranza = ver facturas
+_WRITE = "factura:gestionar"  # registrar/timbrar REP = mismo permiso que timbrar facturas
+ZERO = Decimal("0")
 
 
 def _bucket(dias_vencida: int) -> str:
@@ -95,3 +106,263 @@ def estado_cuenta(
         "antiguedad": antiguedad,
         "facturas": docs,
     }
+
+
+# ─── Recibos de Pago (REP) — registrar + timbrar ─────────────────────────────
+def _commit_seguro(db: Session, ctx: AuthContext) -> None:
+    """Commit intermedio re-armando ROLE app_user + GUC del tenant (mismo patrón
+    que facturas): un timbre del SAT jamás se pierde por un rollback posterior."""
+    db.commit()
+    set_role_tenant(db, ctx.tenant_id)
+
+
+def _next_folio_rep(db: Session, ctx: AuthContext, cliente_id) -> tuple[str, int]:
+    """Serie/folio del REP: serie tipo PAGO resuelta (override→sucursal→cliente→
+    default), contador atómico; fallback a serie 'P' por código."""
+    serie = resolver_serie(db, ctx.tenant_id, "PAGO", cliente_id=cliente_id)
+    if serie is not None:
+        folio = consumir_folio(db, serie.id)
+        if folio is not None:
+            return serie.codigo, folio
+    folio = siguiente_folio(db, ctx.tenant_id, codigo="P", tipo_documento="PAGO")
+    if folio is not None:
+        return "P", folio
+    mx = db.query(func.coalesce(func.max(ReciboPago.folio), 0)).filter(ReciboPago.serie == "P").scalar()
+    return "P", int(mx) + 1
+
+
+class ReciboFacturaIn(BaseModel):
+    factura_id: UUID
+    importe: Decimal = Field(gt=0)
+
+
+class ReciboPagoIn(BaseModel):
+    cliente_id: UUID
+    fecha_pago: datetime
+    forma_pago: str = Field(max_length=5)          # SAT: 01/03/04/...
+    monto: Decimal = Field(gt=0)
+    moneda: str = Field(default="MXN", max_length=3)
+    num_operacion: Optional[str] = Field(default=None, max_length=100)
+    banco: Optional[str] = Field(default=None, max_length=100)
+    notas: Optional[str] = Field(default=None, max_length=500)
+    facturas: list[ReciboFacturaIn] = Field(min_length=1, max_length=100)
+
+
+def _recibo_out(db: Session, recibo: ReciboPago) -> dict:
+    filas = (
+        db.query(ReciboPagoFactura)
+        .filter(ReciboPagoFactura.recibo_id == recibo.id)
+        .all()
+    )
+    fac = {
+        f.id: f for f in db.query(Factura).filter(
+            Factura.id.in_([r.factura_id for r in filas])
+        ).all()
+    } if filas else {}
+    return {
+        "id": str(recibo.id),
+        "serie": recibo.serie, "folio": recibo.folio,
+        "cliente_id": str(recibo.cliente_id),
+        "fecha_pago": recibo.fecha_pago,
+        "forma_pago": recibo.forma_pago,
+        "monto": recibo.monto, "moneda": recibo.moneda,
+        "num_operacion": recibo.num_operacion, "banco": recibo.banco,
+        "estado": recibo.estado, "uuid": recibo.uuid,
+        "fecha_timbrado": recibo.fecha_timbrado,
+        "facturas": [{
+            "factura_id": str(r.factura_id),
+            "serie": fac[r.factura_id].serie if r.factura_id in fac else None,
+            "folio": fac[r.factura_id].folio if r.factura_id in fac else None,
+            "importe_pagado": r.importe_pagado,
+            "num_parcialidad": r.num_parcialidad,
+            "saldo_anterior": r.saldo_anterior,
+            "saldo_insoluto": r.saldo_insoluto,
+        } for r in filas],
+    }
+
+
+@router.get("/recibos-pago")
+def list_recibos(
+    cliente_id: Optional[UUID] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    q = db.query(ReciboPago).filter(ReciboPago.tenant_id == ctx.tenant_id)
+    if cliente_id is not None:
+        q = q.filter(ReciboPago.cliente_id == cliente_id)
+    total = q.count()
+    rows = q.order_by(ReciboPago.created_at.desc()).limit(limit).offset(offset).all()
+    return {"items": [_recibo_out(db, r) for r in rows], "total": total,
+            "limit": limit, "offset": offset}
+
+
+@router.get("/recibos-pago/{recibo_id}")
+def get_recibo(
+    recibo_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    return _recibo_out(db, get_or_404(db, ReciboPago, recibo_id, soft=False))
+
+
+@router.post("/recibos-pago", status_code=201)
+def crear_recibo(
+    payload: ReciboPagoIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Registra un pago (BORRADOR) y le anexa las facturas que cubre. Valida que
+    todas sean PPD timbradas del cliente, que cada importe no exceda su saldo, y
+    que la suma cuadre con el monto. Calcula parcialidad y saldos por factura."""
+    cliente = get_or_404(db, Cliente, payload.cliente_id)
+    suma = sum((Decimal(f.importe) for f in payload.facturas), ZERO)
+    if abs(suma - Decimal(payload.monto)) > Decimal("0.01"):
+        raise HTTPException(status_code=422, detail=f"La suma aplicada (${suma:,.2f}) no cuadra con el monto (${payload.monto:,.2f})")
+
+    recibo = ReciboPago(
+        tenant_id=ctx.tenant_id, cliente_id=cliente.id,
+        fecha_pago=payload.fecha_pago, forma_pago=payload.forma_pago,
+        monto=Decimal(payload.monto), moneda=payload.moneda,
+        num_operacion=payload.num_operacion, banco=payload.banco,
+        notas=(payload.notas or "").strip() or None,
+        estado="BORRADOR", created_by=ctx.user_id,
+    )
+    serie, folio = _next_folio_rep(db, ctx, cliente.id)
+    recibo.serie, recibo.folio = serie, folio
+    db.add(recibo)
+    db.flush()
+
+    for item in payload.facturas:
+        f = (
+            db.query(Factura)
+            .filter(Factura.id == item.factura_id, Factura.deleted_at.is_(None))
+            .with_for_update()
+            .one_or_none()
+        )
+        if f is None or f.cliente_id != cliente.id:
+            raise HTTPException(status_code=422, detail="Una factura no pertenece al cliente")
+        if f.estado != "TIMBRADA" or f.metodo_pago != "PPD":
+            raise HTTPException(status_code=422, detail=f"La factura {f.serie}{f.folio} no es una PPD timbrada")
+        saldo_ant = Decimal(f.saldo_insoluto)
+        importe = Decimal(item.importe)
+        if importe > saldo_ant + Decimal("0.01"):
+            raise HTTPException(
+                status_code=422,
+                detail=f"El importe (${importe:,.2f}) excede el saldo de {f.serie}{f.folio} (${saldo_ant:,.2f})",
+            )
+        # Parcialidad = cuántos abonos previos (recibos timbrados) tiene la factura + 1.
+        previos = (
+            db.query(func.count(ReciboPagoFactura.id))
+            .join(ReciboPago, ReciboPago.id == ReciboPagoFactura.recibo_id)
+            .filter(ReciboPagoFactura.factura_id == f.id, ReciboPago.estado == "TIMBRADO")
+            .scalar()
+        )
+        db.add(ReciboPagoFactura(
+            tenant_id=ctx.tenant_id, recibo_id=recibo.id, factura_id=f.id,
+            importe_pagado=importe, num_parcialidad=int(previos) + 1,
+            saldo_anterior=saldo_ant, saldo_insoluto=saldo_ant - importe,
+            moneda_dr=f.moneda or "MXN",
+        ))
+    db.flush()
+    db.refresh(recibo)
+    return _recibo_out(db, recibo)
+
+
+@router.post("/recibos-pago/{recibo_id}/timbrar")
+def timbrar_recibo(
+    recibo_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Timbra el REP ante el PAC y descuenta el saldo insoluto de cada factura.
+    Mismo blindaje que las facturas: FOR UPDATE, bitácora anti-doble-timbrado,
+    persistencia inmediata del timbre."""
+    enforce(f"timbrar-rep:{ctx.tenant_id}", 300, 3600)
+    recibo = get_or_404(db, ReciboPago, recibo_id, soft=False, for_update=True)
+    if recibo.estado == "TIMBRADO":
+        raise HTTPException(status_code=409, detail="El recibo ya está timbrado")
+    if recibo.estado == "CANCELADO":
+        raise HTTPException(status_code=409, detail="El recibo está cancelado")
+
+    client = FacturamaClient.from_settings(settings)
+    if not client.configured:
+        raise HTTPException(status_code=503, detail="Facturama no está configurado")
+
+    filas = db.query(ReciboPagoFactura).filter(ReciboPagoFactura.recibo_id == recibo.id).all()
+    docs = []
+    for rf in filas:
+        f = db.query(Factura).filter(Factura.id == rf.factura_id).with_for_update().one()
+        # Revalidar el saldo: pudo cambiar desde que se registró el borrador.
+        if Decimal(rf.importe_pagado) > Decimal(f.saldo_insoluto) + Decimal("0.01"):
+            raise HTTPException(
+                status_code=422,
+                detail=f"El saldo de {f.serie}{f.folio} cambió; recrea el recibo",
+            )
+        docs.append((rf, f))
+
+    cliente = db.query(Cliente).filter(Cliente.id == recibo.cliente_id).one()
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+
+    # Bitácora anti-doble-timbrado (igual que facturas): PENDIENTE fresco = mutex;
+    # viejo = reconcilia contra el PAC por serie/folio antes de re-timbrar.
+    pendientes = (
+        db.query(TimbradoIntento)
+        .filter(TimbradoIntento.recibo_pago_id == recibo.id, TimbradoIntento.estado == "PENDIENTE")
+        .all()
+    )
+    if pendientes:
+        ahora = db.query(func.now()).scalar()
+        if any((ahora - i.created_at).total_seconds() < 300 for i in pendientes):
+            raise HTTPException(status_code=409, detail="Hay un timbrado en curso para este recibo; espera y recarga")
+        ok, existente = client.buscar_cfdi(recibo.serie, recibo.folio)
+        if not ok:
+            raise HTTPException(status_code=409, detail="Intento previo sin confirmar y no se pudo verificar con el PAC; reintenta")
+        if existente is not None:
+            recibo.facturama_id = existente.get("Id")
+            recibo.uuid = (((existente.get("Complement") or {}).get("TaxStamp") or {}).get("Uuid")
+                           or existente.get("Uuid"))
+            recibo.estado = "TIMBRADO"
+            recibo.fecha_timbrado = func.now()
+            _aplicar_saldos(docs)
+            for i in pendientes:
+                i.estado = "TIMBRADA"; i.detalle = "Reconciliado: el CFDI ya existía"
+            _commit_seguro(db, ctx)
+            db.refresh(recibo)
+            return _recibo_out(db, recibo)
+        for i in pendientes:
+            i.estado = "ERROR"; i.detalle = "Verificado con el PAC: no llegó a timbrar"
+
+    payload = build_payload_rep(recibo, cliente, tenant, docs, settings)
+    intento = TimbradoIntento(tenant_id=ctx.tenant_id, recibo_pago_id=recibo.id, estado="PENDIENTE")
+    db.add(intento)
+    _commit_seguro(db, ctx)
+
+    try:
+        resp = client.create_cfdi_pago(payload)
+    except FacturamaError as exc:
+        intento.estado = "ERROR"; intento.detalle = str(exc)[:2000]
+        _commit_seguro(db, ctx)
+        raise HTTPException(status_code=502, detail=f"Timbrado del REP rechazado por el PAC: {exc}")
+
+    recibo.facturama_id = resp.get("Id")
+    recibo.uuid = ((resp.get("Complement") or {}).get("TaxStamp") or {}).get("Uuid") or resp.get("Uuid")
+    recibo.estado = "TIMBRADO"
+    recibo.fecha_timbrado = func.now()
+    intento.estado = "TIMBRADA"
+    _aplicar_saldos(docs)                 # descuenta el saldo insoluto de cada factura
+    _commit_seguro(db, ctx)               # el timbre se persiste en el instante
+    try:
+        recibo.xml = client.download_xml(recibo.facturama_id).decode("utf-8", "ignore")
+        db.flush()
+    except FacturamaError:
+        pass                               # el timbre ya quedó; el XML se baja luego
+    db.refresh(recibo)
+    return _recibo_out(db, recibo)
+
+
+def _aplicar_saldos(docs) -> None:
+    """Baja el saldo insoluto de cada factura al saldo calculado en el recibo."""
+    for rf, factura in docs:
+        factura.saldo_insoluto = Decimal(rf.saldo_insoluto)

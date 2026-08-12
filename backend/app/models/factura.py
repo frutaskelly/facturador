@@ -135,8 +135,12 @@ class TimbradoIntento(Base, TimestampMixin):
 
     id = uuid_pk()
     tenant_id = tenant_fk()
+    # Un intento es de una factura O de un recibo de pago (REP).
     factura_id = Column(
-        UUID(as_uuid=True), ForeignKey("facturas.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("facturas.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    recibo_pago_id = Column(
+        UUID(as_uuid=True), ForeignKey("recibos_pago.id", ondelete="CASCADE"), nullable=True, index=True
     )
     # PENDIENTE (en vuelo) | TIMBRADA (éxito) | ERROR (el PAC rechazó / no llegó)
     estado = Column(String(10), nullable=False, server_default="PENDIENTE")

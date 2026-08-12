@@ -205,6 +205,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cobranza/recibos-pago": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Recibos */
+        get: operations["list_recibos_api_v1_cobranza_recibos_pago_get"];
+        put?: never;
+        /**
+         * Crear Recibo
+         * @description Registra un pago (BORRADOR) y le anexa las facturas que cubre. Valida que
+         *     todas sean PPD timbradas del cliente, que cada importe no exceda su saldo, y
+         *     que la suma cuadre con el monto. Calcula parcialidad y saldos por factura.
+         */
+        post: operations["crear_recibo_api_v1_cobranza_recibos_pago_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/recibos-pago/{recibo_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Recibo */
+        get: operations["get_recibo_api_v1_cobranza_recibos_pago__recibo_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/recibos-pago/{recibo_id}/timbrar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Timbrar Recibo
+         * @description Timbra el REP ante el PAC y descuenta el saldo insoluto de cada factura.
+         *     Mismo blindaje que las facturas: FOR UPDATE, bitácora anti-doble-timbrado,
+         *     persistencia inmediata del timbre.
+         */
+        post: operations["timbrar_recibo_api_v1_cobranza_recibos_pago__recibo_id__timbrar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conversiones": {
         parameters: {
             query?: never;
@@ -4649,6 +4711,46 @@ export interface components {
             /** Recepciones */
             recepciones?: components["schemas"]["RecepcionLinea"][] | null;
         };
+        /** ReciboFacturaIn */
+        ReciboFacturaIn: {
+            /**
+             * Factura Id
+             * Format: uuid
+             */
+            factura_id: string;
+            /** Importe */
+            importe: number | string;
+        };
+        /** ReciboPagoIn */
+        ReciboPagoIn: {
+            /** Banco */
+            banco?: string | null;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Facturas */
+            facturas: components["schemas"]["ReciboFacturaIn"][];
+            /**
+             * Fecha Pago
+             * Format: date-time
+             */
+            fecha_pago: string;
+            /** Forma Pago */
+            forma_pago: string;
+            /**
+             * Moneda
+             * @default MXN
+             */
+            moneda: string;
+            /** Monto */
+            monto: number | string;
+            /** Notas */
+            notas?: string | null;
+            /** Num Operacion */
+            num_operacion?: string | null;
+        };
         /** RegistroIn */
         RegistroIn: {
             /** Domicilio Fiscal Cp */
@@ -5924,6 +6026,142 @@ export interface operations {
             };
             path: {
                 cliente_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recibos_api_v1_cobranza_recibos_pago_get: {
+        parameters: {
+            query?: {
+                cliente_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    crear_recibo_api_v1_cobranza_recibos_pago_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReciboPagoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_recibo_api_v1_cobranza_recibos_pago__recibo_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                recibo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    timbrar_recibo_api_v1_cobranza_recibos_pago__recibo_id__timbrar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                recibo_id: string;
             };
             cookie?: never;
         };

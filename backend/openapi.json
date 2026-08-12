@@ -7791,6 +7791,124 @@
     "title": "RecibirIn",
     "type": "object"
    },
+   "ReciboFacturaIn": {
+    "properties": {
+     "factura_id": {
+      "format": "uuid",
+      "title": "Factura Id",
+      "type": "string"
+     },
+     "importe": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Importe"
+     }
+    },
+    "required": [
+     "factura_id",
+     "importe"
+    ],
+    "title": "ReciboFacturaIn",
+    "type": "object"
+   },
+   "ReciboPagoIn": {
+    "properties": {
+     "banco": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Banco"
+     },
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "facturas": {
+      "items": {
+       "$ref": "#/components/schemas/ReciboFacturaIn"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Facturas",
+      "type": "array"
+     },
+     "fecha_pago": {
+      "format": "date-time",
+      "title": "Fecha Pago",
+      "type": "string"
+     },
+     "forma_pago": {
+      "maxLength": 5,
+      "title": "Forma Pago",
+      "type": "string"
+     },
+     "moneda": {
+      "default": "MXN",
+      "maxLength": 3,
+      "title": "Moneda",
+      "type": "string"
+     },
+     "monto": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Monto"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "maxLength": 500,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "num_operacion": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Num Operacion"
+     }
+    },
+    "required": [
+     "cliente_id",
+     "fecha_pago",
+     "forma_pago",
+     "monto",
+     "facturas"
+    ],
+    "title": "ReciboPagoIn",
+    "type": "object"
+   },
    "RegistroIn": {
     "properties": {
      "domicilio_fiscal_cp": {
@@ -11114,6 +11232,284 @@
      }
     ],
     "summary": "Estado Cuenta",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/recibos-pago": {
+   "get": {
+    "operationId": "list_recibos_api_v1_cobranza_recibos_pago_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "maximum": 200,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "List Recibos",
+    "tags": [
+     "cobranza"
+    ]
+   },
+   "post": {
+    "description": "Registra un pago (BORRADOR) y le anexa las facturas que cubre. Valida que\ntodas sean PPD timbradas del cliente, que cada importe no exceda su saldo, y\nque la suma cuadre con el monto. Calcula parcialidad y saldos por factura.",
+    "operationId": "crear_recibo_api_v1_cobranza_recibos_pago_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReciboPagoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Crear Recibo",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/recibos-pago/{recibo_id}": {
+   "get": {
+    "operationId": "get_recibo_api_v1_cobranza_recibos_pago__recibo_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "recibo_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Recibo Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Get Recibo",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/recibos-pago/{recibo_id}/timbrar": {
+   "post": {
+    "description": "Timbra el REP ante el PAC y descuenta el saldo insoluto de cada factura.\nMismo blindaje que las facturas: FOR UPDATE, bitácora anti-doble-timbrado,\npersistencia inmediata del timbre.",
+    "operationId": "timbrar_recibo_api_v1_cobranza_recibos_pago__recibo_id__timbrar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "recibo_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Recibo Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Timbrar Recibo",
     "tags": [
      "cobranza"
     ]

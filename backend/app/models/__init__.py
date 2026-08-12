@@ -9,6 +9,7 @@ from .esquema_impuesto import EsquemaImpuesto
 from .devolucion import Devolucion, LineaDevolucion
 from .factura import Factura, LineaFactura, TimbradoIntento
 from .pago import Pago
+from .recibo_pago import ReciboPago, ReciboPagoFactura
 from .pos_corte import PosCorte
 from .inventario import LoteInventario, Merma, MovimientoInventario
 from .orden_compra import LineaOrdenCompra, OrdenCompra
@@ -56,6 +57,8 @@ __all__ = [
     "LineaDevolucion",
     "LineaFactura",
     "Pago",
+    "ReciboPago",
+    "ReciboPagoFactura",
     "PosCorte",
     "TimbradoIntento",
     # ── precios v2 ──
