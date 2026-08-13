@@ -69,6 +69,12 @@ def build_payload_rep(recibo, cliente, tenant, docs, settings) -> dict:
         payload["Serie"] = recibo.serie
         payload["Folio"] = recibo.folio
 
+    # Ancla propia para reconciliar un timbrado del REP que murió a media llamada
+    # (mismo patrón que las facturas): OrderNumber = serie+folio del recibo. Único
+    # por recibo; buscar_cfdi lo confirma en el detalle tras acotar por receptor.
+    if recibo.serie and str(recibo.folio or "").strip():
+        payload["OrderNumber"] = f"{recibo.serie}{recibo.folio}"
+
     # Emisor: mismo criterio que las facturas (override global / multiemisor / default).
     if settings.FACTURAMA_ISSUER_RFC:
         payload["Issuer"] = {

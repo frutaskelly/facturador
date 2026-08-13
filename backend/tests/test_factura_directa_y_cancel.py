@@ -40,7 +40,7 @@ class _FakePAC:
     def download_xml(self, cfdi_id):
         return b"<xml/>"
 
-    def buscar_cfdi(self, serie, folio):
+    def buscar_cfdi(self, order_number, **kw):
         return True, None
 
     def cancel_cfdi(self, cfdi_id, motive, uuid_replacement=None):
@@ -314,8 +314,8 @@ def test_timbrar_pendiente_viejo_reconcilia_y_adopta(client, env, auth, monkeypa
         def create_cfdi(self, payload):
             raise AssertionError("no debe re-timbrar: el CFDI ya existía")
 
-        def buscar_cfdi(self, serie, folio):
-            return True, {"Id": "YA-EXISTIA", "Serie": serie, "Folio": str(folio),
+        def buscar_cfdi(self, order_number, **kw):
+            return True, {"Id": "YA-EXISTIA", "OrderNumber": order_number,
                           "Complement": {"TaxStamp": {"Uuid": uuid_sat}}}
 
     monkeypatch.setattr(facturas_mod, "FacturamaClient", _PACReconcilia)

@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -28,6 +29,52 @@ import httpx
 log = logging.getLogger(__name__)
 
 _SANDBOX_HOST = "apisandbox.facturama.mx"
+
+
+def _importe_igual(a, b, tol: float = 0.005) -> bool:
+    """Igualdad de importes con tolerancia de medio centavo (los totales de la
+    lista de Facturama son float; el de la app es Decimal)."""
+    try:
+        return abs(float(a) - float(b)) < tol
+    except (TypeError, ValueError):
+        return False
+
+
+def _parse_fecha(s) -> Optional[datetime]:
+    """Fecha naive (hora local MX) que Facturama devuelve en la lista, p. ej.
+    '2026-08-13T15:28:01'. None si no se puede parsear."""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s)[:19])
+    except (TypeError, ValueError):
+        return None
+
+
+def _fecha_ge(fecha_str, desde) -> bool:
+    """¿La fecha del CFDI es >= `desde`? Permisivo: si el CFDI no trae fecha
+    parseable NO se excluye (un falso descarte causaría un re-timbrado duplicado).
+    `desde` puede venir tz-aware (created_at UTC); se compara naive y el llamador
+    ya aplicó un margen amplio que absorbe el desfase de zona (~6 h)."""
+    dt = _parse_fecha(fecha_str)
+    if dt is None:
+        return True
+    d = desde.replace(tzinfo=None) if getattr(desde, "tzinfo", None) else desde
+    try:
+        return dt >= d
+    except TypeError:
+        return True
+
+
+def _fecha_orden(fecha_str):
+    """Clave de orden: más reciente primero; sin fecha → al final."""
+    dt = _parse_fecha(fecha_str)
+    if dt is None:
+        return float("inf")
+    try:
+        return -dt.timestamp()
+    except (OverflowError, OSError, ValueError):
+        return float("inf")
 
 
 class FacturamaError(Exception):
@@ -129,27 +176,88 @@ class FacturamaClient:
                 raise FacturamaError(f"create_cfdi_pago failed: {r.status_code} {r.text}")
             return r.json()
 
-    def buscar_cfdi(self, serie: str, folio) -> tuple[bool, Optional[dict]]:
-        """Busca un CFDI emitido por serie+folio (reconciliación de intentos de
-        timbrado que quedaron PENDIENTE). Devuelve (búsqueda_ok, cfdi|None):
-        (True, None) = la búsqueda funcionó y NO existe; (False, None) = no se
-        pudo verificar (red/API) — el llamador NO debe re-timbrar en ese caso."""
+    def buscar_cfdi(
+        self,
+        order_number: str,
+        *,
+        receptor_rfc: str,
+        emisor_rfc: Optional[str] = None,
+        total=None,
+        desde=None,
+        cap: int = 100,
+    ) -> tuple[bool, Optional[dict]]:
+        """Reconcilia un intento de timbrado PENDIENTE: ¿el CFDI que ese intento
+        pudo crear antes de morir (crash entre create_cfdi y el commit) ya existe
+        en Facturama? Ancla en `OrderNumber` (= serie+folio de la app, inyectado al
+        crear el CFDI).
+
+        Facturama NO indexa OrderNumber en su `keyword` (solo Folio + RFC/Nombre
+        del receptor), pero SÍ lo devuelve en el detalle del CFDI. Por eso se ACOTA
+        por RFC del receptor (keyword) + emisor (RfcIssuer, para no adoptar el CFDI
+        de otro tenant en cuentas multi-emisor) + fecha, y se CONFIRMA el
+        OrderNumber exacto leyendo el detalle de cada candidato.
+
+        Contrato (para nunca re-timbrar a ciegas → nunca duplicar ante el SAT):
+          (True,  cfdi) → existe: adoptar, JAMÁS re-timbrar.
+          (True,  None) → se verificó EXHAUSTIVAMENTE que no existe: seguro re-timbrar.
+          (False, None) → no se pudo verificar (red/API, un detalle ilegible, o
+                          demasiados candidatos para revisar): el llamador NO debe
+                          re-timbrar (mejor un 409 y reintentar que un duplicado).
+
+        `total` NUNCA excluye candidatos (un redondeo distinto daría un falso "no
+        existe" → duplicado); solo prioriza para que el `cap` conserve los más
+        probables. `desde` (fecha mínima) sí acota, con margen amplio.
+        """
+        objetivo = str(order_number).strip()
+        if not objetivo:
+            return False, None
+        emisor = str(emisor_rfc).strip().upper() if emisor_rfc else None
         try:
             with self._client() as c:
-                r = c.get("/cfdi", params={"type": "issued", "keyword": str(folio)})
+                r = c.get("/cfdi", params={"type": "issued", "keyword": str(receptor_rfc)})
                 if r.status_code != 200:
                     return False, None
                 data = r.json()
                 items = data if isinstance(data, list) else []
+                cands = []
                 for it in items:
                     if not isinstance(it, dict):
                         continue
-                    if (
-                        str(it.get("Serie") or "").strip() == str(serie).strip()
-                        and str(it.get("Folio") or "").strip() == str(folio).strip()
-                    ):
-                        return True, it
-                return True, None
+                    # Solo CFDI VIGENTES: un timbrado que sí cuajó (el caso peligroso
+                    # a reconciliar) siempre queda "active"; los cancelados/invalid
+                    # jamás son el objetivo y además su detalle puede no ser legible
+                    # (p. ej. 401), lo que bloquearía la reconciliación. Status vacío
+                    # → se incluye (permisivo, no descartar el objetivo por una etiqueta).
+                    estado = str(it.get("Status") or "").strip().lower()
+                    if estado and estado != "active":
+                        continue
+                    if emisor and str(it.get("RfcIssuer") or "").strip().upper() != emisor:
+                        continue
+                    if desde is not None and not _fecha_ge(it.get("Date"), desde):
+                        continue
+                    cands.append(it)
+                # Prioriza: mismo total primero, luego más recientes (para que el
+                # cap conserve los candidatos más probables). El orden no afecta la
+                # correctitud —el OrderNumber confirma—, solo qué se revisa si hay
+                # más candidatos que `cap`.
+                cands.sort(key=lambda it: (
+                    0 if (total is not None and _importe_igual(it.get("Total"), total)) else 1,
+                    _fecha_orden(it.get("Date")),
+                ))
+                truncado = len(cands) > cap
+                for it in cands[:cap]:
+                    cid = it.get("Id")
+                    if not cid:
+                        continue
+                    d = c.get(f"/cfdi/{cid}", params={"type": "issued"})
+                    if d.status_code != 200:
+                        return False, None  # candidato no verificable → no re-timbrar
+                    det = d.json()
+                    if str(det.get("OrderNumber") or "").strip() == objetivo:
+                        return True, det
+                # Sin match: solo es un "no existe" fiable si se revisaron TODOS los
+                # candidatos; si el cap dejó fuera algunos, no se puede afirmar.
+                return (False, None) if truncado else (True, None)
         except Exception:  # noqa: BLE001 — sin verificación no hay re-timbrado
             return False, None
 

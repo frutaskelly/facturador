@@ -25,6 +25,21 @@ def _f(x) -> float:
     return float(Decimal(str(x or 0)))
 
 
+def emisor_rfc_esperado(settings, tenant) -> str | None:
+    """RFC del emisor con que se timbra, según la MISMA precedencia que arma el
+    Issuer del payload: override global (FACTURAMA_ISSUER_RFC) → multi-emisor
+    (RFC del propio tenant) → None (CSD por defecto de la cuenta = emisor único).
+
+    Lo usa la reconciliación (buscar_cfdi) para, en cuentas multi-emisor, no
+    adoptar un CFDI emitido por OTRO tenant que comparte la misma cuenta de
+    Facturama. En modo emisor-único devuelve None y no hace falta filtrar."""
+    if getattr(settings, "FACTURAMA_ISSUER_RFC", ""):
+        return settings.FACTURAMA_ISSUER_RFC
+    if getattr(settings, "FACTURAMA_MULTIEMISOR", False):
+        return getattr(tenant, "rfc", None)
+    return None
+
+
 ZERO = Decimal("0")
 _RFC_PUBLICO = "XAXX010101000"
 
@@ -151,6 +166,17 @@ def build_payload(db: Session, factura: Factura) -> dict:
     if getattr(settings, "FACTURAMA_SEND_SERIE", False) and factura.serie:
         payload["Serie"] = factura.serie
         payload["Folio"] = factura.folio
+
+    # Identificador propio en OrderNumber (= serie+folio de la app). Es el ancla
+    # para reconciliar un intento de timbrado que murió a media llamada (crash
+    # entre create_cfdi y el commit): al no enviar Serie/Folio por defecto,
+    # Facturama asigna su propio folio y no había forma de re-encontrar el CFDI.
+    # OrderNumber NO se indexa en el `keyword` de Facturama, pero SÍ vuelve en el
+    # detalle del CFDI, así que buscar_cfdi acota por receptor/emisor y confirma
+    # este valor exacto (único por documento → cero adopciones equivocadas).
+    # Se imprime como "Orden de Compra" en el PDF: es la referencia interna.
+    if factura.serie and str(factura.folio or "").strip():
+        payload["OrderNumber"] = f"{factura.serie}{factura.folio}"
 
     # Sustitución (refacturación): esta factura NUEVA reemplaza a una VIEJA. Se
     # reporta al SAT el nodo Relations TipoRelacion "04" (Sustitución de los CFDI

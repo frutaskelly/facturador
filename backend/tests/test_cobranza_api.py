@@ -136,7 +136,7 @@ class _FakePAC:
     def download_xml(self, cfdi_id):
         return b"<xml/>"
 
-    def buscar_cfdi(self, serie, folio):
+    def buscar_cfdi(self, order_number, **kw):
         return True, None
 
 

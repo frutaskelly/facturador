@@ -14,6 +14,7 @@ from __future__ import annotations
 import html as html_mod
 import logging
 
+from datetime import timedelta
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -54,7 +55,7 @@ from ...schemas.factura import (
     TimbrarIn,
 )
 from ...services import email as email_service
-from ...services.cfdi import _RFC_PUBLICO, build_payload
+from ...services.cfdi import _RFC_PUBLICO, build_payload, emisor_rfc_esperado
 from ...services.factura_pdf import build_factura_pdf, build_facturas_pdf
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea_producto, totales
@@ -776,7 +777,19 @@ def timbrar_factura(
                 status_code=409,
                 detail="Hay un timbrado en curso para esta factura; espera un momento y recarga",
             )
-        ok, existente = client.buscar_cfdi(factura.serie, factura.folio)
+        # Reconciliación por OrderNumber (= serie+folio, inyectado al crear el CFDI):
+        # se acota por RFC del receptor y del emisor (multi-emisor) + fecha, y se
+        # confirma el OrderNumber exacto. Ver FacturamaClient.buscar_cfdi.
+        rec_rfc = db.query(Cliente.rfc).filter(Cliente.id == factura.cliente_id).scalar()
+        emisor = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+        desde = min(i.created_at for i in pendientes) - timedelta(days=1)
+        ok, existente = client.buscar_cfdi(
+            f"{factura.serie}{factura.folio}",
+            receptor_rfc=rec_rfc,
+            emisor_rfc=emisor_rfc_esperado(settings, emisor),
+            total=factura.total,
+            desde=desde,
+        )
         if not ok:
             raise HTTPException(
                 status_code=409,

@@ -22,6 +22,7 @@ from ...core.db import set_role_tenant
 from ...core.ratelimit import enforce
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import Cliente, Factura, ReciboPago, ReciboPagoFactura, Tenant, TimbradoIntento
+from ...services.cfdi import emisor_rfc_esperado
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.rep import build_payload_rep
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
@@ -316,7 +317,16 @@ def timbrar_recibo(
         ahora = db.query(func.now()).scalar()
         if any((ahora - i.created_at).total_seconds() < 300 for i in pendientes):
             raise HTTPException(status_code=409, detail="Hay un timbrado en curso para este recibo; espera y recarga")
-        ok, existente = client.buscar_cfdi(recibo.serie, recibo.folio)
+        # Reconciliación por OrderNumber (= serie+folio del recibo). El CFDI de pago
+        # (tipo P) tiene Total 0, así que aquí `total` no aplica: acota por RFC del
+        # receptor + emisor (multi-emisor) + fecha y confirma el OrderNumber exacto.
+        desde = min(i.created_at for i in pendientes) - timedelta(days=1)
+        ok, existente = client.buscar_cfdi(
+            f"{recibo.serie}{recibo.folio}",
+            receptor_rfc=cliente.rfc,
+            emisor_rfc=emisor_rfc_esperado(settings, tenant),
+            desde=desde,
+        )
         if not ok:
             raise HTTPException(status_code=409, detail="Intento previo sin confirmar y no se pudo verificar con el PAC; reintenta")
         if existente is not None:
