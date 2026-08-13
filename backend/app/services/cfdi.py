@@ -152,6 +152,20 @@ def build_payload(db: Session, factura: Factura) -> dict:
         payload["Serie"] = factura.serie
         payload["Folio"] = factura.folio
 
+    # Sustitución (refacturación): esta factura NUEVA reemplaza a una VIEJA. Se
+    # reporta al SAT el nodo Relations TipoRelacion "04" (Sustitución de los CFDI
+    # previos) con el UUID de la vieja. Solo si la vieja ya está timbrada (tiene
+    # UUID); se omite si falta, igual que Serie/Folio (una relación sin UUID rompe
+    # el patrón del PAC).
+    if factura.sustituye_a_factura_id:
+        vieja = (
+            db.query(Factura)
+            .filter(Factura.id == factura.sustituye_a_factura_id)
+            .one_or_none()
+        )
+        if vieja is not None and (vieja.uuid or "").strip():
+            payload["Relations"] = {"Type": "04", "Cfdis": [{"Uuid": vieja.uuid}]}
+
     # Público en general = factura global: requiere Información Global (periodicidad/mes/año).
     if cliente.rfc == _RFC_PUBLICO:
         payload["GlobalInformation"] = {

@@ -291,6 +291,11 @@ export type Factura = {
   fecha_timbrado?: string | null;
   fecha_cancelacion?: string | null;
   motivo_cancelacion?: string | null;
+  // Sustitución CFDI (refacturación, relación "04"):
+  //  - sustituye_a_factura_id: esta factura NUEVA sustituye a esa vieja.
+  //  - uuid_sustitucion: al cancelar con motivo 01, UUID de quien la sustituye.
+  sustituye_a_factura_id?: string | null;
+  uuid_sustitucion?: string | null;
   notas?: string | null;
   created_at: string;
   updated_at: string;

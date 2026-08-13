@@ -74,7 +74,14 @@ class Factura(Base, TimestampMixin, SoftDeleteMixin):
     # ── cancelación CFDI ──
     fecha_cancelacion = Column(DateTime(timezone=True))
     motivo_cancelacion = Column(String(2))      # 01-04 (CFDI 4.0)
+    # Sentido VIEJA → NUEVA: al cancelar esta factura con motivo "01", el UUID del
+    # CFDI que la sustituye (se reporta al SAT como uuidReplacement).
     uuid_sustitucion = Column(String(36))
+    # Sentido NUEVA → VIEJA: la factura previa a la que ESTA sustituye. Al timbrar,
+    # emite el nodo Relations TipoRelacion "04" con el UUID de esa factura vieja.
+    sustituye_a_factura_id = Column(
+        UUID(as_uuid=True), ForeignKey("facturas.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     notas = Column(Text)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
@@ -84,6 +91,8 @@ class Factura(Base, TimestampMixin, SoftDeleteMixin):
         order_by="LineaFactura.numero_linea",
     )
     cliente = relationship("Cliente")
+    # La factura vieja que ESTA sustituye (nueva → vieja).
+    sustituye_a = relationship("Factura", remote_side="Factura.id", foreign_keys=[sustituye_a_factura_id])
 
 
 class LineaFactura(Base):

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Download, Eye, FileCode2, FileText, Mail, Plus, Stamp, Trash2, X } from "lucide-react";
+import { Download, Eye, FileCode2, FileText, Mail, Plus, Replace, Stamp, Trash2, X } from "lucide-react";
 
 import { FacturaDirectaForm } from "@/components/FacturaDirectaForm";
 import { Alert } from "@/components/ui/Alert";
@@ -21,6 +21,7 @@ import { ApiError, apiDownload, apiFetch, apiOpenInTab } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtDateTime, fmtMoney } from "@/lib/format";
 import { useResource, type Page } from "@/lib/hooks";
+import { FORMA_PAGO_OPTS, METODO_PAGO_OPTS, USO_CFDI_OPTS } from "@/lib/sat";
 import type { Cliente, Factura, FacturaDetail, Remision, Serie } from "@/lib/types";
 
 const WRITE = "factura:gestionar";
@@ -148,6 +149,18 @@ export default function FacturasPage() {
   const [enviarMensaje, setEnviarMensaje] = useState("");
   const [enviarBusy, setEnviarBusy] = useState(false);
 
+  // ── sustituir (refacturación, relación CFDI 04) ──
+  const [toSustituir, setToSustituir] = useState<Factura | null>(null);
+  const [sustUso, setSustUso] = useState("");
+  const [sustForma, setSustForma] = useState("");
+  const [sustMetodo, setSustMetodo] = useState("");
+  const [sustBusy, setSustBusy] = useState(false);
+  // Mapa id → factura para resolver el folio de la relación de sustitución.
+  const facById = useMemo(
+    () => Object.fromEntries((data?.items ?? []).map((f) => [f.id, f])),
+    [data],
+  );
+
   async function verDetalle(f: Factura) {
     if (detalles[f.id] || detalleLoading.has(f.id)) return;
     setDetalleLoading((s) => new Set(s).add(f.id));
@@ -178,6 +191,22 @@ export default function FacturasPage() {
           <div><span className="text-muted">Estado:</span> <Badge tone={ESTADO_TONE[d.estado] ?? "muted"}>{d.estado}</Badge></div>
           {d.uuid && <div><span className="text-muted">UUID:</span> <span className="font-mono text-xs">{d.uuid}</span></div>}
           {d.fecha_timbrado && <div><span className="text-muted">Timbrada:</span> {fmtDateTime(d.fecha_timbrado)}</div>}
+          {d.sustituye_a_factura_id && (
+            <div>
+              <span className="text-muted">Sustituye a:</span>{" "}
+              <Badge tone="muted">
+                {facById[d.sustituye_a_factura_id]
+                  ? `${facById[d.sustituye_a_factura_id].serie}${facById[d.sustituye_a_factura_id].folio}`
+                  : "factura previa"}
+              </Badge>
+            </div>
+          )}
+          {d.uuid_sustitucion && (
+            <div>
+              <span className="text-muted">Sustituida por UUID:</span>{" "}
+              <span className="font-mono text-xs">{d.uuid_sustitucion}</span>
+            </div>
+          )}
         </div>
         <DataTable
           rows={d.lineas}
@@ -237,15 +266,13 @@ export default function FacturasPage() {
   }
   async function cancelar() {
     if (!toCancel) return;
-    if (cancelMotivo === "01" && !cancelSustitucion.trim()) {
-      toast.error("El motivo 01 requiere el UUID de la factura que sustituye");
-      return;
-    }
     setActBusy(true);
     try {
       const body: { motivo: string; uuid_sustitucion?: string; inventario: string } =
         { motivo: cancelMotivo, inventario: cancelInventario };
-      if (cancelMotivo === "01") body.uuid_sustitucion = cancelSustitucion.trim();
+      // Motivo 01: el UUID es opcional — si no se captura, el backend lo autocompleta
+      // con la factura sustituta timbrada (creada con "Sustituir").
+      if (cancelMotivo === "01" && cancelSustitucion.trim()) body.uuid_sustitucion = cancelSustitucion.trim();
       await apiFetch(`/api/v1/facturas/${toCancel.id}/cancelar`, {
         method: "POST", body: JSON.stringify(body),
       });
@@ -304,6 +331,35 @@ export default function FacturasPage() {
       toast.error(e instanceof ApiError ? e.message : "No se pudo enviar la factura");
     } finally {
       setEnviarBusy(false);
+    }
+  }
+
+  // ── Sustituir (refacturación): crea la factura sustituta (copia ligada con
+  // relación CFDI 04) en borrador; el usuario la timbra y luego cancela la vieja
+  // con motivo 01 (el UUID se autocompleta con esta sustituta).
+  function abrirSustituir(f: Factura) {
+    setSustUso(f.uso_cfdi); setSustForma(f.forma_pago); setSustMetodo(f.metodo_pago);
+    setToSustituir(f);
+  }
+  async function sustituir() {
+    if (!toSustituir) return;
+    setSustBusy(true);
+    try {
+      const body: Record<string, string> = {};
+      if (sustUso && sustUso !== toSustituir.uso_cfdi) body.uso_cfdi = sustUso;
+      if (sustForma && sustForma !== toSustituir.forma_pago) body.forma_pago = sustForma;
+      if (sustMetodo && sustMetodo !== toSustituir.metodo_pago) body.metodo_pago = sustMetodo;
+      const nueva = await apiFetch<FacturaDetail>(`/api/v1/facturas/${toSustituir.id}/sustituir`, {
+        method: "POST", body: JSON.stringify(body),
+      });
+      toast.success(
+        `Sustituta ${nueva.serie}${nueva.folio} creada (borrador). Tímbrala y luego cancela la original con motivo 01.`,
+      );
+      setToSustituir(null); reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo crear la sustituta");
+    } finally {
+      setSustBusy(false);
     }
   }
 
@@ -472,6 +528,8 @@ export default function FacturasPage() {
       onClick: (f) => { void descargar(f, "xml"); }, hidden: (f) => f.estado !== "TIMBRADA" },
     { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />,
       onClick: (f) => abrirEnviar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
+    { id: "sustituir", label: "Sustituir (refacturar)", icon: <Replace size={15} />,
+      onClick: (f) => abrirSustituir(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
       onClick: (f) => abrirCancelar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
     { id: "descartar", label: "Descartar borrador", icon: <Trash2 size={15} />, tone: "danger",
@@ -730,7 +788,10 @@ export default function FacturasPage() {
             </Select>
           </Field>
           {cancelMotivo === "01" && (
-            <Field label="UUID de la factura que sustituye" required>
+            <Field
+              label="UUID de la factura que sustituye (opcional)"
+              hint="Déjalo vacío si ya creaste la sustituta con «Sustituir» y la timbraste: se autocompleta sola."
+            >
               <Input
                 placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                 value={cancelSustitucion}
@@ -738,21 +799,71 @@ export default function FacturasPage() {
               />
             </Field>
           )}
-          <Field label="¿Qué hacer con el inventario?">
-            <Select value={cancelInventario} onChange={(e) => setCancelInventario(e.target.value as "devolucion" | "perdida")}>
-              <option value="devolucion">Devolución a almacén (regresa a existencias)</option>
-              <option value="perdida">Pérdida por cancelación (se da de baja como merma)</option>
+          {cancelMotivo === "01" ? (
+            <Alert tone="info">
+              Sustitución: la mercancía la ampara la factura sustituta, así que el
+              inventario <strong>no se mueve</strong> y las remisiones quedan ligadas
+              (no se re-facturan).
+            </Alert>
+          ) : (
+            <>
+              <Field label="¿Qué hacer con el inventario?">
+                <Select value={cancelInventario} onChange={(e) => setCancelInventario(e.target.value as "devolucion" | "perdida")}>
+                  <option value="devolucion">Devolución a almacén (regresa a existencias)</option>
+                  <option value="perdida">Pérdida por cancelación (se da de baja como merma)</option>
+                </Select>
+              </Field>
+              <Alert tone="warning">
+                {cancelInventario === "perdida" ? (
+                  <>El inventario reservado se <strong>da de baja como merma</strong> (no regresa a existencias)
+                  {" "}y las remisiones quedan <strong>CANCELADAS</strong> (no se pueden volver a facturar).</>
+                ) : (
+                  <>El inventario reservado <strong>regresa a existencias</strong> y las remisiones se
+                  {" "}liberan a <strong>BORRADOR</strong>, para poder <strong>volver a facturarse</strong>.</>
+                )}
+              </Alert>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        open={toSustituir !== null}
+        onClose={() => setToSustituir(null)}
+        title={`Sustituir factura ${toSustituir?.serie ?? ""}${toSustituir?.folio ?? ""}`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setToSustituir(null)} disabled={sustBusy}>Cerrar</Button>
+            <Button onClick={() => { void sustituir(); }} disabled={sustBusy}>
+              {sustBusy ? "Creando…" : "Crear sustituta"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Alert tone="info">
+            Se creará una <strong>copia</strong> en borrador ligada a esta factura con la
+            relación CFDI <strong>«04 Sustitución»</strong>. Corrige los datos si aplica,
+            <strong> tímbrala</strong>, y luego <strong>cancela esta con motivo 01</strong>
+            {" "}(el UUID se autocompleta). No mueve inventario.
+          </Alert>
+          <Field label="Uso de CFDI">
+            <Select value={sustUso} onChange={(e) => setSustUso(e.target.value)}>
+              {USO_CFDI_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </Select>
           </Field>
-          <Alert tone="warning">
-            {cancelInventario === "perdida" ? (
-              <>El inventario reservado se <strong>da de baja como merma</strong> (no regresa a existencias)
-              {" "}y las remisiones quedan <strong>CANCELADAS</strong> (no se pueden volver a facturar).</>
-            ) : (
-              <>El inventario reservado <strong>regresa a existencias</strong> y las remisiones se
-              {" "}liberan a <strong>BORRADOR</strong>, para poder <strong>volver a facturarse</strong>.</>
-            )}
-          </Alert>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Forma de pago">
+              <Select value={sustForma} onChange={(e) => setSustForma(e.target.value)}>
+                {FORMA_PAGO_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </Select>
+            </Field>
+            <Field label="Método de pago">
+              <Select value={sustMetodo} onChange={(e) => setSustMetodo(e.target.value)}>
+                {METODO_PAGO_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </Select>
+            </Field>
+          </div>
         </div>
       </Modal>
 

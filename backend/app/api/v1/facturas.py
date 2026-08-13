@@ -50,10 +50,11 @@ from ...schemas.factura import (
     FacturaDetailOut,
     FacturaDirectaIn,
     FacturaOut,
+    SustituirIn,
     TimbrarIn,
 )
 from ...services import email as email_service
-from ...services.cfdi import build_payload
+from ...services.cfdi import _RFC_PUBLICO, build_payload
 from ...services.factura_pdf import build_factura_pdf, build_facturas_pdf
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea_producto, totales
@@ -563,6 +564,102 @@ def factura_directa(
     return factura
 
 
+@router.post("/{factura_id}/sustituir", response_model=FacturaDetailOut, status_code=status.HTTP_201_CREATED)
+def sustituir_factura(
+    factura_id: UUID,
+    payload: SustituirIn = Body(default=SustituirIn()),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Crea la factura SUSTITUTA (refacturación) de una timbrada: una copia
+    verbatim en BORRADOR, ligada a la vieja con la relación CFDI "04" (Sustitución
+    de los CFDI previos). NO mueve inventario — la mercancía ya la amparó la
+    original; la sustitución corrige el papel, no vuelve a mover mercancía.
+
+    Flujo fiscal (SAT): 1) crear la sustituta (aquí) y corregir sus datos de
+    cabecera si aplica → 2) timbrarla (lleva el nodo Relations 04 con el UUID de
+    la vieja) → 3) cancelar la vieja con motivo 01 (su uuid_sustitucion se
+    autollena con esta sustituta).
+    """
+    # FOR UPDATE: serializa dos "Sustituir" simultáneos sobre la misma factura
+    # (doble clic / dos usuarios). Sin el lock ambos leerían `existente=None` y
+    # crearían dos sustitutas → dos CFDI 04 sobre el mismo comprobante.
+    vieja = get_or_404(db, Factura, factura_id, for_update=True)
+    if vieja.estado != "TIMBRADA":
+        raise HTTPException(status_code=409, detail="Solo se sustituye una factura timbrada")
+    if not (vieja.uuid or "").strip():
+        raise HTTPException(status_code=409, detail="La factura a sustituir no tiene UUID del SAT")
+    # Factura global (público en general): su periodo (mes/año) va en Información
+    # Global y se deriva de la fecha del comprobante; una sustituta con fecha nueva
+    # reportaría un periodo distinto al que ampara. No se sustituye por aquí.
+    cliente_vieja = db.query(Cliente).filter(Cliente.id == vieja.cliente_id).one()
+    if (cliente_vieja.rfc or "") == _RFC_PUBLICO:
+        raise HTTPException(
+            status_code=409,
+            detail="Las facturas globales (público en general) no se sustituyen aquí; cancélala con motivo 04",
+        )
+    # Una sola sustituta viva por factura (evita dos CFDI 04 apuntando a la misma).
+    existente = (
+        db.query(Factura)
+        .filter(
+            Factura.sustituye_a_factura_id == vieja.id,
+            Factura.estado != "CANCELADA",
+            Factura.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if existente is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Ya existe una sustituta ({existente.serie}{existente.folio}); tímbrala o descártala",
+        )
+
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    serie_obj = resolver_serie(db, ctx.tenant_id, "FACTURA", serie_id=payload.serie_id, cliente_id=vieja.cliente_id)
+    if serie_obj is not None:
+        folio = consumir_folio(db, serie_obj.id)
+        serie_codigo = serie_obj.codigo
+        if folio is None:                       # carrera/desactivada: cae a back-compat
+            folio = _next_folio(db, ctx.tenant_id, serie_codigo)
+    else:
+        serie_codigo = vieja.serie
+        folio = _next_folio(db, ctx.tenant_id, serie_codigo)
+
+    nueva = Factura(
+        tenant_id=ctx.tenant_id, serie=serie_codigo, folio=folio, cliente_id=vieja.cliente_id,
+        uso_cfdi=payload.uso_cfdi or vieja.uso_cfdi,
+        forma_pago=payload.forma_pago or vieja.forma_pago,
+        metodo_pago=payload.metodo_pago or vieja.metodo_pago,
+        moneda=vieja.moneda, tipo_comprobante=vieja.tipo_comprobante,
+        lugar_expedicion=tenant.domicilio_fiscal_cp or vieja.lugar_expedicion,
+        almacen_id=None,                        # copia fiscal: no descuenta inventario
+        subtotal=vieja.subtotal, descuento=vieja.descuento,
+        iva_trasladado=vieja.iva_trasladado, ieps_trasladado=vieja.ieps_trasladado,
+        ret_iva=vieja.ret_iva, ret_isr=vieja.ret_isr, total=vieja.total,
+        notas=payload.notas if payload.notas is not None else vieja.notas,
+        sustituye_a_factura_id=vieja.id,
+        created_by=ctx.user_id, estado="BORRADOR",
+    )
+    db.add(nueva); db.flush()
+
+    # Copia verbatim de los conceptos (mismos importes/impuestos). Sin cantidad_base
+    # ni lote: la sustituta no toca inventario.
+    for ln in sorted(vieja.lineas, key=lambda x: x.numero_linea):
+        db.add(LineaFactura(
+            tenant_id=ctx.tenant_id, factura_id=nueva.id, numero_linea=ln.numero_linea,
+            producto_id=ln.producto_id, clave_prod_serv=ln.clave_prod_serv,
+            clave_unidad=ln.clave_unidad, descripcion=ln.descripcion,
+            cantidad=ln.cantidad, valor_unitario=ln.valor_unitario, importe=ln.importe,
+            descuento=ln.descuento, objeto_imp=ln.objeto_imp,
+            iva_tasa=ln.iva_tasa, iva_importe=ln.iva_importe,
+            ieps_tipo=ln.ieps_tipo, ieps_valor=ln.ieps_valor, ieps_importe=ln.ieps_importe,
+            ret_iva_importe=ln.ret_iva_importe, ret_isr_importe=ln.ret_isr_importe,
+        ))
+    db.flush()
+    db.refresh(nueva)
+    return nueva
+
+
 # ─── Timbrado ─────────────────────────────────────────────────────────────────
 def _commit_seguro(db: Session, ctx) -> None:
     """Commit intermedio + re-arma ROLE app_user y el GUC del tenant.
@@ -756,8 +853,39 @@ def cancelar_factura(
     factura = get_or_404(db, Factura, factura_id, for_update=True)
     if factura.estado != "TIMBRADA":
         raise HTTPException(status_code=409, detail="Solo se cancela una factura timbrada")
-    if payload.motivo == "01" and payload.uuid_sustitucion is None:
-        raise HTTPException(status_code=422, detail="El motivo 01 requiere uuid_sustitucion")
+    # Sustituta(s) timbrada(s) de esta factura (refacturación con relación 04).
+    sustitutas = (
+        db.query(Factura)
+        .filter(
+            Factura.sustituye_a_factura_id == factura.id,
+            Factura.estado == "TIMBRADA",
+            Factura.deleted_at.is_(None),
+        )
+        .all()
+    )
+    # Si ya tiene una sustituta timbrada, la cancelación DEBE ser motivo 01 (con
+    # relación): con otro motivo se liberarían las remisiones y se podría re-facturar
+    # la misma mercancía que la sustituta ya ampara (doble CFDI vivo / doble stock).
+    if sustitutas and payload.motivo != "01":
+        raise HTTPException(
+            status_code=409,
+            detail="Esta factura tiene una sustituta timbrada; cancélala con motivo 01 (sustitución)",
+        )
+    # Motivo 01 (con relación): UUID del CFDI que sustituye a esta. Del payload o
+    # autollenado con la sustituta timbrada (refacturación).
+    uuid_sust = str(payload.uuid_sustitucion) if payload.uuid_sustitucion else None
+    if payload.motivo == "01" and uuid_sust is None:
+        if len(sustitutas) > 1:
+            raise HTTPException(
+                status_code=409, detail="Hay más de una factura sustituta timbrada; indica el uuid_sustitucion",
+            )
+        if len(sustitutas) == 1 and (sustitutas[0].uuid or "").strip():
+            uuid_sust = sustitutas[0].uuid
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail="El motivo 01 requiere la factura sustituta timbrada (créala con Sustituir y tímbrala) o un uuid_sustitucion",
+            )
     # Regla SAE: una factura con abonos (REP timbrado) no se cancela sin cancelar
     # antes su(s) recibo(s) de pago — el complemento quedaría huérfano ante el SAT.
     abonos = (
@@ -783,7 +911,7 @@ def cancelar_factura(
         try:
             client.cancel_cfdi(
                 factura.facturama_id, motive=payload.motivo,
-                uuid_replacement=str(payload.uuid_sustitucion) if payload.uuid_sustitucion else None,
+                uuid_replacement=uuid_sust,
             )
         except FacturamaError as exc:
             raise HTTPException(status_code=502, detail=f"Cancelación rechazada por el PAC: {exc}")
@@ -791,7 +919,22 @@ def cancelar_factura(
     factura.estado = "CANCELADA"
     factura.fecha_cancelacion = func.now()
     factura.motivo_cancelacion = payload.motivo
-    factura.uuid_sustitucion = str(payload.uuid_sustitucion) if payload.uuid_sustitucion else None
+    factura.uuid_sustitucion = uuid_sust
+
+    if payload.motivo == "01":
+        # Sustitución: la mercancía la ampara ahora la factura sustituta, así que
+        # NO se toca inventario ni se liberan las remisiones (el campo `inventario`
+        # se ignora). Si hay una sustituta local única, las remisiones se re-apuntan
+        # a ella (siguen FACTURADA → no re-facturables) para conservar la traza
+        # remisión→CFDI vigente y que una futura cancelación de la sustituta pueda
+        # devolver su inventario.
+        if len(sustitutas) == 1:
+            db.query(Remision).filter(Remision.factura_id == factura.id).update(
+                {Remision.factura_id: sustitutas[0].id}, synchronize_session=False
+            )
+        db.flush()
+        db.refresh(factura)
+        return factura
 
     # Factura directa (sin remisión): revierte el inventario que salió al timbrar.
     _revertir_factura_directa(db, ctx, factura, perdida=(payload.inventario == "perdida"))

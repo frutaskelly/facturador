@@ -123,12 +123,12 @@ def _hdr(u):
     return {"X-Tenant-Id": str(u["tenant_id"])}
 
 
-def _remision_confirmada(client, h, env, qty="10", precio="20"):
+def _remision_confirmada(client, h, env, qty="10", precio="20", cli_id=None):
     client.post("/api/v1/inventario/movimientos", headers=h, json={
         "tipo": "ENTRADA_COMPRA", "producto_id": env["prod_id"], "almacen_id": env["alm_id"],
         "cantidad": "1000", "costo_unitario": "5"})
     rem = client.post("/api/v1/remisiones", headers=h, json={
-        "cliente_facturacion_id": env["cli_id"], "almacen_id": env["alm_id"],
+        "cliente_facturacion_id": cli_id or env["cli_id"], "almacen_id": env["alm_id"],
         "lineas": [{"producto_id": env["prod_id"], "cantidad_solicitada": qty, "precio_unitario": precio}]}).json()
     client.post(f"/api/v1/remisiones/{rem['id']}/confirmar", headers=h)
     return rem["id"]
@@ -318,3 +318,157 @@ def test_empresa_logo_ciclo(client, env, auth_as):
     dele = client.delete("/api/v1/empresa/logo", headers=h)
     assert dele.status_code == 200 and dele.json()["has_logo"] is False
     assert client.get("/api/v1/empresa/logo", headers=h).status_code == 404
+
+
+# ── Sustitución CFDI (refacturación, relación 04) ────────────────────────────
+def _marcar_timbrada(fid):
+    """Marca una factura como TIMBRADA con un UUID del SAT (sin llamar al PAC)."""
+    from app.models import Factura
+    db = SessionLocal()
+    try:
+        f = db.query(Factura).filter(Factura.id == uuid.UUID(fid)).one()
+        f.estado = "TIMBRADA"
+        f.uuid = str(uuid.uuid4())
+        f.facturama_id = "FAC-" + uuid.uuid4().hex[:8]
+        db.commit()
+        return f.uuid
+    finally:
+        db.close()
+
+
+def _cliente_normal(env):
+    """Cliente con RFC NORMAL (no público en general): las globales no se sustituyen."""
+    from app.models import Cliente
+    db = SessionLocal()
+    try:
+        c = Cliente(tenant_id=uuid.UUID(str(env["admin"]["tenant_id"])),
+                    codigo="CLN" + uuid.uuid4().hex[:4], legal_name="Cliente Normal SA",
+                    rfc="EKU9003173C9", regimen_fiscal="601", uso_cfdi_default="G03")
+        db.add(c); db.commit()
+        return str(c.id)
+    finally:
+        db.close()
+
+
+def _vieja_timbrada(client, h, env, cli_id):
+    """Remisión confirmada → factura → marcada TIMBRADA. Devuelve (vieja, rem_id).
+    El UUID del SAT queda en vieja["uuid"]."""
+    rem_id = _remision_confirmada(client, h, env, cli_id=cli_id)
+    vieja = client.post("/api/v1/facturas/desde-remisiones", headers=h,
+                        json={"remision_ids": [rem_id]}).json()
+    vieja["uuid"] = _marcar_timbrada(vieja["id"])
+    return vieja, rem_id
+
+
+def test_sustituir_crea_copia_ligada(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    vieja, _ = _vieja_timbrada(client, h, env, _cliente_normal(env))
+
+    r = client.post(f"/api/v1/facturas/{vieja['id']}/sustituir", headers=h, json={"forma_pago": "01"})
+    assert r.status_code == 201, r.text
+    nueva = r.json()
+    assert nueva["estado"] == "BORRADOR"
+    assert nueva["sustituye_a_factura_id"] == vieja["id"]        # nueva → vieja
+    assert nueva["forma_pago"] == "01"                           # corrección aplicada
+    assert float(nueva["total"]) == float(vieja["total"])        # copia verbatim
+    assert nueva["folio"] != vieja["folio"]
+    assert len(nueva["lineas"]) == len(vieja["lineas"])
+
+    # una segunda sustituta viva para la misma vieja → 409
+    assert client.post(f"/api/v1/facturas/{vieja['id']}/sustituir", headers=h, json={}).status_code == 409
+
+
+def test_sustituir_solo_timbrada(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem_id = _remision_confirmada(client, h, env, cli_id=_cliente_normal(env))
+    vieja = client.post("/api/v1/facturas/desde-remisiones", headers=h, json={"remision_ids": [rem_id]}).json()
+    # sigue en BORRADOR (no timbrada) → no se puede sustituir
+    assert client.post(f"/api/v1/facturas/{vieja['id']}/sustituir", headers=h, json={}).status_code == 409
+
+
+def test_sustituir_global_bloqueado(client, env, auth_as):
+    # El cliente del fixture tiene RFC XAXX010101000 (público en general): global.
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    vieja, _ = _vieja_timbrada(client, h, env, env["cli_id"])
+    r = client.post(f"/api/v1/facturas/{vieja['id']}/sustituir", headers=h, json={})
+    assert r.status_code == 409 and "global" in r.json()["detail"].lower()
+
+
+def test_build_payload_relations_04(client, env, auth_as):
+    from app.models import Factura
+    from app.services.cfdi import build_payload
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    vieja, _ = _vieja_timbrada(client, h, env, _cliente_normal(env))
+    uuid_vieja = vieja["uuid"]
+    nueva = client.post(f"/api/v1/facturas/{vieja['id']}/sustituir", headers=h, json={}).json()
+
+    db = SessionLocal()
+    try:
+        f = db.query(Factura).filter(Factura.id == uuid.UUID(nueva["id"])).one()
+        payload = build_payload(db, f)
+    finally:
+        db.close()
+    # La sustituta reporta al SAT el nodo Relations 04 → UUID de la vieja.
+    assert payload["Relations"] == {"Type": "04", "Cfdis": [{"Uuid": uuid_vieja}]}
+
+
+def test_factura_normal_sin_relations(client, env, auth_as):
+    from app.models import Factura
+    from app.services.cfdi import build_payload
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem_id = _remision_confirmada(client, h, env, cli_id=_cliente_normal(env))
+    fac = client.post("/api/v1/facturas/desde-remisiones", headers=h, json={"remision_ids": [rem_id]}).json()
+    db = SessionLocal()
+    try:
+        f = db.query(Factura).filter(Factura.id == uuid.UUID(fac["id"])).one()
+        payload = build_payload(db, f)
+    finally:
+        db.close()
+    assert "Relations" not in payload   # una factura normal no lleva relación
+
+
+def test_cancelar_01_autollena_neutral_y_reapunta(client, env, auth_as, monkeypatch):
+    import app.core.config as cfg
+    monkeypatch.setattr(cfg.settings, "FACTURAMA_FAKE_CANCEL", True)
+    from app.models import Remision
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    vieja, rem_id = _vieja_timbrada(client, h, env, _cliente_normal(env))
+    nueva = client.post(f"/api/v1/facturas/{vieja['id']}/sustituir", headers=h, json={}).json()
+    uuid_nueva = _marcar_timbrada(nueva["id"])
+
+    # cancelar la vieja con motivo 01 SIN pasar uuid → se autollena con la sustituta
+    c = client.post(f"/api/v1/facturas/{vieja['id']}/cancelar", headers=h, json={"motivo": "01"})
+    assert c.status_code == 200, c.text
+    assert c.json()["estado"] == "CANCELADA"
+    assert c.json()["motivo_cancelacion"] == "01"
+    assert c.json()["uuid_sustitucion"] == uuid_nueva           # vieja → nueva
+
+    db = SessionLocal()
+    try:
+        rem = db.query(Remision).filter(Remision.id == uuid.UUID(rem_id)).one()
+        assert rem.estado == "FACTURADA"                        # inventario-neutral
+        assert str(rem.factura_id) == nueva["id"]               # re-apuntada a la sustituta
+    finally:
+        db.close()
+
+
+def test_cancelar_02_bloqueado_con_sustituta(client, env, auth_as, monkeypatch):
+    import app.core.config as cfg
+    monkeypatch.setattr(cfg.settings, "FACTURAMA_FAKE_CANCEL", True)
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    vieja, _ = _vieja_timbrada(client, h, env, _cliente_normal(env))
+    nueva = client.post(f"/api/v1/facturas/{vieja['id']}/sustituir", headers=h, json={}).json()
+    _marcar_timbrada(nueva["id"])
+    # con sustituta timbrada, cancelar la vieja con motivo 02 → 409 (debe ser 01)
+    r = client.post(f"/api/v1/facturas/{vieja['id']}/cancelar", headers=h, json={"motivo": "02"})
+    assert r.status_code == 409 and "sustituta" in r.json()["detail"].lower()
+
+
+def test_cancelar_01_sin_sustituta_422(client, env, auth_as, monkeypatch):
+    import app.core.config as cfg
+    monkeypatch.setattr(cfg.settings, "FACTURAMA_FAKE_CANCEL", True)
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    vieja, _ = _vieja_timbrada(client, h, env, _cliente_normal(env))
+    # motivo 01 sin sustituta timbrada ni uuid → 422
+    assert client.post(f"/api/v1/facturas/{vieja['id']}/cancelar", headers=h,
+                       json={"motivo": "01"}).status_code == 422

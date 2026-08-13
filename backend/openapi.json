@@ -3167,6 +3167,18 @@
       "title": "Subtotal",
       "type": "string"
      },
+     "sustituye_a_factura_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sustituye A Factura Id"
+     },
      "tenant_id": {
       "format": "uuid",
       "title": "Tenant Id",
@@ -3199,6 +3211,17 @@
        }
       ],
       "title": "Uuid"
+     },
+     "uuid_sustitucion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uuid Sustitucion"
      }
     },
     "required": [
@@ -3471,6 +3494,18 @@
       "title": "Subtotal",
       "type": "string"
      },
+     "sustituye_a_factura_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sustituye A Factura Id"
+     },
      "tenant_id": {
       "format": "uuid",
       "title": "Tenant Id",
@@ -3503,6 +3538,17 @@
        }
       ],
       "title": "Uuid"
+     },
+     "uuid_sustitucion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uuid Sustitucion"
      }
     },
     "required": [
@@ -9832,6 +9878,72 @@
     "title": "SucursalUpdate",
     "type": "object"
    },
+   "SustituirIn": {
+    "description": "Crea la factura sustituta (refacturación) como copia de la vieja, ligada a\nella con relación CFDI \"04\". Opcionalmente corrige los datos fiscales de\ncabecera que suelen ser el error a subsanar (uso de CFDI, forma/método de\npago). El importe/conceptos se copian tal cual de la factura original.",
+    "properties": {
+     "forma_pago": {
+      "anyOf": [
+       {
+        "maxLength": 5,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Forma Pago"
+     },
+     "metodo_pago": {
+      "anyOf": [
+       {
+        "maxLength": 5,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Metodo Pago"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "serie_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Id"
+     },
+     "uso_cfdi": {
+      "anyOf": [
+       {
+        "maxLength": 5,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uso Cfdi"
+     }
+    },
+    "title": "SustituirIn",
+    "type": "object"
+   },
    "TimbrarIn": {
     "properties": {
      "permitir_negativos": {
@@ -13973,6 +14085,81 @@
      }
     ],
     "summary": "Descargar Pdf",
+    "tags": [
+     "facturas"
+    ]
+   }
+  },
+  "/api/v1/facturas/{factura_id}/sustituir": {
+   "post": {
+    "description": "Crea la factura SUSTITUTA (refacturación) de una timbrada: una copia\nverbatim en BORRADOR, ligada a la vieja con la relación CFDI \"04\" (Sustitución\nde los CFDI previos). NO mueve inventario — la mercancía ya la amparó la\noriginal; la sustitución corrige el papel, no vuelve a mover mercancía.\n\nFlujo fiscal (SAT): 1) crear la sustituta (aquí) y corregir sus datos de\ncabecera si aplica → 2) timbrarla (lleva el nodo Relations 04 con el UUID de\nla vieja) → 3) cancelar la vieja con motivo 01 (su uuid_sustitucion se\nautollena con esta sustituta).",
+    "operationId": "sustituir_factura_api_v1_facturas__factura_id__sustituir_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "factura_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Factura Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SustituirIn",
+        "default": {}
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FacturaDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Sustituir Factura",
     "tags": [
      "facturas"
     ]

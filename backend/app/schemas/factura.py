@@ -30,6 +30,18 @@ class FacturaDesdeRemisionesIn(BaseModel):
     permitir_negativos: bool = Field(default=False)
 
 
+class SustituirIn(BaseModel):
+    """Crea la factura sustituta (refacturación) como copia de la vieja, ligada a
+    ella con relación CFDI "04". Opcionalmente corrige los datos fiscales de
+    cabecera que suelen ser el error a subsanar (uso de CFDI, forma/método de
+    pago). El importe/conceptos se copian tal cual de la factura original."""
+    uso_cfdi: Optional[str] = Field(default=None, max_length=5)
+    forma_pago: Optional[str] = Field(default=None, max_length=5)
+    metodo_pago: Optional[str] = Field(default=None, max_length=5)
+    serie_id: Optional[uuid.UUID] = None
+    notas: Optional[str] = None
+
+
 class TimbrarIn(BaseModel):
     # Sobregiro autorizado: una factura DIRECTA sin existencia suficiente frena
     # con 422 salvo que esto venga en true (misma política que remisiones —
@@ -95,6 +107,9 @@ class FacturaOut(ORMModel):
     serie: str
     folio: int
     cliente_id: uuid.UUID
+    # nueva → vieja: la factura previa que ESTA sustituye (relación CFDI "04").
+    # Debe ir ANTES del campo `uuid` de abajo (ese sombrea el módulo uuid).
+    sustituye_a_factura_id: Optional[uuid.UUID] = None
     uso_cfdi: str
     forma_pago: str
     metodo_pago: str
@@ -115,6 +130,10 @@ class FacturaOut(ORMModel):
     fecha_timbrado: Optional[datetime] = None
     fecha_cancelacion: Optional[datetime] = None
     motivo_cancelacion: Optional[str] = None
+    # Sustitución CFDI: vieja → nueva (UUID de quien la sustituye, al cancelar 01).
+    # El sentido nueva → vieja (sustituye_a_factura_id) se declara arriba, antes del
+    # campo `uuid` que sombrearía el módulo uuid en el cuerpo de la clase.
+    uuid_sustitucion: Optional[str] = None
     pdf_url: Optional[str] = None
     notas: Optional[str] = None
     created_at: datetime

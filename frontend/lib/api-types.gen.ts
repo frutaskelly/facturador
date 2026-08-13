@@ -736,6 +736,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/facturas/{factura_id}/sustituir": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sustituir Factura
+         * @description Crea la factura SUSTITUTA (refacturación) de una timbrada: una copia
+         *     verbatim en BORRADOR, ligada a la vieja con la relación CFDI "04" (Sustitución
+         *     de los CFDI previos). NO mueve inventario — la mercancía ya la amparó la
+         *     original; la sustitución corrige el papel, no vuelve a mover mercancía.
+         *
+         *     Flujo fiscal (SAT): 1) crear la sustituta (aquí) y corregir sus datos de
+         *     cabecera si aplica → 2) timbrarla (lleva el nodo Relations 04 con el UUID de
+         *     la vieja) → 3) cancelar la vieja con motivo 01 (su uuid_sustitucion se
+         *     autollena con esta sustituta).
+         */
+        post: operations["sustituir_factura_api_v1_facturas__factura_id__sustituir_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/facturas/{factura_id}/timbrar": {
         parameters: {
             query?: never;
@@ -3165,6 +3193,8 @@ export interface components {
             serie: string;
             /** Subtotal */
             subtotal: string;
+            /** Sustituye A Factura Id */
+            sustituye_a_factura_id?: string | null;
             /**
              * Tenant Id
              * Format: uuid
@@ -3183,6 +3213,8 @@ export interface components {
             uso_cfdi: string;
             /** Uuid */
             uuid?: string | null;
+            /** Uuid Sustitucion */
+            uuid_sustitucion?: string | null;
         };
         /**
          * FacturaDirectaIn
@@ -3278,6 +3310,8 @@ export interface components {
             serie: string;
             /** Subtotal */
             subtotal: string;
+            /** Sustituye A Factura Id */
+            sustituye_a_factura_id?: string | null;
             /**
              * Tenant Id
              * Format: uuid
@@ -3296,6 +3330,8 @@ export interface components {
             uso_cfdi: string;
             /** Uuid */
             uuid?: string | null;
+            /** Uuid Sustitucion */
+            uuid_sustitucion?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -5468,6 +5504,25 @@ export interface components {
             /** Telefono */
             telefono?: string | null;
         };
+        /**
+         * SustituirIn
+         * @description Crea la factura sustituta (refacturación) como copia de la vieja, ligada a
+         *     ella con relación CFDI "04". Opcionalmente corrige los datos fiscales de
+         *     cabecera que suelen ser el error a subsanar (uso de CFDI, forma/método de
+         *     pago). El importe/conceptos se copian tal cual de la factura original.
+         */
+        SustituirIn: {
+            /** Forma Pago */
+            forma_pago?: string | null;
+            /** Metodo Pago */
+            metodo_pago?: string | null;
+            /** Notas */
+            notas?: string | null;
+            /** Serie Id */
+            serie_id?: string | null;
+            /** Uso Cfdi */
+            uso_cfdi?: string | null;
+        };
         /** TimbrarIn */
         TimbrarIn: {
             /**
@@ -7492,6 +7547,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sustituir_factura_api_v1_facturas__factura_id__sustituir_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                factura_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SustituirIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FacturaDetailOut"];
                 };
             };
             /** @description Validation Error */
