@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -366,3 +366,143 @@ def _aplicar_saldos(docs) -> None:
     """Baja el saldo insoluto de cada factura al saldo calculado en el recibo."""
     for rf, factura in docs:
         factura.saldo_insoluto = Decimal(rf.saldo_insoluto)
+
+
+# ─── REP: cancelar / PDF / XML / enviar (F3) ─────────────────────────────────
+class CancelarReciboIn(BaseModel):
+    # 02 sin relación | 01 con sustitución (requiere uuid) | 03 | 04
+    motivo: str = Field(default="02", pattern="^0[1-4]$")
+    uuid_sustitucion: Optional[UUID] = None
+
+
+def _docs_recibo(db: Session, recibo: ReciboPago, *, lock: bool = False):
+    filas = db.query(ReciboPagoFactura).filter(ReciboPagoFactura.recibo_id == recibo.id).all()
+    out = []
+    for rf in filas:
+        q = db.query(Factura).filter(Factura.id == rf.factura_id)
+        if lock:
+            q = q.with_for_update()
+        out.append((rf, q.one()))
+    return out
+
+
+@router.post("/recibos-pago/{recibo_id}/cancelar")
+def cancelar_recibo(
+    recibo_id: UUID,
+    payload: CancelarReciboIn = Body(default=CancelarReciboIn()),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Cancela el REP ante el PAC y REVIERTE el saldo insoluto de cada factura
+    (le regresa el importe abonado). El SAT exige aceptación del receptor para
+    cancelar un CFDI de pago (positiva ficta a 3 días)."""
+    recibo = get_or_404(db, ReciboPago, recibo_id, soft=False, for_update=True)
+    if recibo.estado != "TIMBRADO":
+        raise HTTPException(status_code=409, detail="Solo se cancela un recibo timbrado")
+    if payload.motivo == "01" and payload.uuid_sustitucion is None:
+        raise HTTPException(status_code=422, detail="El motivo 01 requiere uuid_sustitucion")
+
+    if not settings.FACTURAMA_FAKE_CANCEL:
+        client = FacturamaClient.from_settings(settings)
+        if not client.configured:
+            raise HTTPException(status_code=503, detail="Facturama no está configurado")
+        try:
+            client.cancel_cfdi(
+                recibo.facturama_id, motive=payload.motivo,
+                uuid_replacement=str(payload.uuid_sustitucion) if payload.uuid_sustitucion else None,
+            )
+        except FacturamaError as exc:
+            raise HTTPException(status_code=502, detail=f"Cancelación del REP rechazada por el PAC: {exc}")
+
+    # Revierte el abono: el saldo insoluto de cada factura sube por el importe
+    # pagado (tope = total, por si acaso).
+    for rf, factura in _docs_recibo(db, recibo, lock=True):
+        nuevo = Decimal(factura.saldo_insoluto) + Decimal(rf.importe_pagado)
+        factura.saldo_insoluto = nuevo if nuevo <= Decimal(factura.total) else Decimal(factura.total)
+
+    recibo.estado = "CANCELADO"
+    recibo.fecha_cancelacion = func.now()
+    recibo.motivo_cancelacion = payload.motivo
+    db.flush()
+    db.refresh(recibo)
+    return _recibo_out(db, recibo)
+
+
+def _recibo_pdf_bytes(db: Session, ctx: AuthContext, recibo: ReciboPago) -> bytes:
+    from ...services.recibo_pdf import build_recibo_pdf
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    cliente = db.query(Cliente).filter(Cliente.id == recibo.cliente_id).one()
+    return build_recibo_pdf(recibo, tenant, cliente, _docs_recibo(db, recibo))
+
+
+@router.get("/recibos-pago/{recibo_id}/pdf")
+def recibo_pdf(
+    recibo_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    from fastapi import Response
+    recibo = get_or_404(db, ReciboPago, recibo_id, soft=False)
+    pdf = _recibo_pdf_bytes(db, ctx, recibo)
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="REP-{recibo.serie}{recibo.folio}.pdf"'})
+
+
+@router.get("/recibos-pago/{recibo_id}/xml")
+def recibo_xml(
+    recibo_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    from fastapi import Response
+    recibo = get_or_404(db, ReciboPago, recibo_id, soft=False)
+    if not recibo.xml:
+        raise HTTPException(status_code=404, detail="El recibo no tiene XML (¿no está timbrado?)")
+    return Response(content=recibo.xml, media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="REP-{recibo.serie}{recibo.folio}.xml"'})
+
+
+class EnviarReciboIn(BaseModel):
+    to: list[str] = Field(min_length=1, max_length=20)
+    mensaje: Optional[str] = Field(default=None, max_length=2000)
+
+
+@router.post("/recibos-pago/{recibo_id}/enviar")
+def enviar_recibo(
+    recibo_id: UUID,
+    payload: EnviarReciboIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Envía el PDF + XML del REP por correo (SMTP del tenant)."""
+    import html as html_mod
+
+    from ...services import email as email_service
+    from .remisiones import _validar_destinatarios
+
+    recibo = get_or_404(db, ReciboPago, recibo_id, soft=False)
+    if recibo.estado != "TIMBRADO":
+        raise HTTPException(status_code=409, detail="Solo se envía un recibo timbrado")
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    if not email_service.configured(tenant):
+        raise HTTPException(status_code=503, detail="Configura una cuenta de correo en Ajustes › Correo")
+    destinatarios = _validar_destinatarios(payload.to)
+
+    pdf = _recibo_pdf_bytes(db, ctx, recibo)
+    nombre = f"REP-{recibo.serie}{recibo.folio}"
+    attachments: list[tuple[str, bytes, str]] = [(f"{nombre}.pdf", pdf, "application/pdf")]
+    if recibo.xml:
+        attachments.append((f"{nombre}.xml", recibo.xml.encode("utf-8"), "application/xml"))
+    mensaje_html = f"<p>{html_mod.escape(payload.mensaje)}</p>" if payload.mensaje else ""
+    html = (
+        f"{mensaje_html}"
+        f"<p>Adjunto el recibo electrónico de pago <strong>{html_mod.escape(nombre)}</strong>"
+        f" por <strong>${recibo.monto:,.2f} {recibo.moneda}</strong>.</p>"
+        f"<p>UUID: <span style=\"font-family:monospace\">{html_mod.escape(recibo.uuid or '')}</span></p>"
+    )
+    try:
+        email_service.send_email(email_service.smtp_config(tenant), destinatarios,
+                                 f"Recibo de pago {nombre}", html, attachments=attachments)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "to": ", ".join(destinatarios)}

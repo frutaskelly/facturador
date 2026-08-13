@@ -130,6 +130,9 @@ class _FakePAC:
     def create_cfdi_pago(self, payload):
         return {"Id": "REP-FAKE", "Complement": {"TaxStamp": {"Uuid": str(uuid.uuid4())}}}
 
+    def cancel_cfdi(self, cfdi_id, motive, uuid_replacement=None):
+        return {"Status": "canceled"}
+
     def download_xml(self, cfdi_id):
         return b"<xml/>"
 
@@ -208,3 +211,52 @@ def test_rep_solo_ppd_timbrada(client, env, auth):
         "cliente_id": env["cli"], "fecha_pago": hoy, "forma_pago": "03", "monto": "500",
         "facturas": [{"factura_id": fid, "importe": "500"}]})
     assert r.status_code == 422 and "PPD timbrada" in r.json()["detail"]
+
+
+# ── F3: cancelación del REP + candado en cancelar_factura ────────────────────
+def _timbrar_rep(client, env, h, fid, *, monto):
+    hoy = datetime.now(timezone.utc).isoformat()
+    r = client.post("/api/v1/cobranza/recibos-pago", headers=h, json={
+        "cliente_id": env["cli"], "fecha_pago": hoy, "forma_pago": "03", "monto": monto,
+        "facturas": [{"factura_id": fid, "importe": monto}]})
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    t = client.post(f"/api/v1/cobranza/recibos-pago/{rid}/timbrar", headers=h)
+    assert t.status_code == 200, t.text
+    return rid
+
+
+def test_rep_cancelar_revierte_saldo(client, env, auth, fake_pac):
+    # Factura $1160, abono $500 → saldo 660; al cancelar el REP el saldo regresa a 1160.
+    fid = _factura_ppd_timbrada(env, total=1160, dias_atras=40, folio=20)
+    h = _h(env)
+    rid = _timbrar_rep(client, env, h, fid, monto="500")
+    assert _saldo_factura(fid) == Decimal("660")
+
+    c = client.post(f"/api/v1/cobranza/recibos-pago/{rid}/cancelar", headers=h, json={"motivo": "02"})
+    assert c.status_code == 200, c.text
+    assert c.json()["estado"] == "CANCELADO"
+    assert _saldo_factura(fid) == Decimal("1160")     # abono revertido
+
+    # No se cancela dos veces.
+    c2 = client.post(f"/api/v1/cobranza/recibos-pago/{rid}/cancelar", headers=h, json={"motivo": "02"})
+    assert c2.status_code == 409
+
+
+def test_candado_factura_ppd_con_rep(client, env, auth, fake_pac, monkeypatch):
+    # Con un REP timbrado, la factura no se cancela; tras cancelar el REP, sí.
+    import app.core.config as cfg
+    monkeypatch.setattr(cfg.settings, "FACTURAMA_FAKE_CANCEL", True)
+    fid = _factura_ppd_timbrada(env, total=1000, dias_atras=10, folio=21)
+    h = _h(env)
+    rid = _timbrar_rep(client, env, h, fid, monto="1000")
+    assert _saldo_factura(fid) == Decimal("0")
+
+    blocked = client.post(f"/api/v1/facturas/{fid}/cancelar", headers=h, json={})
+    assert blocked.status_code == 409 and "REP" in blocked.json()["detail"]
+
+    # Cancelado el REP, la factura ya se puede cancelar.
+    client.post(f"/api/v1/cobranza/recibos-pago/{rid}/cancelar", headers=h, json={"motivo": "02"})
+    ok = client.post(f"/api/v1/facturas/{fid}/cancelar", headers=h, json={})
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["estado"] == "CANCELADA"

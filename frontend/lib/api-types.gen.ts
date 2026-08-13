@@ -245,6 +245,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cobranza/recibos-pago/{recibo_id}/cancelar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancelar Recibo
+         * @description Cancela el REP ante el PAC y REVIERTE el saldo insoluto de cada factura
+         *     (le regresa el importe abonado). El SAT exige aceptación del receptor para
+         *     cancelar un CFDI de pago (positiva ficta a 3 días).
+         */
+        post: operations["cancelar_recibo_api_v1_cobranza_recibos_pago__recibo_id__cancelar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/recibos-pago/{recibo_id}/enviar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enviar Recibo
+         * @description Envía el PDF + XML del REP por correo (SMTP del tenant).
+         */
+        post: operations["enviar_recibo_api_v1_cobranza_recibos_pago__recibo_id__enviar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/recibos-pago/{recibo_id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recibo Pdf */
+        get: operations["recibo_pdf_api_v1_cobranza_recibos_pago__recibo_id__pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cobranza/recibos-pago/{recibo_id}/timbrar": {
         parameters: {
             query?: never;
@@ -261,6 +320,23 @@ export interface paths {
          *     persistencia inmediata del timbre.
          */
         post: operations["timbrar_recibo_api_v1_cobranza_recibos_pago__recibo_id__timbrar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/recibos-pago/{recibo_id}/xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recibo Xml */
+        get: operations["recibo_xml_api_v1_cobranza_recibos_pago__recibo_id__xml_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2129,6 +2205,16 @@ export interface components {
             /** Uuid Sustitucion */
             uuid_sustitucion?: string | null;
         };
+        /** CancelarReciboIn */
+        CancelarReciboIn: {
+            /**
+             * Motivo
+             * @default 02
+             */
+            motivo: string;
+            /** Uuid Sustitucion */
+            uuid_sustitucion?: string | null;
+        };
         /** CandidatoOut */
         CandidatoOut: {
             /** Nombre */
@@ -2785,6 +2871,13 @@ export interface components {
             mensaje?: string | null;
             /** To */
             to?: string | null;
+        };
+        /** EnviarReciboIn */
+        EnviarReciboIn: {
+            /** Mensaje */
+            mensaje?: string | null;
+            /** To */
+            to: string[];
         };
         /** EnviarRemisionIn */
         EnviarRemisionIn: {
@@ -6154,7 +6247,147 @@ export interface operations {
             };
         };
     };
+    cancelar_recibo_api_v1_cobranza_recibos_pago__recibo_id__cancelar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                recibo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CancelarReciboIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enviar_recibo_api_v1_cobranza_recibos_pago__recibo_id__enviar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                recibo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnviarReciboIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recibo_pdf_api_v1_cobranza_recibos_pago__recibo_id__pdf_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                recibo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     timbrar_recibo_api_v1_cobranza_recibos_pago__recibo_id__timbrar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                recibo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recibo_xml_api_v1_cobranza_recibos_pago__recibo_id__xml_get: {
         parameters: {
             query?: never;
             header?: {

@@ -489,6 +489,30 @@
     "title": "CancelarFacturaIn",
     "type": "object"
    },
+   "CancelarReciboIn": {
+    "properties": {
+     "motivo": {
+      "default": "02",
+      "pattern": "^0[1-4]$",
+      "title": "Motivo",
+      "type": "string"
+     },
+     "uuid_sustitucion": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uuid Sustitucion"
+     }
+    },
+    "title": "CancelarReciboIn",
+    "type": "object"
+   },
    "CandidatoOut": {
     "properties": {
      "nombre": {
@@ -2326,6 +2350,36 @@
      "ids"
     ],
     "title": "EnviarFacturasLoteIn",
+    "type": "object"
+   },
+   "EnviarReciboIn": {
+    "properties": {
+     "mensaje": {
+      "anyOf": [
+       {
+        "maxLength": 2000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mensaje"
+     },
+     "to": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "To",
+      "type": "array"
+     }
+    },
+    "required": [
+     "to"
+    ],
+    "title": "EnviarReciboIn",
     "type": "object"
    },
    "EnviarRemisionIn": {
@@ -11452,6 +11506,216 @@
     ]
    }
   },
+  "/api/v1/cobranza/recibos-pago/{recibo_id}/cancelar": {
+   "post": {
+    "description": "Cancela el REP ante el PAC y REVIERTE el saldo insoluto de cada factura\n(le regresa el importe abonado). El SAT exige aceptación del receptor para\ncancelar un CFDI de pago (positiva ficta a 3 días).",
+    "operationId": "cancelar_recibo_api_v1_cobranza_recibos_pago__recibo_id__cancelar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "recibo_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Recibo Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CancelarReciboIn",
+        "default": {
+         "motivo": "02"
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cancelar Recibo",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/recibos-pago/{recibo_id}/enviar": {
+   "post": {
+    "description": "Envía el PDF + XML del REP por correo (SMTP del tenant).",
+    "operationId": "enviar_recibo_api_v1_cobranza_recibos_pago__recibo_id__enviar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "recibo_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Recibo Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EnviarReciboIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Enviar Recibo",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/recibos-pago/{recibo_id}/pdf": {
+   "get": {
+    "operationId": "recibo_pdf_api_v1_cobranza_recibos_pago__recibo_id__pdf_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "recibo_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Recibo Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Recibo Pdf",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
   "/api/v1/cobranza/recibos-pago/{recibo_id}/timbrar": {
    "post": {
     "description": "Timbra el REP ante el PAC y descuenta el saldo insoluto de cada factura.\nMismo blindaje que las facturas: FOR UPDATE, bitácora anti-doble-timbrado,\npersistencia inmediata del timbre.",
@@ -11510,6 +11774,68 @@
      }
     ],
     "summary": "Timbrar Recibo",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/recibos-pago/{recibo_id}/xml": {
+   "get": {
+    "operationId": "recibo_xml_api_v1_cobranza_recibos_pago__recibo_id__xml_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "recibo_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Recibo Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Recibo Xml",
     "tags": [
      "cobranza"
     ]

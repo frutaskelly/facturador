@@ -36,6 +36,8 @@ from ...models import (
     LoteInventario,
     Merma,
     Producto,
+    ReciboPago,
+    ReciboPagoFactura,
     Remision,
     Tenant,
     TimbradoIntento,
@@ -756,6 +758,19 @@ def cancelar_factura(
         raise HTTPException(status_code=409, detail="Solo se cancela una factura timbrada")
     if payload.motivo == "01" and payload.uuid_sustitucion is None:
         raise HTTPException(status_code=422, detail="El motivo 01 requiere uuid_sustitucion")
+    # Regla SAE: una factura con abonos (REP timbrado) no se cancela sin cancelar
+    # antes su(s) recibo(s) de pago — el complemento quedaría huérfano ante el SAT.
+    abonos = (
+        db.query(func.count(ReciboPagoFactura.id))
+        .join(ReciboPago, ReciboPago.id == ReciboPagoFactura.recibo_id)
+        .filter(ReciboPagoFactura.factura_id == factura.id, ReciboPago.estado == "TIMBRADO")
+        .scalar()
+    )
+    if abonos:
+        raise HTTPException(
+            status_code=409,
+            detail="La factura tiene recibos de pago (REP) timbrados; cancélalos primero en Cobranza",
+        )
 
     if settings.FACTURAMA_FAKE_CANCEL:
         # Cancelación simulada (el sandbox de Facturama no cancela). NO se llama al
