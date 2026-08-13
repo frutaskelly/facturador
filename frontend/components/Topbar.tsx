@@ -1,16 +1,83 @@
 "use client";
 
-import { LogOut } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, ChevronsUpDown, LogOut } from "lucide-react";
 
-import type { Me } from "@/lib/auth";
+import { useAuth, type Me } from "@/lib/auth";
 
 export function Topbar({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+  const { switchTenant } = useAuth();
   const tenant = me.tenants.find(
     (t) => t.tenant_id === me.active_tenant.tenant_id
   );
+  const multi = me.tenants.length > 1;
+
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Cierra el menú al hacer clic fuera o con Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-6">
-      <div className="text-sm font-medium text-muted">{tenant?.name ?? "—"}</div>
+      {multi ? (
+        <div className="relative" ref={menuRef}>
+          {/* Disclosure simple (no listbox ARIA): los botones se navegan con
+              Tab/Enter y el menú cierra con Escape o clic fuera. */}
+          <button
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            aria-label="Cambiar de empresa"
+            className="-ml-2 flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-muted transition hover:bg-surface-2 hover:text-foreground"
+          >
+            <span className="max-w-[16rem] truncate">{tenant?.name ?? "—"}</span>
+            <ChevronsUpDown size={14} className="shrink-0" />
+          </button>
+          {open && (
+            <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-xl border border-border bg-background p-1 shadow-lg">
+              <div className="px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-muted">
+                Empresas
+              </div>
+              {me.tenants.map((t) => {
+                const activa = t.tenant_id === me.active_tenant.tenant_id;
+                return (
+                  <button
+                    key={t.tenant_id}
+                    aria-current={activa || undefined}
+                    onClick={() => {
+                      setOpen(false);
+                      switchTenant(t.tenant_id);
+                    }}
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm transition hover:bg-surface-2"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">{t.name}</span>
+                      <span className="block text-xs text-muted">{t.role}</span>
+                    </span>
+                    {activa && <Check size={15} className="shrink-0 text-accent" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="text-sm font-medium text-muted">{tenant?.name ?? "—"}</div>
+      )}
       <div className="flex items-center gap-4">
         <div className="text-right leading-tight">
           <div className="text-sm font-medium">{me.email}</div>

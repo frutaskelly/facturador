@@ -1,6 +1,27 @@
 "use client";
 
 import { getSupabase } from "./supabaseClient";
+import { getActiveTenantId, setActiveTenantId, tenantHeader } from "./tenant";
+
+// Respuestas del backend cuando el selector X-Tenant-Id guardado ya no sirve
+// (lo quitaron de esa empresa, o el valor se corrompió). Ver _select_membership
+// en backend rbac.py — estos textos son contrato con el frontend.
+const TENANT_SELECTOR_ERRORS = new Set([
+  "Sin acceso a este tenant",       // 403: ya no es miembro de la empresa elegida
+  "Selector de tenant inválido",    // 400: valor guardado corrupto (no es UUID)
+]);
+
+/** Selección de empresa obsoleta/corrupta: se limpia y se recarga la app para
+ *  reconstruir TODO el estado en la empresa default — jamás se cambia de
+ *  empresa en silencio con pantallas montadas (mezclaría datos entre empresas).
+ *  Sin loop posible: tras limpiar ya no se manda el header. */
+function healStaleTenantSelection(status: number, detail: string): boolean {
+  if ((status !== 403 && status !== 400) || !TENANT_SELECTOR_ERRORS.has(detail)) return false;
+  if (!getActiveTenantId()) return false;
+  setActiveTenantId(null);
+  window.location.assign("/dashboard");
+  return true;
+}
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8011";
 
@@ -30,8 +51,9 @@ function detailToMessage(detail: unknown, fallback: string): string {
 
 /**
  * Authenticated fetch against the backend. Attaches the current Supabase
- * access token as a Bearer JWT. The backend derives identity + tenant from
- * that token — we never send a tenant header (v2 security model).
+ * access token as a Bearer JWT. La identidad sale SOLO del token; X-Tenant-Id
+ * es un SELECTOR de empresa para usuarios con varias (grupo) que el backend
+ * valida contra sus membresías — nunca otorga acceso por sí mismo.
  */
 export async function apiFetch<T = unknown>(
   path: string,
@@ -50,6 +72,7 @@ export async function apiFetch<T = unknown>(
   if (session?.access_token) {
     headers.set("Authorization", `Bearer ${session.access_token}`);
   }
+  tenantHeader(headers);
 
   // Timeout por defecto para no dejar un spinner eterno si el backend se
   // cuelga. 60 s: el timbrado con el PAC puede tardar ~30 s. Si el caller pasa
@@ -75,6 +98,7 @@ export async function apiFetch<T = unknown>(
     } catch {
       /* non-JSON error body */
     }
+    healStaleTenantSelection(res.status, detail);
     throw new ApiError(res.status, detail);
   }
 
@@ -90,6 +114,7 @@ export async function apiDownload(path: string, filename: string): Promise<void>
   } = await supabase.auth.getSession();
   const headers = new Headers();
   if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+  tenantHeader(headers);
 
   const res = await fetch(`${API_URL}${path}`, { headers });
   if (!res.ok) {
@@ -99,6 +124,7 @@ export async function apiDownload(path: string, filename: string): Promise<void>
     } catch {
       /* binario o vacío */
     }
+    healStaleTenantSelection(res.status, detail);
     throw new ApiError(res.status, detail);
   }
   const blob = await res.blob();
@@ -133,6 +159,7 @@ export async function apiOpenInTab(path: string, win: Window | null): Promise<vo
   } = await supabase.auth.getSession();
   const headers = new Headers();
   if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+  tenantHeader(headers);
 
   const res = await fetch(`${API_URL}${path}`, { headers });
   if (!res.ok) {
@@ -143,6 +170,7 @@ export async function apiOpenInTab(path: string, win: Window | null): Promise<vo
     } catch {
       /* binario o vacío */
     }
+    healStaleTenantSelection(res.status, detail);
     throw new ApiError(res.status, detail);
   }
   const blob = await res.blob();

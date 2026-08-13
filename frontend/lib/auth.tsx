@@ -11,6 +11,7 @@ import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 
 import { ApiError, apiFetch } from "./api";
 import { getSupabase } from "./supabaseClient";
+import { ACTIVE_TENANT_KEY, setActiveTenantId } from "./tenant";
 
 export type Me = {
   auth_user_id: string;
@@ -28,6 +29,8 @@ type AuthState = {
   /** Non-null when a session exists but /auth/me failed (e.g. not provisioned). */
   accessError: string | null;
   refreshMe: () => Promise<void>;
+  /** Cambia la empresa activa (cuentas multi-empresa) y recarga la app. */
+  switchTenant: (tenantId: string) => void;
   signOut: () => Promise<void>;
 };
 
@@ -58,6 +61,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (_event: AuthChangeEvent, next: Session | null) => {
         setSession(next);
         if (!next) {
+          // Sesión terminada (signOut O expiración): la selección de empresa es
+          // de quien se fue — en una computadora compartida, el siguiente login
+          // no debe heredar la empresa activa del anterior.
+          setActiveTenantId(null);
           setMe(null);
           setAccessError(null);
           setLoading(false);
@@ -79,6 +86,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // loading) y perdería formularios/modales a medio llenar. Por eso revalidamos
     // en silencio cuando ya tenemos `me`.
     if (!me) setLoading(true);
+    // Nota: si el selector de empresa guardado ya no es válido, apiFetch se
+    // auto-repara (healStaleTenantSelection): limpia la selección y recarga la
+    // app completa — aquí solo se refleja el error mientras esa recarga llega.
     apiFetch<Me>("/api/v1/auth/me")
       .then((data) => {
         if (!active) return;
@@ -110,8 +120,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Multi-pestaña: si OTRA pestaña cambia la empresa activa (localStorage es
+  // compartido y cada request lee la clave), esta pestaña quedaría mostrando la
+  // empresa vieja mientras sus fetch salen a la nueva — mezcla de datos y
+  // escrituras cruzadas. El evento `storage` solo dispara en las demás
+  // pestañas: recarga dura para reconstruir todo en la empresa nueva.
+  useEffect(() => {
+    if (!me) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVE_TENANT_KEY && e.newValue !== e.oldValue) {
+        window.location.assign("/dashboard");
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [me]);
+
+  const switchTenant = (tenantId: string) => {
+    if (tenantId === me?.active_tenant.tenant_id) return;
+    setActiveTenantId(tenantId);
+    // Recarga dura al dashboard: todo el estado en memoria (tablas, formularios,
+    // cachés de useResource) es de la empresa anterior; una recarga limpia evita
+    // mezclar datos entre empresas, y la página actual (p. ej. el detalle de una
+    // factura) puede no existir en la nueva.
+    window.location.assign("/dashboard");
+  };
+
   const signOut = async () => {
     await getSupabase().auth.signOut();
+    // La selección de empresa es del usuario que se va; no debe heredarla el
+    // siguiente login en este navegador.
+    setActiveTenantId(null);
     setSession(null);
     setMe(null);
     setAccessError(null);
@@ -119,7 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, me, loading, accessError, refreshMe, signOut }}
+      value={{ session, me, loading, accessError, refreshMe, switchTenant, signOut }}
     >
       {children}
     </AuthContext.Provider>

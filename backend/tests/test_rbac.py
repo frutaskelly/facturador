@@ -122,6 +122,45 @@ def test_tenant_selector_must_match_a_membership(seeded):
     assert exc.value.status_code == 403
 
 
+def test_tenant_selector_switches_among_own_memberships(seeded):
+    # Usuario multi-empresa (grupo): el selector X-Tenant-Id elige entre SUS
+    # membresías — la base del switcher de empresa del Topbar.
+    suffix = uuid.uuid4().hex[:8]
+    db = SessionLocal()
+    try:
+        empresa2 = Tenant(
+            slug=f"rbac2-{suffix}", legal_name="RBAC Dos SA", rfc=f"R2{suffix.upper()}X",
+            regimen_fiscal_sat="601", domicilio_fiscal_cp="44100",
+            tier="SUB", parent_tenant_id=seeded["tenant_id"], status="ACTIVE",
+        )
+        db.add(empresa2); db.flush()
+        admin_role = db.query(Role).filter(Role.nombre == "ADMIN", Role.es_preset.is_(True)).one()
+        cajero_user = db.query(User).filter(User.auth_user_id == seeded["cajero_sub"]).one()
+        m = Membership(tenant_id=empresa2.id, user_id=cajero_user.id, role_id=admin_role.id)
+        db.add(m); db.commit()
+        empresa2_id, m_id = empresa2.id, m.id
+
+        # Selecciona la empresa 2 → contexto de la empresa 2 con SU rol de allá.
+        ctx2 = get_auth_context(
+            principal=_principal(seeded["cajero_sub"], seeded["cajero_email"]),
+            x_tenant_id=str(empresa2_id),
+        )
+        assert ctx2.tenant_id == empresa2_id
+        assert ctx2.role_name == "ADMIN"
+
+        # Selecciona la empresa 1 → contexto de la 1 (rol CAJERO).
+        ctx1 = get_auth_context(
+            principal=_principal(seeded["cajero_sub"], seeded["cajero_email"]),
+            x_tenant_id=str(seeded["tenant_id"]),
+        )
+        assert ctx1.tenant_id == seeded["tenant_id"]
+        assert ctx1.role_name == "CAJERO"
+    finally:
+        db.query(Membership).filter(Membership.id == m_id).delete()
+        db.query(Tenant).filter(Tenant.id == empresa2_id).delete()
+        db.commit(); db.close()
+
+
 # ─── first-login linking by email (operator-provisioned accounts) ────────────
 def _provision_unlinked_user(db, email: str):
     """A tenant + an ADMIN user provisioned but never logged in (auth_user_id NULL)."""

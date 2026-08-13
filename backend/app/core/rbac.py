@@ -125,6 +125,9 @@ def _select_membership(
             detail="Usuario sin tenant asignado",
         )
     if selector:
+        # OJO: los textos "Selector de tenant inválido" y "Sin acceso a este
+        # tenant" son CONTRATO con el frontend (lib/api.ts los detecta para
+        # auto-limpiar una selección de empresa obsoleta). No reformular.
         try:
             wanted = UUID(selector)
         except ValueError:

@@ -18,6 +18,7 @@ import { can, useAuth } from "@/lib/auth";
 import { fmtDate } from "@/lib/format";
 import { REGIMENES_FISCALES } from "@/lib/sat";
 import { getSupabase } from "@/lib/supabaseClient";
+import { tenantHeader } from "@/lib/tenant";
 
 const WRITE = "membership:gestionar";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8011";
@@ -29,6 +30,7 @@ async function authFetch(path: string, init: RequestInit = {}): Promise<Response
   const { data: { session } } = await supabase.auth.getSession();
   const headers = new Headers(init.headers);
   if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+  tenantHeader(headers);   // misma selección de empresa que apiFetch
   return fetch(`${API_URL}${path}`, { ...init, headers });
 }
 

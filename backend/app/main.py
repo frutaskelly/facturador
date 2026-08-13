@@ -75,7 +75,9 @@ app.add_middleware(
     allow_origins=settings.allowed_origins_list(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    # X-Tenant-Id: selector de empresa activa (cuentas multi-empresa); el
+    # backend lo valida contra las membresías del usuario (_select_membership).
+    allow_headers=["Authorization", "Content-Type", "X-Tenant-Id"],
     expose_headers=["X-Request-Id", "X-Total-Count"],
     max_age=3600,
 )
