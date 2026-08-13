@@ -471,6 +471,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/empresa/hijas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Crear Empresa Hija
+         * @description Crea una empresa HIJA del grupo: otro RFC/razón social del mismo dueño,
+         *     como tenant `SUB` colgado de la raíz del grupo. El creador queda como OWNER
+         *     de la nueva (el switcher del Topbar la muestra al instante).
+         *
+         *     Usa la sesión plana `get_db` a propósito: la política RLS de `tenants`
+         *     (id = current_tenant_id) impide insertar OTRO tenant desde la sesión
+         *     scopeada. La única barrera aquí es el código: `parent` sale SIEMPRE de
+         *     ctx.tenant_id (jamás del payload) y se exige ser OWNER.
+         */
+        post: operations["crear_empresa_hija_api_v1_empresa_hijas_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/empresa/logo": {
         parameters: {
             query?: never;
@@ -2808,6 +2835,31 @@ export interface components {
             lineas: components["schemas"]["LineaDevolucionOut"][];
             /** Motivo */
             motivo?: string | null;
+        };
+        /**
+         * EmpresaHijaIn
+         * @description Alta de una empresa HIJA del grupo (otro RFC/razón social del mismo dueño).
+         */
+        EmpresaHijaIn: {
+            /** Domicilio Fiscal Cp */
+            domicilio_fiscal_cp: string;
+            /** Legal Name */
+            legal_name: string;
+            /** Regimen Fiscal Sat */
+            regimen_fiscal_sat: string;
+            /** Rfc */
+            rfc: string;
+        };
+        /** EmpresaHijaOut */
+        EmpresaHijaOut: {
+            /** Legal Name */
+            legal_name: string;
+            /** Rfc */
+            rfc: string;
+            /** Slug */
+            slug: string;
+            /** Tenant Id */
+            tenant_id: string;
         };
         /**
          * EmpresaOnboardingOut
@@ -6901,6 +6953,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    crear_empresa_hija_api_v1_empresa_hijas_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmpresaHijaIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmpresaHijaOut"];
                 };
             };
             /** @description Validation Error */

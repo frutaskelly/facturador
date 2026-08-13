@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronsUpDown, LogOut } from "lucide-react";
+import { Check, ChevronsUpDown, LogOut, Plus } from "lucide-react";
 
+import { AgregarEmpresaModal } from "@/components/AgregarEmpresaModal";
 import { useAuth, type Me } from "@/lib/auth";
 
 export function Topbar({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
@@ -10,9 +11,13 @@ export function Topbar({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const tenant = me.tenants.find(
     (t) => t.tenant_id === me.active_tenant.tenant_id
   );
-  const multi = me.tenants.length > 1;
+  // El menú aparece con varias empresas O para el OWNER (que puede agregar la
+  // primera hija del grupo desde aquí).
+  const isOwner = me.active_tenant.is_owner;
+  const multi = me.tenants.length > 1 || isOwner;
 
   const [open, setOpen] = useState(false);
+  const [agregar, setAgregar] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Cierra el menú al hacer clic fuera o con Escape.
@@ -72,6 +77,21 @@ export function Topbar({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                   </button>
                 );
               })}
+              {isOwner && (
+                <>
+                  <div className="my-1 border-t border-border" />
+                  <button
+                    onClick={() => {
+                      setOpen(false);
+                      setAgregar(true);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-muted transition hover:bg-surface-2 hover:text-foreground"
+                  >
+                    <Plus size={15} className="shrink-0" />
+                    Agregar empresa
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -95,6 +115,7 @@ export function Topbar({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <LogOut size={18} />
         </button>
       </div>
+      {agregar && <AgregarEmpresaModal onClose={() => setAgregar(false)} />}
     </header>
   );
 }

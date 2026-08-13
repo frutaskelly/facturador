@@ -20,11 +20,20 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from ...core.config import settings
 from ...core.db import get_db
-from ...core.rbac import AuthContext, require_permission
-from ...models import Tenant
-from ...schemas.empresa import EmpresaOnboardingOut, EmpresaOut, EmpresaUpdate
+from ...core.rbac import AuthContext, invalidate_auth_cache, require_permission
+from ...models import Membership, Role, Tenant
+from ...schemas.empresa import (
+    EmpresaHijaIn,
+    EmpresaHijaOut,
+    EmpresaOnboardingOut,
+    EmpresaOut,
+    EmpresaUpdate,
+)
 from ...services.facturama import FacturamaClient, FacturamaError, csd_public_fields
 from ...services.onboarding import compute_status, rfc_valido
+# Helpers del registro autoservicio (slug único + CP de 5 dígitos): misma
+# convención de alta de tenants para las empresas hijas del grupo.
+from .registro import _CP_RE, _unique_slug
 
 router = APIRouter(prefix="/empresa", tags=["empresa"])
 
@@ -96,6 +105,121 @@ def put_empresa(
     db.refresh(tenant)
 
     return _empresa_out(tenant)
+
+
+# Tope de empresas por grupo (raíz + hijas): frena el abuso de RFCs basura sin
+# estorbar a un grupo real. Subirlo es cambiar una constante.
+_MAX_EMPRESAS_GRUPO = 10
+
+
+@router.post("/hijas", response_model=EmpresaHijaOut, status_code=201)
+def crear_empresa_hija(
+    payload: EmpresaHijaIn,
+    db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Crea una empresa HIJA del grupo: otro RFC/razón social del mismo dueño,
+    como tenant `SUB` colgado de la raíz del grupo. El creador queda como OWNER
+    de la nueva (el switcher del Topbar la muestra al instante).
+
+    Usa la sesión plana `get_db` a propósito: la política RLS de `tenants`
+    (id = current_tenant_id) impide insertar OTRO tenant desde la sesión
+    scopeada. La única barrera aquí es el código: `parent` sale SIEMPRE de
+    ctx.tenant_id (jamás del payload) y se exige ser OWNER.
+    """
+    if not ctx.is_owner:
+        raise HTTPException(status_code=403, detail="Solo el dueño (OWNER) puede agregar empresas")
+
+    actual = _load_tenant(db, ctx.tenant_id)
+    # Grupo PLANO: la nueva cuelga de la RAÍZ. Si la actual ya es una hija, la
+    # nueva es su hermana (no nietas SUB_SUB — jerarquía simple y predecible).
+    root_id = actual.parent_tenant_id or actual.id
+    # FOR UPDATE sobre la raíz: serializa las altas del grupo. Sin el lock, N
+    # POSTs simultáneos leen el mismo conteo y todos pasan el tope (TOCTOU) —
+    # el límite solo vive en este check, no hay constraint de BD que lo respalde.
+    raiz = (
+        db.query(Tenant).filter(Tenant.id == root_id).with_for_update().one_or_none()
+    )
+    if raiz is None:
+        raise HTTPException(status_code=404, detail="Tenant raíz no encontrado")
+
+    en_grupo = (
+        db.query(Tenant.id)
+        .filter((Tenant.id == root_id) | (Tenant.parent_tenant_id == root_id))
+        .count()
+    )
+    if en_grupo >= _MAX_EMPRESAS_GRUPO:
+        raise HTTPException(
+            status_code=409,
+            detail=f"El grupo ya tiene {en_grupo} empresas (máximo {_MAX_EMPRESAS_GRUPO})",
+        )
+
+    legal_name = payload.legal_name.strip()
+    rfc = payload.rfc.strip().upper()
+    cp = payload.domicilio_fiscal_cp.strip()
+    # Re-validar TRAS el strip (min_length de pydantic corre antes): "  " pasaría
+    # y dejaría una empresa sin razón social en el switcher y los PDFs.
+    if len(legal_name) < 2:
+        raise HTTPException(status_code=422, detail="La razón social es obligatoria")
+    if not rfc_valido(rfc):
+        raise HTTPException(status_code=422, detail="El RFC no tiene un formato válido del SAT")
+    if not _CP_RE.match(cp):
+        raise HTTPException(status_code=422, detail="El código postal debe tener 5 dígitos")
+    if db.query(Tenant.id).filter(Tenant.rfc == rfc).first() is not None:
+        raise HTTPException(status_code=409, detail="Ya existe una empresa registrada con ese RFC")
+
+    owner_role = (
+        db.query(Role)
+        .filter(Role.nombre == "OWNER", Role.es_preset.is_(True), Role.tenant_id.is_(None))
+        .one_or_none()
+    )
+    if owner_role is None:
+        raise HTTPException(status_code=503, detail="Falta el rol OWNER preset del sistema")
+
+    hija = Tenant(
+        slug=_unique_slug(db, legal_name),
+        legal_name=legal_name,
+        trade_name=legal_name,
+        rfc=rfc,
+        regimen_fiscal_sat=payload.regimen_fiscal_sat.strip(),
+        domicilio_fiscal_cp=cp,
+        tier="SUB",
+        parent_tenant_id=root_id,
+        status="ACTIVE",
+        # El grupo comparte plan/asientos: la hija hereda de la raíz, no abre
+        # un trial paralelo.
+        plan=raiz.plan,
+        trial_ends_at=raiz.trial_ends_at,
+        seats_limit=raiz.seats_limit,
+    )
+    db.add(hija)
+    db.flush()
+    db.add(
+        Membership(
+            tenant_id=hija.id,
+            user_id=ctx.user_id,
+            role_id=owner_role.id,
+            acceso_todas_sucursales=True,
+            active=True,
+        )
+    )
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        # Carrera contra los UNIQUE de tenants: puede ser el RFC o el slug (dos
+        # altas simultáneas con la misma razón social) — no afirmar cuál.
+        raise HTTPException(
+            status_code=409,
+            detail="No se pudo crear la empresa: el RFC o el nombre ya están registrados; intenta de nuevo",
+        )
+    # Sin esto, el caché de auth (TTL 30 s) escondería la empresa nueva del
+    # switcher — y rechazaría el X-Tenant-Id de la hija — hasta expirar.
+    invalidate_auth_cache()
+
+    return EmpresaHijaOut(
+        tenant_id=str(hija.id), slug=hija.slug, legal_name=hija.legal_name, rfc=hija.rfc
+    )
 
 
 @router.post("/logo", response_model=EmpresaOut)

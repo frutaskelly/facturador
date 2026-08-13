@@ -23,6 +23,21 @@ class EmpresaUpdate(BaseModel):
     domicilio_fiscal: Dict[str, Any] = Field(default_factory=dict)
 
 
+class EmpresaHijaIn(BaseModel):
+    """Alta de una empresa HIJA del grupo (otro RFC/razón social del mismo dueño)."""
+    legal_name: str = Field(min_length=2, max_length=254)
+    rfc: str = Field(min_length=12, max_length=15)
+    regimen_fiscal_sat: str = Field(min_length=3, max_length=4)
+    domicilio_fiscal_cp: str = Field(min_length=5, max_length=5)
+
+
+class EmpresaHijaOut(BaseModel):
+    tenant_id: str
+    slug: str
+    legal_name: str
+    rfc: str
+
+
 class CsdOut(BaseModel):
     """Pass-through del objeto que devuelve Facturama por cada CSD cargado."""
 

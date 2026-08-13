@@ -2149,6 +2149,71 @@
     "title": "DevolucionOut",
     "type": "object"
    },
+   "EmpresaHijaIn": {
+    "description": "Alta de una empresa HIJA del grupo (otro RFC/razón social del mismo dueño).",
+    "properties": {
+     "domicilio_fiscal_cp": {
+      "maxLength": 5,
+      "minLength": 5,
+      "title": "Domicilio Fiscal Cp",
+      "type": "string"
+     },
+     "legal_name": {
+      "maxLength": 254,
+      "minLength": 2,
+      "title": "Legal Name",
+      "type": "string"
+     },
+     "regimen_fiscal_sat": {
+      "maxLength": 4,
+      "minLength": 3,
+      "title": "Regimen Fiscal Sat",
+      "type": "string"
+     },
+     "rfc": {
+      "maxLength": 15,
+      "minLength": 12,
+      "title": "Rfc",
+      "type": "string"
+     }
+    },
+    "required": [
+     "legal_name",
+     "rfc",
+     "regimen_fiscal_sat",
+     "domicilio_fiscal_cp"
+    ],
+    "title": "EmpresaHijaIn",
+    "type": "object"
+   },
+   "EmpresaHijaOut": {
+    "properties": {
+     "legal_name": {
+      "title": "Legal Name",
+      "type": "string"
+     },
+     "rfc": {
+      "title": "Rfc",
+      "type": "string"
+     },
+     "slug": {
+      "title": "Slug",
+      "type": "string"
+     },
+     "tenant_id": {
+      "title": "Tenant Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "tenant_id",
+     "slug",
+     "legal_name",
+     "rfc"
+    ],
+    "title": "EmpresaHijaOut",
+    "type": "object"
+   },
    "EmpresaOnboardingOut": {
     "description": "Estado de la configuración fiscal del emisor (wizard de onboarding).",
     "properties": {
@@ -12803,6 +12868,71 @@
      }
     ],
     "summary": "Subir Csd",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
+  "/api/v1/empresa/hijas": {
+   "post": {
+    "description": "Crea una empresa HIJA del grupo: otro RFC/razón social del mismo dueño,\ncomo tenant `SUB` colgado de la raíz del grupo. El creador queda como OWNER\nde la nueva (el switcher del Topbar la muestra al instante).\n\nUsa la sesión plana `get_db` a propósito: la política RLS de `tenants`\n(id = current_tenant_id) impide insertar OTRO tenant desde la sesión\nscopeada. La única barrera aquí es el código: `parent` sale SIEMPRE de\nctx.tenant_id (jamás del payload) y se exige ser OWNER.",
+    "operationId": "crear_empresa_hija_api_v1_empresa_hijas_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EmpresaHijaIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EmpresaHijaOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Crear Empresa Hija",
     "tags": [
      "empresa"
     ]
