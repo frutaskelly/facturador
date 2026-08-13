@@ -117,12 +117,13 @@ class FacturamaClient:
             return r.json()
 
     def create_cfdi_pago(self, payload: dict) -> dict:
-        """Timbra un Complemento de Pago 2.0 (CFDI tipo P). POST /2/cfdis."""
+        """Timbra un Complemento de Pago 2.0 (CFDI tipo P). POST /3/cfdis
+        (API Lite, misma que las facturas; /2/cfdis quedó deprecado)."""
         with self._client() as c:
-            r = c.post("/2/cfdis", json=payload)
+            r = c.post("/3/cfdis", json=payload)
             if r.status_code >= 400:
                 log.error(
-                    "Facturama /2/cfdis (REP) %s | Serie=%s Folio=%s | RESPONSE=%s",
+                    "Facturama /3/cfdis (REP) %s | Serie=%s Folio=%s | RESPONSE=%s",
                     r.status_code, payload.get("Serie"), payload.get("Folio"), r.text[:1000],
                 )
                 raise FacturamaError(f"create_cfdi_pago failed: {r.status_code} {r.text}")

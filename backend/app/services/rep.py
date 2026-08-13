@@ -25,18 +25,23 @@ def build_payload_rep(recibo, cliente, tenant, docs, settings) -> dict:
     expedition = (tenant.domicilio_fiscal_cp or "").strip()
     related = []
     for rf, factura in docs:
-        related.append({
+        dr = {
             "TaxObject": "01",   # DR sin desglose de impuestos en el REP (SAT lo permite: 01)
             "Uuid": factura.uuid,
-            "Serie": factura.serie,
-            "Folio": str(factura.folio),
             "Currency": rf.moneda_dr or "MXN",
             "PaymentMethod": "PPD",
             "PartialityNumber": int(rf.num_parcialidad),
             "PreviousBalanceAmount": _f(rf.saldo_anterior),
             "AmountPaid": _f(rf.importe_pagado),
             "ImpSaldoInsoluto": _f(rf.saldo_insoluto),
-        })
+        }
+        # Serie/Folio son opcionales (solo el UUID es obligatorio); omitir vacíos
+        # evita el error de patrón del PAC con serie/folio en blanco.
+        if (factura.serie or "").strip():
+            dr["Serie"] = str(factura.serie).strip()
+        if str(factura.folio or "").strip():
+            dr["Folio"] = str(factura.folio).strip()
+        related.append(dr)
 
     fecha_pago = recibo.fecha_pago
     payload = {
@@ -46,7 +51,7 @@ def build_payload_rep(recibo, cliente, tenant, docs, settings) -> dict:
         "Receiver": {
             "Rfc": cliente.rfc,
             "Name": cliente.legal_name,
-            "CfdiUse": "P01",        # obligatorio en REP
+            "CfdiUse": "CP01",       # CFDI 4.0: uso "Pagos" (el P01 era de 3.3)
             "FiscalRegime": cliente.regimen_fiscal or "616",
             "TaxZipCode": (cliente.domicilio_fiscal or {}).get("cp") or expedition,
         },
