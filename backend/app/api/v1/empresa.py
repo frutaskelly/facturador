@@ -307,12 +307,24 @@ def subir_csd(
 
 @router.get("/csd")
 def listar_csd(
+    db: Session = Depends(get_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     client = FacturamaClient.from_settings(settings)
     if not client.configured:
         raise HTTPException(status_code=503, detail="Facturama no está configurado")
-    return csd_public_fields(client.listar_csds())
+    # La cuenta Facturama es COMPARTIDA entre tenants (un CSD por RFC): sin
+    # filtrar, cada empresa vería los sellos de TODAS las demás (leak
+    # multi-tenant). Solo los del RFC propio — misma convención que _csd_match.
+    tenant = _load_tenant(db, ctx.tenant_id)
+    rfc_u = (tenant.rfc or "").strip().upper()
+    propios = [
+        c for c in (client.listar_csds() or [])
+        if isinstance(c, dict)
+        and rfc_u
+        and str(c.get("Rfc") or c.get("rfc") or "").strip().upper() == rfc_u
+    ]
+    return csd_public_fields(propios)
 
 
 @router.get("/onboarding", response_model=EmpresaOnboardingOut)

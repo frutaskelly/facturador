@@ -29,6 +29,11 @@ export default function UsuariosPage() {
   const rolesRes = useResource<Role[]>("/api/v1/roles");
   const members = membersRes.data ?? [];
   const roles = rolesRes.data ?? [];
+  // Solo el OWNER puede otorgar OWNER o tocar la membresía de un OWNER (el
+  // backend lo exige). Reflejarlo en la UI para no ofrecer acciones que darán 403.
+  const isOwner = !!me?.active_tenant.is_owner;
+  const roleOptions = roles.filter((r) => isOwner || !(r.es_preset && r.nombre === "OWNER"));
+  const rowLocked = (m: Membership) => m.role_nombre === "OWNER" && !isOwner;
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toRemove, setToRemove] = useState<Membership | null>(null);
@@ -51,7 +56,7 @@ export default function UsuariosPage() {
   function openCreate() {
     setCEmail("");
     setCName("");
-    setCRole(roles[0]?.id ?? "");
+    setCRole(roleOptions[0]?.id ?? "");
     setCPass("");
     setCreateOpen(true);
   }
@@ -153,14 +158,14 @@ export default function UsuariosPage() {
     {
       header: "Rol",
       cell: (m) =>
-        canWrite && !isSelf(m) ? (
+        canWrite && !isSelf(m) && !rowLocked(m) ? (
           <Select
             value={m.role_id}
             disabled={busyId === m.id}
             onChange={(e) => changeRole(m, e.target.value)}
             className="max-w-[14rem]"
           >
-            {roles.map((r) => (
+            {roleOptions.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.nombre}
                 {r.es_preset ? "" : " (personalizado)"}
@@ -177,7 +182,7 @@ export default function UsuariosPage() {
     {
       header: "Estado",
       cell: (m) =>
-        canWrite && !isSelf(m) ? (
+        canWrite && !isSelf(m) && !rowLocked(m) ? (
           <div className="flex items-center gap-2">
             <Switch checked={m.active} onChange={(v) => toggleActive(m, v)} />
             <span className="text-sm text-muted">{m.active ? "Activo" : "Inactivo"}</span>
@@ -190,7 +195,7 @@ export default function UsuariosPage() {
       header: "",
       className: "text-right w-1",
       cell: (m) =>
-        canWrite && !isSelf(m) ? (
+        canWrite && !isSelf(m) && !rowLocked(m) ? (
           <div className="flex items-center justify-end gap-1">
             <button
               onClick={() => openPwd(m)}
@@ -274,7 +279,7 @@ export default function UsuariosPage() {
           </Field>
           <Field label="Rol" required>
             <Select value={cRole} onChange={(e) => setCRole(e.target.value)}>
-              {roles.map((r) => (
+              {roleOptions.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.nombre}
                   {r.es_preset ? "" : " (personalizado)"}
