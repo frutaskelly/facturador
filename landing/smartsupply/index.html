@@ -221,6 +221,33 @@
   .cta-final h2 { font-size: clamp(1.9rem, 4vw, 2.8rem); font-weight: 800; }
   .cta-final p { color: var(--ink-soft); margin: 1rem auto 2rem; max-width: 46ch; font-size: 1.08rem; }
 
+  /* Contacto */
+  .contact-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2.4rem; text-align: left; align-items: start; margin-top: 2.6rem; }
+  .contact-methods { display: flex; flex-direction: column; gap: 1rem; margin-top: 1.1rem; }
+  .cmethod { display: flex; align-items: center; gap: .95rem; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 1rem 1.15rem; transition: border-color .18s ease, transform .18s ease; }
+  .cmethod:hover { border-color: color-mix(in srgb, var(--green) 55%, var(--line)); transform: translateY(-2px); }
+  .cmethod .ic { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; flex: none; color: #fff; }
+  .cmethod .ic.wa { background: linear-gradient(180deg,#34c85a,#1faf4a); }
+  .cmethod .ic.mail { background: var(--navy); }
+  .cmethod .lbl { font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft); }
+  .cmethod b { font-family: var(--font-display); font-size: 1.08rem; display: block; letter-spacing: -.01em; }
+  .cmethod:hover b { color: var(--green-deep); }
+
+  .form { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.6rem; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: .9rem; }
+  .form .row { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; }
+  .field { display: flex; flex-direction: column; gap: .35rem; text-align: left; }
+  .field label { font-size: .8rem; font-weight: 600; color: var(--ink-soft); }
+  .field input, .field textarea { font-family: var(--font-body); font-size: .95rem; color: var(--ink); background: var(--bg); border: 1.5px solid var(--line); border-radius: 11px; padding: .7rem .8rem; width: 100%; transition: border-color .15s ease, box-shadow .15s ease; }
+  .field input:focus, .field textarea:focus { outline: none; border-color: var(--green-deep); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 30%, transparent); }
+  .field textarea { resize: vertical; min-height: 96px; }
+  .form-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: .2rem; }
+  .form .btn-wa { justify-content: center; }
+  .form .alt { font-size: .88rem; color: var(--ink-soft); }
+  .form .alt a { color: var(--green-deep); font-weight: 600; }
+  .form .note { font-size: .78rem; color: var(--ink-soft); }
+  @media (max-width: 860px){ .contact-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 480px){ .form .row { grid-template-columns: 1fr; } }
+
   /* Footer */
   footer { border-top: 1px solid var(--line); padding: 2.5rem 0; color: var(--ink-soft); }
   .foot-in { display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; flex-wrap: wrap; font-size: .9rem; }
@@ -271,7 +298,7 @@
       <a href="#integraciones">Integraciones</a>
       <a href="#confianza">Confianza</a>
     </nav>
-    <a class="btn btn-wa" href="#contacto">
+    <a class="btn btn-wa" href="https://wa.me/525540030006?text=Hola%20Smart%20Supply%2C%20me%20interesa%20una%20demo." target="_blank" rel="noopener">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .1-1.7-.1-.4-.1-.9-.3-1.6-.6-2.8-1.2-4.6-4-4.7-4.2-.1-.2-1.1-1.5-1.1-2.8 0-1.3.7-2 .9-2.2.2-.3.5-.3.7-.3h.5c.2 0 .4 0 .6.5.2.6.8 2 .8 2.1.1.1.1.3 0 .5l-.4.5c-.2.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.2.1.4.1.6-.1l.7-.8c.2-.2.4-.2.6-.1l1.9.9c.2.1.4.2.4.3.1.2.1.8-.1 1.5Z"/></svg>
       Hablar por WhatsApp
     </a>
@@ -460,10 +487,42 @@
       <svg class="mark" style="width:64px;height:64px;margin:0 auto 1.2rem"><use href="#ss-mark"/></svg>
       <h2>Deja que el chat haga la operación.</h2>
       <p>Agenda una demo y mira cómo Smart Supply convierte cada orden que llega por WhatsApp en un pedido registrado y facturado.</p>
-      <a class="btn btn-wa" href="#" style="font-size:1.05rem;padding:.9rem 1.8rem">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .1-1.7-.1-.4-.1-.9-.3-1.6-.6-2.8-1.2-4.6-4-4.7-4.2-.1-.2-1.1-1.5-1.1-2.8 0-1.3.7-2 .9-2.2.2-.3.5-.3.7-.3h.5c.2 0 .4 0 .6.5.2.6.8 2 .8 2.1.1.1.1.3 0 .5l-.4.5c-.2.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.2.1.4.1.6-.1l.7-.8c.2-.2.4-.2.6-.1l1.9.9c.2.1.4.2.4.3.1.2.1.8-.1 1.5Z"/></svg>
-        Hablar por WhatsApp
-      </a>
+
+      <div class="contact-grid">
+        <!-- Contacto directo -->
+        <div>
+          <span class="eyebrow">Escríbenos directo</span>
+          <div class="contact-methods">
+            <a class="cmethod" href="https://wa.me/525540030006?text=Hola%20Smart%20Supply%2C%20me%20interesa%20una%20demo." target="_blank" rel="noopener">
+              <span class="ic wa"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .1-1.7-.1-.4-.1-.9-.3-1.6-.6-2.8-1.2-4.6-4-4.7-4.2-.1-.2-1.1-1.5-1.1-2.8 0-1.3.7-2 .9-2.2.2-.3.5-.3.7-.3h.5c.2 0 .4 0 .6.5.2.6.8 2 .8 2.1.1.1.1.3 0 .5l-.4.5c-.2.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.2.1.4.1.6-.1l.7-.8c.2-.2.4-.2.6-.1l1.9.9c.2.1.4.2.4.3.1.2.1.8-.1 1.5Z"/></svg></span>
+              <span><span class="lbl">WhatsApp</span><b>+52 55 4003 0006</b></span>
+            </a>
+            <a class="cmethod" href="mailto:gerencia@smartsupply.mx">
+              <span class="ic mail"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span>
+              <span><span class="lbl">Correo</span><b>gerencia@smartsupply.mx</b></span>
+            </a>
+          </div>
+          <p class="note" style="margin-top:1.1rem">Atención en horario de México (CDMX). Te respondemos por el mismo medio.</p>
+        </div>
+
+        <!-- Formulario -->
+        <form class="form" id="contact-form" novalidate>
+          <div class="row">
+            <div class="field"><label for="cf-nombre">Nombre</label><input id="cf-nombre" name="nombre" type="text" placeholder="Tu nombre" required></div>
+            <div class="field"><label for="cf-empresa">Empresa</label><input id="cf-empresa" name="empresa" type="text" placeholder="Tu negocio"></div>
+          </div>
+          <div class="field"><label for="cf-contacto">Teléfono o correo</label><input id="cf-contacto" name="contacto" type="text" placeholder="Para poder responderte"></div>
+          <div class="field"><label for="cf-mensaje">Mensaje</label><textarea id="cf-mensaje" name="mensaje" placeholder="Cuéntanos qué necesitas…" required></textarea></div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-wa">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .1-1.7-.1-.4-.1-.9-.3-1.6-.6-2.8-1.2-4.6-4-4.7-4.2-.1-.2-1.1-1.5-1.1-2.8 0-1.3.7-2 .9-2.2.2-.3.5-.3.7-.3h.5c.2 0 .4 0 .6.5.2.6.8 2 .8 2.1.1.1.1.3 0 .5l-.4.5c-.2.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.2.1.4.1.6-.1l.7-.8c.2-.2.4-.2.6-.1l1.9.9c.2.1.4.2.4.3.1.2.1.8-.1 1.5Z"/></svg>
+              Enviar por WhatsApp
+            </button>
+            <span class="alt">o <a href="#" id="cf-mail">envíalo por correo</a></span>
+          </div>
+          <span class="note">Al enviar se abre WhatsApp (o tu correo) con el mensaje ya redactado.</span>
+        </form>
+      </div>
     </div>
   </section>
 </main>
@@ -479,5 +538,38 @@
   </div>
 </footer>
 
+<script>
+  (function () {
+    var WA = "525540030006", MAIL = "gerencia@smartsupply.mx";
+    var f = document.getElementById("contact-form");
+    if (!f) return;
+
+    function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ""; }
+    function compose() {
+      var n = val("cf-nombre"), e = val("cf-empresa"), c = val("cf-contacto"), m = val("cf-mensaje");
+      var lines = ["Hola Smart Supply 👋"];
+      if (n) lines.push("Soy " + n + (e ? " de " + e : ""));
+      else if (e) lines.push("Empresa: " + e);
+      if (m) lines.push("", m);
+      if (c) lines.push("", "Contacto: " + c);
+      return lines.join("\n");
+    }
+
+    f.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      if (!f.reportValidity()) return;
+      window.open("https://wa.me/" + WA + "?text=" + encodeURIComponent(compose()), "_blank", "noopener");
+    });
+
+    var mail = document.getElementById("cf-mail");
+    if (mail) mail.addEventListener("click", function (ev) {
+      ev.preventDefault();
+      if (!f.reportValidity()) return;
+      window.location.href = "mailto:" + MAIL +
+        "?subject=" + encodeURIComponent("Contacto Smart Supply") +
+        "&body=" + encodeURIComponent(compose());
+    });
+  })();
+</script>
 </body>
 </html>
