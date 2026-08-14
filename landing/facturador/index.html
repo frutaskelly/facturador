@@ -3,165 +3,180 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Facturador — Facturas Inteligentes en Línea</title>
-  <meta name="description" content="Timbra CFDI 4.0, controla tu inventario y emite remisiones desde un solo lugar. Facturación inteligente para empresas en México." />
+  <title>Facturador Inteligente — Facturación CFDI con IA</title>
+  <meta name="description" content="Timbra CFDI 4.0, automatiza con inteligencia artificial y conecta WhatsApp y tu contabilidad. Facturación, ventas e inventario en un solo lugar, para empresas en México." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #070b14;
-      --bg-soft: #0d1320;
-      --surface: #121a2b;
-      --border: #1f2a40;
-      --text: #e8edf7;
-      --muted: #9aa7bf;
-      --brand: #4f8cff;
-      --brand-2: #29e0c4;
-      --accent: #7c5cff;
+      --navy: #2C3E50;
+      --navy-soft: #3b5168;
+      --green: #82CF5D;
+      --green-dark: #6bbd45;
+      --wa: #25D366;
+      --bg: #ffffff;
+      --bg-soft: #f5f8fa;
+      --border: #e7ecf1;
+      --text: #2C3E50;
+      --muted: #64768a;
       --radius: 16px;
-      --maxw: 1140px;
+      --maxw: 1120px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
     body {
-      font-family: 'Inter', system-ui, sans-serif;
+      font-family: 'Roboto', system-ui, sans-serif;
       background: var(--bg);
       color: var(--text);
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
       overflow-x: hidden;
     }
-    h1, h2, h3 { font-family: 'Sora', 'Inter', sans-serif; line-height: 1.1; letter-spacing: -0.02em; }
+    h1, h2, h3, .wordmark { font-family: 'Montserrat', sans-serif; line-height: 1.12; letter-spacing: -0.02em; }
     a { color: inherit; text-decoration: none; }
     .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+    /* ---- logo ---- */
+    .logo { display: inline-flex; align-items: center; gap: 11px; }
+    .logo svg { width: 34px; height: 34px; display: block; }
+    .wordmark { font-weight: 800; font-size: 19px; color: var(--navy); letter-spacing: -.01em; }
+    .wordmark b { font-weight: 800; }
+    .wordmark span { font-weight: 600; color: var(--green-dark); }
 
     /* ---- nav ---- */
     header {
       position: sticky; top: 0; z-index: 50;
-      backdrop-filter: blur(12px);
-      background: rgba(7, 11, 20, 0.72);
+      backdrop-filter: blur(10px);
+      background: rgba(255, 255, 255, 0.82);
       border-bottom: 1px solid var(--border);
     }
-    .nav { display: flex; align-items: center; justify-content: space-between; height: 68px; }
-    .logo { display: flex; align-items: center; gap: 10px; font-family: 'Sora'; font-weight: 800; font-size: 18px; }
-    .logo .mark {
-      width: 30px; height: 30px; border-radius: 9px;
-      background: linear-gradient(135deg, var(--brand), var(--brand-2));
-      display: grid; place-items: center; color: #04101a; font-weight: 800;
-    }
+    .nav { display: flex; align-items: center; justify-content: space-between; height: 70px; }
     .nav-links { display: flex; gap: 30px; align-items: center; }
-    .nav-links a { color: var(--muted); font-size: 14px; font-weight: 500; transition: color .2s; }
-    .nav-links a:hover { color: var(--text); }
+    .nav-links a { color: var(--muted); font-size: 14.5px; font-weight: 500; transition: color .2s; }
+    .nav-links a:hover { color: var(--navy); }
     .btn {
       display: inline-flex; align-items: center; gap: 8px;
-      padding: 11px 20px; border-radius: 11px; font-weight: 600; font-size: 14px;
-      transition: transform .15s, box-shadow .2s, background .2s; cursor: pointer; border: none;
+      padding: 11px 22px; border-radius: 11px; font-weight: 700; font-size: 14.5px;
+      font-family: 'Montserrat', sans-serif;
+      transition: transform .15s, box-shadow .2s, background .2s, border-color .2s; cursor: pointer; border: none;
     }
-    .btn-primary {
-      background: linear-gradient(135deg, var(--brand), var(--accent));
-      color: #fff; box-shadow: 0 8px 24px -8px rgba(79,140,255,.6);
-    }
-    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 12px 30px -8px rgba(79,140,255,.7); }
-    .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
-    .btn-ghost:hover { border-color: var(--brand); }
+    .btn-primary { background: var(--green); color: #143a05; box-shadow: 0 8px 22px -10px rgba(130,207,93,.9); }
+    .btn-primary:hover { transform: translateY(-1px); background: var(--green-dark); box-shadow: 0 12px 26px -10px rgba(107,189,69,.9); }
+    .btn-navy { background: var(--navy); color: #fff; }
+    .btn-navy:hover { transform: translateY(-1px); background: #223140; }
+    .btn-ghost { background: transparent; color: var(--navy); border: 1px solid var(--border); }
+    .btn-ghost:hover { border-color: var(--green); }
 
     /* ---- hero ---- */
-    .hero { position: relative; padding: 110px 0 90px; text-align: center; }
+    .hero { position: relative; padding: 96px 0 76px; text-align: center; }
     .hero::before {
-      content: ''; position: absolute; inset: -200px 0 auto 0; height: 700px; z-index: -1;
+      content: ''; position: absolute; inset: -80px 0 auto 0; height: 520px; z-index: -1;
       background:
-        radial-gradient(600px 320px at 30% 20%, rgba(79,140,255,.22), transparent 70%),
-        radial-gradient(560px 300px at 75% 10%, rgba(124,92,255,.18), transparent 70%),
-        radial-gradient(500px 300px at 55% 55%, rgba(41,224,196,.10), transparent 70%);
-      filter: blur(4px);
+        radial-gradient(560px 300px at 50% 0%, rgba(130,207,93,.16), transparent 70%),
+        radial-gradient(520px 280px at 78% 8%, rgba(44,62,80,.06), transparent 70%);
     }
     .pill {
       display: inline-flex; align-items: center; gap: 8px;
-      padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 500;
-      background: rgba(41,224,196,.10); color: var(--brand-2);
-      border: 1px solid rgba(41,224,196,.25); margin-bottom: 26px;
+      padding: 7px 15px; border-radius: 999px; font-size: 13px; font-weight: 600;
+      background: rgba(130,207,93,.14); color: var(--green-dark);
+      border: 1px solid rgba(130,207,93,.35); margin-bottom: 26px;
     }
-    .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brand-2); box-shadow: 0 0 0 4px rgba(41,224,196,.2); }
-    .hero h1 { font-size: clamp(38px, 6vw, 66px); font-weight: 800; max-width: 880px; margin: 0 auto; }
-    .hero h1 .grad { background: linear-gradient(120deg, var(--brand), var(--brand-2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-    .hero p.sub { font-size: clamp(16px, 2vw, 20px); color: var(--muted); max-width: 620px; margin: 22px auto 0; }
-    .hero-cta { display: flex; gap: 14px; justify-content: center; margin-top: 38px; flex-wrap: wrap; }
-    .trust { margin-top: 34px; font-size: 13px; color: var(--muted); display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; }
+    .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgba(130,207,93,.22); }
+    .hero h1 { font-size: clamp(38px, 6vw, 64px); font-weight: 800; max-width: 860px; margin: 0 auto; color: var(--navy); }
+    .hero h1 .grn { color: var(--green-dark); }
+    .hero p.sub { font-size: clamp(16px, 2vw, 20px); color: var(--muted); max-width: 640px; margin: 22px auto 0; }
+    .hero-cta { display: flex; gap: 14px; justify-content: center; margin-top: 36px; flex-wrap: wrap; }
+    .trust { margin-top: 32px; font-size: 13.5px; color: var(--muted); display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; }
     .trust span { display: inline-flex; align-items: center; gap: 7px; }
-    .trust svg { color: var(--brand-2); }
+    .trust svg { color: var(--green-dark); flex: none; }
 
     /* ---- stats ---- */
-    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 70px; }
-    .stat { background: var(--bg-soft); padding: 26px 20px; text-align: center; }
-    .stat .num { font-family: 'Sora'; font-size: 30px; font-weight: 800; background: linear-gradient(120deg,var(--brand),var(--brand-2)); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
-    .stat .lbl { font-size: 13px; color: var(--muted); margin-top: 4px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 64px; }
+    .stat { background: var(--bg); padding: 26px 20px; text-align: center; }
+    .stat .num { font-family: 'Montserrat'; font-size: 28px; font-weight: 800; color: var(--navy); }
+    .stat .num em { color: var(--green-dark); font-style: normal; }
+    .stat .lbl { font-size: 13px; color: var(--muted); margin-top: 5px; }
 
     /* ---- sections ---- */
-    section { padding: 80px 0; }
-    .eyebrow { color: var(--brand); font-weight: 600; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
-    .sec-head { max-width: 640px; margin: 0 auto 54px; text-align: center; }
-    .sec-head h2 { font-size: clamp(28px, 4vw, 42px); margin-top: 12px; }
+    section { padding: 78px 0; }
+    .eyebrow { color: var(--green-dark); font-weight: 700; font-size: 12.5px; letter-spacing: .1em; text-transform: uppercase; font-family: 'Montserrat'; }
+    .sec-head { max-width: 660px; margin: 0 auto 52px; text-align: center; }
+    .sec-head h2 { font-size: clamp(28px, 4vw, 40px); margin-top: 12px; color: var(--navy); }
     .sec-head p { color: var(--muted); margin-top: 14px; font-size: 17px; }
 
     .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
     .card {
-      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-      padding: 28px; transition: transform .2s, border-color .2s;
+      background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 28px; transition: transform .2s, border-color .2s, box-shadow .2s;
     }
-    .card:hover { transform: translateY(-4px); border-color: rgba(79,140,255,.5); }
+    .card:hover { transform: translateY(-4px); border-color: rgba(130,207,93,.6); box-shadow: 0 16px 34px -22px rgba(44,62,80,.35); }
     .card .ico {
       width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; margin-bottom: 18px;
-      background: linear-gradient(135deg, rgba(79,140,255,.18), rgba(41,224,196,.14));
-      border: 1px solid var(--border); color: var(--brand);
+      background: rgba(130,207,93,.14); color: var(--green-dark);
     }
-    .card h3 { font-size: 18px; font-family: 'Inter'; font-weight: 700; letter-spacing: -.01em; }
+    .card h3 { font-size: 18px; font-weight: 700; letter-spacing: -.01em; color: var(--navy); }
     .card p { color: var(--muted); font-size: 14.5px; margin-top: 8px; }
 
+    /* ---- integraciones ---- */
+    .integra { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .int-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 34px; background: var(--bg); }
+    .int-card .head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+    .int-card .badge { width: 48px; height: 48px; border-radius: 13px; display: grid; place-items: center; flex: none; }
+    .int-card .badge.wa { background: rgba(37,211,102,.14); color: var(--wa); }
+    .int-card .badge.mc { background: rgba(44,62,80,.08); color: var(--navy); }
+    .int-card h3 { font-size: 20px; color: var(--navy); }
+    .int-card .k { font-size: 12.5px; font-weight: 600; color: var(--muted); font-family: 'Montserrat'; }
+    .int-card p { color: var(--muted); font-size: 15px; margin-top: 4px; }
+
     /* ---- steps ---- */
-    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; counter-reset: step; }
-    .step { position: relative; padding-top: 14px; }
-    .step .n { font-family: 'Sora'; font-weight: 800; font-size: 15px; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg,var(--brand),var(--accent)); color:#fff; margin-bottom: 16px; }
-    .step h3 { font-size: 19px; font-family:'Inter'; font-weight: 700; }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; }
+    .step { padding-top: 6px; }
+    .step .n { font-family: 'Montserrat'; font-weight: 800; font-size: 15px; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--navy); color: #fff; margin-bottom: 16px; }
+    .step h3 { font-size: 19px; font-weight: 700; color: var(--navy); }
     .step p { color: var(--muted); margin-top: 8px; font-size: 14.5px; }
 
     /* ---- cta ---- */
     .cta-box {
       position: relative; overflow: hidden; text-align: center;
-      background: linear-gradient(135deg, #11203f, #16133a);
-      border: 1px solid var(--border); border-radius: 24px; padding: 64px 32px;
+      background: var(--navy);
+      border-radius: 24px; padding: 66px 32px;
     }
-    .cta-box::before { content:''; position:absolute; inset:0; background: radial-gradient(500px 200px at 50% -10%, rgba(79,140,255,.35), transparent 70%); }
+    .cta-box::before { content:''; position:absolute; inset:0; background: radial-gradient(520px 220px at 50% -20%, rgba(130,207,93,.4), transparent 70%); }
     .cta-box > * { position: relative; }
-    .cta-box h2 { font-size: clamp(28px, 4vw, 40px); }
-    .cta-box p { color: var(--muted); max-width: 520px; margin: 14px auto 30px; font-size: 17px; }
+    .cta-box h2 { font-size: clamp(28px, 4vw, 40px); color: #fff; }
+    .cta-box p { color: #b9c6d4; max-width: 540px; margin: 14px auto 30px; font-size: 17px; }
 
     /* ---- footer ---- */
     footer { border-top: 1px solid var(--border); padding: 44px 0; color: var(--muted); font-size: 14px; }
     .foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 18px; }
     .foot-links { display: flex; gap: 24px; }
-    .foot-links a:hover { color: var(--text); }
+    .foot-links a:hover { color: var(--navy); }
 
     @media (max-width: 880px) {
       .nav-links { display: none; }
       .stats { grid-template-columns: repeat(2,1fr); }
-      .grid, .steps { grid-template-columns: 1fr; }
+      .grid, .steps, .integra { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
   <header>
     <div class="wrap nav">
-      <a class="logo" href="/">
-        <span class="mark">F</span> Facturador
+      <a class="logo" href="/" aria-label="Facturador Inteligente">
+        <!-- Marca: F azul con palomita verde (validado / timbrado) -->
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M10 6 H37 V14.5 H18.5 V21.5 H33 V30 H18.5 V42 H10 Z" fill="#2C3E50"/>
+          <path d="M12.5 27 L21 35.5 L42 8.5" stroke="#82CF5D" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="wordmark"><b>facturador</b> <span>inteligente</span></span>
       </a>
       <nav class="nav-links">
         <a href="#features">Funciones</a>
+        <a href="#integraciones">Integraciones</a>
         <a href="#como">Cómo funciona</a>
-        <a href="#cta">Empezar</a>
         <a class="btn btn-ghost" href="https://app.facturador.mx">Iniciar sesión</a>
       </nav>
-      <a class="btn btn-primary" href="https://app.facturador.mx" style="display:none" id="mnav">Entrar</a>
     </div>
   </header>
 
@@ -169,24 +184,24 @@
     <!-- HERO -->
     <section class="hero">
       <div class="wrap">
-        <span class="pill"><span class="dot"></span> CFDI 4.0 · Timbrado autorizado por el SAT</span>
-        <h1>Facturas <span class="grad">inteligentes</span><br />en línea</h1>
-        <p class="sub">Timbra CFDI 4.0, emite remisiones y controla tu inventario multi-sucursal desde una sola plataforma. Hecho para empresas que venden en México.</p>
+        <span class="pill"><span class="dot"></span> Facturación CFDI 4.0 con inteligencia artificial</span>
+        <h1>Factura <span class="grn">inteligente</span>.<br />Cumple sin esfuerzo.</h1>
+        <p class="sub">Timbra CFDI 4.0 ante el SAT, automatiza tu operación con IA y conecta WhatsApp y tu contabilidad. Facturación, ventas e inventario en un solo lugar.</p>
         <div class="hero-cta">
           <a class="btn btn-primary" href="https://app.facturador.mx">Entrar al sistema →</a>
           <a class="btn btn-ghost" href="#features">Ver funciones</a>
         </div>
         <div class="trust">
-          <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg> Multi-empresa y multi-sucursal</span>
-          <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg> Datos aislados por compañía</span>
-          <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg> Envío de remisiones por correo</span>
+          <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg> Timbrado autorizado por el SAT</span>
+          <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg> IA que reduce la captura manual</span>
+          <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg> WhatsApp y contabilidad conectados</span>
         </div>
 
         <div class="stats">
           <div class="stat"><div class="num">CFDI 4.0</div><div class="lbl">Timbrado vigente</div></div>
+          <div class="stat"><div class="num"><em>IA</em></div><div class="lbl">Automatiza tu operación</div></div>
           <div class="stat"><div class="num">100%</div><div class="lbl">En la nube</div></div>
-          <div class="stat"><div class="num">Multi</div><div class="lbl">Sucursal e inventario</div></div>
-          <div class="stat"><div class="num">24/7</div><div class="lbl">Acceso desde cualquier lugar</div></div>
+          <div class="stat"><div class="num">24/7</div><div class="lbl">Desde cualquier lugar</div></div>
         </div>
       </div>
     </section>
@@ -197,7 +212,7 @@
         <div class="sec-head">
           <span class="eyebrow">Todo en un lugar</span>
           <h2>Facturación, ventas e inventario conectados</h2>
-          <p>Deja las hojas de cálculo y los sistemas sueltos. Facturador integra tu operación de principio a fin.</p>
+          <p>Deja las hojas de cálculo y los sistemas sueltos. Facturador Inteligente integra tu operación de principio a fin.</p>
         </div>
         <div class="grid">
           <div class="card">
@@ -206,19 +221,19 @@
             <p>Genera y timbra facturas válidas ante el SAT en segundos, con tus datos de emisor y CSD configurados.</p>
           </div>
           <div class="card">
+            <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/><circle cx="12" cy="12" r="3"/></svg></div>
+            <h3>IA que automatiza</h3>
+            <p>La inteligencia artificial cruza productos, arma la factura desde la remisión y reconcilia pagos. Tú revisas y confirmas, no capturas desde cero.</p>
+          </div>
+          <div class="card">
             <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17V7l6 5z"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>
-            <h3>Remisiones</h3>
-            <p>Emite, imprime y envía remisiones por correo al cliente. Captura ágil con teclado y series de folios.</p>
+            <h3>Remisiones y cobranza</h3>
+            <p>Emite y envía remisiones por correo, controla saldos y genera complementos de pago (REP) sin recapturas.</p>
           </div>
           <div class="card">
             <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg></div>
             <h3>Inventario en tiempo real</h3>
             <p>Controla existencias por almacén y sucursal: actual y en tránsito, con movimientos de compra y ajuste.</p>
-          </div>
-          <div class="card">
-            <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg></div>
-            <h3>Listas de precios y cotizador</h3>
-            <p>Define listas de precios y arma cotizaciones al instante, listas para convertirse en venta.</p>
           </div>
           <div class="card">
             <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13A4 4 0 0 1 16 11"/></svg></div>
@@ -234,8 +249,41 @@
       </div>
     </section>
 
+    <!-- INTEGRACIONES -->
+    <section id="integraciones" style="background:var(--bg-soft); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="eyebrow">Se conecta con tu ecosistema</span>
+          <h2>WhatsApp y tu contabilidad, en el mismo flujo</h2>
+          <p>Facturador Inteligente no vive aislado: se enlaza con las herramientas que ya usas para vender y llevar tus cuentas.</p>
+        </div>
+        <div class="integra">
+          <div class="int-card">
+            <div class="head">
+              <div class="badge wa"><svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2m0 1.67c2.2 0 4.27.86 5.83 2.42a8.19 8.19 0 0 1 2.42 5.82c0 4.54-3.7 8.24-8.25 8.24a8.2 8.2 0 0 1-4.2-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.19 8.19 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24m4.52 10.13c-.25-.12-1.47-.72-1.69-.81-.23-.08-.39-.12-.56.12-.16.25-.64.81-.79.98-.14.16-.29.18-.54.06-.25-.12-1.05-.39-1.99-1.23-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.01-.38.11-.51.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.16.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.4-.42-.56-.42-.14 0-.31-.02-.47-.02s-.43.06-.66.31c-.23.25-.87.85-.87 2.07 0 1.22.89 2.4 1.01 2.56.12.16 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.47-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.14-1.18-.06-.11-.22-.17-.47-.29"/></svg></div>
+              <div>
+                <span class="k">WhatsApp Inteligente · Smart Supply</span>
+                <h3>Vende y factura por WhatsApp</h3>
+              </div>
+            </div>
+            <p>Tus clientes piden, confirman y reciben sus comprobantes por WhatsApp, integrado directo al flujo de venta y facturación. Menos llamadas, menos correos, más ventas cerradas.</p>
+          </div>
+          <div class="int-card">
+            <div class="head">
+              <div class="badge mc"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg></div>
+              <div>
+                <span class="k">Contabilidad · Mini Conta</span>
+                <h3>Enlazado a tu sistema contable</h3>
+              </div>
+            </div>
+            <p>La información fiscal fluye hacia tu contabilidad sin recapturas ni dobles trabajos. Tus facturas y pagos llegan listos a Mini Conta para el cierre del periodo.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- COMO FUNCIONA -->
-    <section id="como" style="background:var(--bg-soft); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
+    <section id="como">
       <div class="wrap">
         <div class="sec-head">
           <span class="eyebrow">Cómo funciona</span>
@@ -249,25 +297,25 @@
           </div>
           <div class="step">
             <div class="n">2</div>
-            <h3>Registra ventas y remisiones</h3>
-            <p>Captura productos con inventario en vivo, genera remisiones y envíalas al cliente por correo.</p>
+            <h3>Vende con ayuda de la IA</h3>
+            <p>Captura o recibe pedidos por WhatsApp con inventario en vivo; la IA arma remisiones y propone la factura.</p>
           </div>
           <div class="step">
             <div class="n">3</div>
-            <h3>Timbra tu factura</h3>
-            <p>Convierte en CFDI 4.0 válido ante el SAT y descárgalo o envíalo, todo desde la misma pantalla.</p>
+            <h3>Timbra y contabiliza</h3>
+            <p>Convierte en CFDI 4.0 válido ante el SAT, envíalo al cliente y deja que fluya hacia tu contabilidad.</p>
           </div>
         </div>
       </div>
     </section>
 
     <!-- CTA -->
-    <section id="cta">
+    <section id="cta" style="padding-top:0;">
       <div class="wrap">
         <div class="cta-box">
           <h2>Empieza a facturar inteligente</h2>
-          <p>Accede a tu cuenta de Facturador y lleva tu facturación, ventas e inventario al mismo lugar.</p>
-          <a class="btn btn-primary" href="https://app.facturador.mx" style="font-size:15px; padding:14px 26px;">Entrar al sistema →</a>
+          <p>Accede a tu cuenta de Facturador Inteligente y lleva tu facturación, ventas e inventario al mismo lugar.</p>
+          <a class="btn btn-primary" href="https://app.facturador.mx" style="font-size:15px; padding:14px 28px;">Entrar al sistema →</a>
         </div>
       </div>
     </section>
@@ -275,26 +323,25 @@
 
   <footer>
     <div class="wrap foot">
-      <div class="logo"><span class="mark">F</span> Facturador</div>
+      <a class="logo" href="/" aria-label="Facturador Inteligente">
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M10 6 H37 V14.5 H18.5 V21.5 H33 V30 H18.5 V42 H10 Z" fill="#2C3E50"/>
+          <path d="M12.5 27 L21 35.5 L42 8.5" stroke="#82CF5D" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="wordmark"><b>facturador</b> <span>inteligente</span></span>
+      </a>
       <div class="foot-links">
         <a href="https://app.facturador.mx">Iniciar sesión</a>
         <a href="#features">Funciones</a>
+        <a href="#integraciones">Integraciones</a>
         <a href="#como">Cómo funciona</a>
       </div>
-      <div>© <span id="yr"></span> Facturador · Facturas Inteligentes en Línea</div>
+      <div>© <span id="yr"></span> Facturador Inteligente · Facturación CFDI con IA</div>
     </div>
   </footer>
 
   <script>
     document.getElementById('yr').textContent = new Date().getFullYear();
-    // Enlaces de login host-aware: cada dominio manda a SU propio app.<dominio>
-    // (facturador.mx → app.facturador.mx, smartsupply.mx → app.smartsupply.mx).
-    (function () {
-      var host = location.hostname.replace(/^www\./, '');
-      if (!host || host === 'localhost') return;
-      var app = 'https://app.' + host + '/login';
-      document.querySelectorAll('a[href^="https://app."]').forEach(function (a) { a.href = app; });
-    })();
   </script>
 </body>
 </html>
