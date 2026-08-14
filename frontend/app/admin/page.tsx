@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Field";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getSupabase } from "@/lib/supabaseClient";
+import { LogoMark, Wordmark } from "@/components/Logo";
 
 type TenantUser = {
   email: string | null;
@@ -95,10 +96,9 @@ function Centered({ children }: { children: React.ReactNode }) {
 function Brand() {
   return (
     <div className="flex items-center gap-2">
-      <span className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-blue-500 to-teal-400 text-sm font-bold text-white">
-        S
-      </span>
-      <span className="font-semibold tracking-tight">Facturador · Admin</span>
+      <LogoMark size={30} />
+      <Wordmark className="text-[15px]" />
+      <span className="text-sm font-medium text-muted">· Admin</span>
     </div>
   );
 }

@@ -7,7 +7,11 @@
   --surface-2: #f5f5f7;
   --border: #d2d2d7;
   --text-secondary: #6e6e73;
-  --accent: #0071e3;
+  /* Acento = azul de marca "Facturador Inteligente" (#2C3E50). Buen contraste
+     con texto blanco en botones y como color de enlace. El verde de marca
+     (#82CF5D) es demasiado claro para eso; se reserva para el logo. */
+  --accent: #2c3e50;
+  --brand-green: #6bbd45;
 }
 
 :root {
@@ -24,6 +28,7 @@
   --color-border: var(--border);
   --color-muted: var(--text-secondary);
   --color-accent: var(--accent);
+  --color-brand-green: var(--brand-green);
   --color-danger: var(--danger);
   --color-success: var(--success);
   --color-favorite: var(--favorite);

@@ -3,8 +3,9 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "Facturador",
-  description: "Plataforma SaaS multi-tenant para cadena de suministro.",
+  title: "Facturador Inteligente",
+  description:
+    "Facturación electrónica CFDI 4.0 con inteligencia artificial. Facturación, ventas e inventario en un solo lugar.",
 };
 
 export default function RootLayout({

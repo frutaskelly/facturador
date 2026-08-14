@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, PasswordInput } from "@/components/ui/Field";
+import { Logo } from "@/components/Logo";
 import { useAuth } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabaseClient";
 
@@ -51,8 +52,8 @@ export default function LoginPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-surface px-4">
       <div className="w-full max-w-sm rounded-2xl border border-border bg-background p-8 shadow-sm">
-        <h1 className="text-xl font-semibold tracking-tight">Facturador</h1>
-        <p className="mt-1 text-sm text-muted">Inicia sesión para continuar</p>
+        <Logo size={34} wordmarkClassName="text-lg" />
+        <p className="mt-4 text-sm text-muted">Inicia sesión para continuar</p>
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
           <Field label="Correo">
