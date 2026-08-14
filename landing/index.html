@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SmartSupply — Facturas Inteligentes en Línea</title>
+  <title>Facturador — Facturas Inteligentes en Línea</title>
   <meta name="description" content="Timbra CFDI 4.0, controla tu inventario y emite remisiones desde un solo lugar. Facturación inteligente para empresas en México." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -153,15 +153,15 @@
   <header>
     <div class="wrap nav">
       <a class="logo" href="/">
-        <span class="mark">S</span> SmartSupply
+        <span class="mark">F</span> Facturador
       </a>
       <nav class="nav-links">
         <a href="#features">Funciones</a>
         <a href="#como">Cómo funciona</a>
         <a href="#cta">Empezar</a>
-        <a class="btn btn-ghost" href="https://app.smartsupply.mx">Iniciar sesión</a>
+        <a class="btn btn-ghost" href="https://app.facturador.mx">Iniciar sesión</a>
       </nav>
-      <a class="btn btn-primary" href="https://app.smartsupply.mx" style="display:none" id="mnav">Entrar</a>
+      <a class="btn btn-primary" href="https://app.facturador.mx" style="display:none" id="mnav">Entrar</a>
     </div>
   </header>
 
@@ -173,7 +173,7 @@
         <h1>Facturas <span class="grad">inteligentes</span><br />en línea</h1>
         <p class="sub">Timbra CFDI 4.0, emite remisiones y controla tu inventario multi-sucursal desde una sola plataforma. Hecho para empresas que venden en México.</p>
         <div class="hero-cta">
-          <a class="btn btn-primary" href="https://app.smartsupply.mx">Entrar al sistema →</a>
+          <a class="btn btn-primary" href="https://app.facturador.mx">Entrar al sistema →</a>
           <a class="btn btn-ghost" href="#features">Ver funciones</a>
         </div>
         <div class="trust">
@@ -197,7 +197,7 @@
         <div class="sec-head">
           <span class="eyebrow">Todo en un lugar</span>
           <h2>Facturación, ventas e inventario conectados</h2>
-          <p>Deja las hojas de cálculo y los sistemas sueltos. SmartSupply integra tu operación de principio a fin.</p>
+          <p>Deja las hojas de cálculo y los sistemas sueltos. Facturador integra tu operación de principio a fin.</p>
         </div>
         <div class="grid">
           <div class="card">
@@ -266,8 +266,8 @@
       <div class="wrap">
         <div class="cta-box">
           <h2>Empieza a facturar inteligente</h2>
-          <p>Accede a tu cuenta de SmartSupply y lleva tu facturación, ventas e inventario al mismo lugar.</p>
-          <a class="btn btn-primary" href="https://app.smartsupply.mx" style="font-size:15px; padding:14px 26px;">Entrar al sistema →</a>
+          <p>Accede a tu cuenta de Facturador y lleva tu facturación, ventas e inventario al mismo lugar.</p>
+          <a class="btn btn-primary" href="https://app.facturador.mx" style="font-size:15px; padding:14px 26px;">Entrar al sistema →</a>
         </div>
       </div>
     </section>
@@ -275,18 +275,26 @@
 
   <footer>
     <div class="wrap foot">
-      <div class="logo"><span class="mark">S</span> SmartSupply</div>
+      <div class="logo"><span class="mark">F</span> Facturador</div>
       <div class="foot-links">
-        <a href="https://app.smartsupply.mx">Iniciar sesión</a>
+        <a href="https://app.facturador.mx">Iniciar sesión</a>
         <a href="#features">Funciones</a>
         <a href="#como">Cómo funciona</a>
       </div>
-      <div>© <span id="yr"></span> SmartSupply · Facturas Inteligentes en Línea</div>
+      <div>© <span id="yr"></span> Facturador · Facturas Inteligentes en Línea</div>
     </div>
   </footer>
 
   <script>
     document.getElementById('yr').textContent = new Date().getFullYear();
+    // Enlaces de login host-aware: cada dominio manda a SU propio app.<dominio>
+    // (facturador.mx → app.facturador.mx, smartsupply.mx → app.smartsupply.mx).
+    (function () {
+      var host = location.hostname.replace(/^www\./, '');
+      if (!host || host === 'localhost') return;
+      var app = 'https://app.' + host + '/login';
+      document.querySelectorAll('a[href^="https://app."]').forEach(function (a) { a.href = app; });
+    })();
   </script>
 </body>
 </html>

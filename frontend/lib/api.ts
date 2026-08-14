@@ -23,7 +23,21 @@ function healStaleTenantSelection(status: number, detail: string): boolean {
   return true;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8011";
+/**
+ * Base del API derivada del HOST actual: `app.<dominio>` / `admin.<dominio>` →
+ * `api.<dominio>`. Así el mismo build sirve varios dominios (facturador.mx y
+ * smartsupply.mx) siendo cada uno autocontenido — sin hornear un dominio fijo
+ * en build. En localhost/SSR cae a NEXT_PUBLIC_API_URL.
+ */
+export function apiBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    const parts = window.location.hostname.split(".");
+    if ((parts[0] === "app" || parts[0] === "admin") && parts.length >= 3) {
+      return `https://api.${parts.slice(1).join(".")}`;
+    }
+  }
+  return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8011";
+}
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -82,7 +96,7 @@ export async function apiFetch<T = unknown>(
 
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${path}`, { ...init, headers, signal });
+    res = await fetch(`${apiBaseUrl()}${path}`, { ...init, headers, signal });
   } catch (e) {
     if (ownTimeout && e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
       throw new ApiError(0, "El servidor tardó demasiado en responder. Revisa tu conexión e intenta de nuevo.");
@@ -116,7 +130,7 @@ export async function apiDownload(path: string, filename: string): Promise<void>
   if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
   tenantHeader(headers);
 
-  const res = await fetch(`${API_URL}${path}`, { headers });
+  const res = await fetch(`${apiBaseUrl()}${path}`, { headers });
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -161,7 +175,7 @@ export async function apiOpenInTab(path: string, win: Window | null): Promise<vo
   if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
   tenantHeader(headers);
 
-  const res = await fetch(`${API_URL}${path}`, { headers });
+  const res = await fetch(`${apiBaseUrl()}${path}`, { headers });
   if (!res.ok) {
     win.close();
     let detail = res.statusText;

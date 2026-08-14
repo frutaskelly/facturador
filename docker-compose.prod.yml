@@ -11,11 +11,12 @@
 #
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
-# Hostnames (ingress del túnel):
-#   smartsupply.mx        → landing  (nginx)
-#   app.smartsupply.mx    → frontend (Next.js)
-#   admin.smartsupply.mx  → frontend (Next.js, middleware → /admin)
-#   api.smartsupply.mx    → backend  (FastAPI)
+# Hostnames (ingress del túnel) — corren AMBOS dominios (facturador.mx primario,
+# smartsupply.mx legado). El frontend deriva el API de su propio host (lib/api.ts).
+#   facturador.mx / smartsupply.mx          → landing  (nginx)
+#   app.facturador.mx / app.smartsupply.mx  → frontend (Next.js)
+#   admin.facturador.mx / admin.smartsupply.mx → frontend (Next.js, middleware → /admin)
+#   api.facturador.mx / api.smartsupply.mx  → backend  (FastAPI)
 #
 # Proyecto/red propios (smartsupplyv2prod) para no chocar con el stack de dev
 # (smartsupplyv2) que comparte el host.
@@ -55,7 +56,7 @@ services:
       # directa db.<ref>.supabase.co:5432 es solo IPv6 y no es alcanzable desde
       # el contenedor. Usuario pooler = postgres.<project_ref>.
       REDIS_URL: redis://redis:6379/0
-      ALLOWED_ORIGINS: "https://app.smartsupply.mx,https://admin.smartsupply.mx,https://smartsupply.mx,https://api.smartsupply.mx"
+      ALLOWED_ORIGINS: "https://app.facturador.mx,https://admin.facturador.mx,https://facturador.mx,https://api.facturador.mx,https://app.smartsupply.mx,https://admin.smartsupply.mx,https://smartsupply.mx,https://api.smartsupply.mx"
     depends_on:
       redis:
         condition: service_healthy
@@ -66,7 +67,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        # NEXT_PUBLIC_* se hornean en build-time → apuntan al API público.
+        # El front deriva el API de su propio host en runtime (lib/api.ts:apiBaseUrl),
+        # así el mismo build sirve facturador.mx y smartsupply.mx. Esta env solo es
+        # FALLBACK (SSR/localhost) — se deja en un dominio que ya resuelve.
         NEXT_PUBLIC_API_URL: https://api.smartsupply.mx
         NEXT_PUBLIC_SUPABASE_URL: https://qwffsaxoeehwwdzaytqb.supabase.co
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_tgJ_GhSa9ZtHvysc-HPH1g_4V1bjKDb

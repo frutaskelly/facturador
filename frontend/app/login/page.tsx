@@ -51,7 +51,7 @@ export default function LoginPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-surface px-4">
       <div className="w-full max-w-sm rounded-2xl border border-border bg-background p-8 shadow-sm">
-        <h1 className="text-xl font-semibold tracking-tight">SmartSupply v2.0</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Facturador</h1>
         <p className="mt-1 text-sm text-muted">Inicia sesión para continuar</p>
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4">

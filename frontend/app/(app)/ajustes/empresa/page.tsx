@@ -13,7 +13,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { OnboardingChecklist, useOnboarding } from "@/components/OnboardingChecklist";
-import { ApiError, apiFetch } from "@/lib/api";
+import { ApiError, apiBaseUrl, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtDate } from "@/lib/format";
 import { REGIMENES_FISCALES } from "@/lib/sat";
@@ -21,7 +21,6 @@ import { getSupabase } from "@/lib/supabaseClient";
 import { tenantHeader } from "@/lib/tenant";
 
 const WRITE = "membership:gestionar";
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8011";
 
 // apiFetch fuerza Content-Type JSON, así que los endpoints binarios/multipart
 // (logo GET/POST, CSD POST) usan este fetch crudo con el mismo Bearer token.
@@ -31,7 +30,7 @@ async function authFetch(path: string, init: RequestInit = {}): Promise<Response
   const headers = new Headers(init.headers);
   if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
   tenantHeader(headers);   // misma selección de empresa que apiFetch
-  return fetch(`${API_URL}${path}`, { ...init, headers });
+  return fetch(`${apiBaseUrl()}${path}`, { ...init, headers });
 }
 
 // Respuesta no-ok → ApiError con el `detail` del backend (o el statusText).

@@ -917,7 +917,7 @@ def _build_remisiones_lote_html(
         f"<p style='margin:16px 0 0;text-align:right;font-size:16px'>"
         f"<strong>Total general: {_fmt_money(total_general)}</strong></p>"
         "<p style='margin:24px 0 0;color:#999;font-size:12px'>"
-        "Correo enviado automáticamente por SmartSupply.</p>"
+        "Correo enviado automáticamente por Facturador.</p>"
         "</div>"
     )
 
@@ -1042,7 +1042,7 @@ def enviar_remisiones_lote(
             ln.producto_nombre = names.get(ln.producto_id)
 
     cliente_nombre = cliente.legal_name if cliente else ""
-    emisor_nombre = (tenant.trade_name or tenant.legal_name) if tenant else "SmartSupply"
+    emisor_nombre = (tenant.trade_name or tenant.legal_name) if tenant else "Facturador"
     mensaje = (payload.mensaje or "").strip() or None
     html = _build_remisiones_lote_html(rems, cliente_nombre, mensaje, emisor_nombre)
 

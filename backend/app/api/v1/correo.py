@@ -100,12 +100,12 @@ def probar_correo(
     if not to:
         raise HTTPException(status_code=422, detail="Indica un destinatario de prueba")
     html = (
-        "<p>Esta es una <strong>prueba de conexión</strong> de SmartSupply.</p>"
+        "<p>Esta es una <strong>prueba de conexión</strong> de Facturador.</p>"
         "<p>Si recibes este mensaje, tu cuenta de correo está configurada "
         "correctamente.</p>"
     )
     try:
-        email_service.send_email(cfg, [to], "Prueba de conexión — SmartSupply", html)
+        email_service.send_email(cfg, [to], "Prueba de conexión — Facturador", html)
     except Exception as exc:  # noqa: BLE001 — superficie del error al cliente
         raise HTTPException(status_code=502, detail=str(exc))
     return {"ok": True}

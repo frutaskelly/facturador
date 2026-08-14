@@ -98,7 +98,7 @@ function Brand() {
       <span className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-blue-500 to-teal-400 text-sm font-bold text-white">
         S
       </span>
-      <span className="font-semibold tracking-tight">SmartSupply · Admin</span>
+      <span className="font-semibold tracking-tight">Facturador · Admin</span>
     </div>
   );
 }

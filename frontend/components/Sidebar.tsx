@@ -43,7 +43,7 @@ export function Sidebar({ me }: { me: Me }) {
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-background">
       <div className="flex h-14 items-center px-5 text-base font-semibold tracking-tight">
-        SmartSupply
+        Facturador
       </div>
       <nav className="flex-1 overflow-y-auto px-3 pb-6">
         {hydrated && favoriteItems.length > 0 && (

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reconstruye y levanta el stack de PRODUCCIÓN de smartsupply — lo que sirve
-# smartsupply.mx (túnel de Cloudflare incluido en docker-compose.prod.yml, con
+# facturador.mx / smartsupply.mx (túnel de Cloudflare incluido en docker-compose.prod.yml, con
 # restart:unless-stopped, así que sobrevive un reinicio del Mini).
 #
 # Construye desde los ARCHIVOS LOCALES en disco, igual que mini-conta: git no es
@@ -24,5 +24,5 @@ $COMPOSE run --rm backend alembic upgrade head
 echo "→ 3/3 Levantando/reemplazando contenedores…"
 $COMPOSE up -d
 
-echo "✓ Live en https://smartsupply.mx"
+echo "✓ Live en https://facturador.mx (y smartsupply.mx)"
 $COMPOSE ps

@@ -1147,7 +1147,7 @@ def enviar_facturas_lote(
             detail="Configura una cuenta de correo en Ajustes › Correo antes de enviar facturas.",
         )
 
-    emisor_nombre = tenant.trade_name or tenant.legal_name or "SmartSupply"
+    emisor_nombre = tenant.trade_name or tenant.legal_name or "Facturador"
     cliente_nombre = cliente.legal_name if cliente else ""
     n = len(facturas)
     filas = []
@@ -1193,7 +1193,7 @@ def enviar_facturas_lote(
         f"<p style='margin:16px 0 0;text-align:right;font-size:16px'>"
         f"<strong>Total general: ${total_general:,.2f}</strong></p>"
         "<p style='margin:24px 0 0;color:#999;font-size:12px'>"
-        "Correo enviado automáticamente por SmartSupply.</p>"
+        "Correo enviado automáticamente por Facturador.</p>"
         "</div>"
     )
     asunto = (

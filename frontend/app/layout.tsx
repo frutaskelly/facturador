@@ -3,7 +3,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "SmartSupply v2.0",
+  title: "Facturador",
   description: "Plataforma SaaS multi-tenant para cadena de suministro.",
 };
 
