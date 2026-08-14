@@ -147,6 +147,32 @@
     .cta-box h2 { font-size: clamp(28px, 4vw, 40px); color: #fff; }
     .cta-box p { color: #b9c6d4; max-width: 540px; margin: 14px auto 30px; font-size: 17px; }
 
+    /* ---- contacto ---- */
+    .contact { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 44px; align-items: start; }
+    .contact-aside h2 { font-size: clamp(26px, 3.4vw, 36px); color: var(--navy); }
+    .contact-aside p { color: var(--muted); margin-top: 14px; font-size: 16px; }
+    .contact-ways { margin-top: 26px; display: flex; flex-direction: column; gap: 12px; }
+    .contact-way { display: inline-flex; align-items: center; gap: 12px; font-size: 15px; color: var(--navy); }
+    .contact-way .ic { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: rgba(130,207,93,.14); color: var(--green-dark); flex: none; }
+    .contact-way a { font-weight: 600; color: var(--navy); }
+    .contact-way a:hover { color: var(--green-dark); }
+    .contact-way small { display: block; color: var(--muted); font-weight: 400; font-size: 12.5px; }
+    form.card-form { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 30px; }
+    .frow { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: 13px; font-weight: 600; color: var(--navy); font-family: 'Montserrat'; margin-bottom: 6px; }
+    .field input, .field textarea {
+      width: 100%; padding: 11px 13px; border: 1px solid var(--border); border-radius: 11px;
+      font-family: inherit; font-size: 14.5px; color: var(--text); background: var(--bg); transition: border-color .15s, box-shadow .15s;
+    }
+    .field input:focus, .field textarea:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px rgba(130,207,93,.18); }
+    .field textarea { resize: vertical; min-height: 120px; }
+    .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+    .form-msg { margin-top: 14px; font-size: 14px; border-radius: 11px; padding: 12px 14px; display: none; }
+    .form-msg.ok { display: block; background: rgba(130,207,93,.14); color: #2f6b12; border: 1px solid rgba(130,207,93,.4); }
+    .form-msg.err { display: block; background: #fdecec; color: #b42318; border: 1px solid #f6cccc; }
+    .form-msg a { color: inherit; font-weight: 700; text-decoration: underline; }
+
     /* ---- footer ---- */
     footer { border-top: 1px solid var(--border); padding: 44px 0; color: var(--muted); font-size: 14px; }
     .foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 18px; }
@@ -156,7 +182,8 @@
     @media (max-width: 880px) {
       .nav-links { display: none; }
       .stats { grid-template-columns: repeat(2,1fr); }
-      .grid, .steps, .integra { grid-template-columns: 1fr; }
+      .grid, .steps, .integra, .contact, .frow { grid-template-columns: 1fr; }
+      .contact { gap: 32px; }
     }
   </style>
 </head>
@@ -175,6 +202,7 @@
         <a href="#features">Funciones</a>
         <a href="#integraciones">Integraciones</a>
         <a href="#como">Cómo funciona</a>
+        <a href="#contacto">Contacto</a>
         <a class="btn btn-ghost" href="https://app.facturador.mx">Iniciar sesión</a>
       </nav>
     </div>
@@ -309,8 +337,60 @@
       </div>
     </section>
 
+    <!-- CONTACTO -->
+    <section id="contacto" style="background:var(--bg-soft); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
+      <div class="wrap">
+        <div class="contact">
+          <div class="contact-aside">
+            <span class="eyebrow">Contacto</span>
+            <h2 style="margin-top:12px;">Hablemos de tu facturación</h2>
+            <p>Cuéntanos de tu negocio y te mostramos cómo Facturador Inteligente puede automatizar tu facturación, ventas e inventario. Te respondemos en horas hábiles.</p>
+            <div class="contact-ways">
+              <span class="contact-way">
+                <span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg></span>
+                <span><a href="mailto:gerencia@facturador.mx">gerencia@facturador.mx</a><small>Escríbenos directo</small></span>
+              </span>
+            </div>
+          </div>
+
+          <form class="card-form" id="contact-form" novalidate>
+            <div class="frow">
+              <div class="field">
+                <label for="c-nombre">Nombre *</label>
+                <input id="c-nombre" name="nombre" type="text" required maxlength="120" autocomplete="name" />
+              </div>
+              <div class="field">
+                <label for="c-empresa">Empresa</label>
+                <input id="c-empresa" name="empresa" type="text" maxlength="160" autocomplete="organization" />
+              </div>
+            </div>
+            <div class="frow">
+              <div class="field">
+                <label for="c-correo">Correo *</label>
+                <input id="c-correo" name="correo" type="email" required maxlength="254" autocomplete="email" />
+              </div>
+              <div class="field">
+                <label for="c-telefono">Teléfono</label>
+                <input id="c-telefono" name="telefono" type="tel" maxlength="40" autocomplete="tel" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="c-mensaje">Mensaje *</label>
+              <textarea id="c-mensaje" name="mensaje" required minlength="5" maxlength="4000" placeholder="¿Qué necesitas? Cuéntanos de tu negocio."></textarea>
+            </div>
+            <!-- Honeypot anti-bot: oculto; un humano no lo llena. -->
+            <div class="hp" aria-hidden="true">
+              <label>No llenar<input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
+            </div>
+            <button type="submit" class="btn btn-primary" id="contact-submit" style="width:100%; justify-content:center; padding:13px 22px;">Enviar mensaje</button>
+            <div class="form-msg" id="contact-msg" role="status" aria-live="polite"></div>
+          </form>
+        </div>
+      </div>
+    </section>
+
     <!-- CTA -->
-    <section id="cta" style="padding-top:0;">
+    <section id="cta">
       <div class="wrap">
         <div class="cta-box">
           <h2>Empieza a facturar inteligente</h2>
@@ -334,7 +414,8 @@
         <a href="https://app.facturador.mx">Iniciar sesión</a>
         <a href="#features">Funciones</a>
         <a href="#integraciones">Integraciones</a>
-        <a href="#como">Cómo funciona</a>
+        <a href="#contacto">Contacto</a>
+        <a href="mailto:gerencia@facturador.mx">gerencia@facturador.mx</a>
       </div>
       <div>© <span id="yr"></span> Facturador Inteligente · Facturación CFDI con IA</div>
     </div>
@@ -342,6 +423,82 @@
 
   <script>
     document.getElementById('yr').textContent = new Date().getFullYear();
+
+    // ── Formulario de contacto → POST a api.<dominio>/api/v1/contacto ──────────
+    (function () {
+      var form = document.getElementById('contact-form');
+      if (!form) return;
+      var btn = document.getElementById('contact-submit');
+      var msg = document.getElementById('contact-msg');
+      var GERENCIA = 'gerencia@facturador.mx';
+
+      function show(kind, html) { msg.className = 'form-msg ' + kind; msg.innerHTML = html; }
+
+      // Fallback si el servidor aún no puede enviar (SMTP sin configurar) o hay
+      // un error de red: ofrecemos abrir el correo con los datos pre-llenados,
+      // para no perder el contacto.
+      function mailtoFallback() {
+        var v = function (n) { return (form.elements[n] && form.elements[n].value || '').trim(); };
+        var subj = 'Contacto facturador.mx — ' + (v('nombre') || '');
+        var body =
+          'Nombre: ' + v('nombre') + '\n' +
+          'Empresa: ' + v('empresa') + '\n' +
+          'Teléfono: ' + v('telefono') + '\n' +
+          'Correo: ' + v('correo') + '\n\n' +
+          v('mensaje');
+        return 'mailto:' + GERENCIA + '?subject=' + encodeURIComponent(subj) + '&body=' + encodeURIComponent(body);
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (!form.checkValidity()) { form.reportValidity(); return; }
+
+        var host = location.hostname.replace(/^www\./, '');
+        if (!host || host === 'localhost') {
+          show('err', 'Vista previa local: el envío funciona en facturador.mx.');
+          return;
+        }
+        var api = 'https://api.' + host + '/api/v1/contacto';
+
+        var payload = {
+          nombre: form.elements['nombre'].value.trim(),
+          correo: form.elements['correo'].value.trim(),
+          empresa: form.elements['empresa'].value.trim(),
+          telefono: form.elements['telefono'].value.trim(),
+          mensaje: form.elements['mensaje'].value.trim(),
+          website: form.elements['website'].value
+        };
+
+        btn.disabled = true;
+        var original = btn.textContent;
+        btn.textContent = 'Enviando…';
+        msg.className = 'form-msg';
+
+        fetch(api, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function (res) {
+          if (res.ok) {
+            form.reset();
+            show('ok', '¡Gracias! Recibimos tu mensaje y te contactaremos pronto.');
+          } else if (res.status === 503) {
+            show('err', 'Escríbenos directo a <a href="' + mailtoFallback() + '">' + GERENCIA + '</a>.');
+          } else if (res.status === 429) {
+            show('err', 'Enviaste varios mensajes seguidos. Intenta de nuevo en unos minutos.');
+          } else {
+            return res.json().catch(function () { return {}; }).then(function (j) {
+              show('err', (j && j.detail) ? j.detail : 'No se pudo enviar. Intenta de nuevo o escríbenos a <a href="mailto:' + GERENCIA + '">' + GERENCIA + '</a>.');
+            });
+          }
+        }).catch(function () {
+          show('err', 'No se pudo conectar. Escríbenos a <a href="' + mailtoFallback() + '">' + GERENCIA + '</a>.');
+        }).then(function () {
+          btn.disabled = false;
+          btn.textContent = original;
+        });
+      });
+    })();
   </script>
 </body>
 </html>

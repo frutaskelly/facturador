@@ -14,6 +14,7 @@ from .api.v1 import (
     categorias,
     clientes,
     cobranza,
+    contacto,
     conversiones,
     correo,
     empresa,
@@ -96,6 +97,7 @@ def api_root() -> dict:
 # ─── API v1 routers ───────────────────────────────────────────────────────────
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(registro.router, prefix="/api/v1")  # PÚBLICO (signup autoservicio)
+app.include_router(contacto.router, prefix="/api/v1")  # PÚBLICO (formulario de contacto)
 # Phase 3 — catálogo / master data
 app.include_router(categorias.router, prefix="/api/v1")
 app.include_router(esquemas_impuesto.router, prefix="/api/v1")

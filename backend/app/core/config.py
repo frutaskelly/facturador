@@ -80,6 +80,26 @@ class Settings(BaseSettings):
     # proyecto Supabase tenga "Confirm email" + envío de correo configurado.
     SIGNUP_REQUIRE_EMAIL_CONFIRM: bool = False
 
+    # ─── Formulario de contacto público (landing) ──────────────────────────────
+    # Kill-switch: false deshabilita POST /contacto.
+    CONTACT_ENABLED: bool = True
+    # Máximo de envíos por IP por hora (rate limit con Redis; fail-open).
+    CONTACT_RATE_PER_HOUR: int = 5
+    # A dónde llegan los mensajes del formulario.
+    CONTACT_RECIPIENT: str = "gerencia@facturador.mx"
+    # SMTP de PLATAFORMA para enviar el correo de contacto (buzón de Workspace de
+    # facturador.mx). Distinto del SMTP por-tenant (tenant.config["email"], que es
+    # el buzón del cliente para SUS facturas). Vacío = /contacto responde 503.
+    # En Google Workspace: host=smtp.gmail.com, port=465, use_ssl=true,
+    # username=<buzón>, password=<App Password de 16 dígitos con verificación en 2 pasos>.
+    CONTACT_SMTP_HOST: str = ""
+    CONTACT_SMTP_PORT: int = 465
+    CONTACT_SMTP_USERNAME: str = ""
+    CONTACT_SMTP_PASSWORD: str = ""
+    CONTACT_SMTP_FROM_EMAIL: str = ""  # vacío → usa CONTACT_SMTP_USERNAME
+    CONTACT_SMTP_FROM_NAME: str = "Facturador Inteligente"
+    CONTACT_SMTP_USE_SSL: bool = True
+
     # ─── CORS (comma-separated) ─────────────────────────────────────────────────
     ALLOWED_ORIGINS: str = "http://localhost:3012,http://localhost:3000"
 
@@ -94,6 +114,26 @@ class Settings(BaseSettings):
 
     def platform_operators_list(self) -> list[str]:
         return [e.strip().lower() for e in self.PLATFORM_OPERATORS.split(",") if e.strip()]
+
+    def contact_smtp_configured(self) -> bool:
+        """True si hay SMTP de plataforma utilizable para /contacto."""
+        return bool(
+            self.CONTACT_SMTP_HOST
+            and self.CONTACT_SMTP_USERNAME
+            and self.CONTACT_SMTP_PASSWORD
+        )
+
+    def contact_smtp_cfg(self) -> dict:
+        """Config SMTP de plataforma con la forma que espera services.email.send_email."""
+        return {
+            "host": self.CONTACT_SMTP_HOST,
+            "port": self.CONTACT_SMTP_PORT,
+            "username": self.CONTACT_SMTP_USERNAME,
+            "password": self.CONTACT_SMTP_PASSWORD,
+            "from_email": self.CONTACT_SMTP_FROM_EMAIL or self.CONTACT_SMTP_USERNAME,
+            "from_name": self.CONTACT_SMTP_FROM_NAME,
+            "use_ssl": self.CONTACT_SMTP_USE_SSL,
+        }
 
     def jwks_url(self) -> str:
         """JWKS endpoint; derived from SUPABASE_URL if not set explicitly."""

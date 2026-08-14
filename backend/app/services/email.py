@@ -44,12 +44,16 @@ def send_email(
     subject: str,
     html: str,
     attachments: Optional[list[tuple[str, bytes, str]]] = None,
+    reply_to: Optional[str] = None,
 ) -> None:
     """Envía un correo HTML a `to` usando la config SMTP `cfg`.
 
     `attachments` es una lista de (filename, content, mime_type), p. ej.
     [("A1.pdf", pdf_bytes, "application/pdf")] — usado para adjuntar el
     XML/PDF de una factura.
+
+    `reply_to` fija la cabecera Reply-To (p. ej. el correo del prospecto en el
+    formulario de contacto, para poder responderle directo).
 
     Lanza una Exception con un mensaje claro si falla la conexión/autenticación.
     """
@@ -67,6 +71,8 @@ def send_email(
     msg["Subject"] = subject
     msg["From"] = formataddr((from_name, from_email)) if from_name else from_email
     msg["To"] = ", ".join(to)
+    if reply_to:
+        msg["Reply-To"] = reply_to
     msg.set_content(
         "Este mensaje contiene contenido en HTML. Usa un cliente que lo soporte."
     )
