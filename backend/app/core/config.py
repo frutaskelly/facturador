@@ -105,6 +105,11 @@ class Settings(BaseSettings):
     CONTACT_SMTP_PORT: int = 465
     CONTACT_SMTP_USERNAME: str = ""
     CONTACT_SMTP_PASSWORD: str = ""
+    # App Password POR SITIO. Google permite varias por cuenta, independientes:
+    # así se puede revocar la de un sitio sin tumbar los otros. El usuario SMTP es
+    # el mismo buzón real; solo cambia el token. Vacío → usa CONTACT_SMTP_PASSWORD.
+    CONTACT_SMTP_PASSWORD_FACTURADOR: str = ""
+    CONTACT_SMTP_PASSWORD_SMARTSUPPLY: str = ""
     CONTACT_SMTP_FROM_EMAIL: str = ""  # vacío → usa CONTACT_SMTP_USERNAME
     CONTACT_SMTP_FROM_NAME: str = "Facturador Inteligente"
     CONTACT_SMTP_USE_SSL: bool = True
@@ -132,6 +137,29 @@ class Settings(BaseSettings):
             if k.strip().lower() == h and v.strip():
                 return v.strip()
         return self.CONTACT_RECIPIENT
+
+    def contact_smtp_password_for(self, host: str | None) -> str:
+        """App Password del sitio `host`; la genérica si ese sitio no tiene la suya."""
+        h = (host or "").strip().lower().removeprefix("www.")
+        por_sitio = {
+            "facturador.mx": self.CONTACT_SMTP_PASSWORD_FACTURADOR,
+            "smartsupply.mx": self.CONTACT_SMTP_PASSWORD_SMARTSUPPLY,
+        }
+        return por_sitio.get(h) or self.CONTACT_SMTP_PASSWORD
+
+    def contact_smtp_configured_for(self, host: str | None) -> bool:
+        """True si ese sitio tiene SMTP utilizable (host + usuario + su token)."""
+        return bool(
+            self.CONTACT_SMTP_HOST
+            and self.CONTACT_SMTP_USERNAME
+            and self.contact_smtp_password_for(host)
+        )
+
+    def contact_smtp_cfg_for(self, host: str | None) -> dict:
+        """Config SMTP para `host`: igual que contact_smtp_cfg pero con SU token."""
+        cfg = self.contact_smtp_cfg()
+        cfg["password"] = self.contact_smtp_password_for(host)
+        return cfg
 
     def contact_smtp_configured(self) -> bool:
         """True si hay SMTP de plataforma utilizable para /contacto."""

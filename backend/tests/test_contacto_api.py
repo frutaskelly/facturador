@@ -185,3 +185,49 @@ def test_sin_correo_ni_telefono_rechaza(client, monkeypatch):
     _capturar(monkeypatch)
     r = client.post("/api/v1/contacto", json=_payload(correo=None, telefono=None))
     assert r.status_code == 422
+
+
+# ─── Una App Password por sitio (revocable por separado) ─────────────────────
+
+def test_cada_sitio_usa_su_propio_token(client, monkeypatch):
+    _smtp_listo(monkeypatch)
+    monkeypatch.setattr(settings, "CONTACT_SMTP_PASSWORD", "token-generico")
+    monkeypatch.setattr(settings, "CONTACT_SMTP_PASSWORD_FACTURADOR", "token-facturador")
+    monkeypatch.setattr(settings, "CONTACT_SMTP_PASSWORD_SMARTSUPPLY", "token-smartsupply")
+
+    usados = {}
+
+    def _fake_send(cfg, to, subject, html, attachments=None, reply_to=None):
+        usados[to[0]] = cfg["password"]
+
+    monkeypatch.setattr("app.api.v1.contacto.email_service.send_email", _fake_send)
+
+    client.post("/api/v1/contacto", json=_payload(), headers={"Origin": "https://facturador.mx"})
+    client.post("/api/v1/contacto", json=_payload(), headers={"Origin": "https://smartsupply.mx"})
+
+    assert usados["gerencia@facturador.mx"] == "token-facturador"
+    assert usados["gerencia@smartsupply.mx"] == "token-smartsupply"
+
+
+def test_sitio_sin_token_propio_cae_al_generico(client, monkeypatch):
+    """Sin token propio no se rompe: usa el genérico (evita apagar un sitio)."""
+    _smtp_listo(monkeypatch)
+    monkeypatch.setattr(settings, "CONTACT_SMTP_PASSWORD", "token-generico")
+    monkeypatch.setattr(settings, "CONTACT_SMTP_PASSWORD_SMARTSUPPLY", "")
+
+    cap = {}
+    monkeypatch.setattr(
+        "app.api.v1.contacto.email_service.send_email",
+        lambda cfg, to, subject, html, attachments=None, reply_to=None: cap.update(pw=cfg["password"]),
+    )
+    r = client.post("/api/v1/contacto", json=_payload(), headers={"Origin": "https://smartsupply.mx"})
+    assert r.status_code == 200
+    assert cap["pw"] == "token-generico"
+
+
+def test_sin_ningun_token_responde_503(client, monkeypatch):
+    _smtp_listo(monkeypatch)
+    monkeypatch.setattr(settings, "CONTACT_SMTP_PASSWORD", "")
+    monkeypatch.setattr(settings, "CONTACT_SMTP_PASSWORD_FACTURADOR", "")
+    r = client.post("/api/v1/contacto", json=_payload(), headers={"Origin": "https://facturador.mx"})
+    assert r.status_code == 503

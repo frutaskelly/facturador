@@ -98,11 +98,12 @@ def contacto(payload: ContactoIn, request: Request) -> ContactoOut:
         raise HTTPException(422, "Deja un correo o un teléfono para poder responderte")
 
     # ─── Envío ─────────────────────────────────────────────────────────────────
-    if not settings.contact_smtp_configured():
+    sitio = _site_host(request) or "facturador.mx"
+    # Cada sitio envía con SU propia App Password (revocable por separado).
+    if not settings.contact_smtp_configured_for(sitio):
         # El front lo trata como "no disponible" y muestra el correo directo.
         raise HTTPException(503, "El envío de contacto no está disponible por ahora.")
 
-    sitio = _site_host(request) or "facturador.mx"
     destinatario = settings.contact_recipient_for(sitio)
     subject = f"Contacto {sitio} — {payload.nombre.strip()}"
     if payload.empresa and payload.empresa.strip():
@@ -110,7 +111,7 @@ def contacto(payload: ContactoIn, request: Request) -> ContactoOut:
 
     try:
         email_service.send_email(
-            settings.contact_smtp_cfg(),
+            settings.contact_smtp_cfg_for(sitio),
             to=[destinatario],
             subject=subject,
             html=_render_html(payload, ip, sitio),
