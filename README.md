@@ -1,6 +1,6 @@
-# SmartSupply v2.0
+# Facturador
 
-Plataforma SaaS multi-tenant para coordinación de cadena de suministro
+Facturación electrónica CFDI 4.0 con IA — plataforma SaaS multi-tenant
 gobierno–alimentos. Rebuild limpio de v1 (`cadena-de-suministro-ai`) con el plan
 de acción de seguridad incorporado desde el día 1.
 

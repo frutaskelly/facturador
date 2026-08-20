@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Panel de administración de plataforma (admin.smartsupply.mx).
+ * Panel de administración de plataforma (admin.facturador.mx).
  *
  * Independiente del shell de la app (vive fuera del grupo (app)): maneja su
  * propio login y consume los endpoints /api/v1/platform/*, que el backend

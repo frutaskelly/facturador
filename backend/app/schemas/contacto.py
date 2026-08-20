@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 class ContactoIn(BaseModel):
     nombre: str = Field(min_length=2, max_length=120)
     # Correo y teléfono son opcionales por separado, pero el router exige AL MENOS
-    # uno: hay landings (smartsupply) con un solo campo "teléfono o correo".
+    # uno (basta un dato de contacto para responderle).
     correo: Optional[str] = Field(default=None, max_length=254)
     empresa: Optional[str] = Field(default=None, max_length=160)
     telefono: Optional[str] = Field(default=None, max_length=40)

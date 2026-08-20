@@ -1,3 +1,3 @@
-"""SmartSupply v2.0 backend."""
+"""Facturador backend."""
 
 __version__ = "2.0.0"

@@ -26,7 +26,7 @@ function healStaleTenantSelection(status: number, detail: string): boolean {
 /**
  * Base del API derivada del HOST actual: `app.<dominio>` / `admin.<dominio>` →
  * `api.<dominio>`. Así el mismo build sirve varios dominios (facturador.mx y
- * smartsupply.mx) siendo cada uno autocontenido — sin hornear un dominio fijo
+ * otros dominios) siendo cada uno autocontenido — sin hornear un dominio fijo
  * en build. En localhost/SSR cae a NEXT_PUBLIC_API_URL.
  */
 export function apiBaseUrl(): string {
