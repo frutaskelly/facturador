@@ -1,7 +1,7 @@
 # Facturador — stack de PRODUCCIÓN.
 #
 # Imágenes autocontenidas (sin bind-mount del código) servidas a internet vía
-# un Cloudflare Tunnel PROPIO (tunnel "smartsupplyv2", ID f9fe0e2c, credenciales en
+# un Cloudflare Tunnel PROPIO (tunnel "facturador", ID 745371ba, credenciales en
 # cloudflared-config/, gitignored). Antes dependía del túnel compartido
 # cadena_tunnel, cuya config vivía en una carpeta de OneDrive fuera de este
 # repo — cuando OneDrive no la rematerializaba tras un reinicio, el túnel
