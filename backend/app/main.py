@@ -1,4 +1,4 @@
-"""SmartSupply v2.0 — FastAPI entry point."""
+"""Facturador — FastAPI entry point."""
 import logging
 from contextlib import asynccontextmanager
 
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
         else "sandbox"
     )
     log.info(
-        "SmartSupply v2.0 starting — env=%s, facturama=%s, origins=%s",
+        "Facturador starting — env=%s, facturama=%s, origins=%s",
         settings.ENVIRONMENT,
         facturama_env,
         settings.allowed_origins_list(),
@@ -61,9 +61,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="SmartSupply v2.0",
+    title="Facturador",
     version=__version__,
-    description="Plataforma SaaS multi-tenant — cadena de suministro gobierno-alimentos.",
+    description="Facturación electrónica CFDI 4.0 con IA — plataforma SaaS multi-tenant.",
     lifespan=lifespan,
     # En producción no se publica la superficie completa del API (docs/openapi).
     docs_url=None if settings.is_production else "/docs",
@@ -91,7 +91,7 @@ def health() -> dict:
 
 @app.get("/api", tags=["meta"])
 def api_root() -> dict:
-    return {"service": "smartsupply-v2", "docs": "/docs", "health": "/health"}
+    return {"service": "facturador", "docs": "/docs", "health": "/health"}
 
 
 # ─── API v1 routers ───────────────────────────────────────────────────────────

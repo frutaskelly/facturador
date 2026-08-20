@@ -1,7 +1,7 @@
-# SmartSupply v2.0 — stack de PRODUCCIÓN.
+# Facturador — stack de PRODUCCIÓN.
 #
 # Imágenes autocontenidas (sin bind-mount del código) servidas a internet vía
-# un Cloudflare Tunnel PROPIO (tunnel "smartsupplyv2", credenciales en
+# un Cloudflare Tunnel PROPIO (tunnel "smartsupplyv2", ID f9fe0e2c, credenciales en
 # cloudflared-config/, gitignored). Antes dependía del túnel compartido
 # cadena_tunnel, cuya config vivía en una carpeta de OneDrive fuera de este
 # repo — cuando OneDrive no la rematerializaba tras un reinicio, el túnel
@@ -11,21 +11,21 @@
 #
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
-# Hostnames (ingress del túnel) — corren AMBOS dominios (facturador.mx primario,
-# smartsupply.mx legado). El frontend deriva el API de su propio host (lib/api.ts).
-#   facturador.mx / smartsupply.mx          → landing  (nginx)
-#   app.facturador.mx / app.smartsupply.mx  → frontend (Next.js)
-#   admin.facturador.mx / admin.smartsupply.mx → frontend (Next.js, middleware → /admin)
-#   api.facturador.mx / api.smartsupply.mx  → backend  (FastAPI)
+# Hostnames (ingress del túnel) — SOLO facturador.mx (smartsupply.mx es otro
+# producto con su propio stack: repo smartsupply-web).
+#   facturador.mx / www  → landing  (nginx)
+#   app.facturador.mx    → frontend (Next.js)
+#   admin.facturador.mx  → frontend (Next.js, middleware → /admin)
+#   api.facturador.mx    → backend  (FastAPI)
 #
-# Proyecto/red propios (smartsupplyv2prod) para no chocar con el stack de dev
-# (smartsupplyv2) que comparte el host.
-name: smartsupplyv2prod
+# Proyecto/red propios (facturadorprod) para no chocar con el stack de dev
+# que comparte el host.
+name: facturadorprod
 
 services:
   redis:
     image: redis:7-alpine
-    container_name: smartsupplyv2_redis
+    container_name: facturador_redis
     restart: unless-stopped
     volumes:
       - redisdata:/data
@@ -40,8 +40,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: smartsupplyv2-backend:prod
-    container_name: smartsupplyv2_backend
+    image: facturador-backend:prod
+    container_name: facturador_backend
     restart: unless-stopped
     # Secrets vienen del .env.prod (gitignored) — SEPARADO del .env de dev, que
     # apunta a Facturama sandbox. .env.prod trae las credenciales/flags de
@@ -56,7 +56,7 @@ services:
       # directa db.<ref>.supabase.co:5432 es solo IPv6 y no es alcanzable desde
       # el contenedor. Usuario pooler = postgres.<project_ref>.
       REDIS_URL: redis://redis:6379/0
-      ALLOWED_ORIGINS: "https://app.facturador.mx,https://admin.facturador.mx,https://facturador.mx,https://www.facturador.mx,https://api.facturador.mx,https://app.smartsupply.mx,https://admin.smartsupply.mx,https://smartsupply.mx,https://www.smartsupply.mx,https://api.smartsupply.mx"
+      ALLOWED_ORIGINS: "https://app.facturador.mx,https://admin.facturador.mx,https://facturador.mx,https://www.facturador.mx,https://api.facturador.mx"
     depends_on:
       redis:
         condition: service_healthy
@@ -67,14 +67,13 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        # El front deriva el API de su propio host en runtime (lib/api.ts:apiBaseUrl),
-        # así el mismo build sirve facturador.mx y smartsupply.mx. Esta env solo es
-        # FALLBACK (SSR/localhost) — se deja en un dominio que ya resuelve.
-        NEXT_PUBLIC_API_URL: https://api.smartsupply.mx
+        # El front deriva el API de su propio host en runtime (lib/api.ts:apiBaseUrl).
+        # Esta env solo es FALLBACK (SSR/localhost).
+        NEXT_PUBLIC_API_URL: https://api.facturador.mx
         NEXT_PUBLIC_SUPABASE_URL: https://qwffsaxoeehwwdzaytqb.supabase.co
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_tgJ_GhSa9ZtHvysc-HPH1g_4V1bjKDb
-    image: smartsupplyv2-frontend:prod
-    container_name: smartsupplyv2_frontend
+    image: facturador-frontend:prod
+    container_name: facturador_frontend
     restart: unless-stopped
     depends_on:
       - backend
@@ -96,8 +95,8 @@ services:
     build:
       context: ./landing
       dockerfile: Dockerfile
-    image: smartsupplyv2-landing:prod
-    container_name: smartsupplyv2_landing
+    image: facturador-landing:prod
+    container_name: facturador_landing
     restart: unless-stopped
     healthcheck:
       # 127.0.0.1 explícito: el wget de busybox resuelve localhost a ::1 (IPv6)
@@ -113,7 +112,7 @@ services:
     # Pineada (era :latest): el túnel es el único punto de entrada a prod; un
     # pull sorpresa con breaking change lo tumbaría. Subir la versión a propósito.
     image: cloudflare/cloudflared:2026.5.2
-    container_name: smartsupplyv2_tunnel
+    container_name: facturador_tunnel
     restart: unless-stopped
     command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
@@ -133,4 +132,4 @@ volumes:
 
 networks:
   ssv2:
-    name: smartsupplyv2prod_network
+    name: facturadorprod_network

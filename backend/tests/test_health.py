@@ -9,4 +9,4 @@ def test_health_ok(client):
 def test_api_root(client):
     r = client.get("/api")
     assert r.status_code == 200
-    assert r.json()["service"] == "smartsupply-v2"
+    assert r.json()["service"] == "facturador"
