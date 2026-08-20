@@ -56,7 +56,7 @@ services:
       # directa db.<ref>.supabase.co:5432 es solo IPv6 y no es alcanzable desde
       # el contenedor. Usuario pooler = postgres.<project_ref>.
       REDIS_URL: redis://redis:6379/0
-      ALLOWED_ORIGINS: "https://app.facturador.mx,https://admin.facturador.mx,https://facturador.mx,https://api.facturador.mx,https://app.smartsupply.mx,https://admin.smartsupply.mx,https://smartsupply.mx,https://api.smartsupply.mx"
+      ALLOWED_ORIGINS: "https://app.facturador.mx,https://admin.facturador.mx,https://facturador.mx,https://www.facturador.mx,https://api.facturador.mx,https://app.smartsupply.mx,https://admin.smartsupply.mx,https://smartsupply.mx,https://www.smartsupply.mx,https://api.smartsupply.mx"
     depends_on:
       redis:
         condition: service_healthy

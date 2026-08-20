@@ -85,8 +85,17 @@ class Settings(BaseSettings):
     CONTACT_ENABLED: bool = True
     # Máximo de envíos por IP por hora (rate limit con Redis; fail-open).
     CONTACT_RATE_PER_HOUR: int = 5
-    # A dónde llegan los mensajes del formulario.
+    # A dónde llegan los mensajes del formulario (fallback si el host no está
+    # en CONTACT_RECIPIENTS).
     CONTACT_RECIPIENT: str = "gerencia@facturador.mx"
+    # Destinatario POR SITIO: el mismo endpoint sirve a varias landings y cada una
+    # entrega en su propio alias de marca. Formato "host=correo,host=correo".
+    # El host se toma del Origin/Referer de la petición (sin www.).
+    CONTACT_RECIPIENTS: str = (
+        "facturador.mx=gerencia@facturador.mx,"
+        "smartsupply.mx=gerencia@smartsupply.mx,"
+        "miniconta.mx=gerencia@miniconta.mx"
+    )
     # SMTP de PLATAFORMA para enviar el correo de contacto (buzón de Workspace de
     # facturador.mx). Distinto del SMTP por-tenant (tenant.config["email"], que es
     # el buzón del cliente para SUS facturas). Vacío = /contacto responde 503.
@@ -114,6 +123,15 @@ class Settings(BaseSettings):
 
     def platform_operators_list(self) -> list[str]:
         return [e.strip().lower() for e in self.PLATFORM_OPERATORS.split(",") if e.strip()]
+
+    def contact_recipient_for(self, host: str | None) -> str:
+        """Destinatario para el sitio `host`; CONTACT_RECIPIENT si no está mapeado."""
+        h = (host or "").strip().lower().removeprefix("www.")
+        for par in self.CONTACT_RECIPIENTS.split(","):
+            k, _, v = par.partition("=")
+            if k.strip().lower() == h and v.strip():
+                return v.strip()
+        return self.CONTACT_RECIPIENT
 
     def contact_smtp_configured(self) -> bool:
         """True si hay SMTP de plataforma utilizable para /contacto."""

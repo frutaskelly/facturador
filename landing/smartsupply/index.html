@@ -520,7 +520,12 @@
             </button>
             <span class="alt">o <a href="#" id="cf-mail">envíalo por correo</a></span>
           </div>
-          <span class="note">Al enviar se abre WhatsApp (o tu correo) con el mensaje ya redactado.</span>
+          <!-- Honeypot anti-bot: oculto; un humano no lo llena. -->
+          <div style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden" aria-hidden="true">
+            <label>No llenar<input type="text" id="cf-website" name="website" tabindex="-1" autocomplete="off"></label>
+          </div>
+          <div id="cf-msg" role="status" aria-live="polite" style="display:none;margin-top:.8rem;font-size:.92rem;padding:.7rem .9rem;border-radius:10px"></div>
+          <span class="note">Al enviar por WhatsApp se abre el chat; por correo lo mandamos nosotros.</span>
         </form>
       </div>
     </div>
@@ -561,13 +566,55 @@
       window.open("https://wa.me/" + WA + "?text=" + encodeURIComponent(compose()), "_blank", "noopener");
     });
 
+    // "Envíalo por correo": envío REAL vía el backend (api.<dominio>/api/v1/contacto),
+    // que entrega en el alias de este sitio. Si el server no puede, cae a mailto
+    // con el mensaje ya redactado para no perder el contacto.
+    var msg = document.getElementById("cf-msg");
+    function show(ok, html) {
+      if (!msg) return;
+      msg.style.display = "block";
+      msg.style.background = ok ? "rgba(37,211,102,.12)" : "#fdecec";
+      msg.style.color = ok ? "#1c7a3e" : "#b42318";
+      msg.style.border = "1px solid " + (ok ? "rgba(37,211,102,.35)" : "#f6cccc");
+      msg.innerHTML = html;
+    }
+    function mailtoHref() {
+      return "mailto:" + MAIL +
+        "?subject=" + encodeURIComponent("Contacto Smart Supply") +
+        "&body=" + encodeURIComponent(compose());
+    }
+
     var mail = document.getElementById("cf-mail");
     if (mail) mail.addEventListener("click", function (ev) {
       ev.preventDefault();
       if (!f.reportValidity()) return;
-      window.location.href = "mailto:" + MAIL +
-        "?subject=" + encodeURIComponent("Contacto Smart Supply") +
-        "&body=" + encodeURIComponent(compose());
+
+      var host = location.hostname.replace(/^www\./, "");
+      if (!host || host === "localhost") { window.location.href = mailtoHref(); return; }
+
+      var contacto = val("cf-contacto");
+      var esCorreo = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(contacto);
+      var payload = {
+        nombre: val("cf-nombre"),
+        empresa: val("cf-empresa"),
+        correo: esCorreo ? contacto : null,
+        telefono: esCorreo ? null : contacto,
+        mensaje: val("cf-mensaje"),
+        website: val("cf-website")
+      };
+
+      mail.textContent = "enviando…";
+      fetch("https://api." + host + "/api/v1/contacto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }).then(function (res) {
+        if (res.ok) { f.reset(); show(true, "¡Gracias! Recibimos tu mensaje y te contactamos pronto."); }
+        else if (res.status === 429) show(false, "Enviaste varios mensajes seguidos. Intenta en unos minutos.");
+        else show(false, 'No se pudo enviar. <a href="' + mailtoHref() + '" style="color:inherit;font-weight:700">Escríbenos por correo</a>.');
+      }).catch(function () {
+        show(false, 'No se pudo conectar. <a href="' + mailtoHref() + '" style="color:inherit;font-weight:700">Escríbenos por correo</a>.');
+      }).then(function () { mail.textContent = "envíalo por correo"; });
     });
   })();
 </script>

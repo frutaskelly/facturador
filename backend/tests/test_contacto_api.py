@@ -100,3 +100,88 @@ def test_html_escapado_previene_inyeccion(client, monkeypatch):
     assert r.status_code == 200
     assert "<script>" not in capturado["html"]
     assert "&lt;script&gt;" in capturado["html"]
+
+
+# ─── Ruteo por sitio: un endpoint, varias landings ────────────────────────────
+
+def _smtp_listo(monkeypatch):
+    monkeypatch.setattr(settings, "CONTACT_SMTP_HOST", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "CONTACT_SMTP_USERNAME", "buzon@example.com")
+    monkeypatch.setattr(settings, "CONTACT_SMTP_PASSWORD", "app-password-fake")
+    monkeypatch.setattr(
+        settings,
+        "CONTACT_RECIPIENTS",
+        "facturador.mx=gerencia@facturador.mx,"
+        "smartsupply.mx=gerencia@smartsupply.mx,"
+        "miniconta.mx=gerencia@miniconta.mx",
+    )
+    monkeypatch.setattr(settings, "CONTACT_RECIPIENT", "fallback@example.com")
+
+
+def _capturar(monkeypatch) -> dict:
+    cap = {}
+
+    def _fake_send(cfg, to, subject, html, attachments=None, reply_to=None):
+        cap.update(to=to, subject=subject, html=html)
+
+    monkeypatch.setattr("app.api.v1.contacto.email_service.send_email", _fake_send)
+    return cap
+
+
+@pytest.mark.parametrize(
+    "origin,destino,etiqueta",
+    [
+        ("https://facturador.mx", "gerencia@facturador.mx", "facturador.mx"),
+        ("https://www.smartsupply.mx", "gerencia@smartsupply.mx", "smartsupply.mx"),
+        ("https://miniconta.mx", "gerencia@miniconta.mx", "miniconta.mx"),
+    ],
+)
+def test_cada_sitio_entrega_en_su_alias(client, monkeypatch, origin, destino, etiqueta):
+    _smtp_listo(monkeypatch)
+    cap = _capturar(monkeypatch)
+    r = client.post("/api/v1/contacto", json=_payload(), headers={"Origin": origin})
+    assert r.status_code == 200
+    assert cap["to"] == [destino]
+    # El asunto y el cuerpo dicen de qué sitio viene (www. se normaliza).
+    assert cap["subject"].startswith(f"Contacto {etiqueta} —")
+    assert etiqueta in cap["html"]
+
+
+def test_host_desconocido_cae_al_fallback(client, monkeypatch):
+    """Un Origin no mapeado NO puede redirigir el correo a un tercero: los
+    destinos son lista blanca, así que cae en CONTACT_RECIPIENT."""
+    _smtp_listo(monkeypatch)
+    cap = _capturar(monkeypatch)
+    r = client.post(
+        "/api/v1/contacto", json=_payload(), headers={"Origin": "https://sitio-malicioso.example"}
+    )
+    assert r.status_code == 200
+    assert cap["to"] == ["fallback@example.com"]
+
+
+# ─── Contrato "correo O teléfono" (smartsupply usa un solo campo) ─────────────
+
+def test_solo_telefono_es_valido(client, monkeypatch):
+    """Sin correo pero con teléfono: se envía, y sin Reply-To (no hay a quién)."""
+    _smtp_listo(monkeypatch)
+    cap = {}
+
+    def _fake_send(cfg, to, subject, html, attachments=None, reply_to=None):
+        cap.update(to=to, reply_to=reply_to)
+
+    monkeypatch.setattr("app.api.v1.contacto.email_service.send_email", _fake_send)
+    r = client.post(
+        "/api/v1/contacto",
+        json=_payload(correo=None, telefono="8112345678"),
+        headers={"Origin": "https://smartsupply.mx"},
+    )
+    assert r.status_code == 200
+    assert cap["reply_to"] is None
+    assert cap["to"] == ["gerencia@smartsupply.mx"]
+
+
+def test_sin_correo_ni_telefono_rechaza(client, monkeypatch):
+    _smtp_listo(monkeypatch)
+    _capturar(monkeypatch)
+    r = client.post("/api/v1/contacto", json=_payload(correo=None, telefono=None))
+    assert r.status_code == 422
