@@ -111,7 +111,7 @@ services:
   tunnel:
     # Pineada (era :latest): el túnel es el único punto de entrada a prod; un
     # pull sorpresa con breaking change lo tumbaría. Subir la versión a propósito.
-    image: cloudflare/cloudflared:2026.5.2
+    image: cloudflare/cloudflared:2026.8.2
     container_name: facturador_tunnel
     restart: unless-stopped
     command: tunnel --config /etc/cloudflared/config.yml run
