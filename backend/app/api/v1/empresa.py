@@ -30,6 +30,7 @@ from ...schemas.empresa import (
     EmpresaUpdate,
 )
 from ...services.facturama import FacturamaClient, FacturamaError, csd_public_fields
+from ...services.csd_validador import validar_csd
 from ...services.onboarding import compute_status, rfc_valido
 # Helpers del registro autoservicio (slug único + CP de 5 dígitos): misma
 # convención de alta de tenants para las empresas hijas del grupo.
@@ -278,6 +279,34 @@ def borrar_logo(
     return _empresa_out(tenant)
 
 
+# Un .cer/.key real mide unos KB; 1 MB de tope corta archivos equivocados.
+_CSD_MAX = 1024 * 1024
+
+
+def _leer_csd_files(cer: UploadFile, key: UploadFile) -> tuple[bytes, bytes]:
+    cer_data = cer.file.read(_CSD_MAX + 1)
+    key_data = key.file.read(_CSD_MAX + 1)
+    if len(cer_data) > _CSD_MAX or len(key_data) > _CSD_MAX:
+        raise HTTPException(status_code=422, detail="El .cer/.key no debe exceder 1 MB")
+    return cer_data, key_data
+
+
+@router.post("/csd/validar")
+def validar_csd_endpoint(
+    cer: UploadFile = File(...),
+    key: UploadFile = File(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Prueba LOCAL del CSD (sin tocar Facturama): certifica que el .cer es un
+    certificado real y vigente del RFC del emisor, que la contraseña abre el
+    .key y que la llave corresponde al certificado. La UI pinta ✓/✗ por campo."""
+    tenant = _load_tenant(db, ctx.tenant_id)
+    cer_data, key_data = _leer_csd_files(cer, key)
+    return validar_csd(cer_data, key_data, password, tenant.rfc or "")
+
+
 @router.post("/csd")
 def subir_csd(
     cer: UploadFile = File(...),
@@ -294,13 +323,21 @@ def subir_csd(
     if not client.configured:
         raise HTTPException(status_code=503, detail="Facturama no está configurado")
 
-    # Un .cer/.key real mide unos KB; 1 MB de tope corta archivos equivocados
-    # (o abusivos) sin cargarlos completos a memoria.
-    _CSD_MAX = 1024 * 1024
-    cer_data = cer.file.read(_CSD_MAX + 1)
-    key_data = key.file.read(_CSD_MAX + 1)
-    if len(cer_data) > _CSD_MAX or len(key_data) > _CSD_MAX:
-        raise HTTPException(status_code=422, detail="El .cer/.key no debe exceder 1 MB")
+    cer_data, key_data = _leer_csd_files(cer, key)
+
+    # Compuerta local ANTES de llamar al PAC: solo fallas DEFINITIVAS (contraseña
+    # que no abre la llave, llave de otro certificado, RFC ajeno, cert vencido).
+    # Si nuestra validación no es concluyente, se deja pasar a Facturama.
+    v = validar_csd(cer_data, key_data, password, tenant.rfc or "")
+    if v["key_ok"] and not v["password_ok"]:
+        raise HTTPException(status_code=422, detail=v["password_detalle"] or "La contraseña no abre la llave privada")
+    if v["cer_ok"] and v["key_ok"] and v["password_ok"] and not v["par_ok"] and v["par_detalle"].startswith("La llave"):
+        raise HTTPException(status_code=422, detail=v["par_detalle"])
+    if v["cer_ok"] and v["rfc_coincide"] is False:
+        raise HTTPException(status_code=422, detail=v["cer_detalle"])
+    if v["cer_ok"] and v["vigente"] is False:
+        raise HTTPException(status_code=422, detail=v["cer_detalle"])
+
     cer_b64 = base64.b64encode(cer_data).decode()
     key_b64 = base64.b64encode(key_data).decode()
     try:

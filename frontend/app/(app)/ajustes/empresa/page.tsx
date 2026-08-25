@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Building2, CheckCircle2, Pencil, ShieldCheck, Upload } from "lucide-react";
+import { Building2, CheckCircle2, Pencil, ShieldCheck, Upload, Check, X } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -138,6 +138,20 @@ export default function EmpresaPage() {
   const ambiente = onboardingStatus?.ambiente ?? "sandbox";
 
   const [csds, setCsds] = useState<Csd[]>([]);
+
+  // Validación LOCAL del CSD (sin subirlo a Facturama): en cuanto están los 3
+  // datos, el backend prueba cert/llave/contraseña y la UI pinta ✓/✗ por campo.
+  type CsdCheck = {
+    cer_ok: boolean; cer_detalle: string;
+    key_ok: boolean; key_detalle: string;
+    password_ok: boolean; password_detalle: string;
+    par_ok: boolean; par_detalle: string;
+    rfc_cert: string | null; rfc_coincide: boolean | null;
+    vigente: boolean | null; vigencia_fin: string | null;
+    es_fiel: boolean | null; valido: boolean;
+  };
+  const [csdCheck, setCsdCheck] = useState<CsdCheck | null>(null);
+  const [checking, setChecking] = useState(false);
   const [cerFile, setCerFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
   const [csdPassword, setCsdPassword] = useState("");
@@ -273,6 +287,46 @@ export default function EmpresaPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  // Corre la prueba local cada que cambian archivo/contraseña (debounce para
+  // no disparar en cada tecla de la contraseña).
+  useEffect(() => {
+    if (!cerFile || !keyFile || !csdPassword) {
+      setCsdCheck(null);
+      return;
+    }
+    let cancelado = false;
+    const t = setTimeout(async () => {
+      setChecking(true);
+      try {
+        const fd = new FormData();
+        fd.append("cer", cerFile);
+        fd.append("key", keyFile);
+        fd.append("password", csdPassword);
+        const res = await authFetch("/api/v1/empresa/csd/validar", { method: "POST", body: fd });
+        if (!res.ok) throw await toApiError(res);
+        const data = (await res.json()) as CsdCheck;
+        if (!cancelado) setCsdCheck(data);
+      } catch {
+        if (!cancelado) setCsdCheck(null);
+      } finally {
+        if (!cancelado) setChecking(false);
+      }
+    }, 600);
+    return () => { cancelado = true; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cerFile, keyFile, csdPassword]);
+
+  // Label de campo del CSD con su veredicto: ✓ verde, ✗ rojo o neutro.
+  function EtiquetaCsd({ texto, ok }: { texto: string; ok: boolean | null }) {
+    return (
+      <span className="mb-1 flex items-center gap-1.5 text-sm font-medium">
+        {texto}
+        {ok === true && <Check size={15} className="text-success" aria-label="válido" />}
+        {ok === false && <X size={15} className="text-danger" aria-label="inválido" />}
+      </span>
+    );
   }
 
   async function subirCsd() {
@@ -497,35 +551,64 @@ export default function EmpresaPage() {
 
           {canWrite && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Certificado (.cer)">
+              <label className="block">
+                <EtiquetaCsd
+                  texto="Certificado (.cer)"
+                  ok={csdCheck ? csdCheck.cer_ok && csdCheck.vigente !== false && csdCheck.rfc_coincide !== false && !csdCheck.es_fiel : null}
+                />
                 <Input
                   type="file"
                   accept=".cer"
                   onChange={(e) => setCerFile(e.target.files?.[0] ?? null)}
                   disabled={uploading}
                 />
-              </Field>
-              <Field label="Llave privada (.key)">
+                {csdCheck?.cer_detalle && (
+                  <span className="mt-1 block text-xs text-danger">{csdCheck.cer_detalle}</span>
+                )}
+              </label>
+              <label className="block">
+                <EtiquetaCsd texto="Llave privada (.key)" ok={csdCheck ? csdCheck.key_ok && (csdCheck.par_ok || !csdCheck.password_ok) : null} />
                 <Input
                   type="file"
                   accept=".key"
                   onChange={(e) => setKeyFile(e.target.files?.[0] ?? null)}
                   disabled={uploading}
                 />
-              </Field>
-              <Field label="Contraseña de la llave privada">
+                {csdCheck?.key_detalle && (
+                  <span className="mt-1 block text-xs text-danger">{csdCheck.key_detalle}</span>
+                )}
+                {csdCheck?.par_detalle && (
+                  <span className="mt-1 block text-xs text-danger">{csdCheck.par_detalle}</span>
+                )}
+              </label>
+              <label className="block">
+                <EtiquetaCsd texto="Contraseña de la llave privada" ok={csdCheck ? csdCheck.password_ok : null} />
                 <PasswordInput
                   value={csdPassword}
                   onChange={(e) => setCsdPassword(e.target.value)}
                   disabled={uploading}
                 />
-              </Field>
+                {csdCheck?.password_detalle && (
+                  <span className="mt-1 block text-xs text-danger">{csdCheck.password_detalle}</span>
+                )}
+              </label>
               <div className="flex items-end">
                 <Button onClick={subirCsd} disabled={uploading}>
                   <Upload size={16} /> {uploading ? "Subiendo…" : "Subir CSD"}
                 </Button>
               </div>
             </div>
+          )}
+
+          {checking && (
+            <p className="text-xs text-muted">Probando el certificado y la llave…</p>
+          )}
+          {csdCheck?.valido && (
+            <Alert tone="success">
+              ✅ CSD válido: RFC {csdCheck.rfc_cert}, la contraseña abre la llave y corresponde
+              al certificado{csdCheck.vigencia_fin ? ` (vigente hasta ${csdCheck.vigencia_fin})` : ""}.
+              Ya puedes dar clic en “Subir CSD”.
+            </Alert>
           )}
 
           <div>
@@ -568,6 +651,9 @@ export default function EmpresaPage() {
             <div className="flex items-center gap-4">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={logoUrl} alt="Logo de la empresa" className="max-h-20 rounded border border-border bg-white p-2" />
+              <span className="flex items-center gap-1.5 text-sm font-medium text-success">
+                <Check size={15} /> Logo cargado
+              </span>
               {canWrite && (
                 <Button variant="secondary" onClick={quitarLogo} disabled={logoUploading}>
                   Quitar logo
