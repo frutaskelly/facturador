@@ -189,7 +189,6 @@ export default function EmpresaPage() {
 
   // Logo del emisor (para el PDF de las facturas). Se previsualiza vía fetch
   // autenticado → object URL (el endpoint requiere Bearer, un <img src> no basta).
-  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
 
@@ -409,19 +408,20 @@ export default function EmpresaPage() {
     }
   }
 
-  async function subirLogo() {
-    if (!logoFile) {
-      toast.error("Selecciona una imagen (PNG, JPG o WebP)");
+  // Sube el logo EN CUANTO se selecciona el archivo (sin botón intermedio):
+  // recibe el File directo del evento para no depender del estado de React.
+  async function subirLogo(file: File) {
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("La imagen pesa más de 2 MB. Reduce el tamaño e inténtalo de nuevo.");
       return;
     }
     setLogoUploading(true);
     try {
       const fd = new FormData();
-      fd.append("logo", logoFile);
+      fd.append("logo", file);
       const res = await authFetch("/api/v1/empresa/logo", { method: "POST", body: fd });
       if (!res.ok) throw await toApiError(res);
       toast.success("Logo actualizado");
-      setLogoFile(null);
       loadLogo();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo subir el logo");
@@ -726,19 +726,22 @@ export default function EmpresaPage() {
 
           {canWrite && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Imagen del logo">
+              <Field label="Imagen del logo" hint="Se sube automáticamente al seleccionarla.">
                 <Input
                   type="file"
                   accept="image/png,image/jpeg,image/webp"
-                  onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    if (f) void subirLogo(f);
+                    // permite re-seleccionar el mismo archivo tras un error
+                    e.target.value = "";
+                  }}
                   disabled={logoUploading}
                 />
               </Field>
-              <div className="flex items-end">
-                <Button onClick={subirLogo} disabled={logoUploading || !logoFile}>
-                  <Upload size={16} /> {logoUploading ? "Subiendo…" : "Subir logo"}
-                </Button>
-              </div>
+              {logoUploading && (
+                <div className="flex items-end pb-2 text-sm text-muted">Subiendo logo…</div>
+              )}
             </div>
           )}
         </div>
