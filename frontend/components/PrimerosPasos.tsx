@@ -61,7 +61,7 @@ export function PrimerosPasos() {
 
   if (data.todo_listo) {
     return (
-      <Card className="mb-6 border-success/40">
+      <Card className="border-success/40">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-full bg-emerald-50 text-success">
@@ -90,7 +90,7 @@ export function PrimerosPasos() {
   }
 
   return (
-    <Card className="mb-6">
+    <Card>
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-semibold tracking-tight">Primeros pasos</h2>
         <span className="text-sm text-muted">

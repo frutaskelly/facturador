@@ -23,8 +23,6 @@ export default function DashboardPage() {
     <div>
       <PageHeader title="Dashboard" subtitle={`Bienvenido, ${me.email}`} />
 
-      <PrimerosPasos />
-
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((c) => (
           <Card key={c.label}>
@@ -41,6 +39,10 @@ export default function DashboardPage() {
             secciones de Catálogo y Operaciones.
           </p>
         </Card>
+      </div>
+
+      <div className="mt-8">
+        <PrimerosPasos />
       </div>
     </div>
   );
