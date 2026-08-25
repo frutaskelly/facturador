@@ -31,6 +31,7 @@ from ...schemas.empresa import (
 )
 from ...services.facturama import FacturamaClient, FacturamaError, csd_public_fields
 from ...services.csd_validador import validar_csd
+from ...services.rfc import validar_rfc_local
 from ...services.onboarding import compute_status, rfc_valido
 # Helpers del registro autoservicio (slug único + CP de 5 dígitos): misma
 # convención de alta de tenants para las empresas hijas del grupo.
@@ -88,6 +89,15 @@ def put_empresa(
     # El RFC va en cada CFDI emitido; formato inválido = timbrado rechazado después.
     if not rfc_valido(rfc):
         raise HTTPException(status_code=422, detail="El RFC no tiene un formato válido del SAT")
+    # Dígito verificador: atrapa typos (dígitos transpuestos, letra final mal).
+    if rfc in ("XAXX010101000", "XEXX010101000"):
+        raise HTTPException(status_code=422, detail="Los RFC genéricos del SAT no pueden ser el emisor")
+    v = validar_rfc_local(rfc)
+    if not v["digito_ok"]:
+        raise HTTPException(
+            status_code=422,
+            detail="El RFC no pasa el dígito verificador del SAT — revisa si hay dígitos transpuestos o la última letra",
+        )
     if not cp:
         raise HTTPException(status_code=422, detail="El código postal es obligatorio")
 

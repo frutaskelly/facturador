@@ -44,6 +44,35 @@ async function toApiError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, detail);
 }
 
+// ── Validación local de RFC: formato + dígito verificador del SAT ──────────
+// Espejo de backend/app/services/rfc.py: el último carácter del RFC es un
+// dígito verificador determinista — atrapa dígitos transpuestos y typos al
+// instante, sin consultar al SAT ni gastar folios.
+const RFC_RE = /^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/;
+const RFC_TABLA = "0123456789ABCDEFGHIJKLMN&OPQRSTUVWXYZ";
+function rfcDigitoVerificador(rfcSinDv: string): string {
+  const base = rfcSinDv.padStart(12, " ");
+  let suma = 0;
+  for (let i = 0; i < 12; i++) {
+    const ch = base[i];
+    const val = ch === " " ? 37 : ch === "Ñ" ? 38 : RFC_TABLA.indexOf(ch);
+    suma += (val < 0 ? 0 : val) * (13 - i);
+  }
+  const r = 11 - (suma % 11);
+  return r === 11 ? "0" : r === 10 ? "A" : String(r);
+}
+function validarRfcEmisor(rfc: string): { ok: boolean; motivo: string } {
+  const r = rfc.trim().toUpperCase();
+  if (!r) return { ok: false, motivo: "" };
+  if (r === "XAXX010101000" || r === "XEXX010101000")
+    return { ok: false, motivo: "Los RFC genéricos del SAT no pueden ser el emisor" };
+  if (!RFC_RE.test(r))
+    return { ok: false, motivo: "Formato inválido: 3-4 letras + fecha (AAMMDD) + homoclave" };
+  if (rfcDigitoVerificador(r.slice(0, -1)) !== r[r.length - 1])
+    return { ok: false, motivo: "No pasa el dígito verificador del SAT — revisa dígitos transpuestos o la última letra" };
+  return { ok: true, motivo: "" };
+}
+
 // Catálogo de entidades federativas (clave de 3 letras del SAT c_Estado).
 const MX_ESTADOS: ComboOption[] = [
   ["AGU", "Aguascalientes"], ["BCN", "Baja California"], ["BCS", "Baja California Sur"],
@@ -126,7 +155,8 @@ export default function EmpresaPage() {
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
-  const [verified, setVerified] = useState(false);
+  // null = sin verificar · true = SAT ok · false = el SAT lo rechazó
+  const [verified, setVerified] = useState<boolean | null>(null);
   // Modo bloqueado: tras guardar, los campos quedan de solo lectura hasta
   // confirmar la edición (evita cambios accidentales en datos fiscales).
   const [locked, setLocked] = useState(false);
@@ -218,10 +248,26 @@ export default function EmpresaPage() {
     setForm((f) => ({ ...f, ...patch }));
   }
 
+  // Veredicto local en vivo (formato + dígito verificador), sin gastar folios.
+  const rfcLocal = validarRfcEmisor(form.rfc);
+  const rfcEnRojo = (form.rfc.trim() !== "" && !rfcLocal.ok) || verified === false;
+
+  // Si el RFC está en rojo, el formulario se queda en modo edición solo —
+  // sin que el usuario tenga que dar clic en "Editar".
+  useEffect(() => {
+    if (rfcEnRojo) setLocked(false);
+  }, [rfcEnRojo]);
+
   async function verificarRfc() {
     const rfc = form.rfc.trim().toUpperCase();
     if (!rfc) {
       toast.error("Captura primero el RFC");
+      return;
+    }
+    if (!rfcLocal.ok) {
+      // Ni siquiera pasa la validación local: no gastar un folio del PAC.
+      setVerified(false);
+      toast.error(rfcLocal.motivo);
       return;
     }
     setVerifying(true);
@@ -256,6 +302,10 @@ export default function EmpresaPage() {
     }
     if (!form.rfc.trim()) {
       toast.error("El RFC es obligatorio");
+      return;
+    }
+    if (!rfcLocal.ok) {
+      toast.error(`RFC inválido: ${rfcLocal.motivo}`);
       return;
     }
     if (!form.domicilio_fiscal_cp.trim()) {
@@ -431,24 +481,36 @@ export default function EmpresaPage() {
                 value={form.rfc}
                 onChange={(e) => {
                   set({ rfc: e.target.value.toUpperCase() });
-                  setVerified(false); // cualquier cambio invalida la verificación previa
+                  setVerified(null); // cualquier cambio invalida la verificación previa
                 }}
                 disabled={ro}
               />
-              {verified ? (
-                <Badge tone="success">
-                  <CheckCircle2 size={12} className="mr-1" /> Verificado
-                </Badge>
+              {verified === true ? (
+                <Button variant="success" onClick={verificarRfc} disabled={verifying || loadError}>
+                  <Check size={16} /> RFC verificado
+                </Button>
+              ) : rfcEnRojo ? (
+                <Button variant="danger" onClick={verificarRfc} disabled={verifying || loadError}>
+                  <X size={16} /> {verifying ? "Verificando…" : "RFC inválido"}
+                </Button>
               ) : (
                 <Button
                   variant="secondary"
                   onClick={verificarRfc}
-                  disabled={verifying || loading || locked || loadError}
+                  disabled={verifying || loading || loadError}
                 >
                   <ShieldCheck size={16} /> {verifying ? "Verificando…" : "Verificar RFC"}
                 </Button>
               )}
             </div>
+            {form.rfc.trim() !== "" && !rfcLocal.ok && rfcLocal.motivo && (
+              <span className="mt-1 block text-xs text-danger">{rfcLocal.motivo}</span>
+            )}
+            {verified === false && rfcLocal.ok && (
+              <span className="mt-1 block text-xs text-danger">
+                El SAT no valida este RFC (inactivo o no localizado). Corrígelo antes de continuar.
+              </span>
+            )}
           </Field>
           <Field label="Régimen fiscal SAT">
             <Select
