@@ -95,7 +95,11 @@ def put_empresa(
     tenant.regimen_fiscal_sat = payload.regimen_fiscal_sat.strip()
     tenant.domicilio_fiscal_cp = cp
     # Reasignar el dict para que SQLAlchemy detecte el cambio del JSONB.
-    tenant.domicilio_fiscal = dict(payload.domicilio_fiscal or {})
+    dom = dict(payload.domicilio_fiscal or {})
+    # País fijo: el Facturador emite CFDI mexicanos (emisor siempre en México).
+    # Se fuerza server-side para que ningún cliente pueda mandar otro valor.
+    dom["pais"] = "México"
+    tenant.domicilio_fiscal = dom
     flag_modified(tenant, "domicilio_fiscal")
     try:
         db.commit()

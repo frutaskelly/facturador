@@ -179,7 +179,8 @@ export default function EmpresaPage() {
           colonia: str(dom.colonia),
           ciudad: str(dom.ciudad),
           estado: normalizaEstado(str(dom.estado)),
-          pais: str(dom.pais),
+          // País fijo: siempre México (se ignora cualquier valor guardado distinto).
+          pais: "México",
         });
         // Si ya hay datos fiscales guardados, arranca bloqueado.
         if ((e.legal_name || "").trim() || (e.rfc || "").trim()) setLocked(true);
@@ -451,11 +452,8 @@ export default function EmpresaPage() {
             />
           </Field>
           <Field label="País">
-            <Input
-              value={form.pais}
-              onChange={(e) => set({ pais: e.target.value })}
-              disabled={ro}
-            />
+            {/* Fijo: el emisor de un CFDI siempre es mexicano. */}
+            <Input value="México" disabled />
           </Field>
         </div>
 
