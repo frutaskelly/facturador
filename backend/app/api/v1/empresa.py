@@ -15,6 +15,7 @@ import base64
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -376,6 +377,78 @@ def listar_csd(
         and str(c.get("Rfc") or c.get("rfc") or "").strip().upper() == rfc_u
     ]
     return csd_public_fields(propios)
+
+
+def armar_checklist(
+    *, fiscal: bool, logo: bool, correo: bool, productos: bool,
+    clientes: bool, listas: bool, series: bool, primera_factura: bool,
+) -> dict:
+    """Checklist de primeros pasos (puro, testeable): el orden ES la guía."""
+    pasos = [
+        {"id": "fiscal", "titulo": "Configura tu empresa ante el SAT",
+         "detalle": "Datos fiscales, RFC verificado y sello digital (CSD).",
+         "completo": fiscal, "href": "/ajustes/empresa", "cta": "Configurar"},
+        {"id": "logo", "titulo": "Sube el logo de tu empresa",
+         "detalle": "Aparece en el PDF de tus facturas y remisiones.",
+         "completo": logo, "href": "/ajustes/empresa", "cta": "Subir logo"},
+        {"id": "correo", "titulo": "Conecta tu correo de envío",
+         "detalle": "Para mandar facturas y remisiones a tus clientes por email.",
+         "completo": correo, "href": "/ajustes/correo", "cta": "Conectar"},
+        {"id": "productos", "titulo": "Da de alta tus productos",
+         "detalle": "Tu catálogo con claves SAT y unidades.",
+         "completo": productos, "href": "/productos", "cta": "Agregar"},
+        {"id": "clientes", "titulo": "Registra tus clientes",
+         "detalle": "Con su RFC y uso de CFDI para poder facturarles.",
+         "completo": clientes, "href": "/clientes", "cta": "Registrar"},
+        {"id": "listas", "titulo": "Crea tu lista de precios",
+         "detalle": "Precios por cliente o generales para cotizar y vender.",
+         "completo": listas, "href": "/listas-precios", "cta": "Crear"},
+        {"id": "series", "titulo": "Revisa tus series de folios",
+         "detalle": "Las series con las que se numeran facturas y remisiones.",
+         "completo": series, "href": "/ajustes/series", "cta": "Revisar"},
+        {"id": "primera_factura", "titulo": "Timbra tu primera factura",
+         "detalle": "El último paso: tu primer CFDI real desde el sistema.",
+         "completo": primera_factura, "href": "/facturas", "cta": "Facturar"},
+    ]
+    completos = sum(1 for p_ in pasos if p_["completo"])
+    siguiente = next((p_["id"] for p_ in pasos if not p_["completo"]), None)
+    return {"pasos": pasos, "completos": completos, "total": len(pasos),
+            "todo_listo": completos == len(pasos), "siguiente": siguiente}
+
+
+@router.get("/checklist")
+def checklist_inicio(
+    db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Primeros pasos para el Dashboard: guía tipo checklist de qué falta para
+    empezar a trabajar (fiscal + operativo), calculada de datos vivos."""
+    tenant = _load_tenant(db, ctx.tenant_id)
+    client = FacturamaClient.from_settings(settings)
+    st = compute_status(client, tenant, multiemisor=settings.FACTURAMA_MULTIEMISOR)
+
+    def _n(tabla: str, extra: str = "", soft_delete: bool = True) -> int:
+        # Whitelist dura: la tabla se interpola en el SQL — solo literales internos.
+        assert tabla in {"productos", "clientes", "listas_precios", "series", "facturas"}
+        borrado = "and deleted_at is null" if soft_delete else ""
+        return db.execute(
+            sa_text(f"select count(*) from {tabla} where tenant_id = :t {borrado} {extra}"),
+            {"t": tenant.id},
+        ).scalar() or 0
+
+    return armar_checklist(
+        fiscal=bool(st.get("listo_para_facturar")),
+        # exists en SQL: no cargar el blob del logo (hasta 2 MB) solo para saber si hay.
+        logo=bool(db.execute(
+            sa_text("select logo is not null from tenants where id = :t"), {"t": tenant.id}
+        ).scalar()),
+        correo=bool(((tenant.config or {}).get("email") or {}).get("host")),
+        productos=_n("productos") > 0,
+        clientes=_n("clientes") > 0,
+        listas=_n("listas_precios") > 0,
+        series=_n("series", soft_delete=False) > 0,
+        primera_factura=_n("facturas", "and estado = 'TIMBRADA'") > 0,
+    )
 
 
 @router.get("/onboarding", response_model=EmpresaOnboardingOut)

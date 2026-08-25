@@ -1,6 +1,7 @@
 "use client";
 
 import { Card } from "@/components/ui/Card";
+import { PrimerosPasos } from "@/components/PrimerosPasos";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useAuth } from "@/lib/auth";
 
@@ -21,6 +22,8 @@ export default function DashboardPage() {
   return (
     <div>
       <PageHeader title="Dashboard" subtitle={`Bienvenido, ${me.email}`} />
+
+      <PrimerosPasos />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((c) => (
