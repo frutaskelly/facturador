@@ -12,7 +12,7 @@
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Check, PartyPopper } from "lucide-react";
+import { ArrowRight, Check, Loader2, PartyPopper } from "lucide-react";
 
 import { Card } from "@/components/ui/Card";
 import { apiFetch } from "@/lib/api";
@@ -40,22 +40,59 @@ function dismissKey(): string {
 
 export function PrimerosPasos() {
   const [data, setData] = useState<Checklist | null>(null);
-  const [oculto, setOculto] = useState(true); // arranca oculto para no parpadear
+  const [cargando, setCargando] = useState(true);
+  const [oculto, setOculto] = useState(false);
+
+  function cacheKey(): string {
+    return `ss.primeros-pasos.cache.${getActiveTenantId() ?? "default"}`;
+  }
 
   useEffect(() => {
+    // Pinta al instante el último estado conocido (el fetch consulta al PAC y
+    // puede tardar segundos); el resultado fresco lo reemplaza al llegar.
+    try {
+      const cached = localStorage.getItem(cacheKey());
+      if (cached) {
+        const d = JSON.parse(cached) as Checklist;
+        setData(d);
+        setOculto(d.todo_listo && localStorage.getItem(dismissKey()) === "1");
+        setCargando(false);
+      }
+    } catch {
+      /* caché corrupta: se ignora */
+    }
+
     apiFetch<Checklist>("/api/v1/empresa/checklist")
       .then((d) => {
         setData(d);
+        localStorage.setItem(cacheKey(), JSON.stringify(d));
         // Solo se respeta el "ocultar" cuando TODO está completo; si algo se
         // descompletó, la guía reaparece.
         const dismissed = localStorage.getItem(dismissKey()) === "1";
         setOculto(d.todo_listo && dismissed);
         if (!d.todo_listo) localStorage.removeItem(dismissKey());
       })
-      .catch(() => setData(null)); // sin permiso o error: no se muestra
+      .catch(() => {
+        /* sin permiso o error: se queda la caché si había, o nada */
+      })
+      .finally(() => setCargando(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!data || oculto) return null;
+  if (oculto) return null;
+
+  // Primera visita (sin caché): indicador de carga en el lugar de la guía.
+  if (!data) {
+    if (!cargando) return null; // error sin caché: no se muestra
+    return (
+      <Card>
+        <div className="flex items-center gap-3 py-2 text-sm text-muted">
+          <Loader2 size={18} className="animate-spin" aria-hidden="true" />
+          Cargando tu guía de primeros pasos…
+        </div>
+      </Card>
+    );
+  }
 
   const pct = data.total > 0 ? Math.round((data.completos / data.total) * 100) : 0;
 
