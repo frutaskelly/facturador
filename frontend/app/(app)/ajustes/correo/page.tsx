@@ -21,6 +21,7 @@ type CorreoConfig = {
   use_ssl: boolean;
   configured: boolean;
   has_password: boolean;
+  aviso?: string | null;
 };
 
 type FormState = {
@@ -113,6 +114,7 @@ export default function CorreoPage() {
       setHasPassword(cfg.has_password);
       set({ password: "" });
       toast.success("Configuración guardada y verificada ✓");
+      if (cfg.aviso) toast.info(cfg.aviso);
     } catch (e) {
       toast.error(
         e instanceof ApiError ? e.message

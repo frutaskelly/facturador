@@ -89,7 +89,22 @@ def put_correo(
     tenant.config = {**(tenant.config or {}), "email": new_cfg}
     flag_modified(tenant, "config")
     db.flush()
-    return _masked(new_cfg)
+
+    out = _masked(new_cfg)
+    # Aviso (no bloquea): en Gmail, enviar desde un ALIAS distinto del usuario
+    # solo funciona si el alias está verificado en «Enviar como»; si no, Gmail
+    # reescribe el remitente al buzón autenticado sin avisar.
+    remitente = new_cfg["from_email"].strip().lower()
+    usuario = new_cfg["username"].strip().lower()
+    if remitente and usuario and remitente != usuario and "gmail" in new_cfg["host"].lower():
+        out.aviso = (
+            f"El remitente «{new_cfg['from_email']}» es distinto del usuario "
+            f"«{new_cfg['username']}». Para que Gmail respete ese remitente, el "
+            "alias debe estar dado de alta y verificado en Gmail → Configuración → "
+            "Cuentas → «Enviar como». Si no lo está, tus correos saldrán como "
+            f"{new_cfg['username']}."
+        )
+    return out
 
 
 @router.post("/probar")

@@ -25,6 +25,8 @@ class CorreoConfigOut(BaseModel):
     use_ssl: bool = False
     configured: bool = False
     has_password: bool = False
+    # Aviso no bloqueante (p. ej. remitente distinto del usuario en Gmail).
+    aviso: Optional[str] = None
 
 
 class CorreoProbarIn(BaseModel):

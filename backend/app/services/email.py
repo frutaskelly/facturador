@@ -38,15 +38,24 @@ def configured(tenant) -> bool:
     return bool(cfg.get("host") and cfg.get("username") and cfg.get("password"))
 
 
-def _mensaje_smtp(exc: Exception, host: str, port: int) -> str:
+def _mensaje_smtp(exc: Exception, host: str, port: int, username: str = "") -> str:
     """Traduce el fallo de SMTP a algo accionable para el usuario."""
     txt = str(exc)
     if isinstance(exc, smtplib.SMTPAuthenticationError) or "535" in txt:
-        return (
+        base = (
             "El servidor rechazó el usuario o la contraseña. En Gmail/Workspace "
             "debes usar una Contraseña de aplicación de 16 caracteres (no la "
             "contraseña normal), generada EN LA MISMA cuenta del campo Usuario, "
             "con la verificación en 2 pasos activada."
+        )
+        # Causa muy común: poner un ALIAS en Usuario. Los alias NO tienen
+        # contraseña propia; se autentica con el buzón real y el alias va en
+        # «Remitente (email)».
+        return base + (
+            " Si «"
+            + (username or "ese correo")
+            + "» es un ALIAS (no un buzón con su propia contraseña), pon en Usuario"
+            " el buzón REAL y deja el alias solo en «Remitente (email)»."
         )
     if "Name or service not known" in txt or "getaddrinfo" in txt or "nodename" in txt:
         return f"No se encontró el servidor «{host}». Revisa que esté bien escrito."
@@ -87,7 +96,7 @@ def verificar_conexion(cfg: dict) -> None:
                 if username:
                     server.login(username, password)
     except Exception as exc:  # noqa: BLE001 — se traduce a mensaje de usuario
-        raise Exception(_mensaje_smtp(exc, host, port))
+        raise Exception(_mensaje_smtp(exc, host, port, username))
 
 
 def send_email(
