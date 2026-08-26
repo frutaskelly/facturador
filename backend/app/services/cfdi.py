@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from ..core.config import settings
 
 _MX_TZ = ZoneInfo("America/Mexico_City")
-from ..models import Cliente, Factura, Producto, Tenant
+from ..models import Cliente, Factura, Producto, ProductoCliente, Tenant
 
 
 def _f(x) -> float:
@@ -80,9 +80,24 @@ def build_payload(db: Session, factura: Factura) -> dict:
     else:
         expedition = settings.FACTURAMA_EXPEDITION_PLACE or factura.lugar_expedicion or tenant.domicilio_fiscal_cp
 
-    # Productos (para los litros del IEPS por cuota).
+    # Productos (para los litros del IEPS por cuota y el SKU de NoIdentificacion).
     prod_ids = {ln.producto_id for ln in factura.lineas if ln.producto_id}
     productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+
+    # Catálogo por cliente: cómo llama ESTE cliente a cada producto. Estándar
+    # de línea: Description = nombre del cliente (si lo definió) o el interno;
+    # IdentificationNumber (NoIdentificacion) = código del cliente o el SKU —
+    # siempre viaja, así todos los CFDI llevan una clave rastreable sin duplicar
+    # productos por cliente.
+    alias_cliente = {
+        pc.producto_id: pc
+        for pc in db.query(ProductoCliente)
+        .filter(
+            ProductoCliente.cliente_id == factura.cliente_id,
+            ProductoCliente.producto_id.in_(prod_ids),
+        )
+        .all()
+    } if prod_ids else {}
 
     items = []
     for ln in sorted(factura.lineas, key=lambda x: x.numero_linea):
@@ -123,9 +138,13 @@ def build_payload(db: Session, factura: Factura) -> dict:
                     "Rate": 0, "IsRetention": True, "IsQuota": False,
                 })
 
+        pc = alias_cliente.get(ln.producto_id)
+        prod_ln = productos.get(ln.producto_id)
+        descripcion = (pc.nombre_cliente or "").strip() if pc else ""
+        no_ident = (pc.codigo_cliente or "").strip() if pc else ""
         item = {
             "ProductCode": ln.clave_prod_serv,
-            "Description": ln.descripcion,
+            "Description": descripcion or ln.descripcion,
             "UnitCode": ln.clave_unidad,
             "Unit": ln.clave_unidad,
             "UnitPrice": _f(ln.valor_unitario),
@@ -136,6 +155,8 @@ def build_payload(db: Session, factura: Factura) -> dict:
             "Total": _f(Decimal(str(ln.importe)) + Decimal(str(ln.iva_importe or 0)) + Decimal(str(ln.ieps_importe or 0))
                        - Decimal(str(ln.ret_iva_importe or 0)) - Decimal(str(ln.ret_isr_importe or 0))),
         }
+        if no_ident or (prod_ln and prod_ln.sku):
+            item["IdentificationNumber"] = no_ident or prod_ln.sku
         if taxes or retenciones:
             item["Taxes"] = taxes + retenciones
         items.append(item)

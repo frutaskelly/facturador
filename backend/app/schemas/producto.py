@@ -121,3 +121,79 @@ class LineaPegadaOut(BaseModel):
 class AliasIn(BaseModel):
     texto: str = Field(min_length=1, max_length=254)
     producto_id: uuid.UUID
+
+
+# ─── Importación masiva (plantilla o lista de precios con IA) ────────────────
+class ImportFilaPreview(BaseModel):
+    fila: int
+    nombre: str
+    codigo: str = ""
+    descripcion: str = ""
+    unidad: str = ""
+    precio: str = ""
+    clave_sat: str = ""
+    unidad_sat: str = ""
+    codigo_barras: str = ""
+    # Mejor candidato del cruce (≥ score de confianza) — sugerencia "vincular".
+    producto_id: Optional[uuid.UUID] = None
+    candidatos: list[CandidatoOut] = Field(default_factory=list)
+    # El cliente elegido ya tiene código/nombre guardado para ese producto.
+    ya_vinculado: bool = False
+
+
+class ImportPreviewOut(BaseModel):
+    formato: str                  # "plantilla" (determinista) | "ia"
+    filas: list[ImportFilaPreview]
+
+
+class ImportFilaIn(BaseModel):
+    accion: str = Field(pattern="^(crear|vincular|omitir)$")
+    producto_id: Optional[uuid.UUID] = None      # requerido para "vincular"
+    nombre: str = Field(min_length=1, max_length=254)
+    sku: Optional[str] = Field(default=None, max_length=50)
+    descripcion: Optional[str] = Field(default=None, max_length=1000)
+    unidad_base: Optional[str] = Field(default=None, max_length=20)
+    clave_sat: Optional[str] = Field(default=None, max_length=8)
+    unidad_sat: Optional[str] = Field(default=None, max_length=3)
+    codigo_barras: Optional[str] = Field(default=None, max_length=20)
+    categoria_id: Optional[uuid.UUID] = None
+    esquema_impuesto_id: Optional[uuid.UUID] = None
+    # Solo cuando la importación es la lista de un cliente:
+    codigo_cliente: Optional[str] = Field(default=None, max_length=50)
+    nombre_cliente: Optional[str] = Field(default=None, max_length=254)
+    precio: Optional[Decimal] = Field(default=None, ge=0)
+
+
+class ImportIn(BaseModel):
+    cliente_id: Optional[uuid.UUID] = None
+    guardar_precios: bool = False
+    lista_id: Optional[uuid.UUID] = None          # default: la lista del cliente
+    filas: list[ImportFilaIn] = Field(min_length=1, max_length=500)
+
+
+class ImportErrorFila(BaseModel):
+    fila: int
+    error: str
+
+
+class ImportResultOut(BaseModel):
+    creados: int
+    vinculados: int
+    alias_guardados: int
+    precios_guardados: int
+    omitidos: int
+    errores: list[ImportErrorFila] = Field(default_factory=list)
+
+
+# ─── Catálogo del cliente (codigo/nombre por cliente → CFDI) ─────────────────
+class ProductoClienteOut(BaseModel):
+    producto_id: uuid.UUID
+    producto_sku: str
+    producto_nombre: str
+    codigo_cliente: Optional[str] = None
+    nombre_cliente: Optional[str] = None
+
+
+class ProductoClienteUpsert(BaseModel):
+    codigo_cliente: Optional[str] = Field(default=None, max_length=50)
+    nombre_cliente: Optional[str] = Field(default=None, max_length=254)

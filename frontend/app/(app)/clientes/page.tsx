@@ -27,8 +27,12 @@ const config: CrudConfig<Cliente> = {
         : <span className="text-muted">—</span> },
     { header: "Estado", cell: (c) => <Badge tone={c.status === "ACTIVO" ? "success" : "muted"}>{c.status}</Badge> },
     { header: "", cell: (c) => (
-      <Link href={`/clientes/${c.id}/estado-cuenta`} onClick={(e) => e.stopPropagation()}
-        className="text-sm text-accent hover:underline">Estado de cuenta</Link>
+      <div className="flex gap-3">
+        <Link href={`/clientes/${c.id}/catalogo`} onClick={(e) => e.stopPropagation()}
+          className="text-sm text-accent hover:underline">Catálogo</Link>
+        <Link href={`/clientes/${c.id}/estado-cuenta`} onClick={(e) => e.stopPropagation()}
+          className="text-sm text-accent hover:underline">Estado de cuenta</Link>
+      </div>
     ) },
   ],
   fields: [

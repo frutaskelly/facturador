@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { FileUp, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +10,7 @@ import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { ImportarProductosModal } from "@/components/ImportarProductosModal";
 import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
@@ -134,6 +135,7 @@ export default function ProductosPage() {
   const [satOpciones, setSatOpciones] = useState<SatOpcion[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerText, setPickerText] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
 
   async function suggestSat() {
     if (!form) return;
@@ -288,11 +290,22 @@ export default function ProductosPage() {
         subtitle="Catálogo de productos"
         actions={
           canWrite ? (
-            <Button onClick={() => { setPickerText(""); setPickerOpen(true); }}>
-              <Plus size={16} /> Nuevo producto
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setImportOpen(true)}>
+                <FileUp size={16} /> Importar
+              </Button>
+              <Button onClick={() => { setPickerText(""); setPickerOpen(true); }}>
+                <Plus size={16} /> Nuevo producto
+              </Button>
+            </div>
           ) : undefined
         }
+      />
+
+      <ImportarProductosModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onDone={reload}
       />
 
       <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin productos" storageKey="productos" />

@@ -315,6 +315,39 @@ export type Candidato = {
   unidad_base?: string | null;
 };
 export type MatchResult = { texto: string; candidatos: Candidato[] };
+
+// ─── Importación masiva de productos (plantilla o lista de precios con IA) ───
+export type ImportFilaPreview = {
+  fila: number;
+  nombre: string;
+  codigo: string;
+  descripcion: string;
+  unidad: string;
+  precio: string;
+  clave_sat: string;
+  unidad_sat: string;
+  codigo_barras: string;
+  producto_id?: string | null;     // sugerencia: vincular a este existente
+  candidatos: Candidato[];
+  ya_vinculado: boolean;           // el cliente ya tiene código/nombre para él
+};
+export type ImportPreview = { formato: "plantilla" | "ia"; filas: ImportFilaPreview[] };
+export type ImportResult = {
+  creados: number;
+  vinculados: number;
+  alias_guardados: number;
+  precios_guardados: number;
+  omitidos: number;
+  errores: { fila: number; error: string }[];
+};
+// Catálogo del cliente: su código (NoIdentificacion) y su nombre (Descripcion CFDI).
+export type ProductoClienteRow = {
+  producto_id: string;
+  producto_sku: string;
+  producto_nombre: string;
+  codigo_cliente?: string | null;
+  nombre_cliente?: string | null;
+};
 // Línea parseada desde un pegado de Excel (backend detecta columnas + cruza).
 export type LineaPegada = {
   texto: string;
