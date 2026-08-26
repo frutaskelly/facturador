@@ -112,9 +112,13 @@ export default function CorreoPage() {
       });
       setHasPassword(cfg.has_password);
       set({ password: "" });
-      toast.success("Configuración guardada");
+      toast.success("Configuración guardada y verificada ✓");
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo guardar");
+      toast.error(
+        e instanceof ApiError ? e.message
+          : e instanceof Error && e.message ? e.message
+          : "No se pudo guardar la configuración de correo.",
+      );
     } finally {
       setSaving(false);
     }
@@ -133,7 +137,11 @@ export default function CorreoPage() {
       });
       toast.success(`Correo de prueba enviado a ${testTo.trim()}`);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo enviar la prueba");
+      toast.error(
+        e instanceof ApiError ? e.message
+          : e instanceof Error && e.message ? e.message
+          : "No se pudo enviar la prueba.",
+      );
     } finally {
       setTesting(false);
     }

@@ -78,6 +78,14 @@ def put_correo(
         "from_name": (payload.from_name or "").strip() or None,
         "use_ssl": payload.use_ssl,
     }
+    # Guardar VERIFICA: se prueba el login SMTP antes de persistir, para que
+    # nadie se quede con una configuración que no funciona (sin enviar correo).
+    if new_cfg["host"] and new_cfg["username"] and new_cfg["password"]:
+        try:
+            email_service.verificar_conexion(new_cfg)
+        except Exception as exc:  # noqa: BLE001 — mensaje accionable al usuario
+            raise HTTPException(status_code=422, detail=str(exc))
+
     tenant.config = {**(tenant.config or {}), "email": new_cfg}
     flag_modified(tenant, "config")
     db.flush()
@@ -105,6 +113,8 @@ def probar_correo(
         "correctamente.</p>"
     )
     try:
+        # Primero el login (mensaje claro si son las credenciales), luego el envío.
+        email_service.verificar_conexion(cfg)
         email_service.send_email(cfg, [to], "Prueba de conexión — Facturador", html)
     except Exception as exc:  # noqa: BLE001 — superficie del error al cliente
         raise HTTPException(status_code=502, detail=str(exc))

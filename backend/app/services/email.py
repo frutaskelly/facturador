@@ -38,6 +38,58 @@ def configured(tenant) -> bool:
     return bool(cfg.get("host") and cfg.get("username") and cfg.get("password"))
 
 
+def _mensaje_smtp(exc: Exception, host: str, port: int) -> str:
+    """Traduce el fallo de SMTP a algo accionable para el usuario."""
+    txt = str(exc)
+    if isinstance(exc, smtplib.SMTPAuthenticationError) or "535" in txt:
+        return (
+            "El servidor rechazó el usuario o la contraseña. En Gmail/Workspace "
+            "debes usar una Contraseña de aplicación de 16 caracteres (no la "
+            "contraseña normal), generada EN LA MISMA cuenta del campo Usuario, "
+            "con la verificación en 2 pasos activada."
+        )
+    if "Name or service not known" in txt or "getaddrinfo" in txt or "nodename" in txt:
+        return f"No se encontró el servidor «{host}». Revisa que esté bien escrito."
+    if "timed out" in txt.lower() or "timeout" in txt.lower():
+        return f"El servidor {host}:{port} no respondió. Revisa el puerto y la conexión segura."
+    if "refused" in txt.lower():
+        return f"El servidor {host} rechazó la conexión en el puerto {port}."
+    if "WRONG_VERSION_NUMBER" in txt or "SSLError" in txt or "ssl" in txt.lower():
+        return (
+            f"Error de conexión segura en el puerto {port}. Usa SSL con el puerto 465 "
+            "o STARTTLS con el 587."
+        )
+    return f"No se pudo conectar: {txt}"
+
+
+def verificar_conexion(cfg: dict) -> None:
+    """Prueba host + puerto + usuario + contraseña SIN enviar correo.
+
+    Lanza Exception con un mensaje en español y accionable si algo falla.
+    """
+    host = (cfg.get("host") or "").strip()
+    if not host:
+        raise ValueError("Falta el servidor SMTP (host)")
+    port = int(cfg.get("port") or 587)
+    username = cfg.get("username") or ""
+    password = cfg.get("password") or ""
+    use_ssl = bool(cfg.get("use_ssl")) or port == 465
+    try:
+        if use_ssl:
+            with smtplib.SMTP_SSL(host, port, timeout=_TIMEOUT) as server:
+                if username:
+                    server.login(username, password)
+        else:
+            with smtplib.SMTP(host, port, timeout=_TIMEOUT) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                if username:
+                    server.login(username, password)
+    except Exception as exc:  # noqa: BLE001 — se traduce a mensaje de usuario
+        raise Exception(_mensaje_smtp(exc, host, port))
+
+
 def send_email(
     cfg: dict,
     to: list[str],
