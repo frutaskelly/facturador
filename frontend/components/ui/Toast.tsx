@@ -1,5 +1,12 @@
 "use client";
 
+/**
+ * Avisos de la app: TODOS en un popup modal con OK — nada de notificaciones
+ * fugaces en la esquina, que pasan desapercibidas.
+ *
+ * La API (`toast.success/error/info`) no cambia, así que ninguna página necesita
+ * tocarse. Los mensajes se encolan (FIFO) y se deduplican si llegan repetidos.
+ */
 import {
   createContext,
   useContext,
@@ -8,10 +15,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Info } from "lucide-react";
 
-type ToastKind = "success" | "info";
-type Toast = { id: number; kind: ToastKind; message: string };
+type Kind = "success" | "error" | "info";
+type Aviso = { kind: Kind; message: string };
 
 type ToastApi = {
   success: (m: string) => void;
@@ -20,92 +27,93 @@ type ToastApi = {
 };
 
 const ToastContext = createContext<ToastApi | null>(null);
-let _id = 0;
+
+const ESTILO: Record<Kind, { titulo: string; icono: ReactNode; fondo: string }> = {
+  success: {
+    titulo: "Listo",
+    icono: <CheckCircle2 size={20} />,
+    fondo: "bg-emerald-50 text-success",
+  },
+  error: {
+    titulo: "Algo salió mal",
+    icono: <AlertCircle size={20} />,
+    fondo: "bg-red-50 text-danger",
+  },
+  info: {
+    titulo: "Aviso",
+    icono: <Info size={20} />,
+    fondo: "bg-blue-50 text-blue-700",
+  },
+};
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  // Los ERRORES no son fugaces: van a un popup modal con OK que el usuario
-  // tiene que cerrar — así nunca pasan desapercibidos. Cola FIFO por si
-  // llegan varios; se deduplican mensajes consecutivos idénticos.
-  const [errores, setErrores] = useState<string[]>([]);
+  const [cola, setCola] = useState<Aviso[]>([]);
   const okRef = useRef<HTMLButtonElement>(null);
 
-  function push(kind: ToastKind, message: string) {
-    const id = ++_id;
-    setToasts((t) => [...t, { id, kind, message }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
+  function push(kind: Kind, message: string) {
+    setCola((q) => {
+      const ultimo = q[q.length - 1];
+      if (ultimo && ultimo.kind === kind && ultimo.message === message) return q;
+      return [...q, { kind, message }];
+    });
   }
 
   const api: ToastApi = {
     success: (m) => push("success", m),
+    error: (m) => push("error", m),
     info: (m) => push("info", m),
-    error: (m) =>
-      setErrores((q) => (q[q.length - 1] === m ? q : [...q, m])),
   };
 
-  function cerrarError() {
-    setErrores((q) => q.slice(1));
+  function cerrar() {
+    setCola((q) => q.slice(1));
   }
 
-  // Foco al botón OK al abrir y cierre con Escape/Enter.
+  // Foco al botón OK al abrir; Enter/Escape lo cierran.
   useEffect(() => {
-    if (errores.length === 0) return;
+    if (cola.length === 0) return;
     okRef.current?.focus();
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape" || e.key === "Enter") {
         e.preventDefault();
-        cerrarError();
+        cerrar();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [errores.length]);
+  }, [cola.length]);
+
+  const actual = cola[0];
+  const estilo = actual ? ESTILO[actual.kind] : null;
 
   return (
     <ToastContext.Provider value={api}>
       {children}
 
-      {/* aria-live: los avisos se anuncian a lectores de pantalla al aparecer. */}
-      <div aria-live="polite" className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`pointer-events-auto rounded-lg border px-4 py-2 text-sm shadow-md ${
-              t.kind === "success"
-                ? "border-success/30 bg-background text-success"
-                : "border-border bg-background text-foreground"
-            }`}
-          >
-            {t.message}
-          </div>
-        ))}
-      </div>
-
-      {/* Popup modal de error: mensaje + OK. Bloquea hasta que el usuario lo lea. */}
-      {errores.length > 0 && (
+      {actual && estilo && (
         <div
-          role="alertdialog"
+          role={actual.kind === "error" ? "alertdialog" : "dialog"}
           aria-modal="true"
-          aria-label="Error"
+          aria-label={estilo.titulo}
           className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
-          onClick={cerrarError}
+          onClick={cerrar}
         >
           <div
             className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start gap-3">
-              <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-red-50 text-danger">
-                <AlertCircle size={20} />
+              <span
+                className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full ${estilo.fondo}`}
+                aria-hidden="true"
+              >
+                {estilo.icono}
               </span>
               <div className="min-w-0">
-                <h2 className="text-base font-semibold tracking-tight">
-                  Algo salió mal
-                </h2>
-                <p className="mt-1 break-words text-sm text-muted">{errores[0]}</p>
-                {errores.length > 1 && (
+                <h2 className="text-base font-semibold tracking-tight">{estilo.titulo}</h2>
+                <p className="mt-1 break-words text-sm text-muted">{actual.message}</p>
+                {cola.length > 1 && (
                   <p className="mt-2 text-xs text-muted">
-                    ({errores.length - 1} aviso{errores.length > 2 ? "s" : ""} más en cola)
+                    ({cola.length - 1} aviso{cola.length > 2 ? "s" : ""} más en cola)
                   </p>
                 )}
               </div>
@@ -113,7 +121,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div className="mt-5 flex justify-end">
               <button
                 ref={okRef}
-                onClick={cerrarError}
+                onClick={cerrar}
                 className="inline-flex items-center justify-center rounded-lg bg-accent px-6 py-2 text-sm font-medium text-white transition hover:opacity-90"
               >
                 OK
