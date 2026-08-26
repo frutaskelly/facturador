@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ExternalLink, Mail, Send, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
-import { Field, Input, Select } from "@/components/ui/Field";
+import { Field, Input, PasswordInput, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
@@ -219,8 +219,7 @@ export default function CorreoPage() {
             />
           </Field>
           <Field label="Contraseña" hint={hasPassword ? "Deja en blanco para conservar la actual" : undefined}>
-            <Input
-              type="password"
+            <PasswordInput
               placeholder={hasPassword ? "•••• (sin cambios)" : ""}
               value={form.password}
               onChange={(e) => set({ password: e.target.value })}

@@ -12,7 +12,7 @@ import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
-import { Field, Input } from "@/components/ui/Field";
+import { Field, Input, PasswordInput } from "@/components/ui/Field";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getSupabase } from "@/lib/supabaseClient";
 import { LogoMark, Wordmark } from "@/components/Logo";
@@ -137,8 +137,7 @@ function LoginCard() {
             />
           </Field>
           <Field label="Contraseña">
-            <Input
-              type="password"
+            <PasswordInput
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"

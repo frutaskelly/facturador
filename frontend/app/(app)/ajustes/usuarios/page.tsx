@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Field, Input, Select, Switch } from "@/components/ui/Field";
+import { Field, Input, PasswordInput, Select, Switch } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
@@ -288,8 +288,7 @@ export default function UsuariosPage() {
             </Select>
           </Field>
           <Field label="Contraseña" required hint="Mínimo 8 caracteres">
-            <Input
-              type="password"
+            <PasswordInput
               value={cPass}
               onChange={(e) => setCPass(e.target.value)}
               autoComplete="new-password"
@@ -318,8 +317,7 @@ export default function UsuariosPage() {
             {pwdFor?.user_full_name || pwdFor?.user_email}
           </p>
           <Field label="Nueva contraseña" required hint="Mínimo 8 caracteres">
-            <Input
-              type="password"
+            <PasswordInput
               value={newPass}
               onChange={(e) => setNewPass(e.target.value)}
               autoComplete="new-password"
