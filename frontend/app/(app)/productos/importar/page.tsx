@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Download, FileUp, Sparkles } from "lucide-react";
 
+import { CategoriaCombobox } from "@/components/CategoriaCombobox";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select, Switch } from "@/components/ui/Field";
@@ -100,9 +101,16 @@ export default function ImportarProductosPage() {
   const clientes = clientesRes.data?.items ?? [];
   const esquemasRes = useResource<Page<EsquemaImpuesto>>("/api/v1/esquemas-impuesto?limit=200");
   const esquemas = (esquemasRes.data?.items ?? []).filter((e) => e.activo);
-  const categoriasRes = useResource<Page<Categoria>>("/api/v1/categorias?limit=500");
+  // limit=200 es el tope del endpoint (con 500 respondía 422 y la lista salía
+  // vacía). Solo las ACTIVAS: son las que el usuario ve en /categorias.
+  const categoriasRes = useResource<Page<Categoria>>(
+    "/api/v1/categorias?limit=200&activo=true"
+  );
   const [catsExtra, setCatsExtra] = useState<Categoria[]>([]);   // creadas aquí mismo
-  const categorias = [...(categoriasRes.data?.items ?? []), ...catsExtra];
+  const categorias = useMemo(
+    () => [...(categoriasRes.data?.items ?? []), ...catsExtra],
+    [categoriasRes.data, catsExtra]
+  );
 
   const [paso, setPaso] = useState<Paso>("subir");
   const [archivo, setArchivo] = useState<File | null>(null);
@@ -336,32 +344,6 @@ export default function ImportarProductosPage() {
 
   function setFila(fila: number, patch: Partial<Fila>) {
     setFilas((rows) => rows.map((r) => (r.fila === fila ? { ...r, ...patch } : r)));
-  }
-
-  /** Crea una categoría sin salir de la pantalla y la aplica a la fila. */
-  async function crearCategoria(nombre: string, aplicarA?: number) {
-    const limpio = nombre.trim();
-    if (!limpio) return;
-    const norm = (t: string) =>
-      t.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-    const yaExiste = categorias.find((c) => norm(c.nombre) === norm(limpio));
-    if (yaExiste) {
-      if (aplicarA !== undefined) setFila(aplicarA, { cat_id: yaExiste.id });
-      toast.info(`Ya existe «${yaExiste.nombre}»: se usó esa`);
-      return yaExiste;
-    }
-    try {
-      const cat = await apiFetch<Categoria>("/api/v1/categorias", {
-        method: "POST",
-        body: JSON.stringify({ nombre: limpio }),
-      });
-      setCatsExtra((c) => [...c, cat]);
-      if (aplicarA !== undefined) setFila(aplicarA, { cat_id: cat.id });
-      toast.success(`Categoría «${cat.nombre}» creada`);
-      return cat;
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo crear la categoría");
-    }
   }
 
   async function importar() {
@@ -694,30 +676,25 @@ export default function ImportarProductosPage() {
                         <td className="px-3 py-2 font-medium">{m.nombre_archivo}</td>
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-2">
-                            <Select
-                              value={catDestino[m.nombre_archivo] ?? ""}
-                              aria-label={`Categoría del sistema para ${m.nombre_archivo}`}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setCatDestino((d) => ({ ...d, [m.nombre_archivo]: v }));
-                                // Se aplica ya: si se hiciera al entrar al
-                                // preview, pisaría las correcciones fila a fila.
-                                setFilas((rows) =>
-                                  rows.map((f) =>
-                                    f.categoria === m.nombre_archivo ? { ...f, cat_id: v } : f
-                                  )
-                                );
-                              }}
-                            >
-                              <option value="">
-                                + Crear «{m.nombre_archivo}»
-                              </option>
-                              {categorias.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.nombre}
-                                </option>
-                              ))}
-                            </Select>
+                            <div className="flex-1">
+                              <CategoriaCombobox
+                                value={catDestino[m.nombre_archivo] ?? ""}
+                                categorias={categorias}
+                                sugerida={m.nombre_archivo}
+                                ariaLabel={`Categoría del sistema para ${m.nombre_archivo}`}
+                                onCreada={(c) => setCatsExtra((x) => [...x, c])}
+                                onChange={(v) => {
+                                  setCatDestino((d) => ({ ...d, [m.nombre_archivo]: v }));
+                                  // Se aplica ya: si se hiciera al entrar al
+                                  // preview, pisaría las correcciones fila a fila.
+                                  setFilas((rows) =>
+                                    rows.map((f) =>
+                                      f.categoria === m.nombre_archivo ? { ...f, cat_id: v } : f
+                                    )
+                                  );
+                                }}
+                              />
+                            </div>
                             {!m.es_nueva && catDestino[m.nombre_archivo] === m.categoria_id ? (
                               <Badge tone="success">Ya existe</Badge>
                             ) : null}
@@ -971,32 +948,15 @@ export default function ImportarProductosPage() {
 
                     {/* Categoría — con alta al vuelo */}
                     <td className="px-2 py-2">
-                      <Select
+                      <CategoriaCombobox
                         value={f.cat_id}
+                        categorias={categorias}
+                        sugerida={f.categoria || undefined}
                         disabled={f.accion !== "crear"}
-                        aria-label={`Categoría de ${f.nombre}`}
-                        onChange={(e) => {
-                          if (e.target.value === "__nueva__") {
-                            const nombre = window.prompt(
-                              "Nombre de la categoría nueva",
-                              f.categoria || ""
-                            );
-                            if (nombre) void crearCategoria(nombre, f.fila);
-                            return;
-                          }
-                          setFila(f.fila, { cat_id: e.target.value });
-                        }}
-                      >
-                        <option value="">
-                          {f.categoria ? `+ Crear «${f.categoria}»` : "— Sin categoría —"}
-                        </option>
-                        {categorias.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.nombre}
-                          </option>
-                        ))}
-                        <option value="__nueva__">+ Nueva categoría…</option>
-                      </Select>
+                        ariaLabel={`Categoría de ${f.nombre}`}
+                        onCreada={(c) => setCatsExtra((x) => [...x, c])}
+                        onChange={(v) => setFila(f.fila, { cat_id: v })}
+                      />
                     </td>
 
                     {/* Esquema de impuesto */}
