@@ -322,3 +322,114 @@ def match_categorias(
             "es_nueva": not usar,
         })
     return out
+
+
+# ── Categoría sugerida para productos nuevos ─────────────────────────────────
+_LOTE_CATEGORIA = 300   # productos por llamada; arriba de eso se trocea
+
+_SYSTEM_CATEGORIA = """\
+Clasificas productos de abarrotes, frutas, verduras y artículos de limpieza en \
+las CATEGORÍAS que ya usa un negocio mexicano. Para cada producto elige la \
+categoría más adecuada de la lista dada — solo de esa lista, nunca inventes \
+una. Si ninguna encaja razonablemente, deja la categoría vacía.
+Llama SIEMPRE a la herramienta `asignar_categorias`.\
+"""
+
+_TOOL_CATEGORIA = {
+    "name": "asignar_categorias",
+    "description": "Asigna a cada producto el nombre de la categoría que le corresponde.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "asignaciones": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "indice": {"type": "integer", "description": "El número del producto, tal cual se te dio."},
+                        "categoria": {"type": "string", "description": "Nombre de la lista dada, o vacío."},
+                    },
+                    "required": ["indice", "categoria"],
+                },
+            },
+        },
+        "required": ["asignaciones"],
+    },
+}
+
+
+def sugerir_categorias(
+    productos: list[dict], categorias: list[CategoriaProducto], *, usar_ia: bool = True
+) -> list[dict]:
+    """[{nombre, clave_sat}] → [{nombre, categoria_id, categoria_nombre, origen}].
+
+    Elige SIEMPRE entre las categorías que el negocio ya tiene (las de
+    /categorias): sugerir una nueva sería crear catálogo por la puerta de atrás.
+    """
+    vacio = [
+        {"nombre": p.get("nombre", ""), "categoria_id": None, "categoria_nombre": "", "origen": ""}
+        for p in productos
+    ]
+    if not productos or not categorias or not usar_ia or not settings.ANTHROPIC_API_KEY:
+        return vacio
+
+    por_nombre = {_norm(c.nombre): c for c in categorias}
+    # Se trocea: con un catálogo grande, mandarlo entero en una sola llamada
+    # truncaba en silencio y el usuario leía "600 de 900" como si a los 300
+    # restantes la IA no les hubiera encontrado categoría.
+    if len(productos) > _LOTE_CATEGORIA:
+        salida: list[dict] = []
+        for i in range(0, len(productos), _LOTE_CATEGORIA):
+            salida.extend(
+                sugerir_categorias(productos[i:i + _LOTE_CATEGORIA], categorias, usar_ia=usar_ia)
+            )
+        return salida
+    try:
+        import anthropic
+
+        lista = "\n".join(f"- {c.nombre}" for c in categorias)
+        # Numerados: la respuesta vuelve por ÍNDICE, no por nombre. Cotejar por
+        # nombre fallaba en silencio cuando el modelo repetía la línea entera
+        # ("CILANTRO [clave SAT 50405500]") en vez del nombre solo.
+        items = "\n".join(
+            f"{i}. {p.get('nombre','')}"
+            + (f" [clave SAT {p['clave_sat']}]" if p.get("clave_sat") else "")
+            for i, p in enumerate(productos, start=1)
+        )
+        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        with client.messages.stream(
+            model=settings.SAT_AI_MODEL,
+            max_tokens=16000,
+            system=[{"type": "text", "text": _SYSTEM_CATEGORIA,
+                     "cache_control": {"type": "ephemeral"}}],
+            tools=[_TOOL_CATEGORIA],
+            tool_choice={"type": "tool", "name": "asignar_categorias"},
+            messages=[{"role": "user", "content": f"Categorías del negocio:\n{lista}\n\nProductos:\n{items}"}],
+        ) as stream:
+            resp = stream.get_final_message()
+    except Exception as exc:  # noqa: BLE001 — degradación: sin sugerencia
+        logger.warning("sugerencia IA de categorías falló: %s", exc)
+        return vacio
+
+    elecciones: dict[int, str] = {}
+    for block in resp.content:
+        if getattr(block, "type", None) == "tool_use" and block.name == "asignar_categorias":
+            for a in (block.input.get("asignaciones") or []):
+                if not isinstance(a, dict):
+                    continue
+                try:
+                    elecciones[int(a.get("indice"))] = str(a.get("categoria", ""))
+                except (TypeError, ValueError):
+                    continue
+
+    out = []
+    for i, p in enumerate(productos, start=1):
+        nombre = p.get("nombre", "")
+        cat = por_nombre.get(_norm(elecciones.get(i, "")))
+        out.append({
+            "nombre": nombre,
+            "categoria_id": cat.id if cat else None,
+            "categoria_nombre": cat.nombre if cat else "",
+            "origen": "ia" if cat else "",
+        })
+    return out

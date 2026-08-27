@@ -48,6 +48,9 @@ class Candidato:
     presentaciones: dict
     presentacion_default: Optional[str]
     unidad_base: Optional[str]
+    # La categoría del producto existente: al vincular, la fila hereda la suya.
+    categoria_id: Optional[UUID] = None
+    esquema_impuesto_id: Optional[UUID] = None
 
 
 def _cand(p: Producto, score: int, origen: str) -> "Candidato":
@@ -56,6 +59,8 @@ def _cand(p: Producto, score: int, origen: str) -> "Candidato":
         presentaciones=p.presentaciones or {},
         presentacion_default=p.presentacion_default,
         unidad_base=p.unidad_base,
+        categoria_id=p.categoria_id,
+        esquema_impuesto_id=p.esquema_impuesto_id,
     )
 
 

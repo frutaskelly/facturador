@@ -71,7 +71,13 @@ function detailToMessage(detail: unknown, fallback: string): string {
  */
 export async function apiFetch<T = unknown>(
   path: string,
-  init: RequestInit = {}
+  init: RequestInit = {},
+  opts: {
+    /** Tope de espera en ms (default 60 s). Súbelo en operaciones que
+     *  legítimamente tardan más — leer un PDF con IA son ~90 s — o el
+     *  navegador aborta una petición que iba bien. */
+    timeoutMs?: number;
+  } = {},
 ): Promise<T> {
   // La sesión se lee ANTES de salir a la red; si esta lectura falla (o el
   // refresh del token no pudo completarse), la petición ni siquiera se emite
@@ -110,7 +116,7 @@ export async function apiFetch<T = unknown>(
   // cuelga. 60 s: el timbrado con el PAC puede tardar ~30 s. Si el caller pasa
   // su propio `signal`, se respeta tal cual (y su abort se propaga sin traducir).
   const ownTimeout = init.signal == null;
-  const signal = init.signal ?? AbortSignal.timeout(60_000);
+  const signal = init.signal ?? AbortSignal.timeout(opts.timeoutMs ?? 60_000);
 
   let res: Response;
   try {

@@ -315,6 +315,11 @@ export type Candidato = {
   presentaciones: Record<string, number>;
   presentacion_default?: string | null;
   unidad_base?: string | null;
+  // Lo que YA tiene el producto existente: al vincular, la fila lo hereda.
+  categoria_id?: string | null;
+  categoria_nombre?: string;
+  esquema_impuesto_id?: string | null;
+  esquema_codigo?: string;
 };
 export type MatchResult = { texto: string; candidatos: Candidato[] };
 
@@ -362,6 +367,12 @@ export type SugerenciaEsquema = {
   origen: string;
   motivo?: string;
 };
+export type SugerenciaCategoria = {
+  nombre: string;
+  categoria_id?: string | null;
+  categoria_nombre: string;
+  origen: string;   // "ia" | ""
+};
 // Una columna del archivo y a qué campo del sistema se está leyendo.
 export type ImportColumna = {
   indice: number;
@@ -385,6 +396,15 @@ export type ImportPreview = {
   filas_sin_esquema: number;
   tiene_precios: boolean;
 };
+// Qué producto quedó en cada fila: lo usa el último paso para guardar el
+// catálogo del cliente sin volver a subir el archivo.
+export type ImportProductoResultado = {
+  fila: number;
+  producto_id: string;
+  codigo: string;
+  nombre: string;
+  presentacion: string;
+};
 export type ImportResult = {
   creados: number;
   vinculados: number;
@@ -395,6 +415,7 @@ export type ImportResult = {
   presentaciones_agregadas: number;
   lista_id?: string | null;
   lista_nombre?: string | null;
+  productos: ImportProductoResultado[];
   errores: { fila: number; error: string }[];
 };
 export type SugerenciaSat = {
