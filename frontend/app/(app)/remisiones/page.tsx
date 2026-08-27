@@ -1659,7 +1659,7 @@ export default function RemisionesPage() {
           <Input type="date" value={fHasta} onChange={(e) => setFHasta(e.target.value)} />
         </Field>
         <Field label="Cliente">
-          <Select value={fCliente} onChange={(e) => setFCliente(e.target.value)} aria-label="Filtrar por cliente">
+          <Select className="min-w-64" value={fCliente} onChange={(e) => setFCliente(e.target.value)} aria-label="Filtrar por cliente">
             <option value="">Todos</option>
             {clientes.map((c) => (
               <option key={c.id} value={c.id}>{c.legal_name}</option>
