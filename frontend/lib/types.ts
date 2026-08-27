@@ -340,9 +340,20 @@ export type ImportFilaPreview = {
   precio_distinto?: boolean;       // la repetición trae OTRO precio (conflicto)
   mismo_producto_que?: number | null; // otra fila ya se vinculó al mismo producto
 };
+// Una columna del archivo y a qué campo del sistema se está leyendo.
+export type ImportColumna = {
+  indice: number;
+  encabezado: string;
+  campo: string;              // "" = no se importa
+  muestras: string[];
+};
 export type ImportPreview = {
   formato: "plantilla" | "ia";
   filas: ImportFilaPreview[];
+  columnas: ImportColumna[];
+  campos_mapeables: { valor: string; etiqueta: string }[];
+  requiere_mapeo: boolean;      // no se reconoció la columna de descripción
+  filas_sin_nombre: number;     // renglones con datos descartados por no traer nombre
   // Meta para las preguntas en lote:
   faltan_clave_sat: number;
   faltan_unidad_sat: number;

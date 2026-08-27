@@ -7,6 +7,7 @@ are persisted (RLS does not constrain Postgres FK checks).
 """
 from __future__ import annotations
 
+import json
 from typing import Optional
 from uuid import UUID
 
@@ -32,6 +33,7 @@ from ...models import (
 from ...schemas.producto import (
     AliasIn,
     CandidatoOut,
+    ImportColumnaOut,
     ImportErrorFila,
     ImportFilaPreview,
     ImportIn,
@@ -50,7 +52,9 @@ from ...schemas.producto import (
 from ...schemas.common import Page
 from ...services.categoria_codigo import generate_unique_codigo
 from ...services.importar_productos import (
+    CAMPOS_MAPEABLES,
     ImportProductosError,
+    analizar_columnas,
     extraer_con_ia,
     generar_plantilla,
     normalizar_unidad,
@@ -349,6 +353,7 @@ def importar_preview(
     cliente_id: Optional[UUID] = Form(default=None),
     cliente_ids: list[UUID] = Form(default=[]),
     usar_ia: bool = Form(default=True),
+    mapeo: Optional[str] = Form(default=None),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
@@ -367,8 +372,51 @@ def importar_preview(
     filename = archivo.filename or "archivo"
     ext = (filename.rsplit(".", 1)[-1] if "." in filename else "").lower()
 
+    # Mapeo columna→campo corregido por el usuario en la pantalla de columnas.
+    mapeo_cols: Optional[dict[int, str]] = None
+    if mapeo:
+        try:
+            crudo = json.loads(mapeo)
+            mapeo_cols = {
+                int(k): str(v) for k, v in dict(crudo).items()
+                if isinstance(v, str) and v.strip()
+            }
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="Mapeo de columnas inválido")
+
+    columnas_info: dict = {"columnas": [], "campos": []}
+    requiere_mapeo = False
     try:
-        filas = parsear_plantilla(data, filename) if ext in _TABULARES else None
+        if ext in _TABULARES:
+            # Las columnas del archivo SIEMPRE se exponen: es lo que el usuario
+            # revisa antes de importar nada. Si no se reconoció ninguna columna
+            # como la descripción del producto, se devuelven igual (sin filas)
+            # para que él indique cuál es — sin ese camino, justo los archivos
+            # con encabezados ajenos se quedaban sin pantalla de mapeo.
+            columnas_info = analizar_columnas(data, filename) or columnas_info
+            try:
+                filas = parsear_plantilla(data, filename, mapeo_cols)
+            except ImportProductosError:
+                # Con mapeo del usuario pero sin columna de nombre: se regresa a
+                # la pantalla de mapeo con el aviso, en vez de un callejón 422.
+                if mapeo_cols is None:
+                    raise
+                filas = None
+            if mapeo_cols is not None:
+                # Lo que el usuario corrigió manda sobre lo detectado, pero solo
+                # lo que el parseo realmente aceptó (campo válido, sin repetir).
+                validos = {v for v, _ in CAMPOS_MAPEABLES}
+                aceptado: dict[int, str] = {}
+                for i, campo in sorted(mapeo_cols.items()):
+                    if campo in validos and campo not in aceptado.values():
+                        aceptado[i] = campo
+                for c in columnas_info["columnas"]:
+                    c["campo"] = aceptado.get(c["indice"], "")
+            if filas is None:
+                requiere_mapeo = True
+                filas = []
+        else:
+            filas = None
         formato = "plantilla" if filas is not None else "ia"
         if filas is None:
             if not usar_ia:
@@ -381,6 +429,9 @@ def importar_preview(
             filas = extraer_con_ia(data, filename)
     except ImportProductosError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+    # Renglones con datos que se descartaron por no traer nombre.
+    filas_sin_nombre = int(filas[0].pop("_saltadas", 0)) if filas else 0
 
     # Cruce contra el catálogo, una sola carga para todas las filas.
     catalogo = productos_activos(db)
@@ -553,6 +604,10 @@ def importar_preview(
     return ImportPreviewOut(
         formato=formato,
         filas=out,
+        columnas=[ImportColumnaOut(**c) for c in columnas_info["columnas"]],
+        campos_mapeables=columnas_info["campos"],
+        requiere_mapeo=requiere_mapeo,
+        filas_sin_nombre=filas_sin_nombre,
         faltan_clave_sat=sum(1 for f in activas if not f.clave_sat),
         faltan_unidad_sat=sum(1 for f in activas if not f.unidad_sat),
         categorias_nuevas=cats_nuevas,

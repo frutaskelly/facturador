@@ -158,9 +158,26 @@ class ImportFilaPreview(BaseModel):
     mismo_producto_que: Optional[int] = None
 
 
+class ImportColumnaOut(BaseModel):
+    """Una columna del archivo y a qué campo del sistema se está leyendo."""
+    indice: int
+    encabezado: str
+    campo: str = ""               # "" = no se importa
+    muestras: list[str] = Field(default_factory=list)
+
+
 class ImportPreviewOut(BaseModel):
     formato: str                  # "plantilla" (determinista) | "ia"
     filas: list[ImportFilaPreview]
+    # Mapeo columna→campo (solo archivos tabulares): el usuario lo revisa y
+    # corrige antes de aprobar. Vacío en la rama IA (no hay columnas fijas).
+    columnas: list[ImportColumnaOut] = Field(default_factory=list)
+    campos_mapeables: list[dict] = Field(default_factory=list)
+    # No se reconoció qué columna trae la descripción: el usuario debe mapear.
+    requiere_mapeo: bool = False
+    # Renglones con datos descartados por no traer nombre (se avisan, no se
+    # esconden: el preview traería menos productos que el archivo).
+    filas_sin_nombre: int = 0
     # Para las preguntas en LOTE del wizard (una respuesta para todo el archivo):
     faltan_clave_sat: int = 0         # filas sin clave SAT → P1 sugerida/genérica
     faltan_unidad_sat: int = 0        # filas sin unidad SAT → P2 sugerida/genérica
