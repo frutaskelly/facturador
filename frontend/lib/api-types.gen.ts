@@ -1899,6 +1899,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/sugerir-esquema-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sugerir Esquema Batch
+         * @description Qué esquema de impuesto le toca a cada producto, entre los que YA tiene
+         *     el negocio. Sin esquema el CFDI saldría sin IVA/IEPS, así que la
+         *     importación no debe dejar productos en blanco.
+         *
+         *     Primero reglas fiscales mexicanas por clave SAT/nombre (alimentos IVA 0%,
+         *     limpieza y plásticos 16%, refrescos y botanas con IEPS) y, para lo que no
+         *     resuelvan, una sola llamada de IA que ELIGE entre los esquemas del tenant.
+         */
+        post: operations["sugerir_esquema_batch_api_v1_productos_sugerir_esquema_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/sugerir-sat-batch": {
         parameters: {
             query?: never;
@@ -2588,6 +2614,8 @@ export interface components {
              * @default []
              */
             cliente_ids: string[];
+            /** Mapeo */
+            mapeo?: string | null;
             /**
              * Usar Ia
              * @default true
@@ -3975,6 +4003,48 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * ImportCategoriaMatch
+         * @description Una categoría del archivo y a cuál existente corresponde (o si es nueva).
+         */
+        ImportCategoriaMatch: {
+            /** Categoria Id */
+            categoria_id?: string | null;
+            /**
+             * Categoria Nombre
+             * @default
+             */
+            categoria_nombre: string;
+            /**
+             * Es Nueva
+             * @default true
+             */
+            es_nueva: boolean;
+            /** Nombre Archivo */
+            nombre_archivo: string;
+            /**
+             * Score
+             * @default 0
+             */
+            score: number;
+        };
+        /**
+         * ImportColumnaOut
+         * @description Una columna del archivo y a qué campo del sistema se está leyendo.
+         */
+        ImportColumnaOut: {
+            /**
+             * Campo
+             * @default
+             */
+            campo: string;
+            /** Encabezado */
+            encabezado: string;
+            /** Indice */
+            indice: number;
+            /** Muestras */
+            muestras?: string[];
+        };
         /** ImportErrorFila */
         ImportErrorFila: {
             /** Error */
@@ -4038,6 +4108,8 @@ export interface components {
              * @default
              */
             categoria: string;
+            /** Categoria Id */
+            categoria_id?: string | null;
             /**
              * Clave Sat
              * @default
@@ -4067,6 +4139,13 @@ export interface components {
              * @default
              */
             esquema: string;
+            /** Esquema Id */
+            esquema_id?: string | null;
+            /**
+             * Esquema Origen
+             * @default
+             */
+            esquema_origen: string;
             /** Fila */
             fila: number;
             /** Mismo Producto Que */
@@ -4135,8 +4214,14 @@ export interface components {
         };
         /** ImportPreviewOut */
         ImportPreviewOut: {
+            /** Campos Mapeables */
+            campos_mapeables?: Record<string, never>[];
+            /** Categorias Match */
+            categorias_match?: components["schemas"]["ImportCategoriaMatch"][];
             /** Categorias Nuevas */
             categorias_nuevas?: string[];
+            /** Columnas */
+            columnas?: components["schemas"]["ImportColumnaOut"][];
             /** Esquemas No Encontrados */
             esquemas_no_encontrados?: string[];
             /**
@@ -4156,8 +4241,18 @@ export interface components {
              * @default 0
              */
             filas_sin_esquema: number;
+            /**
+             * Filas Sin Nombre
+             * @default 0
+             */
+            filas_sin_nombre: number;
             /** Formato */
             formato: string;
+            /**
+             * Requiere Mapeo
+             * @default false
+             */
+            requiere_mapeo: boolean;
             /**
              * Tiene Precios
              * @default false
@@ -6418,6 +6513,28 @@ export interface components {
             /** Telefono */
             telefono?: string | null;
         };
+        /** SugerenciaEsquemaOut */
+        SugerenciaEsquemaOut: {
+            /**
+             * Esquema Codigo
+             * @default
+             */
+            esquema_codigo: string;
+            /** Esquema Id */
+            esquema_id?: string | null;
+            /**
+             * Motivo
+             * @default
+             */
+            motivo: string;
+            /** Nombre */
+            nombre: string;
+            /**
+             * Origen
+             * @default
+             */
+            origen: string;
+        };
         /** SugerenciaSatOut */
         SugerenciaSatOut: {
             /** Clave Sat */
@@ -6430,6 +6547,16 @@ export interface components {
             unidad_sat: string;
             /** Unidad Sat Generica */
             unidad_sat_generica: string;
+        };
+        /** SugerirEsquemaBatchIn */
+        SugerirEsquemaBatchIn: {
+            /** Productos */
+            productos: Record<string, never>[];
+            /**
+             * Usar Ia
+             * @default true
+             */
+            usar_ia: boolean;
         };
         /** SugerirSatBatchIn */
         SugerirSatBatchIn: {
@@ -10955,6 +11082,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sugerir_esquema_batch_api_v1_productos_sugerir_esquema_batch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SugerirEsquemaBatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SugerenciaEsquemaOut"][];
                 };
             };
             /** @description Validation Error */
