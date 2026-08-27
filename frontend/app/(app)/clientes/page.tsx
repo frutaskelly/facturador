@@ -6,6 +6,7 @@ import { CrudPage, type CrudConfig } from "@/components/crud/CrudPage";
 import { Badge } from "@/components/ui/Badge";
 import { apiFetch } from "@/lib/api";
 import { fmtMoney } from "@/lib/format";
+import { motivoCpInvalido, motivoRfcInvalido } from "@/lib/rfc";
 import { FORMA_PAGO_OPTS, METODO_PAGO_OPTS, REGIMENES_FISCALES, USO_CFDI_OPTS } from "@/lib/sat";
 import type { Cliente } from "@/lib/types";
 
@@ -39,6 +40,10 @@ const config: CrudConfig<Cliente> = {
       label: "RFC",
       required: true,
       colSpan: 2,
+      // El SAT rechaza el timbrado con un RFC de receptor mal capturado: se
+      // valida aquí (formato + dígito verificador) para no descubrirlo hasta
+      // que la factura ya no se pueda emitir.
+      validate: (v) => motivoRfcInvalido(v, { permitirGenericos: true }),
       action: {
         label: "Verificar RFC",
         // Con Razón social + CP + Régimen ya capturados, valida el combo
@@ -99,7 +104,7 @@ const config: CrudConfig<Cliente> = {
         },
       },
     },
-    { name: "cp", label: "Código postal", required: true },
+    { name: "cp", label: "Código postal", required: true, validate: motivoCpInvalido },
     {
       name: "regimen_fiscal",
       label: "Régimen fiscal SAT",

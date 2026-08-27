@@ -11,6 +11,7 @@ they are read-only here, never accepted from the client payload.
 from __future__ import annotations
 
 from typing import Optional
+import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -101,6 +102,44 @@ def validar_rfc(
         raise HTTPException(status_code=502, detail=f"No se pudo validar el RFC: {exc}")
 
 
+# RFC genéricos del SAT: SÍ son válidos como RECEPTOR (a diferencia del emisor).
+_RFC_GENERICOS = {"XAXX010101000", "XEXX010101000"}
+_CP_CLIENTE_RE = re.compile(r"^\d{5}$")
+
+
+def _validar_datos_fiscales(data: dict) -> None:
+    """RFC y CP del receptor: el SAT rechaza el timbrado si están mal, así que
+    se atrapan AQUÍ y no cuando ya hay una factura que no se puede emitir."""
+    if "rfc" in data and data["rfc"] is not None:
+        rfc = str(data["rfc"]).strip().upper()
+        data["rfc"] = rfc
+        if not rfc:
+            raise HTTPException(status_code=422, detail="El RFC del cliente es obligatorio")
+        if rfc not in _RFC_GENERICOS:
+            v = validar_rfc_local(rfc)
+            if not v["formato_ok"]:
+                raise HTTPException(
+                    status_code=422,
+                    detail="El RFC no tiene un formato válido del SAT (3-4 letras + AAMMDD + homoclave).",
+                )
+            if not v["digito_ok"]:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"El RFC {rfc} no pasa el dígito verificador del SAT: hay un error de "
+                        "captura (dígitos transpuestos o el último carácter). Verifícalo con "
+                        "la constancia de situación fiscal del cliente."
+                    ),
+                )
+    dom = data.get("domicilio_fiscal")
+    if isinstance(dom, dict) and dom.get("cp") is not None:
+        cp = str(dom.get("cp") or "").strip()
+        if cp and not _CP_CLIENTE_RE.match(cp):
+            raise HTTPException(
+                status_code=422, detail="El código postal debe tener exactamente 5 dígitos."
+            )
+
+
 @router.post("", response_model=ClienteOut, status_code=status.HTTP_201_CREATED)
 def create_cliente(
     payload: ClienteCreate,
@@ -109,6 +148,7 @@ def create_cliente(
 ):
     ensure_fk(db, ListaPrecios, payload.lista_precios_id, "lista_precios_id")
     data = payload.model_dump()
+    _validar_datos_fiscales(data)
     # El código se genera SIEMPRE en el servidor; se ignora cualquier valor enviado.
     data.pop("codigo", None)
     codigo = generate_cliente_codigo(db, ctx.tenant_id)
@@ -137,6 +177,7 @@ def update_cliente(
 ):
     obj = get_or_404(db, Cliente, cliente_id)
     data = payload.model_dump(exclude_unset=True)
+    _validar_datos_fiscales(data)
     # El código no se regenera ni se acepta en update: queda fijo desde la creación.
     data.pop("codigo", None)
     if "lista_precios_id" in data:

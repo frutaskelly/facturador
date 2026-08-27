@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -45,6 +45,13 @@ export type CrudField = {
     run: (value: string, form: FormValues) => Promise<{ ok: boolean; message: string }>;
     watch?: string[];
   };
+  /**
+   * Validación LOCAL del campo (sin red): devuelve el motivo del error o null
+   * si está bien. Se muestra en rojo bajo el campo mientras se escribe y
+   * BLOQUEA el guardado — así un dato fiscal mal capturado (p. ej. un RFC que
+   * no pasa el dígito verificador) nunca llega a la base ni al timbrado.
+   */
+  validate?: (value: string, form: FormValues) => string | null;
 };
 
 /** A select whose options come from another list endpoint. */
@@ -175,6 +182,14 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
       if (f.required && !isReadonly && typeof v === "string" && !v.trim()) {
         toast.error(`${f.label} es obligatorio`);
         return;
+      }
+      // Validación local del campo: bloquea el guardado con el motivo exacto.
+      if (f.validate && !isReadonly) {
+        const motivo = f.validate(String(v ?? ""), form);
+        if (motivo) {
+          toast.error(`${f.label}: ${motivo}`);
+          return;
+        }
       }
     }
     try {
@@ -308,6 +323,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                 );
               }
               const isReadonly = f.readonly || f.readOnly;
+              const errorCampo = f.validate ? f.validate(String(val ?? ""), form) : null;
               return (
                 <div key={f.name} className={cls}>
                   <Field label={f.label} required={f.required} hint={f.hint}>
@@ -346,6 +362,9 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                       </div>
                     )}
                   </Field>
+                  {errorCampo && (
+                    <span className="mt-1 block text-xs text-danger">{errorCampo}</span>
+                  )}
                 </div>
               );
             })}
@@ -391,10 +410,15 @@ function FieldActionButton({
   // resultado obsoleto (p. ej. el RFC quedó igual pero el CP cambió).
   const fingerprint = [value, ...(action.watch ?? []).map((k) => String(form[k] ?? ""))].join(" ");
   const [verifiedFingerprint, setVerifiedFingerprint] = useState<string | null>(null);
+  // Huella con la que la verificación FALLÓ: pinta el botón en rojo hasta que
+  // el usuario corrija el dato (antes solo salía un aviso y el botón quedaba
+  // igual, así que el rechazo pasaba desapercibido).
+  const [failedFingerprint, setFailedFingerprint] = useState<string | null>(null);
 
   useEffect(() => {
     if (verifiedFingerprint !== null && fingerprint !== verifiedFingerprint) setVerifiedFingerprint(null);
-  }, [fingerprint, verifiedFingerprint]);
+    if (failedFingerprint !== null && fingerprint !== failedFingerprint) setFailedFingerprint(null);
+  }, [fingerprint, verifiedFingerprint, failedFingerprint]);
 
   async function run() {
     setBusy(true);
@@ -403,19 +427,23 @@ function FieldActionButton({
       if (ok) {
         toast.success(message);
         setVerifiedFingerprint(fingerprint);
+        setFailedFingerprint(null);
       } else {
         toast.error(message);
         setVerifiedFingerprint(null);
+        setFailedFingerprint(fingerprint);
       }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "La acción falló");
       setVerifiedFingerprint(null);
+      setFailedFingerprint(fingerprint);
     } finally {
       setBusy(false);
     }
   }
 
   const verified = verifiedFingerprint !== null && verifiedFingerprint === fingerprint;
+  const failed = failedFingerprint !== null && failedFingerprint === fingerprint;
 
   return (
     <Button
@@ -424,12 +452,20 @@ function FieldActionButton({
       onClick={run}
       disabled={busy || !value.trim()}
       className={`shrink-0 whitespace-nowrap ${
-        verified ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600 hover:opacity-90" : ""
+        verified
+          ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600 hover:opacity-90"
+          : failed
+          ? "border-red-600 bg-red-600 text-white hover:bg-red-600 hover:opacity-90"
+          : ""
       }`}
     >
       {busy ? "…" : verified ? (
         <>
           <Check size={16} /> Verificado
+        </>
+      ) : failed ? (
+        <>
+          <X size={16} /> No válido
         </>
       ) : (
         action.label
