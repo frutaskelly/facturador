@@ -316,6 +316,8 @@ def crear_externo(
         payload.clave,
         payload.cliente_id,
         sucursal_id=payload.sucursal_id,
+        serie_factura_id=payload.serie_factura_id,
+        serie_remision_id=payload.serie_remision_id,
         origen=payload.origen,
         confianza=payload.confianza,
         user_id=ctx.user_id,

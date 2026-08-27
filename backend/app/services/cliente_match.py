@@ -301,6 +301,32 @@ def resolver_destino(
     return resolver_sucursal_por_texto(db, cliente_id, texto)
 
 
+def serie_del_grupo(db: Session, tenant_id: UUID, jid: str, cliente_id: UUID, campo: str):
+    """La serie que usa ESE grupo para ESE cliente, si se configuró.
+
+    Un cliente usa varias según la operación por la que entra el pedido —en SAE,
+    EHMO factura hospitales con ZEHMOHOS y costales con ZEHMOFAC, y el grupo
+    interno de Pachuca declara tres a la vez—. Vacío = la del cliente.
+    `campo` es "serie_factura_id" o "serie_remision_id".
+    """
+    if not jid:
+        return None
+    hit = _buscar(db, tenant_id, "WHATSAPP", jid, cliente_id)
+    if hit is None:
+        return None
+    sid = getattr(hit, campo, None)
+    if sid is None:
+        return None
+    from ..models import Serie
+
+    viva = (
+        db.query(Serie.id)
+        .filter(Serie.id == sid, Serie.tenant_id == tenant_id, Serie.activa.is_(True))
+        .first()
+    )
+    return viva[0] if viva else None
+
+
 def sucursal_del_grupo(db: Session, tenant_id: UUID, jid: str, cliente_id: UUID):
     """La sucursal POR DEFECTO de ese grupo para ese cliente, si se configuró.
 
@@ -350,6 +376,8 @@ def aprender(
     cliente_id: UUID,
     *,
     sucursal_id=_SIN_TOCAR,
+    serie_factura_id=_SIN_TOCAR,
+    serie_remision_id=_SIN_TOCAR,
     origen: str = "MANUAL",
     confianza: str = "CONFIRMADA",
     user_id=None,
@@ -390,6 +418,10 @@ def aprender(
         existing.cliente_id = cliente_id
         if sucursal_id is not _SIN_TOCAR:
             existing.sucursal_id = sucursal_id
+        if serie_factura_id is not _SIN_TOCAR:
+            existing.serie_factura_id = serie_factura_id
+        if serie_remision_id is not _SIN_TOCAR:
+            existing.serie_remision_id = serie_remision_id
         existing.origen = origen
         existing.confianza = confianza
         db.flush()
@@ -402,6 +434,8 @@ def aprender(
         clave_normalizada=norm,
         cliente_id=cliente_id,
         sucursal_id=None if sucursal_id is _SIN_TOCAR else sucursal_id,
+        serie_factura_id=None if serie_factura_id is _SIN_TOCAR else serie_factura_id,
+        serie_remision_id=None if serie_remision_id is _SIN_TOCAR else serie_remision_id,
         origen=origen,
         confianza=confianza,
         created_by=user_id,
@@ -419,6 +453,10 @@ def aprender(
             existing.cliente_id = cliente_id
             if sucursal_id is not _SIN_TOCAR:
                 existing.sucursal_id = sucursal_id
+            if serie_factura_id is not _SIN_TOCAR:
+                existing.serie_factura_id = serie_factura_id
+            if serie_remision_id is not _SIN_TOCAR:
+                existing.serie_remision_id = serie_remision_id
             existing.origen = origen
             existing.confianza = confianza
             db.flush()

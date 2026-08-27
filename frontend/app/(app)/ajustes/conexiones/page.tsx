@@ -7,6 +7,7 @@
 // sola pregunta —¿está entrando lo que debe?—, que es lo único que alguien
 // viene a mirar aquí una vez que funciona.
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -37,6 +38,7 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type {
   ActividadConexion,
+  ClienteDelGrupo,
   Almacen,
   ClaveNueva,
   Cliente,
@@ -70,6 +72,7 @@ function haceCuanto(iso?: string | null): string {
 
 export default function Page() {
   const { me } = useAuth();
+  const router = useRouter();
   const toast = useToast();
   const canWrite = can(me, WRITE);
 
@@ -166,15 +169,26 @@ export default function Page() {
     }
   }
 
-  /** Sucursal por defecto de un grupo para un cliente. Se guarda en la propia
-   *  equivalencia del grupo, que es donde vive "de este grupo, a este destino". */
-  async function cambiarSucursalDelGrupo(jid: string, clienteId: string, sucursalId: string) {
+  /** Lo que es "de este grupo para este cliente" —sucursal y series— vive en la
+   *  propia equivalencia del grupo. Los campos que no se mandan no se tocan. */
+  async function cambiarDelGrupo(
+    g: GrupoWhatsapp,
+    c: ClienteDelGrupo,
+    campo: "sucursal_id" | "serie_factura_id" | "serie_remision_id",
+    valor: string
+  ) {
     try {
       await apiFetch("/api/v1/clientes/externos", {
         method: "POST",
         body: JSON.stringify({
-          sistema: "WHATSAPP", clave: jid, cliente_id: clienteId,
-          sucursal_id: sucursalId || null,
+          sistema: "WHATSAPP",
+          clave: g.jid,
+          cliente_id: c.cliente_id,
+          // Se reenvía lo que ya había: el endpoint reapunta la fila entera.
+          sucursal_id: c.sucursal_grupo_id ?? null,
+          serie_factura_id: c.serie_factura_grupo_id ?? null,
+          serie_remision_id: c.serie_remision_grupo_id ?? null,
+          [campo]: valor || null,
         }),
       });
       reload();
@@ -663,13 +677,17 @@ export default function Page() {
                                       </td>
                                       <td className="px-3 py-2">
                                         <Select
-                                          value={c.serie_factura_id ?? ""}
+                                          value={c.serie_factura_grupo_id ?? ""}
                                           disabled={!canWrite}
                                           onChange={(e) =>
-                                            cambiarCliente(c.cliente_id, "serie_factura_id", e.target.value)
+                                            cambiarDelGrupo(g, c, "serie_factura_id", e.target.value)
                                           }
                                         >
-                                          <option value="">predeterminada</option>
+                                          <option value="">
+                                            {c.serie_factura
+                                              ? `hereda ${c.serie_factura}`
+                                              : "hereda del cliente"}
+                                          </option>
                                           {seriesFac.map((s) => (
                                             <option key={s.id} value={s.id}>{s.codigo}</option>
                                           ))}
@@ -677,13 +695,17 @@ export default function Page() {
                                       </td>
                                       <td className="px-3 py-2">
                                         <Select
-                                          value={c.serie_remision_id ?? ""}
+                                          value={c.serie_remision_grupo_id ?? ""}
                                           disabled={!canWrite}
                                           onChange={(e) =>
-                                            cambiarCliente(c.cliente_id, "serie_remision_id", e.target.value)
+                                            cambiarDelGrupo(g, c, "serie_remision_id", e.target.value)
                                           }
                                         >
-                                          <option value="">predeterminada</option>
+                                          <option value="">
+                                            {c.serie_remision
+                                              ? `hereda ${c.serie_remision}`
+                                              : "hereda del cliente"}
+                                          </option>
                                           {seriesRem.map((s) => (
                                             <option key={s.id} value={s.id}>{s.codigo}</option>
                                           ))}
@@ -706,30 +728,27 @@ export default function Page() {
                                         </Select>
                                       </td>
                                       <td className="px-3 py-2">
-                                        {c.sucursales.length ? (
-                                          <Select
-                                            value={c.sucursal_grupo_id ?? ""}
-                                            disabled={!canWrite}
-                                            onChange={(e) =>
-                                              cambiarSucursalDelGrupo(g.jid, c.cliente_id, e.target.value)
+                                        <Select
+                                          value={c.sucursal_grupo_id ?? ""}
+                                          disabled={!canWrite}
+                                          onChange={(e) => {
+                                            if (e.target.value === "__crear__") {
+                                              router.push(`/sucursales?cliente=${c.cliente_id}`);
+                                              return;
                                             }
-                                          >
-                                            <option value="">— la que diga la orden —</option>
-                                            {c.sucursales.map((s) => (
-                                              <option key={s.id} value={s.id}>{s.nombre}</option>
-                                            ))}
-                                          </Select>
-                                        ) : (
-                                          <span className="text-favorite">
-                                            sin sucursales
-                                            <Link
-                                              href={`/sucursales?cliente=${c.cliente_id}`}
-                                              className="ml-2 text-xs text-accent hover:underline"
-                                            >
-                                              crear
-                                            </Link>
-                                          </span>
-                                        )}
+                                            cambiarDelGrupo(g, c, "sucursal_id", e.target.value);
+                                          }}
+                                        >
+                                          <option value="">
+                                            {c.sucursales.length
+                                              ? "— la que diga la orden —"
+                                              : "— sin sucursales —"}
+                                          </option>
+                                          {c.sucursales.map((s) => (
+                                            <option key={s.id} value={s.id}>{s.nombre}</option>
+                                          ))}
+                                          <option value="__crear__">+ Crear sucursal…</option>
+                                        </Select>
                                       </td>
                                       <td className="px-2 py-2 text-right">
                                         {canWrite && c.externo_id ? (
@@ -783,11 +802,12 @@ export default function Page() {
                             ) : null}
 
                             <p className="mt-3 text-xs text-muted">
-                              La <strong>sucursal por defecto</strong> es de este grupo: solo se usa
-                              cuando la orden no dice a dónde va, o nombra un punto de entrega que
-                              nadie ha registrado. La <strong>serie</strong> y el{" "}
-                              <strong>almacén</strong> son del CLIENTE: cambiarlos aquí los cambia en
-                              todos sus documentos, no solo en los de este grupo.
+                              La <strong>sucursal por defecto</strong> y las <strong>series</strong>{" "}
+                              son de ESTE grupo: un cliente usa series distintas según la operación
+                              por la que entra el pedido, y en blanco hereda la suya. La sucursal
+                              solo se usa cuando la orden no dice a dónde va, o nombra un punto de
+                              entrega que nadie ha registrado. El <strong>almacén</strong> sí es del
+                              CLIENTE: cambiarlo aquí lo cambia en todos sus documentos.
                             </p>
                           </td>
                         </tr>

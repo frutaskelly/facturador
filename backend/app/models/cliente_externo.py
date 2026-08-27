@@ -44,7 +44,14 @@ class ClienteExterno(Base):
     cliente_id = Column(
         UUID(as_uuid=True), ForeignKey("clientes.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # En una fila UBICACION: a qué sucursal pertenece ese punto de entrega.
+    # En una WHATSAPP: la sucursal POR DEFECTO de ese grupo para ese cliente.
     sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id", ondelete="SET NULL"))
+    # Solo en filas WHATSAPP: la serie que usa ESE grupo para ESE cliente. Vacío
+    # = hereda la del cliente. Existe porque un cliente usa varias según la
+    # operación por la que entre el pedido (EHMO: ZEHMOHOS y ZEHMOFAC).
+    serie_factura_id = Column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"))
+    serie_remision_id = Column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"))
     origen = Column(String(12), nullable=False, server_default="MANUAL")        # MANUAL | BOT | IMPORT | IA
     confianza = Column(String(10), nullable=False, server_default="CONFIRMADA")  # CONFIRMADA | SUGERIDA
     notas = Column(Text)

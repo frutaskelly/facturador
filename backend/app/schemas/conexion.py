@@ -91,6 +91,10 @@ class ClienteDelGrupoOut(BaseModel):
     # La sucursal POR DEFECTO de este grupo para este cliente (última red del
     # destino cuando el punto de entrega no resuelve nada).
     sucursal_grupo_id: Optional[uuid.UUID] = None
+    # Serie de ESTE grupo para ESTE cliente. Vacío = hereda la del cliente, que
+    # es lo que muestran `serie_factura` / `serie_remision`.
+    serie_factura_grupo_id: Optional[uuid.UUID] = None
+    serie_remision_grupo_id: Optional[uuid.UUID] = None
     almacen: Optional[str] = None
     serie_factura_id: Optional[uuid.UUID] = None
     serie_remision_id: Optional[uuid.UUID] = None

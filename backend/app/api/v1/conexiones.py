@@ -348,6 +348,8 @@ def listar_grupos(
             filas.append(ClienteDelGrupoOut(
                 externo_id=ext.id if ext else None,
                 sucursal_grupo_id=ext.sucursal_id if ext else None,
+                serie_factura_grupo_id=ext.serie_factura_id if ext else None,
+                serie_remision_grupo_id=ext.serie_remision_id if ext else None,
                 cliente_id=c.id,
                 nombre=c.legal_name,
                 serie_factura=series.get(c.serie_factura_id),

@@ -1299,6 +1299,18 @@
       ],
       "title": "Serie Factura"
      },
+     "serie_factura_grupo_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Factura Grupo Id"
+     },
      "serie_factura_id": {
       "anyOf": [
        {
@@ -1321,6 +1333,18 @@
        }
       ],
       "title": "Serie Remision"
+     },
+     "serie_remision_grupo_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Remision Grupo Id"
      },
      "serie_remision_id": {
       "anyOf": [
@@ -1405,6 +1429,30 @@
       "title": "Origen",
       "type": "string"
      },
+     "serie_factura_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Factura Id"
+     },
+     "serie_remision_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Remision Id"
+     },
      "sistema": {
       "enum": [
        "RFC",
@@ -1481,6 +1529,30 @@
      "origen": {
       "title": "Origen",
       "type": "string"
+     },
+     "serie_factura_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Factura Id"
+     },
+     "serie_remision_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Remision Id"
      },
      "sistema": {
       "title": "Sistema",

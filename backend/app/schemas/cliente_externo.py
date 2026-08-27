@@ -17,6 +17,10 @@ class ClienteExternoCreate(BaseModel):
     clave: str = Field(min_length=1, max_length=254)
     cliente_id: uuid.UUID
     sucursal_id: Optional[uuid.UUID] = None
+    # Solo tienen sentido en una equivalencia de grupo (WHATSAPP): la serie que
+    # usa ESE grupo para ESE cliente. Vacío = hereda la del cliente.
+    serie_factura_id: Optional[uuid.UUID] = None
+    serie_remision_id: Optional[uuid.UUID] = None
     origen: Origen = "MANUAL"
     confianza: Confianza = "CONFIRMADA"
     notas: Optional[str] = None
@@ -29,6 +33,8 @@ class ClienteExternoOut(ORMModel):
     clave_normalizada: str
     cliente_id: uuid.UUID
     sucursal_id: Optional[uuid.UUID] = None
+    serie_factura_id: Optional[uuid.UUID] = None
+    serie_remision_id: Optional[uuid.UUID] = None
     origen: str
     confianza: str
     notas: Optional[str] = None

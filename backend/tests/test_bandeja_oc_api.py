@@ -558,3 +558,49 @@ def test_asignar_no_borra_la_sucursal_por_defecto_del_grupo(client, env, auth_as
                                     params={"sistema": "WHATSAPP"}).json()
               if e["clave"] == jid)
     assert wa["sucursal_id"] == env["suc"]     # sigue ahí
+
+
+def test_la_serie_del_grupo_gana_sobre_la_del_cliente(client, env, auth_as):
+    """Un cliente usa varias series según la operación por la que entra el
+    pedido: en SAE, EHMO factura hospitales con una y costales con otra, y el
+    grupo interno de Pachuca declara tres a la vez."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    jid = "grupo-con-serie@g.us"
+
+    propia = client.post("/api/v1/series", headers=h, json={
+        "codigo": "GRUPO1", "tipo_documento": "REMISION", "tipo": "NO_FISCAL"}).json()
+
+    def _remision(**over):
+        oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(jid=jid, **over)).json()
+        client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                     json={"cliente_id": env["ehmo"], "aprender": False})
+        hecho = client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision", headers=h, json={
+            "lineas": [{"producto_id": env["prod"], "cantidad": "1", "precio_unitario": "10"}]}).json()
+        return client.get(f"/api/v1/remisiones/{hecho['remision_id']}", headers=h).json()
+
+    # Sin serie del grupo: la resuelve como siempre (default del inquilino).
+    base = _remision()
+    assert not base["folio_interno"].startswith("GRUPO1")
+
+    # Con serie del grupo, esa manda.
+    _externo(client, h, "WHATSAPP", jid, env["ehmo"], serie_remision_id=propia["id"])
+    assert _remision()["folio_interno"].startswith("GRUPO1")
+
+
+def test_la_serie_del_grupo_sobrevive_a_aprender(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    jid = "grupo-serie-conserva@g.us"
+    propia = client.post("/api/v1/series", headers=h, json={
+        "codigo": "GRUPO2", "tipo_documento": "REMISION", "tipo": "NO_FISCAL"}).json()
+    _externo(client, h, "WHATSAPP", jid, env["ehmo"], serie_remision_id=propia["id"])
+
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        rfc=None, ubicacion=None, jid=jid)).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "aprender": True})
+
+    wa = next(e for e in client.get("/api/v1/clientes/externos", headers=h,
+                                    params={"sistema": "WHATSAPP"}).json()
+              if e["clave"] == jid)
+    assert wa["serie_remision_id"] == propia["id"]

@@ -605,6 +605,8 @@ export type ClienteExterno = {
   clave_normalizada: string;
   cliente_id: string;
   sucursal_id?: string | null;
+  serie_factura_id?: string | null;
+  serie_remision_id?: string | null;
   origen: "MANUAL" | "BOT" | "IMPORT" | "IA";
   confianza: "CONFIRMADA" | "SUGERIDA";
   notas?: string | null;
@@ -713,6 +715,9 @@ export type ClienteDelGrupo = {
   sucursales: { id: string; nombre: string }[];
   /** Sucursal por defecto de ESTE grupo para ESTE cliente (última red del destino). */
   sucursal_grupo_id?: string | null;
+  /** Serie de ESTE grupo para ESTE cliente. Vacío = hereda la del cliente. */
+  serie_factura_grupo_id?: string | null;
+  serie_remision_grupo_id?: string | null;
   almacen?: string | null;
   serie_factura_id?: string | null;
   serie_remision_id?: string | null;

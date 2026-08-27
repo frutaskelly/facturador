@@ -454,9 +454,16 @@ def crear_remision(
         (p.get("observaciones") or "").strip() or None,
     ] if x)
 
+    # La serie del GRUPO gana sobre la del cliente: un cliente usa varias según
+    # la operación por la que entró el pedido. Vacío = que la resuelva el
+    # backend como siempre (sucursal → cliente → default).
+    serie_id = cliente_match.serie_del_grupo(
+        db, ctx.tenant_id, str(p.get("jid") or ""), oc.cliente_id, "serie_remision_id"
+    )
     body = RemisionCreate(
         cliente_facturacion_id=oc.cliente_id,
         sucursal_id=oc.sucursal_id,
+        serie_id=serie_id,
         almacen_id=almacen_id,
         fecha_remision=payload.fecha_remision,
         fecha_entrega=payload.fecha_entrega or _fecha(p.get("fecha_entrega")),

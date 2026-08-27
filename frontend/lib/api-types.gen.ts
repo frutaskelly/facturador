@@ -3320,10 +3320,14 @@ export interface components {
             registrado: boolean;
             /** Serie Factura */
             serie_factura?: string | null;
+            /** Serie Factura Grupo Id */
+            serie_factura_grupo_id?: string | null;
             /** Serie Factura Id */
             serie_factura_id?: string | null;
             /** Serie Remision */
             serie_remision?: string | null;
+            /** Serie Remision Grupo Id */
+            serie_remision_grupo_id?: string | null;
             /** Serie Remision Id */
             serie_remision_id?: string | null;
             /** Sucursal Grupo Id */
@@ -3354,6 +3358,10 @@ export interface components {
              * @enum {string}
              */
             origen: "MANUAL" | "BOT" | "IMPORT" | "IA";
+            /** Serie Factura Id */
+            serie_factura_id?: string | null;
+            /** Serie Remision Id */
+            serie_remision_id?: string | null;
             /**
              * Sistema
              * @enum {string}
@@ -3389,6 +3397,10 @@ export interface components {
             notas?: string | null;
             /** Origen */
             origen: string;
+            /** Serie Factura Id */
+            serie_factura_id?: string | null;
+            /** Serie Remision Id */
+            serie_remision_id?: string | null;
             /** Sistema */
             sistema: string;
             /** Sucursal Id */
