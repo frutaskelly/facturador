@@ -366,6 +366,9 @@ export type Candidato = {
   categoria_nombre?: string;
   esquema_impuesto_id?: string | null;
   esquema_codigo?: string;
+  // Lo fiscal del producto existente: al vincular es lo que se usa.
+  clave_sat?: string | null;
+  unidad_sat?: string | null;
 };
 export type MatchResult = { texto: string; candidatos: Candidato[] };
 

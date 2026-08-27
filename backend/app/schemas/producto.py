@@ -104,6 +104,9 @@ class CandidatoOut(BaseModel):
     categoria_nombre: str = ""
     esquema_impuesto_id: Optional[uuid.UUID] = None
     esquema_codigo: str = ""
+    # Lo fiscal del producto existente: al vincular, la fila usa esto.
+    clave_sat: Optional[str] = None
+    unidad_sat: Optional[str] = None
 
 
 class MatchResultOut(BaseModel):

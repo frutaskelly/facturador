@@ -3281,6 +3281,8 @@ export interface components {
              * @default
              */
             categoria_nombre: string;
+            /** Clave Sat */
+            clave_sat?: string | null;
             /**
              * Esquema Codigo
              * @default
@@ -3310,6 +3312,8 @@ export interface components {
             sku: string;
             /** Unidad Base */
             unidad_base?: string | null;
+            /** Unidad Sat */
+            unidad_sat?: string | null;
         };
         /**
          * CatalogoClienteBatchIn

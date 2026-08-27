@@ -764,6 +764,17 @@
       "title": "Categoria Nombre",
       "type": "string"
      },
+     "clave_sat": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sat"
+     },
      "esquema_codigo": {
       "default": "",
       "title": "Esquema Codigo",
@@ -828,6 +839,17 @@
        }
       ],
       "title": "Unidad Base"
+     },
+     "unidad_sat": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Sat"
      }
     },
     "required": [

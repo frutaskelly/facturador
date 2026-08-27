@@ -432,6 +432,36 @@ def test_preview_difuso_direccional(client, env, auth_as):
     assert f2["producto_id"] is not None        # calificativo genérico → vincular
 
 
+def test_preview_plural_si_auto_vincula(client, env, auth_as):
+    """'ACELGAS' es la 'ACELGA MANOJO DE 1 KG' del catálogo: la s de más no hace
+    un producto nuevo, así que la fila llega ya vinculada al mejor candidato."""
+    db = SessionLocal()
+    try:
+        db.add(Producto(tenant_id=env["tenant_id"], sku="00000021",
+                        nombre="ACELGA MANOJO DE 1 KG", clave_sat="50403700", unidad_sat="KGM"))
+        db.add(Producto(tenant_id=env["tenant_id"], sku="00000022", nombre="LIMON",
+                        clave_sat="50403700", unidad_sat="KGM"))
+        db.commit()
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["NOMBRE", "UNIDAD"],
+        ["ACELGAS", "KILO"],
+        ["LIMONES", "KILO"],
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    f1, f2 = r.json()["filas"]
+    assert f1["producto_id"] is not None
+    assert f1["candidatos"][0]["nombre"] == "ACELGA MANOJO DE 1 KG"
+    assert f2["producto_id"] is not None        # plural con -es
+
+
 def test_preview_repetida_con_otro_precio(client, env, auth_as):
     """Renglón repetido con OTRO precio = conflicto visible, no descarte mudo."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
