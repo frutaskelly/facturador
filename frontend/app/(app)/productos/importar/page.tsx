@@ -123,9 +123,9 @@ export default function ImportarProductosPage() {
   const [campos, setCampos] = useState<{ valor: string; etiqueta: string }[]>([]);
   const [filas, setFilas] = useState<Fila[]>([]);
   const [resultado, setResultado] = useState<ImportResult | null>(null);
-  // Selección de la tabla para las acciones en lote (omitir/incluir, aplicar
-  // categoría o esquema a muchas filas de golpe).
-  const [seleccion, setSeleccion] = useState<Fila[]>([]);
+  // La casilla de cada fila significa "se importa". Desmarcarla la omite: es
+  // el gesto natural para excluir unas cuantas de un lote grande.
+  const [incluidas, setIncluidas] = useState<Set<number>>(new Set());
   const [resetSeleccion, setResetSeleccion] = useState(0);
   // Último fallo al aprobar: se muestra junto al botón para que quede claro que
   // el trabajo sigue en pantalla y basta reintentar (pasa si el servidor se
@@ -137,7 +137,6 @@ export default function ImportarProductosPage() {
   const [p2, setP2] = useState<"sugerida" | "generica">("sugerida");
   // Por cada categoría del archivo: "" = crear nueva, o el id de una existente.
   const [catDestino, setCatDestino] = useState<Record<string, string>>({});
-  const [guardarPrecios, setGuardarPrecios] = useState(true);
   const [listaNombre, setListaNombre] = useState("");
   const [sugiriendoEsq, setSugiriendoEsq] = useState(false);
 
@@ -151,28 +150,21 @@ export default function ImportarProductosPage() {
   const clienteConLista = clientesSel.length === 1 && Boolean(clientesSel[0].lista_precios_id);
   const hayClientes = clienteIds.length > 0;
 
+  /** ¿Esta fila se va a importar? (casilla marcada) */
+  const seImporta = useCallback((f: Fila) => incluidas.has(f.fila), [incluidas]);
+
   const resumen = useMemo(() => {
-    const crear = filas.filter((f) => f.accion === "crear").length;
-    const vincular = filas.filter((f) => f.accion === "vincular").length;
-    const omitir = filas.filter((f) => f.accion === "omitir").length;
+    const activas = filas.filter((f) => incluidas.has(f.fila));
+    const crear = activas.filter((f) => f.accion === "crear").length;
+    const vincular = activas.filter((f) => f.accion === "vincular").length;
+    const omitir = filas.length - activas.length;
     // Solo las que se CREAN reciben esquema: al vincular se conserva el del
     // producto que ya existe (el backend no lo toca).
-    const sinEsquema = filas.filter((f) => f.accion === "crear" && !f.esq_id).length;
-    const conPrecio = filas.filter((f) => f.accion !== "omitir" && f.precio).length;
-    const variantes = filas.filter(esVarianteNueva).length;
+    const sinEsquema = activas.filter((f) => f.accion === "crear" && !f.esq_id).length;
+    const conPrecio = activas.filter((f) => f.precio).length;
+    const variantes = activas.filter(esVarianteNueva).length;
     return { crear, vincular, omitir, sinEsquema, conPrecio, variantes };
-  }, [filas]);
-
-  // La selección pertenece a la tabla del preview: al salir de ese paso se
-  // limpia. Si no, al volver la barra de lote seguía mostrando el conteo viejo
-  // con las casillas ya vacías — y peor tras releer el archivo, porque esos
-  // números de fila ya apuntan a otros productos.
-  useEffect(() => {
-    if (paso !== "preview") {
-      setSeleccion([]);
-      setResetSeleccion((n) => n + 1);
-    }
-  }, [paso]);
+  }, [filas, incluidas]);
 
   // Media hora de decisiones no se pierden por un F5 o un clic al menú.
   const hayTrabajo = filas.length > 0 && paso !== "resultado";
@@ -214,7 +206,11 @@ export default function ImportarProductosPage() {
         setMeta(p);
         setColumnas(p.columnas ?? []);
         setCampos(p.campos_mapeables ?? []);
-        setFilas(p.filas.map(aFila));
+        const nuevas = p.filas.map(aFila);
+        setFilas(nuevas);
+        // Todo entra por default, salvo lo repetido o dado de baja en el archivo.
+        setIncluidas(new Set(nuevas.filter((f) => !f.duplicada_de && !f.baja).map((f) => f.fila)));
+        setResetSeleccion((n) => n + 1);
         // Cada categoría del archivo arranca apuntando a la que le corresponde.
         setCatDestino(
           Object.fromEntries(
@@ -269,7 +265,7 @@ export default function ImportarProductosPage() {
   /** Claves y unidades SAT faltantes, según lo elegido en el paso 3. */
   async function aplicarSat() {
     const faltantes = filas.filter(
-      (f) => f.accion !== "omitir" && (!f.clave_sat || !f.unidad_sat)
+      (f) => seImporta(f) && (!f.clave_sat || !f.unidad_sat)
     );
     if (faltantes.length === 0) return;
     let porNombre: Record<string, SugerenciaSat> = {};
@@ -284,7 +280,7 @@ export default function ImportarProductosPage() {
     }
     setFilas((rows) =>
       rows.map((f) => {
-        if (f.accion === "omitir") return f;
+        if (!incluidas.has(f.fila)) return f;
         const s = porNombre[f.nombre];
         let clave = f.clave_sat;
         let unidad = f.unidad_sat;
@@ -297,7 +293,7 @@ export default function ImportarProductosPage() {
 
   /** Esquema de impuesto para las filas que no tienen: reglas fiscales + IA. */
   async function sugerirEsquemas() {
-    const faltantes = filas.filter((f) => f.accion !== "omitir" && !f.esq_id);
+    const faltantes = filas.filter((f) => seImporta(f) && !f.esq_id);
     if (faltantes.length === 0) {
       toast.info("Todas las filas ya tienen esquema");
       return;
@@ -319,7 +315,7 @@ export default function ImportarProductosPage() {
       const asignados = faltantes.filter((f) => porNombre[f.nombre]?.esquema_id).length;
       setFilas((rows) =>
         rows.map((f) => {
-          if (f.accion === "omitir" || f.esq_id) return f;
+          if (!incluidas.has(f.fila) || f.esq_id) return f;
           const s = porNombre[f.nombre];
           if (!s?.esquema_id) {
             return s?.motivo ? { ...f, esquema_motivo: s.motivo, esquema_origen: s.origen } : f;
@@ -363,12 +359,13 @@ export default function ImportarProductosPage() {
   }
 
   async function importar() {
-    const activas = filas.filter((f) => f.accion !== "omitir");
-    if (activas.length === 0) {
-      toast.error("Todas las filas están omitidas");
+    if (incluidas.size === 0) {
+      toast.error("No hay ninguna fila marcada para importar");
       return;
     }
-    const pendiente = filas.find((f) => f.accion === "vincular" && !f.producto_sel);
+    const pendiente = filas.find(
+      (f) => seImporta(f) && f.accion === "vincular" && !f.producto_sel
+    );
     if (pendiente) {
       toast.error(
         `Fila ${pendiente.fila} (${pendiente.nombre}): elige el producto a vincular ` +
@@ -378,7 +375,7 @@ export default function ImportarProductosPage() {
     }
     setCargando(true);
     try {
-      const conPrecios = guardarPrecios && Boolean(meta?.tiene_precios);
+      const conPrecios = Boolean(meta?.tiene_precios);
       const res = await apiFetch<ImportResult>("/api/v1/productos/importar", {
         method: "POST",
         body: JSON.stringify({
@@ -389,7 +386,7 @@ export default function ImportarProductosPage() {
           // usuario dejó "crear nueva" para esa categoría.
           crear_categorias: true,
           filas: filas.map((f) => ({
-            accion: f.accion,
+            accion: seImporta(f) ? f.accion : "omitir",
             producto_id: f.accion === "vincular" ? f.producto_sel : null,
             nombre: f.nombre,
             sku: !hayClientes && f.accion === "crear" && f.codigo ? f.codigo : null,
@@ -422,12 +419,24 @@ export default function ImportarProductosPage() {
   }
 
   async function aplicarAsignacion() {
-    if (!resultado?.lista_id || asignar === "nada" || asignadoMsg) {
+    if (!resultado?.lista_id || asignadoMsg) {
+      router.push("/productos");
+      return;
+    }
+    if (asignar === "nada" && listaNombre.trim() === (resultado.lista_nombre ?? "")) {
       router.push("/productos");
       return;
     }
     setAsignando(true);
     try {
+      // El nombre se decide al final: si lo cambió, se renombra la lista.
+      const nombreFinal = listaNombre.trim();
+      if (nombreFinal && nombreFinal !== resultado.lista_nombre) {
+        await apiFetch(`/api/v1/listas-precios/${resultado.lista_id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ nombre: nombreFinal }),
+        });
+      }
       const r = await apiFetch<{ default: boolean; clientes_asignados: number }>(
         `/api/v1/listas-precios/${resultado.lista_id}/asignar`,
         {
@@ -441,25 +450,16 @@ export default function ImportarProductosPage() {
       setAsignadoMsg(
         r.default
           ? "Lista marcada como default para todos los clientes"
-          : `Lista asignada a ${r.clientes_asignados} cliente(s)`
+          : r.clientes_asignados > 0
+            ? `Lista asignada a ${r.clientes_asignados} cliente(s)`
+            : "Lista guardada"
       );
-      toast.success("Lista de precios asignada");
+      toast.success("Lista de precios guardada");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo asignar la lista");
     } finally {
       setAsignando(false);
     }
-  }
-
-  /** Aplica un cambio a todas las filas seleccionadas (acciones en lote). */
-  function aplicarALaSeleccion(patch: Partial<Fila> | ((f: Fila) => Partial<Fila>)) {
-    if (seleccion.length === 0) return;
-    const ids = new Set(seleccion.map((f) => f.fila));
-    setFilas((rows) =>
-      rows.map((f) => (ids.has(f.fila) ? { ...f, ...(typeof patch === "function" ? patch(f) : patch) } : f))
-    );
-    setSeleccion([]);
-    setResetSeleccion((n) => n + 1);   // limpia las casillas de la tabla
   }
 
   // Columnas de la tabla del preview: todo lo que se va a dar de alta.
@@ -482,7 +482,7 @@ export default function ImportarProductosPage() {
       // SAE el código es justo por lo que el usuario busca.
       exportValue: (f) => [f.nombre, f.codigo, f.codigo_barras, f.descripcion].filter(Boolean).join(" "),
       cell: (f) => (
-        <div className={f.accion === "omitir" ? "opacity-50" : ""}>
+        <div className={seImporta(f) ? "" : "opacity-50"}>
           <div className="font-medium">{f.nombre}</div>
           {f.codigo ? <div className="text-xs text-muted tabular-nums">{f.codigo}</div> : null}
           <div className="flex flex-wrap gap-1 pt-0.5">
@@ -519,7 +519,6 @@ export default function ImportarProductosPage() {
           >
             <option value="vincular">Vincular a existente</option>
             <option value="crear">Crear producto nuevo</option>
-            <option value="omitir">Omitir</option>
           </Select>
           {f.accion === "vincular" ? (
             <Select
@@ -640,7 +639,7 @@ export default function ImportarProductosPage() {
       sortable: true,
       sortValue: (f) => f.clave_sat,
       cell: (f) =>
-        f.accion !== "omitir" ? (
+        seImporta(f) ? (
           <div className="flex gap-1">
             <div className="w-[7rem]">
               <Input
@@ -1017,28 +1016,6 @@ export default function ImportarProductosPage() {
             </section>
           ) : null}
 
-          {/* Lista de precios */}
-          {meta.tiene_precios ? (
-            <section className="space-y-2">
-              <h2 className="text-sm font-medium">Lista de precios</h2>
-              <div className="space-y-2 rounded-lg border border-border p-3">
-                <div className="flex items-center gap-3">
-                  <Switch checked={guardarPrecios} onChange={setGuardarPrecios} />
-                  <span className="text-sm">
-                    {clienteConLista
-                      ? "Guardar los precios en la lista del cliente"
-                      : `Crear una lista con los ${resumen.conPrecio} precios del archivo`}
-                  </span>
-                </div>
-                {guardarPrecios && !clienteConLista ? (
-                  <Field label="Nombre de la lista">
-                    <Input value={listaNombre} onChange={(e) => setListaNombre(e.target.value)} />
-                  </Field>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
-
           <div className="flex gap-2">
             <Button
               variant="secondary"
@@ -1058,82 +1035,42 @@ export default function ImportarProductosPage() {
       {/* ── 4. Preview a pantalla completa ─────────────────────────────── */}
       {paso === "preview" && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <Badge tone="accent">{resumen.crear} nuevos</Badge>
-            <Badge tone="success">{resumen.vincular} vinculados</Badge>
+          {/* Acción principal arriba: con cientos de filas, el pie queda lejos.
+              Desmarcar una casilla la omite — el conteo lo refleja al vuelo. */}
+          <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-3 border-b border-border bg-background px-1 py-3">
+            <Button onClick={importar} disabled={cargando}>
+              {cargando ? <Spinner className="h-4 w-4" /> : null}
+              {cargando
+                ? "Importando…"
+                : `Aprobar ${resumen.crear} nuevos, ${resumen.vincular} vinculados, ${resumen.omitir} omitidos`}
+            </Button>
+            <Button variant="secondary" onClick={() => setPaso("revisar")} disabled={cargando}>
+              Regresar
+            </Button>
             {resumen.variantes > 0 ? (
               <Badge tone="accent">{resumen.variantes} presentaciones nuevas</Badge>
             ) : null}
-            {resumen.omitir > 0 ? <Badge tone="muted">{resumen.omitir} omitidos</Badge> : null}
             {resumen.sinEsquema > 0 ? (
               <Badge tone="danger">{resumen.sinEsquema} sin esquema de impuesto</Badge>
             ) : null}
             {resumen.conPrecio > 0 ? (
-              <span className="text-muted">{resumen.conPrecio} con precio</span>
+              <span className="text-sm text-muted">{resumen.conPrecio} con precio</span>
+            ) : null}
+            {falloImport ? (
+              <span className="text-sm text-danger">
+                {falloImport} — tus decisiones siguen aquí: vuelve a intentarlo.
+              </span>
             ) : null}
           </div>
-
-          {/* Acciones en lote: marcar filas con las casillas y aplicarlas de golpe. */}
-          {seleccion.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-accent/40 bg-accent/5 p-2 text-sm">
-              <span className="font-medium">{seleccion.length} seleccionados:</span>
-              <Button variant="secondary" onClick={() => aplicarALaSeleccion({ accion: "omitir" })}>
-                Omitir
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  aplicarALaSeleccion((f) =>
-                    f.accion !== "omitir"
-                      ? {}   // ya está incluida: no se pisa su decisión
-                      : { accion: f.producto_sel || f.producto_id ? "vincular" : "crear" }
-                  )
-                }
-              >
-                Incluir
-              </Button>
-              <span className="mx-1 text-muted">|</span>
-              <Select
-                value=""
-                aria-label="Categoría para los seleccionados"
-                onChange={(e) => {
-                  const id = e.target.value;
-                  // Al vincular, el backend conserva la del producto existente.
-                  aplicarALaSeleccion((f) => (f.accion === "crear" ? { cat_id: id } : {}));
-                }}
-              >
-                <option value="">Categoría…</option>
-                {categorias.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nombre}
-                  </option>
-                ))}
-              </Select>
-              <Select
-                value=""
-                aria-label="Esquema de impuesto para los seleccionados"
-                onChange={(e) => {
-                  const id = e.target.value;
-                  aplicarALaSeleccion((f) => (f.accion === "crear" ? { esq_id: id } : {}));
-                }}
-              >
-                <option value="">Esquema de impuesto…</option>
-                {esquemas.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.codigo} · IVA {Math.round(Number(e.iva_tasa) * 100)}%
-                  </option>
-                ))}
-              </Select>
-            </div>
-          ) : null}
 
           <DataTable
             columns={columnasPreview}
             rows={filas}
             rowKey={(f) => f.fila}
             selectable
-            onSelectionChange={setSeleccion}
+            onSelectionChange={(rows) => setIncluidas(new Set(rows.map((f) => f.fila)))}
             selectionResetKey={resetSeleccion}
+            initialSelectedKeys={filas.filter((f) => !f.duplicada_de && !f.baja).map((f) => f.fila)}
             searchable
             searchPlaceholder="Buscar producto, código, categoría…"
             paginated
@@ -1143,28 +1080,6 @@ export default function ImportarProductosPage() {
             empty="Sin filas"
           />
 
-          <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-background py-3">
-            <Button variant="secondary" onClick={() => setPaso("revisar")} disabled={cargando}>
-              Regresar
-            </Button>
-            <Button onClick={importar} disabled={cargando}>
-              {cargando ? <Spinner className="h-4 w-4" /> : null}
-              {cargando
-                ? "Importando…"
-                : `Aprobar todo (${resumen.crear} nuevos, ${resumen.vincular} vinculados)`}
-            </Button>
-            {resumen.sinEsquema > 0 ? (
-              <span className="text-sm text-danger">
-                {resumen.sinEsquema} productos quedarían sin esquema de impuesto
-              </span>
-            ) : null}
-            {falloImport ? (
-              <span className="text-sm text-danger">
-                {falloImport} — tus {filas.length} decisiones siguen aquí: vuelve a
-                darle a Aprobar todo.
-              </span>
-            ) : null}
-          </div>
         </div>
       )}
 
@@ -1212,8 +1127,16 @@ export default function ImportarProductosPage() {
           {resultado.lista_id && !asignadoMsg ? (
             <div className="space-y-2 rounded-lg border border-border p-3">
               <div className="text-sm font-medium">
-                Lista «{resultado.lista_nombre}» — ¿a quién se la asignamos?
+                Lista de precios creada con {resultado.precios_guardados} precios
               </div>
+              <Field label="Nombre de la lista">
+                <Input
+                  value={listaNombre}
+                  onChange={(e) => setListaNombre(e.target.value)}
+                  placeholder="Lista de precios"
+                />
+              </Field>
+              <div className="text-sm font-medium">¿A quién se la asignamos?</div>
               <Select
                 value={asignar}
                 onChange={(e) => setAsignar(e.target.value as "nada" | "default" | "clientes")}
@@ -1251,9 +1174,7 @@ export default function ImportarProductosPage() {
 
           <Button onClick={aplicarAsignacion} disabled={asignando}>
             {asignando ? <Spinner className="h-4 w-4" /> : null}
-            {resultado.lista_id && asignar !== "nada" && !asignadoMsg
-              ? "Asignar y terminar"
-              : "Ir a Productos"}
+            {resultado.lista_id && !asignadoMsg ? "Guardar y terminar" : "Ir a Productos"}
           </Button>
         </div>
       )}

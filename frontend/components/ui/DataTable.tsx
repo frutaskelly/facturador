@@ -144,6 +144,10 @@ export type DataTableProps<T> = {
   /** Al cambiar este valor, el componente limpia su selección interna (útil para
    *  que el padre la resetee tras una acción en lote). */
   selectionResetKey?: number | string;
+  /** Claves marcadas al montar (y cada vez que cambia `selectionResetKey`).
+   *  Útil cuando la casilla significa "incluido" y lo normal es que todo lo
+   *  esté: sin esto, la tabla arrancaría con todo desmarcado. */
+  initialSelectedKeys?: (string | number)[];
 };
 
 export function DataTable<T>({
@@ -172,6 +176,7 @@ export function DataTable<T>({
   selectable,
   onSelectionChange,
   selectionResetKey,
+  initialSelectedKeys,
 }: DataTableProps<T>) {
   // ── identidad estable de cada columna ──
   const cols = useMemo(() => {
@@ -227,10 +232,20 @@ export function DataTable<T>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialExpandedKey, rows]);
 
-  const [selectedKeys, setSelectedKeys] = useState<Set<string | number>>(new Set());
-  // Limpia la selección cuando el padre cambia `selectionResetKey`.
+  const [selectedKeys, setSelectedKeys] = useState<Set<string | number>>(
+    () => new Set(initialSelectedKeys ?? []),
+  );
+  // Vuelve al estado inicial cuando el padre cambia `selectionResetKey`
+  // (sin `initialSelectedKeys`, eso es "sin nada marcado").
+  const initialKeysRef = useRef(initialSelectedKeys);
+  initialKeysRef.current = initialSelectedKeys;
+  const primerReset = useRef(true);
   useEffect(() => {
-    setSelectedKeys(new Set());
+    if (primerReset.current) {
+      primerReset.current = false;   // el useState ya sembró el inicial
+      return;
+    }
+    setSelectedKeys(new Set(initialKeysRef.current ?? []));
   }, [selectionResetKey]);
 
   // ── columna de acciones (íconos por fila + menú ⋮ para reordenar/ocultar) ──
