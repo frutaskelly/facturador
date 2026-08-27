@@ -744,3 +744,91 @@ def test_importar_varios_clientes(client, env, auth_as):
         assert str(cli2.lista_precios_id) == str(res["lista_id"])
     finally:
         db.close()
+
+
+# ─── Regresiones de la auditoría del incidente 2026-08-27 ────────────────────
+def test_precio_con_coma_decimal():
+    """'12,50' es doce con cincuenta, no mil doscientos cincuenta."""
+    from app.services.importar_productos import _decimal
+    casos = {
+        "12,50": "12.50",        # coma decimal (formato europeo)
+        "12.50": "12.50",        # punto decimal
+        "1,234.56": "1234.56",   # coma de miles + punto decimal
+        "1.234,56": "1234.56",   # punto de miles + coma decimal
+        "1,234": "1234",         # coma de miles
+        "$ 935.40": "935.40",
+        "0": "0",
+    }
+    for entrada, esperado in casos.items():
+        assert _decimal(entrada) == Decimal(esperado), f"{entrada} → {_decimal(entrada)}"
+    assert _decimal("") is None
+    assert _decimal("abc") is None
+
+
+def test_preview_multicliente_codigo_ambiguo(client, env, auth_as):
+    """Dos clientes con el MISMO código para productos distintos: no se
+    auto-sugiere ninguno (antes ganaba el primero del SELECT y ligaba mal)."""
+    db = SessionLocal()
+    try:
+        otro = Producto(tenant_id=env["tenant_id"], sku="00000060", nombre="SAL DE MESA 1 KG",
+                        clave_sat="50171550", unidad_sat="KGM")
+        c2 = Cliente(tenant_id=env["tenant_id"], codigo="CAMB", legal_name="Cliente Ambiguo SA",
+                     rfc="CAM900101AA1", regimen_fiscal="601")
+        db.add_all([otro, c2]); db.flush()
+        # Mismo código "X-100" → productos DISTINTOS según el cliente.
+        db.add(ProductoCliente(tenant_id=env["tenant_id"], cliente_id=uuid.UUID(env["cli_id"]),
+                               producto_id=uuid.UUID(env["prod_id"]), codigo_cliente="X-100"))
+        db.add(ProductoCliente(tenant_id=env["tenant_id"], cliente_id=c2.id,
+                               producto_id=otro.id, codigo_cliente="X-100"))
+        db.commit()
+        c2_id, otro_id = str(c2.id), str(otro.id)
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([["NOMBRE", "CODIGO"], ["PRODUCTO CUALQUIERA ZZZ", "X-100"]])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false", "cliente_ids": [env["cli_id"], c2_id]},
+    )
+    assert r.status_code == 200, r.text
+    f1 = r.json()["filas"][0]
+    # Código ambiguo entre los clientes elegidos → sin sugerencia por código.
+    assert f1["producto_id"] is None
+    assert f1["ya_vinculado"] is False
+
+    # Con UN solo cliente el código sí manda (no hay ambigüedad).
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false", "cliente_ids": [c2_id]},
+    )
+    f1 = r.json()["filas"][0]
+    assert f1["producto_id"] == otro_id and f1["ya_vinculado"] is True
+
+
+def test_cruce_masivo_no_hace_un_select_por_fila(client, env, auth_as):
+    """El preview carga los alias UNA vez: sin esto eran 500+ viajes a la base
+    (medio segundo en local, decenas de segundos contra la base en la nube)."""
+    from sqlalchemy import event
+    from app.core.db import engine
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    filas = [["NOMBRE", "UNIDAD"]] + [[f"PRODUCTO MASIVO {i}", "KILO"] for i in range(60)]
+    data = _xlsx(filas)
+
+    consultas: list[str] = []
+    def _contar(conn, cursor, statement, params, context, executemany):
+        consultas.append(statement)
+    event.listen(engine, "before_cursor_execute", _contar)
+    try:
+        r = client.post(
+            "/api/v1/productos/importar-preview", headers=h,
+            files={"archivo": ("masivo.xlsx", data, "application/octet-stream")},
+            data={"usar_ia": "false"},
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", _contar)
+    assert r.status_code == 200 and len(r.json()["filas"]) == 60
+    alias_queries = [q for q in consultas if "producto_alias" in q]
+    assert len(alias_queries) <= 1, f"{len(alias_queries)} consultas a producto_alias (debe ser 1)"

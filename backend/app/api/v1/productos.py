@@ -58,6 +58,7 @@ from ...services.importar_productos import (
 )
 from ...services.sat_catalogo import sugerir_batch
 from ...services.producto_match import (
+    alias_del_tenant,
     aprender_alias,
     buscar,
     normalizar,
@@ -161,10 +162,11 @@ def match_productos(
         # La rama IA manda el catálogo completo como contexto (cuesta dinero).
         enforce(f"producto-ia:{ctx.tenant_id}", 120, 3600)
     catalogo = productos_activos(db)   # una sola carga para todos los textos
+    aliases = alias_del_tenant(db)     # idem: sin esto era un SELECT por texto
     resultados: list[dict] = []
     sin_match: list[str] = []
     for texto in payload.textos:
-        cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit, prods=catalogo)
+        cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit, prods=catalogo, aliases=aliases)
         resultados.append({"texto": texto, "candidatos": [
             CandidatoOut(
                 producto_id=c.producto_id, sku=c.sku, nombre=c.nombre, score=c.score, origen=c.origen,
@@ -209,11 +211,12 @@ def parse_pegado(
         return []
 
     catalogo = productos_activos(db)   # una sola carga para todas las filas
+    aliases = alias_del_tenant(db)     # idem: sin esto era un SELECT por fila
     resultados: list[dict] = []
     sin_match: list[str] = []
     for f in filas:
         # Varios candidatos para poblar el desplegable Match IA (el front muestra ≥80%).
-        cands = buscar(db, ctx.tenant_id, f["producto"], limit=8, prods=catalogo)
+        cands = buscar(db, ctx.tenant_id, f["producto"], limit=8, prods=catalogo, aliases=aliases)
         resultados.append({
             "texto": f["producto"],
             "cantidad": f["cantidad"],
@@ -378,6 +381,7 @@ def importar_preview(
 
     # Cruce contra el catálogo, una sola carga para todas las filas.
     catalogo = productos_activos(db)
+    aliases = alias_del_tenant(db)     # una sola carga: sin esto, un SELECT por fila
     por_sku = {p.sku.strip().upper(): p for p in catalogo if p.sku}
     por_id = {p.id: p for p in catalogo}
 
@@ -403,10 +407,14 @@ def importar_preview(
         esquemas_tenant.add(normalizar(e.codigo or ""))
         esquemas_tenant.add(normalizar(e.nombre or ""))
 
-    # Lo que los clientes elegidos YA tienen vinculado (por producto y código).
+    # Lo que los clientes elegidos YA tienen vinculado. Con VARIOS clientes un
+    # mismo código puede apuntar a productos distintos según el cliente: en ese
+    # caso NO se auto-sugiere ninguno (sugerir el del primer cliente que salga
+    # del SELECT ligaría la fila al producto equivocado). Solo manda el código
+    # cuando todos los clientes que lo usan coinciden en el producto.
     ids_clientes = list(dict.fromkeys(([cliente_id] if cliente_id else []) + list(cliente_ids)))
-    pc_por_producto: dict = {}
-    pc_por_codigo: dict = {}
+    productos_vinculados: set = set()
+    codigo_a_productos: dict[str, set] = {}
     if ids_clientes:
         for cid in ids_clientes:
             ensure_fk(db, Cliente, cid, "cliente_id")
@@ -415,10 +423,14 @@ def importar_preview(
             .filter(ProductoCliente.cliente_id.in_(ids_clientes))
             .all()
         ):
-            pc_por_producto[pc.producto_id] = pc
+            productos_vinculados.add(pc.producto_id)
             cod = (pc.codigo_cliente or "").strip().upper()
             if cod:
-                pc_por_codigo.setdefault(cod, pc)
+                codigo_a_productos.setdefault(cod, set()).add(pc.producto_id)
+    # Códigos sin ambigüedad entre los clientes elegidos.
+    pc_por_codigo = {
+        cod: next(iter(pids)) for cod, pids in codigo_a_productos.items() if len(pids) == 1
+    }
 
     out: list[ImportFilaPreview] = []
     # nombre/código normalizado → (primera fila, su precio)
@@ -445,9 +457,9 @@ def importar_preview(
             vistos.setdefault(k, (n, f.get("precio") or ""))
 
         # 1) El código del cliente ya está vinculado → ese producto, sin dudar.
-        pc = pc_por_codigo.get(codigo.upper()) if codigo else None
-        if pc is not None:
-            sugerido = pc.producto_id
+        pid_por_codigo = pc_por_codigo.get(codigo.upper()) if codigo else None
+        if pid_por_codigo is not None:
+            sugerido = pid_por_codigo
             ya_vinculado = True
 
         # 2) El código coincide EXACTO con un SKU interno.
@@ -456,13 +468,13 @@ def importar_preview(
 
         # 3) Cruce por nombre (exacto → alias → difuso). Los difusos solo se
         #    auto-sugieren si el cruce es confiable en la dirección de importar.
-        cands = buscar(db, ctx.tenant_id, f["nombre"], limit=5, prods=catalogo)
+        cands = buscar(db, ctx.tenant_id, f["nombre"], limit=5, prods=catalogo, aliases=aliases)
         if sugerido is None and cands and cands[0].score >= 80:
             top = cands[0]
             if top.origen in ("exacto", "alias") or _cruce_confiable(f["nombre"], top.nombre):
                 sugerido = top.producto_id
         if sugerido is not None and not ya_vinculado:
-            ya_vinculado = sugerido in pc_por_producto
+            ya_vinculado = sugerido in productos_vinculados
 
         # Variante nueva: cruza a un producto existente pero con una unidad que
         # el producto aún no maneja ("Cilantro" KILO ← fila en MANOJO).

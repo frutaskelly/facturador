@@ -162,7 +162,9 @@ export function ImportarProductosModal({
         p.tiene_precios;
       setPaso(hayPreguntas ? "preguntas" : "preview");
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo leer el archivo");
+      toast.error(
+        e instanceof ApiError ? e.message : "No se pudo leer el archivo. Intenta de nuevo."
+      );
     } finally {
       setCargando(false);
     }

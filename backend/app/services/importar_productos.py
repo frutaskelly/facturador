@@ -91,9 +91,27 @@ def _texto(v) -> str:
 
 
 def _decimal(v) -> Optional[Decimal]:
-    s = _texto(v).replace("$", "").replace(",", "")
+    """Precio del archivo → Decimal, tolerando formato local.
+
+    La coma puede ser separador de MILES ("1,234.56") o DECIMAL ("12,50",
+    exports en formato europeo). Borrar la coma a ciegas convertía 12,50 en
+    1250 — un precio x100 que pasaba sin marca. Se decide por la forma:
+    si hay punto y coma, manda el que va más a la derecha; si solo hay comas,
+    es decimal cuando deja 1-2 dígitos al final y no hay grupos de 3.
+    """
+    s = _texto(v).replace("$", "").replace(" ", "").replace(" ", "")
     if not s:
         return None
+    if "," in s and "." in s:
+        # El separador decimal es el ÚLTIMO que aparece; el otro es de miles.
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        entero, _, resto = s.rpartition(",")
+        # "1,234" / "1,234,567" → miles; "12,5" / "12,50" → decimal.
+        s = s.replace(",", "") if (len(resto) == 3 and entero) else s.replace(",", ".")
     try:
         d = Decimal(s)
         return d if d >= 0 else None

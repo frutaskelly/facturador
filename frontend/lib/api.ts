@@ -73,10 +73,28 @@ export async function apiFetch<T = unknown>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
-  const supabase = getSupabase();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  // La sesión se lee ANTES de salir a la red; si esta lectura falla (o el
+  // refresh del token no pudo completarse), la petición ni siquiera se emite
+  // — sin traducirlo, cada pantalla mostraba su mensaje genérico y el fallo
+  // no dejaba rastro en el servidor. Se reporta como lo que es: sesión.
+  let session: { access_token?: string } | null = null;
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase.auth.getSession();
+    session = data.session;
+    if (error && !session) {
+      throw new ApiError(
+        0,
+        "No pudimos validar tu sesión. Recarga la página (F5) e intenta de nuevo.",
+      );
+    }
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    throw new ApiError(
+      0,
+      "No pudimos validar tu sesión. Recarga la página (F5) e intenta de nuevo.",
+    );
+  }
 
   const headers = new Headers(init.headers);
   // Con FormData el navegador pone el multipart boundary; forzar JSON lo rompe.
@@ -101,7 +119,16 @@ export async function apiFetch<T = unknown>(
     if (ownTimeout && e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
       throw new ApiError(0, "El servidor tardó demasiado en responder. Revisa tu conexión e intenta de nuevo.");
     }
-    throw e;
+    // Un abort ajeno (el caller canceló) se propaga tal cual.
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
+    // Falla de RED (sin conexión, o el backend reiniciándose durante un
+    // despliegue): fetch lanza TypeError. Sin traducirlo, cada pantalla lo
+    // reportaba con su mensaje genérico ("No se pudo leer el archivo"),
+    // culpando al dato del usuario en vez de a la conexión.
+    throw new ApiError(
+      0,
+      "No se pudo conectar con el servidor. Puede estar actualizándose; espera unos segundos e intenta de nuevo.",
+    );
   }
 
   if (!res.ok) {
@@ -117,7 +144,17 @@ export async function apiFetch<T = unknown>(
   }
 
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  try {
+    return (await res.json()) as T;
+  } catch {
+    // Respuesta OK pero el cuerpo llegó truncado o no es JSON (corte del túnel
+    // a mitad del stream): también es un fallo de transporte, no del dato que
+    // mandó el usuario.
+    throw new ApiError(
+      0,
+      "La respuesta del servidor llegó incompleta. Intenta de nuevo.",
+    );
+  }
 }
 
 /** Descarga autenticada de un archivo binario (XML/PDF) y dispara el guardado. */

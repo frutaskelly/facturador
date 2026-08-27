@@ -63,6 +63,20 @@ def productos_activos(db: Session) -> list[Producto]:
     return db.query(Producto).filter(Producto.deleted_at.is_(None), Producto.activo.is_(True)).all()
 
 
+def alias_del_tenant(db: Session) -> dict[str, UUID]:
+    """Todos los alias aprendidos del tenant: {alias_normalizado: producto_id}.
+
+    Se carga UNA vez y se pasa a `buscar` cuando se cruzan muchos textos (la
+    importación masiva resuelve cientos de filas): sin esto era un SELECT por
+    fila — 508 filas = 508 viajes a la base, que contra una base en la nube
+    convierte medio segundo en decenas.
+    """
+    return {
+        a.alias_normalizado: a.producto_id
+        for a in db.query(ProductoAlias.alias_normalizado, ProductoAlias.producto_id).all()
+    }
+
+
 def buscar(
     db: Session,
     tenant_id: UUID,
@@ -70,6 +84,7 @@ def buscar(
     *,
     limit: int = 5,
     prods: Optional[list[Producto]] = None,
+    aliases: Optional[dict[str, UUID]] = None,
 ) -> list[Candidato]:
     """Devuelve candidatos ordenados por confianza para un texto libre.
 
@@ -95,15 +110,20 @@ def buscar(
             out.append(_cand(p, 100, "exacto"))
             seen.add(p.id)
 
-    # 2) alias aprendido (si apunta a un producto que aún no está incluido)
-    alias = (
-        db.query(ProductoAlias)
-        .filter(ProductoAlias.alias_normalizado == norm)
-        .one_or_none()
-    )
-    if alias is not None and alias.producto_id in by_id and alias.producto_id not in seen:
-        out.append(_cand(by_id[alias.producto_id], 100, "alias"))
-        seen.add(alias.producto_id)
+    # 2) alias aprendido (si apunta a un producto que aún no está incluido).
+    #    `aliases` precargado evita un SELECT por texto en los cruces masivos.
+    if aliases is not None:
+        alias_pid = aliases.get(norm)
+    else:
+        fila = (
+            db.query(ProductoAlias.producto_id)
+            .filter(ProductoAlias.alias_normalizado == norm)
+            .one_or_none()
+        )
+        alias_pid = fila[0] if fila is not None else None
+    if alias_pid is not None and alias_pid in by_id and alias_pid not in seen:
+        out.append(_cand(by_id[alias_pid], 100, "alias"))
+        seen.add(alias_pid)
 
     # 3) por producto: prefijo / subcadena / difuso. Se evalúa CADA producto
     #    (no se colapsan por nombre normalizado), para que al teclear las primeras
