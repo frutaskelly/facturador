@@ -96,7 +96,8 @@ export function ImportarProductosModal({
       setFilas(
         p.filas.map((f) => ({
           ...f,
-          accion: f.producto_id ? "vincular" : "crear",
+          // Filas repetidas en el archivo se omiten por default (editable).
+          accion: f.duplicada_de ? "omitir" : f.producto_id ? "vincular" : "crear",
           producto_sel: f.producto_id ?? "",
         }))
       );
@@ -300,6 +301,9 @@ export function ImportarProductosModal({
                       {f.unidad ? <div className="text-xs text-muted">{f.unidad}</div> : null}
                       {f.ya_vinculado ? (
                         <Badge tone="accent">Ya vinculado a este cliente</Badge>
+                      ) : null}
+                      {f.duplicada_de ? (
+                        <Badge tone="warning">Repetida (ver fila {f.duplicada_de})</Badge>
                       ) : null}
                     </td>
                     <td className="px-2 py-2 tabular-nums">{f.codigo || "—"}</td>

@@ -25,7 +25,8 @@ from ..core.config import settings
 
 logger = logging.getLogger(__name__)
 
-MAX_FILAS = 500          # tope duro de filas por archivo (preview e importación)
+MAX_FILAS = 2000         # tope del camino determinista (plantilla/SAE)
+MAX_FILAS_IA = 500       # tope del camino IA (el output de la extracción cuesta)
 
 # Encabezados de la plantilla oficial (en este orden).
 PLANTILLA_COLUMNAS = [
@@ -56,6 +57,7 @@ _HEADERS = {
     "DESCRIPCION": "descripcion",
     "CODIGO": "codigo",
     "CLAVE": "codigo",
+    "CLAVESAE": "codigo",       # exports de SAE ASPEL
     "SKU": "codigo",
     "UNIDAD": "unidad",
     "PRESENTACION": "unidad",
@@ -80,6 +82,26 @@ def _decimal(v) -> Optional[Decimal]:
         return d if d >= 0 else None
     except InvalidOperation:
         return None
+
+
+# Variantes de unidad de venta → unidad canónica del sistema.
+_UNIDADES_CANON = {
+    "KILOGRAMO": "KILO", "KILOGRAMOS": "KILO", "KILOS": "KILO", "KG": "KILO", "KGS": "KILO",
+    "PZ": "PIEZA", "PZA": "PIEZA", "PZAS": "PIEZA", "PIEZAS": "PIEZA", "PZS": "PIEZA",
+    "LT": "LITRO", "LTS": "LITRO", "L": "LITRO", "LITROS": "LITRO",
+    "ML": "MILILITRO", "MILILITROS": "MILILITRO",
+    "GR": "GRAMO", "GRS": "GRAMO", "GRAMOS": "GRAMO", "G": "GRAMO",
+    "MJ": "MANOJO", "MANOJOS": "MANOJO",
+    "CJ": "CAJA", "CJA": "CAJA", "CAJAS": "CAJA",
+    "PAQ": "PAQUETE", "PAQUETES": "PAQUETE",
+    "BOLSAS": "BOLSA", "COSTALES": "COSTAL", "BULTOS": "BULTO",
+    "DOC": "DOCENA", "DOCENAS": "DOCENA", "MALLAS": "MALLA", "REJAS": "REJA",
+}
+
+
+def normalizar_unidad(u: str) -> str:
+    s = (u or "").strip().upper()
+    return _UNIDADES_CANON.get(s, s)
 
 
 def _leer_tabla(data: bytes, filename: str):
@@ -109,7 +131,13 @@ def parsear_plantilla(data: bytes, filename: str) -> Optional[list[dict]]:
         if campo and campo not in cols.values():
             cols[i] = campo
     if "nombre" not in cols.values():
-        return None
+        # Exports estilo SAE: no hay columna NOMBRE, pero la DESCRIPCION es el
+        # nombre del producto (Linea | Clave SAE | Descripcion | Unidad | Precio).
+        desc_idx = next((i for i, c in cols.items() if c == "descripcion"), None)
+        if desc_idx is not None:
+            cols[desc_idx] = "nombre"
+        else:
+            return None
 
     filas: list[dict] = []
     for _, row in df.iterrows():
@@ -122,7 +150,7 @@ def parsear_plantilla(data: bytes, filename: str) -> Optional[list[dict]]:
             "nombre": nombre,
             "codigo": _texto(r.get("codigo")),
             "descripcion": _texto(r.get("descripcion")),
-            "unidad": _texto(r.get("unidad")).upper(),
+            "unidad": normalizar_unidad(_texto(r.get("unidad"))),
             "precio": str(precio) if precio is not None else "",
             "clave_sat": re.sub(r"\D", "", _texto(r.get("clave_sat")))[:8],
             "unidad_sat": _texto(r.get("unidad_sat")).upper()[:3],
@@ -216,8 +244,8 @@ def _tabla_a_texto(data: bytes, filename: str) -> str:
         celdas = [_texto(v) for v in row.tolist()]
         if any(celdas):
             lineas.append("\t".join(celdas))
-        if len(lineas) > MAX_FILAS + 50:   # margen para encabezados/notas
-            raise ImportProductosError(f"Máximo {MAX_FILAS} productos por archivo")
+        if len(lineas) > MAX_FILAS_IA + 50:   # margen para encabezados/notas
+            raise ImportProductosError(f"Máximo {MAX_FILAS_IA} productos por archivo con IA")
     if not lineas:
         raise ImportProductosError("El archivo está vacío")
     return "\n".join(lineas)
@@ -267,7 +295,9 @@ def extraer_con_ia(data: bytes, filename: str) -> list[dict]:
 
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
     try:
-        resp = client.messages.create(
+        # Streaming obligatorio: con max_tokens grandes (cientos de filas) el
+        # SDK rechaza la llamada no-streaming por el límite de 10 minutos.
+        with client.messages.stream(
             model=settings.SAT_AI_MODEL,
             max_tokens=32000,
             system=[{"type": "text", "text": _SYSTEM_EXTRACT,
@@ -275,7 +305,8 @@ def extraer_con_ia(data: bytes, filename: str) -> list[dict]:
             tools=[_TOOL_EXTRACT],
             tool_choice={"type": "tool", "name": "registrar_productos"},
             messages=[{"role": "user", "content": content}],
-        )
+        ) as stream:
+            resp = stream.get_final_message()
     except anthropic.APIError as exc:
         logger.warning("extracción IA de productos falló: %s", exc)
         raise ImportProductosError(
@@ -296,7 +327,7 @@ def extraer_con_ia(data: bytes, filename: str) -> list[dict]:
                     "nombre": nombre,
                     "codigo": _texto(p.get("codigo")),
                     "descripcion": _texto(p.get("descripcion")),
-                    "unidad": _texto(p.get("unidad")).upper(),
+                    "unidad": normalizar_unidad(_texto(p.get("unidad"))),
                     "precio": str(precio) if precio is not None else "",
                     "clave_sat": re.sub(r"\D", "", _texto(p.get("clave_sat")))[:8],
                     "unidad_sat": _texto(p.get("unidad_sat")).upper()[:3],
@@ -304,7 +335,7 @@ def extraer_con_ia(data: bytes, filename: str) -> list[dict]:
                 })
     if not filas:
         raise ImportProductosError("La IA no encontró productos en el archivo")
-    return filas[:MAX_FILAS]
+    return filas[:MAX_FILAS_IA]
 
 
 def generar_plantilla() -> bytes:

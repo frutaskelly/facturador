@@ -330,6 +330,7 @@ export type ImportFilaPreview = {
   producto_id?: string | null;     // sugerencia: vincular a este existente
   candidatos: Candidato[];
   ya_vinculado: boolean;           // el cliente ya tiene código/nombre para él
+  duplicada_de?: number | null;    // el archivo repite este producto (fila original)
 };
 export type ImportPreview = { formato: "plantilla" | "ia"; filas: ImportFilaPreview[] };
 export type ImportResult = {

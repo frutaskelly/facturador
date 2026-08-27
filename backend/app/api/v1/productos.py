@@ -48,6 +48,7 @@ from ...services.importar_productos import (
     ImportProductosError,
     extraer_con_ia,
     generar_plantilla,
+    normalizar_unidad,
     parsear_plantilla,
 )
 from ...services.producto_match import (
@@ -281,6 +282,27 @@ def crear_alias(
 
 _TABULARES = ("xlsx", "xls", "csv")
 
+# Palabras que no discriminan producto (calificativos genéricos de listas).
+_STOP_CRUCE = {
+    "de", "del", "la", "el", "los", "las", "a", "en", "con", "y", "o",
+    "primera", "granel", "natural", "fresco", "fresca", "limpio", "limpia",
+    "kg", "kilo", "kilogramo", "pza", "pieza", "pz", "lt", "litro",
+}
+
+
+def _cruce_confiable(nombre_archivo: str, nombre_candidato: str) -> bool:
+    """¿Se puede auto-sugerir VINCULAR un candidato difuso?
+
+    El scorer de búsqueda (token_set_ratio) ignora tokens sobrantes: tecleando
+    "ajo" debe aparecer "AJO EN POLVO". Pero al IMPORTAR esa dirección liga mal:
+    "AJO EN POLVO" del archivo NO es el "AJO" del catálogo. Regla direccional:
+    si el nombre del archivo trae tokens con contenido que el candidato no
+    tiene (es MÁS específico), no se auto-vincula — se deja como "crear" con
+    los candidatos visibles para que el usuario decida en un clic."""
+    qa = {t for t in normalizar(nombre_archivo).split() if t not in _STOP_CRUCE}
+    pa = {t for t in normalizar(nombre_candidato).split() if t not in _STOP_CRUCE}
+    return not (qa - pa)   # sin tokens extra del lado del archivo
+
 
 @router.get("/plantilla-importacion")
 def plantilla_importacion(
@@ -349,10 +371,20 @@ def importar_preview(
                 pc_por_codigo.setdefault(cod, pc)
 
     out: list[ImportFilaPreview] = []
+    vistos: dict[str, int] = {}   # nombre/código normalizado → primera fila
     for n, f in enumerate(filas, start=1):
         codigo = (f.get("codigo") or "").strip()
         sugerido = None
         ya_vinculado = False
+
+        # Duplicados DENTRO del archivo (listas reales repiten renglones): se
+        # marca la repetición para que la UI la omita por default. Mismo nombre
+        # con OTRA unidad no es duplicado (KG vs PZ = dos presentaciones).
+        claves = [f"n:{normalizar(f['nombre'])}|{f.get('unidad') or ''}"] + (
+            [f"c:{codigo.upper()}"] if codigo else [])
+        duplicada_de = next((vistos[k] for k in claves if k in vistos), None)
+        for k in claves:
+            vistos.setdefault(k, n)
 
         # 1) El código del cliente ya está vinculado → ese producto, sin dudar.
         pc = pc_por_codigo.get(codigo.upper()) if codigo else None
@@ -364,10 +396,13 @@ def importar_preview(
         if sugerido is None and codigo and codigo.upper() in por_sku:
             sugerido = por_sku[codigo.upper()].id
 
-        # 3) Cruce por nombre (exacto → alias → difuso).
+        # 3) Cruce por nombre (exacto → alias → difuso). Los difusos solo se
+        #    auto-sugieren si el cruce es confiable en la dirección de importar.
         cands = buscar(db, ctx.tenant_id, f["nombre"], limit=5, prods=catalogo)
         if sugerido is None and cands and cands[0].score >= 80:
-            sugerido = cands[0].producto_id
+            top = cands[0]
+            if top.origen in ("exacto", "alias") or _cruce_confiable(f["nombre"], top.nombre):
+                sugerido = top.producto_id
         if sugerido is not None and not ya_vinculado:
             ya_vinculado = sugerido in pc_por_producto
 
@@ -393,6 +428,7 @@ def importar_preview(
                 for c in cands
             ],
             ya_vinculado=ya_vinculado,
+            duplicada_de=duplicada_de,
         ))
     return ImportPreviewOut(formato=formato, filas=out)
 
@@ -402,6 +438,7 @@ _UNIDAD_A_SAT = {
     "KILO": "KGM", "GRAMO": "GRM", "LITRO": "LTR", "MILILITRO": "MLT",
     "PIEZA": "H87", "CAJA": "XBX", "PAQUETE": "XPK", "BOLSA": "XBG",
     "COSTAL": "XSA", "BULTO": "XSA", "DOCENA": "DPC",
+    "MANOJO": "H87", "MALLA": "XBG", "REJA": "XBX", "ATADO": "H87",
 }
 
 
@@ -459,7 +496,7 @@ def importar_productos(
                         categoria_id=fila.categoria_id,
                         esquema_impuesto_id=fila.esquema_impuesto_id,
                     )
-                    unidad_base = (fila.unidad_base or "").strip().upper() or "KILO"
+                    unidad_base = normalizar_unidad(fila.unidad_base or "") or "KILO"
                     sku = (fila.sku or "").strip()
                     if not sku:
                         siguiente_sku += 1

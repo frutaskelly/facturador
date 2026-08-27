@@ -139,6 +139,8 @@ class ImportFilaPreview(BaseModel):
     candidatos: list[CandidatoOut] = Field(default_factory=list)
     # El cliente elegido ya tiene código/nombre guardado para ese producto.
     ya_vinculado: bool = False
+    # El archivo repite este producto (mismo nombre o código): fila original.
+    duplicada_de: Optional[int] = None
 
 
 class ImportPreviewOut(BaseModel):
@@ -168,7 +170,7 @@ class ImportIn(BaseModel):
     cliente_id: Optional[uuid.UUID] = None
     guardar_precios: bool = False
     lista_id: Optional[uuid.UUID] = None          # default: la lista del cliente
-    filas: list[ImportFilaIn] = Field(min_length=1, max_length=500)
+    filas: list[ImportFilaIn] = Field(min_length=1, max_length=2000)
 
 
 class ImportErrorFila(BaseModel):

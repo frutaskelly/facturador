@@ -331,3 +331,76 @@ def test_catalogo_cliente_crud(client, env, auth_as):
     r = client.put(f"{base}/{env['prod_id']}", headers=_hdr(env["tomador"]),
                    json={"codigo_cliente": "X"})
     assert r.status_code == 403
+
+
+def test_preview_formato_sae_sin_ia(client, env, auth_as):
+    """Export SAE: Linea | Clave SAE | Descripcion | Unidad | Precio — la
+    DESCRIPCION es el nombre y se parsea determinista (sin IA)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["Linea", "Clave SAE", "Descripcion", "Unidad", "Precio"],
+        ["ABARR", "ACEI-ACEI-639", "ACEITE COMESTIBLE 20 LT CRISTAL", "PIEZA", "935.4"],
+        ["SECOS", "TAMA-FRUT-437", "TAMARINDO", "KILOGRAMO", "94.5"],
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista_sae.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["formato"] == "plantilla"
+    f1, f2 = body["filas"]
+    assert f1["nombre"] == "ACEITE COMESTIBLE 20 LT CRISTAL"
+    assert f1["codigo"] == "ACEI-ACEI-639"
+    assert f2["unidad"] == "KILO"   # KILOGRAMO normalizado
+
+
+def test_preview_marca_duplicados_del_archivo(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["NOMBRE", "UNIDAD", "PRECIO"],
+        ["ESPARRAGOS", "KILO", "264"],
+        ["ESPARRAGOS", "KILO", "264"],          # repetida → omitir por default
+        ["PAPAYA MARADOL", "KILO", "43.5"],
+        ["PAPAYA MARADOL", "PIEZA", "43.5"],    # otra unidad → NO es duplicado
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    f = r.json()["filas"]
+    assert f[0]["duplicada_de"] is None
+    assert f[1]["duplicada_de"] == 1
+    assert f[2]["duplicada_de"] is None
+    assert f[3]["duplicada_de"] is None   # KG vs PZ = dos presentaciones
+
+
+def test_preview_difuso_direccional(client, env, auth_as):
+    """'AJO EN POLVO' NO se auto-vincula al 'AJO' del catálogo (más específico);
+    'AJO DE PRIMERA' sí (solo calificativos genéricos de más)."""
+    db = SessionLocal()
+    try:
+        db.add(Producto(tenant_id=env["tenant_id"], sku="00000020", nombre="AJO",
+                        clave_sat="50403700", unidad_sat="KGM"))
+        db.commit()
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["NOMBRE", "UNIDAD"],
+        ["AJO EN POLVO", "KILO"],
+        ["AJO DE PRIMERA", "KILO"],
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    f1, f2 = r.json()["filas"]
+    assert f1["producto_id"] is None            # más específico → crear
+    assert any(c["nombre"] == "AJO" for c in f1["candidatos"])  # pero se ofrece
+    assert f2["producto_id"] is not None        # calificativo genérico → vincular
