@@ -16,6 +16,39 @@ const config: CrudConfig<Categoria> = {
     { header: "Nombre", cell: (c) => c.nombre },
     { header: "Estado", cell: (c) => <Badge tone={c.activo ? "success" : "muted"}>{c.activo ? "Activo" : "Inactivo"}</Badge> },
   ],
+  // Catálogo sugerido para distribución de alimentos: el usuario solo palomea
+  // lo que usa, en vez de teclear una por una. La descripción es opcional.
+  suggestions: {
+    label: "Catálogo sugerido",
+    title: "Categorías sugeridas",
+    hint: "Elige las que uses en tu negocio. Podrás editarlas o agregar más después.",
+    keyOf: (c) => c.nombre.trim().toLowerCase(),
+    items: [
+      ["Frutas", "Fruta fresca de temporada"],
+      ["Verduras", "Verdura y hortaliza fresca"],
+      ["Abarrotes", "Despensa y productos secos"],
+      ["Lácteos", "Leche, queso, crema y yogurt"],
+      ["Carnes", "Res, cerdo, pollo y pavo"],
+      ["Embutidos", "Jamón, salchicha, tocino y salami"],
+      ["Pescados y mariscos", "Producto del mar fresco y congelado"],
+      ["Panadería", "Pan, tortilla y repostería"],
+      ["Bebidas", "Agua, refrescos y jugos"],
+      ["Botanas y dulces", "Frituras, galletas dulces y confitería"],
+      ["Congelados", "Producto que requiere cadena de frío"],
+      ["Enlatados y conservas", "Producto enlatado o en conserva"],
+      ["Granos y semillas", "Frijol, arroz, lenteja y semillas"],
+      ["Especias y condimentos", "Sal, especias, salsas y aderezos"],
+      ["Aceites y grasas", "Aceite, manteca y mantequilla"],
+      ["Limpieza", "Productos de limpieza e higiene"],
+      ["Desechables", "Platos, vasos, cubiertos y servilletas"],
+      ["Papelería", "Artículos de oficina y papelería"],
+    ].map(([nombre, descripcion]) => ({
+      key: nombre.trim().toLowerCase(),
+      nombre,
+      descripcion,
+      payload: { nombre, descripcion, activo: true },
+    })),
+  },
   fields: [
     { name: "nombre", label: "Nombre", required: true },
     {

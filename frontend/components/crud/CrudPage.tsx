@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -102,6 +102,19 @@ export type CrudConfig<T> = {
    * texto para lectores de pantalla.
    */
   rowLinks?: (row: T) => { href: string; title: string; icon: ReactNode }[];
+  /**
+   * Catálogo SUGERIDO: lista lista para usar que el usuario solo palomea y
+   * agrega (en vez de teclear uno por uno). Las que ya existen salen marcadas
+   * y deshabilitadas, así que se puede volver a abrir sin duplicar nada.
+   */
+  suggestions?: {
+    label: string;
+    title: string;
+    hint?: string;
+    items: { key: string; nombre: string; descripcion?: string; payload: Record<string, unknown> }[];
+    /** Clave con la que se detecta si la sugerencia ya está dada de alta. */
+    keyOf: (row: T) => string;
+  };
   /** Advertencia opcional al eliminar (impacto + alternativa). Si devuelve texto,
    * se muestra en el diálogo de confirmación antes de borrar. */
   deleteWarning?: (row: T) => Promise<string | null>;
@@ -148,6 +161,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
 
   // Campo cuyo catálogo se está creando desde el propio formulario (mini-modal).
   const [inlineFor, setInlineFor] = useState<CrudField | null>(null);
+  const [sugerenciasOpen, setSugerenciasOpen] = useState(false);
   const puedeCrearInline = (f: CrudField) =>
     !f.createInline?.perm || can(me, f.createInline.perm);
 
@@ -328,9 +342,16 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
         subtitle={config.subtitle}
         actions={
           canWrite ? (
-            <Button onClick={openCreate}>
-              <Plus size={16} /> {config.newLabel ?? `Nuevo ${config.title.toLowerCase()}`}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {config.suggestions && (
+                <Button variant="secondary" onClick={() => setSugerenciasOpen(true)}>
+                  <Sparkles size={16} /> {config.suggestions.label}
+                </Button>
+              )}
+              <Button onClick={openCreate}>
+                <Plus size={16} /> {config.newLabel ?? `Nuevo ${config.title.toLowerCase()}`}
+              </Button>
+            </div>
           ) : undefined
         }
       />
@@ -467,6 +488,19 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
             const refrescar = inlineFor.createInline?.refreshes ?? [inlineFor.name];
             await refrescarLookups(refrescar);
             setInlineFor(null);
+          }}
+        />
+      )}
+
+      {config.suggestions && sugerenciasOpen && (
+        <SugerenciasModal
+          spec={config.suggestions}
+          basePath={config.basePath}
+          existentes={new Set(rows.map(config.suggestions.keyOf))}
+          onClose={() => setSugerenciasOpen(false)}
+          onDone={() => {
+            setSugerenciasOpen(false);
+            reload();
           }}
         />
       )}
@@ -646,6 +680,122 @@ function CrearInlineModal({
           </Field>
         ))}
       </div>
+    </Modal>
+  );
+}
+
+/** Catálogo sugerido: el usuario palomea lo que quiere y se da de alta de golpe.
+ *  Lo que ya existe aparece marcado y bloqueado (no se puede duplicar). */
+function SugerenciasModal<T extends { id: string }>({
+  spec,
+  basePath,
+  existentes,
+  onClose,
+  onDone,
+}: {
+  spec: NonNullable<CrudConfig<T>["suggestions"]>;
+  basePath: string;
+  existentes: Set<string>;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const { post } = useMutation();
+  const disponibles = spec.items.filter((i) => !existentes.has(i.key));
+  const [sel, setSel] = useState<Set<string>>(() => new Set(disponibles.map((i) => i.key)));
+  const [busy, setBusy] = useState(false);
+
+  function toggle(key: string) {
+    setSel((s) => {
+      const n = new Set(s);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
+  }
+
+  async function agregar() {
+    const elegidas = disponibles.filter((i) => sel.has(i.key));
+    if (elegidas.length === 0) {
+      toast.error("Selecciona al menos una");
+      return;
+    }
+    setBusy(true);
+    let ok = 0;
+    const fallos: string[] = [];
+    for (const item of elegidas) {
+      try {
+        await post(basePath, item.payload);
+        ok += 1;
+      } catch (e) {
+        fallos.push(`${item.nombre}: ${e instanceof ApiError ? e.message : "error"}`);
+      }
+    }
+    setBusy(false);
+    if (ok > 0) toast.success(`Se agregaron ${ok} de ${elegidas.length}`);
+    if (fallos.length) toast.error(`No se pudieron agregar: ${fallos.slice(0, 3).join(" · ")}`);
+    onDone();
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={spec.title}
+      wide
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
+            Cancelar
+          </Button>
+          <Button onClick={agregar} disabled={busy || sel.size === 0}>
+            {busy ? "Agregando…" : `Agregar ${sel.size}`}
+          </Button>
+        </>
+      }
+    >
+      {spec.hint && <p className="mb-3 text-sm text-muted">{spec.hint}</p>}
+      {disponibles.length === 0 ? (
+        <p className="text-sm text-muted">Ya tienes todas las sugerencias dadas de alta.</p>
+      ) : (
+        <>
+          <div className="mb-2 flex gap-3 text-xs">
+            <button type="button" className="font-medium text-accent hover:underline"
+              onClick={() => setSel(new Set(disponibles.map((i) => i.key)))}>
+              Seleccionar todas
+            </button>
+            <button type="button" className="font-medium text-muted hover:underline"
+              onClick={() => setSel(new Set())}>
+              Ninguna
+            </button>
+          </div>
+          <ul className="divide-y divide-border">
+            {spec.items.map((item) => {
+              const yaEsta = existentes.has(item.key);
+              return (
+                <li key={item.key} className="flex items-start gap-3 py-2">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 shrink-0 accent-[var(--accent)]"
+                    checked={yaEsta || sel.has(item.key)}
+                    disabled={yaEsta || busy}
+                    onChange={() => toggle(item.key)}
+                  />
+                  <div className="min-w-0">
+                    <div className={`text-sm font-medium ${yaEsta ? "text-muted" : ""}`}>
+                      {item.nombre}
+                      {yaEsta && <span className="ml-2 text-xs font-normal text-muted">(ya la tienes)</span>}
+                    </div>
+                    {item.descripcion && (
+                      <div className="text-xs text-muted">{item.descripcion}</div>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
     </Modal>
   );
 }
