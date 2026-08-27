@@ -9,6 +9,7 @@ v2 change: `Precio` carries its own `tenant_id` (the RLS key), instead of
 relying on a join to `listas_precios` for isolation. Cleaner, uniform policy.
 """
 from sqlalchemy import (
+    Boolean,
     Column,
     Date,
     ForeignKey,
@@ -40,6 +41,9 @@ class ListaPrecios(Base, TimestampMixin, SoftDeleteMixin):
     vigencia_hasta = Column(Date)
     moneda = Column(String(3), nullable=False, server_default="MXN")
     notas = Column(Text)
+    # La lista base del negocio (la usan los clientes sin lista propia). La
+    # resolución de precios la prefiere sobre la convención codigo='UNICO'.
+    es_default = Column(Boolean, nullable=False, server_default="false")
 
 
 class Precio(Base):

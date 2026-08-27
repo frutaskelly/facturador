@@ -18,6 +18,7 @@ from .precio import ListaPrecios, Precio
 from .producto import Producto
 from .producto_alias import ProductoAlias
 from .producto_cliente import ProductoCliente
+from .sat_catalogo import SatClaveProdServ, SatClaveUnidad
 from .proveedor import Proveedor
 from .remision import LineaRemision, Remision
 from .role import Role
@@ -39,6 +40,8 @@ __all__ = [
     "Producto",
     "ProductoAlias",
     "ProductoCliente",
+    "SatClaveProdServ",
+    "SatClaveUnidad",
     "ListaPrecios",
     "Precio",
     "Cliente",

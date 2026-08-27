@@ -41,5 +41,8 @@ class ProductoCliente(Base, TimestampMixin):
     codigo_cliente = Column(String(50))
     # Nombre con el que el cliente conoce el producto (Descripcion del CFDI).
     nombre_cliente = Column(String(254))
+    # Unidad con la que ESE cliente compra ("Cilantro por manojo" → MANOJO):
+    # debe existir en las presentaciones del producto. Vacía = la default.
+    presentacion = Column(String(20))
 
     producto = relationship("Producto")

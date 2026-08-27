@@ -134,6 +134,16 @@ class ImportFilaPreview(BaseModel):
     clave_sat: str = ""
     unidad_sat: str = ""
     codigo_barras: str = ""
+    categoria: str = ""
+    esquema: str = ""
+    # ESTATUS BAJA del archivo (SAE): se omite por default, reversible en la UI.
+    baja: bool = False
+    # Validación contra el catálogo SAT oficial (None = campo vacío).
+    clave_sat_valida: Optional[bool] = None
+    unidad_sat_valida: Optional[bool] = None
+    # La fila cruza a un producto existente pero con una unidad que el producto
+    # aún no maneja → ofrecer "agregar presentación" con su factor.
+    nueva_presentacion: bool = False
     # Mejor candidato del cruce (≥ score de confianza) — sugerencia "vincular".
     producto_id: Optional[uuid.UUID] = None
     candidatos: list[CandidatoOut] = Field(default_factory=list)
@@ -151,6 +161,13 @@ class ImportFilaPreview(BaseModel):
 class ImportPreviewOut(BaseModel):
     formato: str                  # "plantilla" (determinista) | "ia"
     filas: list[ImportFilaPreview]
+    # Para las preguntas en LOTE del wizard (una respuesta para todo el archivo):
+    faltan_clave_sat: int = 0         # filas sin clave SAT → P1 sugerida/genérica
+    faltan_unidad_sat: int = 0        # filas sin unidad SAT → P2 sugerida/genérica
+    categorias_nuevas: list[str] = Field(default_factory=list)   # → P3 crearlas o no
+    esquemas_no_encontrados: list[str] = Field(default_factory=list)
+    filas_sin_esquema: int = 0        # → P4 esquema default del lote
+    tiene_precios: bool = False       # → crear/actualizar lista de precios
 
 
 class ImportFilaIn(BaseModel):
@@ -164,7 +181,15 @@ class ImportFilaIn(BaseModel):
     unidad_sat: Optional[str] = Field(default=None, max_length=3)
     codigo_barras: Optional[str] = Field(default=None, max_length=20)
     categoria_id: Optional[uuid.UUID] = None
+    # Nombre de la categoría del archivo (se resuelve/crea según crear_categorias).
+    categoria: Optional[str] = Field(default=None, max_length=100)
     esquema_impuesto_id: Optional[uuid.UUID] = None
+    # Código o nombre del esquema del archivo (IVA16, IVA0…), se cruza por texto.
+    esquema: Optional[str] = Field(default=None, max_length=100)
+    activo: bool = True                          # ESTATUS BAJA importa inactivo
+    # Al VINCULAR con otra unidad: cuántas unidades base trae 1 de esta unidad
+    # ("1 MANOJO = 0.5 KILO"). Solo aplica si la unidad no existe en el producto.
+    presentacion_factor: Optional[Decimal] = Field(default=None, gt=0)
     # Solo cuando la importación es la lista de un cliente:
     codigo_cliente: Optional[str] = Field(default=None, max_length=50)
     nombre_cliente: Optional[str] = Field(default=None, max_length=254)
@@ -175,6 +200,12 @@ class ImportIn(BaseModel):
     cliente_id: Optional[uuid.UUID] = None
     guardar_precios: bool = False
     lista_id: Optional[uuid.UUID] = None          # default: la lista del cliente
+    # Sin cliente y sin lista_id: crear una lista nueva con este nombre.
+    lista_nombre: Optional[str] = Field(default=None, max_length=254)
+    # Pregunta 3 del lote: crear las categorías nuevas que trae el archivo.
+    crear_categorias: bool = False
+    # Pregunta 4: esquema de impuesto para las filas que no traen uno.
+    esquema_default_id: Optional[uuid.UUID] = None
     filas: list[ImportFilaIn] = Field(min_length=1, max_length=2000)
 
 
@@ -189,7 +220,26 @@ class ImportResultOut(BaseModel):
     alias_guardados: int
     precios_guardados: int
     omitidos: int
+    categorias_creadas: int = 0
+    presentaciones_agregadas: int = 0
+    # Lista de precios que recibió los precios (para el paso de asignación).
+    lista_id: Optional[uuid.UUID] = None
+    lista_nombre: Optional[str] = None
     errores: list[ImportErrorFila] = Field(default_factory=list)
+
+
+# ─── Sugerencia SAT en lote (Pregunta 1/2 del wizard) ────────────────────────
+class SugerirSatBatchIn(BaseModel):
+    productos: list[dict] = Field(min_length=1, max_length=2000)
+    # cada item: {"nombre": str, "unidad": str}
+
+
+class SugerenciaSatOut(BaseModel):
+    nombre: str
+    clave_sat: str
+    descripcion_sat: str
+    unidad_sat: str
+    unidad_sat_generica: str
 
 
 # ─── Catálogo del cliente (codigo/nombre por cliente → CFDI) ─────────────────
@@ -199,8 +249,10 @@ class ProductoClienteOut(BaseModel):
     producto_nombre: str
     codigo_cliente: Optional[str] = None
     nombre_cliente: Optional[str] = None
+    presentacion: Optional[str] = None
 
 
 class ProductoClienteUpsert(BaseModel):
     codigo_cliente: Optional[str] = Field(default=None, max_length=50)
     nombre_cliente: Optional[str] = Field(default=None, max_length=254)
+    presentacion: Optional[str] = Field(default=None, max_length=20)

@@ -26,6 +26,8 @@ from ...models import (
     Producto,
     ProductoAlias,
     ProductoCliente,
+    SatClaveProdServ,
+    SatClaveUnidad,
 )
 from ...schemas.producto import (
     AliasIn,
@@ -42,8 +44,11 @@ from ...schemas.producto import (
     ProductoCreate,
     ProductoOut,
     ProductoUpdate,
+    SugerenciaSatOut,
+    SugerirSatBatchIn,
 )
 from ...schemas.common import Page
+from ...services.categoria_codigo import generate_unique_codigo
 from ...services.importar_productos import (
     ImportProductosError,
     extraer_con_ia,
@@ -51,6 +56,7 @@ from ...services.importar_productos import (
     normalizar_unidad,
     parsear_plantilla,
 )
+from ...services.sat_catalogo import sugerir_batch
 from ...services.producto_match import (
     aprender_alias,
     buscar,
@@ -372,6 +378,29 @@ def importar_preview(
     # Cruce contra el catálogo, una sola carga para todas las filas.
     catalogo = productos_activos(db)
     por_sku = {p.sku.strip().upper(): p for p in catalogo if p.sku}
+    por_id = {p.id: p for p in catalogo}
+
+    # Validación en lote contra el catálogo SAT oficial (única fuente).
+    claves_archivo = {f["clave_sat"] for f in filas if f.get("clave_sat")}
+    claves_ok = {
+        c for (c,) in db.query(SatClaveProdServ.clave)
+        .filter(SatClaveProdServ.clave.in_(claves_archivo)).all()
+    } if claves_archivo else set()
+    unidades_archivo = {(f.get("unidad_sat") or "").upper() for f in filas if f.get("unidad_sat")}
+    unidades_ok = {
+        c.upper() for (c,) in db.query(SatClaveUnidad.clave)
+        .filter(SatClaveUnidad.clave.in_(unidades_archivo)).all()
+    } if unidades_archivo else set()
+
+    # Categorías y esquemas del tenant, por nombre/código normalizado.
+    cats_tenant = {
+        normalizar(c.nombre) for c in
+        db.query(CategoriaProducto).filter(CategoriaProducto.deleted_at.is_(None)).all()
+    }
+    esquemas_tenant = set()
+    for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.deleted_at.is_(None)).all():
+        esquemas_tenant.add(normalizar(e.codigo or ""))
+        esquemas_tenant.add(normalizar(e.nombre or ""))
 
     # Lo que el cliente ya tiene vinculado (por producto y por su código).
     pc_por_producto: dict = {}
@@ -428,16 +457,35 @@ def importar_preview(
         if sugerido is not None and not ya_vinculado:
             ya_vinculado = sugerido in pc_por_producto
 
+        # Variante nueva: cruza a un producto existente pero con una unidad que
+        # el producto aún no maneja ("Cilantro" KILO ← fila en MANOJO).
+        nueva_presentacion = False
+        unidad_fila = f.get("unidad") or ""
+        prod_sug = por_id.get(sugerido) if sugerido else None
+        if prod_sug is not None and unidad_fila:
+            conocidas = {(prod_sug.unidad_base or "").upper()} | {
+                str(k).upper() for k in (prod_sug.presentaciones or {})
+            }
+            nueva_presentacion = unidad_fila.upper() not in conocidas
+
+        clave_f = f.get("clave_sat") or ""
+        unidad_sat_f = (f.get("unidad_sat") or "").upper()
         out.append(ImportFilaPreview(
             fila=n,
             nombre=f["nombre"],
             codigo=codigo,
             descripcion=f.get("descripcion") or "",
-            unidad=f.get("unidad") or "",
+            unidad=unidad_fila,
             precio=f.get("precio") or "",
-            clave_sat=f.get("clave_sat") or "",
-            unidad_sat=f.get("unidad_sat") or "",
+            clave_sat=clave_f,
+            unidad_sat=unidad_sat_f,
             codigo_barras=f.get("codigo_barras") or "",
+            categoria=f.get("categoria") or "",
+            esquema=f.get("esquema") or "",
+            baja=(f.get("estatus") or "") in ("BAJA", "INACTIVO", "B"),
+            clave_sat_valida=(clave_f in claves_ok) if clave_f else None,
+            unidad_sat_valida=(unidad_sat_f in unidades_ok) if unidad_sat_f else None,
+            nueva_presentacion=nueva_presentacion,
             producto_id=sugerido,
             candidatos=[
                 CandidatoOut(
@@ -457,15 +505,59 @@ def importar_preview(
     # Dos filas distintas del archivo vinculadas al MISMO producto ("PIMIENTA" y
     # "PIMIENTA BLANCA" → un solo bote): se marca la segunda para revisarla —
     # si se importan ambas, la última pisa el código/nombre/precio del cliente.
+    # EXCEPTO cuando la segunda trae otra unidad: eso es una variante legítima
+    # del mismo producto (Cilantro KILO + Cilantro MANOJO), no un choque.
     primera_por_producto: dict = {}
     for fila in out:
         if fila.producto_id is None or fila.duplicada_de is not None:
             continue
-        if fila.producto_id in primera_por_producto:
-            fila.mismo_producto_que = primera_por_producto[fila.producto_id]
-        else:
+        previa = primera_por_producto.get(fila.producto_id)
+        if previa is not None and not fila.nueva_presentacion:
+            fila.mismo_producto_que = previa
+        elif previa is None:
             primera_por_producto[fila.producto_id] = fila.fila
-    return ImportPreviewOut(formato=formato, filas=out)
+
+    # Meta para las preguntas en LOTE del wizard.
+    activas = [f for f in out if f.duplicada_de is None and not f.baja]
+    cats_nuevas = sorted({
+        f.categoria for f in activas
+        if f.categoria and normalizar(f.categoria) not in cats_tenant
+    })
+    esq_no_encontrados = sorted({
+        f.esquema for f in activas
+        if f.esquema and normalizar(f.esquema) not in esquemas_tenant
+    })
+    return ImportPreviewOut(
+        formato=formato,
+        filas=out,
+        faltan_clave_sat=sum(1 for f in activas if not f.clave_sat),
+        faltan_unidad_sat=sum(1 for f in activas if not f.unidad_sat),
+        categorias_nuevas=cats_nuevas,
+        esquemas_no_encontrados=esq_no_encontrados,
+        filas_sin_esquema=sum(1 for f in activas if not f.esquema),
+        tiene_precios=any(f.precio for f in activas),
+    )
+
+
+@router.post("/sugerir-sat-batch", response_model=list[SugerenciaSatOut])
+def sugerir_sat_batch(
+    payload: SugerirSatBatchIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Pregunta 1/2 del wizard: claves y unidades SAT sugeridas para N productos
+    en una pasada. SOLO devuelve claves que existen en el catálogo SAT oficial
+    cargado en el sistema (la IA elige entre candidatos del catálogo; sin IA,
+    gana el mejor candidato por texto; sin candidatos, la genérica 01010101)."""
+    enforce(f"producto-ia:{ctx.tenant_id}", 120, 3600)
+    productos = [
+        {"nombre": str(p.get("nombre", "")).strip(), "unidad": str(p.get("unidad", "")).strip()}
+        for p in payload.productos
+        if str(p.get("nombre", "")).strip()
+    ]
+    if not productos:
+        raise HTTPException(status_code=422, detail="Sin productos que sugerir")
+    return [SugerenciaSatOut(**s) for s in sugerir_batch(db, productos)]
 
 
 # Unidad de venta capturada → clave SAT de unidad (fallback razonable).
@@ -492,20 +584,53 @@ def importar_productos(
         cliente = get_or_404(db, Cliente, payload.cliente_id)
 
     lista_id = None
+    lista_nombre_out = None
     if payload.guardar_precios:
         lista_id = payload.lista_id or (cliente.lista_precios_id if cliente else None)
+        if lista_id is None and (payload.lista_nombre or "").strip():
+            # Crear la lista aquí mismo (menos pasos): código único desde el
+            # nombre. Si la importación es de un cliente SIN lista, se le asigna.
+            nombre_lista = payload.lista_nombre.strip()
+            base = "".join(ch for ch in nombre_lista.upper() if ch.isalnum())[:20] or "LISTA"
+            codigo_lista = base
+            n = 2
+            while db.query(ListaPrecios.id).filter(ListaPrecios.codigo == codigo_lista).first():
+                sufijo = str(n)
+                codigo_lista = base[: 20 - len(sufijo)] + sufijo
+                n += 1
+            lista = ListaPrecios(tenant_id=ctx.tenant_id, codigo=codigo_lista, nombre=nombre_lista)
+            db.add(lista)
+            db.flush()
+            lista_id = lista.id
+            if cliente is not None and cliente.lista_precios_id is None:
+                cliente.lista_precios_id = lista.id
         if lista_id is None:
             raise HTTPException(
                 status_code=422,
                 detail="Para guardar precios se necesita una lista de precios "
-                       "(el cliente no tiene lista asignada)",
+                       "(elige una, dale un nombre a la nueva, o asigna una al cliente)",
             )
         ensure_fk(db, ListaPrecios, lista_id, "lista_id")
+        lista_nombre_out = db.query(ListaPrecios.nombre).filter(ListaPrecios.id == lista_id).scalar()
+    if payload.esquema_default_id is not None:
+        ensure_fk(db, EsquemaImpuesto, payload.esquema_default_id, "esquema_default_id")
+
+    # Categorías y esquemas del tenant por nombre/código normalizado (para
+    # resolver las columnas CATEGORIA y ESQUEMA del archivo).
+    cats_por_nombre: dict[str, CategoriaProducto] = {}
+    for c in db.query(CategoriaProducto).filter(CategoriaProducto.deleted_at.is_(None)).all():
+        cats_por_nombre.setdefault(normalizar(c.nombre), c)
+    esquemas_por_clave: dict[str, EsquemaImpuesto] = {}
+    for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.deleted_at.is_(None)).all():
+        for k in (e.codigo, e.nombre):
+            if k:
+                esquemas_por_clave.setdefault(normalizar(k), e)
 
     # SKUs secuenciales sin re-consultar el máximo en cada fila.
     siguiente_sku = _max_sku_num(db)
 
     creados = vinculados = alias_guardados = precios_guardados = omitidos = 0
+    categorias_creadas = presentaciones_agregadas = 0
     errores: list[ImportErrorFila] = []
 
     for n, fila in enumerate(payload.filas, start=1):
@@ -514,6 +639,35 @@ def importar_productos(
             continue
         try:
             with db.begin_nested():   # savepoint: una fila mala no tira el lote
+                unidad_fila = normalizar_unidad(fila.unidad_base or "")
+
+                # Categoría: id explícito → nombre del archivo (existente o
+                # creada si el lote lo pidió) → sin categoría.
+                categoria_id = fila.categoria_id
+                if categoria_id is None and (fila.categoria or "").strip():
+                    cat = cats_por_nombre.get(normalizar(fila.categoria))
+                    if cat is None and payload.crear_categorias:
+                        cat = CategoriaProducto(
+                            tenant_id=ctx.tenant_id,
+                            codigo=generate_unique_codigo(db, ctx.tenant_id, fila.categoria),
+                            nombre=fila.categoria.strip(),
+                        )
+                        db.add(cat)
+                        db.flush()
+                        cats_por_nombre[normalizar(cat.nombre)] = cat
+                        categorias_creadas += 1
+                    if cat is not None:
+                        categoria_id = cat.id
+
+                # Esquema: id explícito → código/nombre del archivo → default del lote.
+                esquema_id = fila.esquema_impuesto_id
+                if esquema_id is None and (fila.esquema or "").strip():
+                    esq = esquemas_por_clave.get(normalizar(fila.esquema))
+                    if esq is not None:
+                        esquema_id = esq.id
+                if esquema_id is None:
+                    esquema_id = payload.esquema_default_id
+
                 if fila.accion == "vincular":
                     if fila.producto_id is None:
                         raise ValueError("Falta el producto a vincular")
@@ -524,14 +678,28 @@ def importar_productos(
                     )
                     if prod is None:
                         raise ValueError("Producto a vincular no encontrado")
+                    # Variante nueva del MISMO producto (Cilantro KILO ← MANOJO):
+                    # se agrega la presentación con su factor y su unidad SAT.
+                    conocidas = {(prod.unidad_base or "").upper()} | {
+                        str(k).upper() for k in (prod.presentaciones or {})
+                    }
+                    if unidad_fila and unidad_fila.upper() not in conocidas:
+                        factor = float(fila.presentacion_factor or 1)
+                        sat = (fila.unidad_sat or "").strip().upper() \
+                            or _UNIDAD_A_SAT.get(unidad_fila, prod.unidad_sat)
+                        prod.presentaciones = {
+                            **(prod.presentaciones or {}),
+                            unidad_fila: {"factor": factor, "sat": sat},
+                        }
+                        presentaciones_agregadas += 1
                     vinculados += 1
                 else:  # crear
                     _validate_fks(
                         db,
-                        categoria_id=fila.categoria_id,
-                        esquema_impuesto_id=fila.esquema_impuesto_id,
+                        categoria_id=categoria_id,
+                        esquema_impuesto_id=esquema_id,
                     )
-                    unidad_base = normalizar_unidad(fila.unidad_base or "") or "KILO"
+                    unidad_base = unidad_fila or "KILO"
                     sku = (fila.sku or "").strip()
                     if not sku:
                         siguiente_sku += 1
@@ -541,8 +709,8 @@ def importar_productos(
                         sku=sku,
                         nombre=fila.nombre.strip().upper(),
                         descripcion=(fila.descripcion or "").strip() or None,
-                        categoria_id=fila.categoria_id,
-                        esquema_impuesto_id=fila.esquema_impuesto_id,
+                        categoria_id=categoria_id,
+                        esquema_impuesto_id=esquema_id,
                         clave_sat=(fila.clave_sat or "").strip() or "01010101",
                         unidad_sat=(fila.unidad_sat or "").strip().upper()
                                    or _UNIDAD_A_SAT.get(unidad_base, "KGM"),
@@ -550,13 +718,14 @@ def importar_productos(
                         presentaciones={unidad_base: 1},
                         presentacion_default=unidad_base,
                         codigo_barras=(fila.codigo_barras or "").strip() or None,
+                        activo=fila.activo,
                     )
                     db.add(prod)
                     db.flush()
                     creados += 1
 
                 # Catálogo del cliente: su código → NoIdentificacion, su nombre
-                # → Descripcion del CFDI. Solo si algo viene capturado.
+                # → Descripcion del CFDI, su presentación → cómo le vende.
                 if cliente is not None:
                     codigo_c = (fila.codigo_cliente or "").strip() or None
                     nombre_c = (fila.nombre_cliente or "").strip() or None
@@ -578,6 +747,8 @@ def importar_productos(
                             db.add(pc)
                         pc.codigo_cliente = codigo_c
                         pc.nombre_cliente = nombre_c
+                        if unidad_fila:
+                            pc.presentacion = unidad_fila
                         db.flush()
                         alias_guardados += 1
                         # El cruce también aprende el nombre del cliente.
@@ -587,9 +758,10 @@ def importar_productos(
                                 origen="IMPORT", user_id=ctx.user_id,
                             )
 
-                # Precio → lista de precios del cliente (o la indicada).
+                # Precio → lista indicada, EN la presentación de la fila (el
+                # precio del MANOJO no es el del KILO).
                 if lista_id is not None and fila.precio is not None:
-                    presentacion = prod.presentacion_default or prod.unidad_base or "KILO"
+                    presentacion = unidad_fila or prod.presentacion_default or prod.unidad_base or "KILO"
                     precio_row = (
                         db.query(Precio)
                         .filter(
@@ -618,7 +790,11 @@ def importar_productos(
 
     return ImportResultOut(
         creados=creados, vinculados=vinculados, alias_guardados=alias_guardados,
-        precios_guardados=precios_guardados, omitidos=omitidos, errores=errores,
+        precios_guardados=precios_guardados, omitidos=omitidos,
+        categorias_creadas=categorias_creadas,
+        presentaciones_agregadas=presentaciones_agregadas,
+        lista_id=lista_id, lista_nombre=lista_nombre_out,
+        errores=errores,
     )
 
 

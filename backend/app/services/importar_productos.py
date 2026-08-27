@@ -28,16 +28,20 @@ logger = logging.getLogger(__name__)
 MAX_FILAS = 2000         # tope del camino determinista (plantilla/SAE)
 MAX_FILAS_IA = 500       # tope del camino IA (el output de la extracción cuesta)
 
-# Encabezados de la plantilla oficial (en este orden).
+# Encabezados de la plantilla oficial (en este orden). Compatible con el
+# export de listas de SAE (CLAVE | DESCRIPCIÓN | UNIDAD DE SALIDA | CLAVE SAT |
+# UNIDAD DE SALIDA SAT | PRECIO | CATEGORÍA | ESTATUS).
 PLANTILLA_COLUMNAS = [
-    ("NOMBRE", "Nombre del producto (obligatorio)"),
-    ("CODIGO", "Código del cliente o SKU deseado (opcional)"),
-    ("DESCRIPCION", "Descripción (opcional)"),
-    ("UNIDAD", "Unidad de venta: KILO, PIEZA, CAJA… (opcional)"),
-    ("PRECIO", "Precio de venta (opcional)"),
-    ("CLAVE_SAT", "Clave SAT c_ClaveProdServ, 8 dígitos (opcional)"),
-    ("UNIDAD_SAT", "Clave SAT de unidad: KGM, H87, XBX… (opcional)"),
+    ("DESCRIPCION", "Nombre del producto (obligatorio)"),
+    ("CLAVE", "Código del cliente o SKU deseado (opcional)"),
+    ("UNIDAD", "Unidad de venta: KILO, PIEZA, CAJA… (opcional, default KILO)"),
+    ("PRECIO", "Precio de venta (opcional — crea/actualiza lista de precios)"),
+    ("CLAVE_SAT", "Clave SAT c_ClaveProdServ, 8 dígitos (opcional — sugerida o genérica 01010101)"),
+    ("UNIDAD_SAT", "Clave SAT de unidad: KGM, H87, XBX… (opcional — sugerida o genérica)"),
+    ("CATEGORIA", "Categoría (opcional — se puede crear al importar)"),
+    ("ESQUEMA_IMPUESTO", "Código del esquema de impuesto: IVA16, IVA0… (opcional)"),
     ("CODIGO_BARRAS", "Código de barras EAN/GTIN (opcional)"),
+    ("ESTATUS", "ALTA o BAJA (opcional — BAJA se omite por default)"),
 ]
 
 
@@ -59,12 +63,25 @@ _HEADERS = {
     "CLAVE": "codigo",
     "CLAVESAE": "codigo",       # exports de SAE ASPEL
     "SKU": "codigo",
+    "CLAVESKU": "codigo",
     "UNIDAD": "unidad",
+    "UNIDADDESALIDA": "unidad",  # export SAE
+    "UNIDADDEVENTA": "unidad",
     "PRESENTACION": "unidad",
     "PRECIO": "precio",
     "CLAVESAT": "clave_sat",
     "UNIDADSAT": "unidad_sat",
+    "UNIDADDESALIDASAT": "unidad_sat",   # export SAE
     "CODIGOBARRAS": "codigo_barras",
+    "CATEGORIA": "categoria",
+    "LINEA": "categoria",
+    "ESQUEMA": "esquema",
+    "ESQUEMAIMPUESTO": "esquema",
+    "ESQUEMADEIMPUESTO": "esquema",
+    "ESTATUS": "estatus",
+    "ESTADO": "estatus",
+    # Columnas informativas de los exports que NO deben capturarse:
+    # DESCRIPCIONSAT y DESCRIPCIONUNIDADSAT no están aquí a propósito.
 }
 
 
@@ -146,6 +163,12 @@ def parsear_plantilla(data: bytes, filename: str) -> Optional[list[dict]]:
         if not nombre:
             continue  # filas vacías / totales
         precio = _decimal(r.get("precio"))
+        categoria = _texto(r.get("categoria"))
+        # "— sin categoría —" y similares cuentan como vacío.
+        if "sin categoria" in unicodedata.normalize("NFKD", categoria.lower()).encode(
+            "ascii", "ignore"
+        ).decode():
+            categoria = ""
         filas.append({
             "nombre": nombre,
             "codigo": _texto(r.get("codigo")),
@@ -155,6 +178,9 @@ def parsear_plantilla(data: bytes, filename: str) -> Optional[list[dict]]:
             "clave_sat": re.sub(r"\D", "", _texto(r.get("clave_sat")))[:8],
             "unidad_sat": _texto(r.get("unidad_sat")).upper()[:3],
             "codigo_barras": _texto(r.get("codigo_barras")),
+            "categoria": categoria,
+            "esquema": _texto(r.get("esquema")),
+            "estatus": _texto(r.get("estatus")).upper(),
         })
         if len(filas) > MAX_FILAS:
             raise ImportProductosError(f"Máximo {MAX_FILAS} productos por archivo")
@@ -218,6 +244,7 @@ _TOOL_EXTRACT = {
                         "precio": {"type": "string"},
                         "clave_sat": {"type": "string"},
                         "unidad_sat": {"type": "string"},
+                        "categoria": {"type": "string", "description": "Categoría/línea si la lista la trae; vacío si no."},
                     },
                     "required": ["nombre"],
                 },
@@ -335,6 +362,9 @@ def extraer_con_ia(data: bytes, filename: str) -> list[dict]:
                     "clave_sat": re.sub(r"\D", "", _texto(p.get("clave_sat")))[:8],
                     "unidad_sat": _texto(p.get("unidad_sat")).upper()[:3],
                     "codigo_barras": "",
+                    "categoria": _texto(p.get("categoria")),
+                    "esquema": "",
+                    "estatus": "",
                 })
     if not filas:
         raise ImportProductosError("La IA no encontró productos en el archivo")
@@ -361,8 +391,10 @@ def generar_plantilla() -> bytes:
     ws.column_dimensions["A"].width = 34
 
     ejemplos = [
-        ["JITOMATE SALADETT", "JIT-SAD-001", "", "KILO", "28.50", "50421800", "KGM", ""],
-        ["ACEITE COMESTIBLE 20 LT", "", "Marca Cristal", "PIEZA", "935.40", "50151513", "H87", ""],
+        ["JITOMATE SALADETT", "JIT-SAD-001", "KILO", "28.50", "50406500", "KGM",
+         "FRUTA Y VERDURA", "IVA0", "", "ALTA"],
+        ["ACEITE COMESTIBLE 20 LT CRISTAL", "", "PIEZA", "935.40", "50151513", "H87",
+         "ABARROTE", "IVA0", "", "ALTA"],
     ]
     for r, fila in enumerate(ejemplos, start=2):
         for i, v in enumerate(fila, start=1):

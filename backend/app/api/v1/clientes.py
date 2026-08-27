@@ -192,6 +192,7 @@ def catalogo_cliente(
             producto_nombre=p.nombre,
             codigo_cliente=pc.codigo_cliente,
             nombre_cliente=pc.nombre_cliente,
+            presentacion=pc.presentacion,
         )
         for pc, p in rows
     ]
@@ -229,6 +230,8 @@ def upsert_catalogo_cliente(
         db.add(pc)
     pc.codigo_cliente = codigo
     pc.nombre_cliente = nombre
+    if payload.presentacion is not None:
+        pc.presentacion = payload.presentacion.strip().upper() or None
     db.flush()
     # El cruce de productos también aprende el nombre del cliente.
     if nombre:
@@ -239,6 +242,7 @@ def upsert_catalogo_cliente(
         producto_nombre=prod.nombre,
         codigo_cliente=pc.codigo_cliente,
         nombre_cliente=pc.nombre_cliente,
+        presentacion=pc.presentacion,
     )
 
 

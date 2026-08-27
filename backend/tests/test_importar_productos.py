@@ -16,14 +16,15 @@ from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
 from app.models import (
-    Almacen, Cliente, EsquemaImpuesto, ListaPrecios, Membership, Precio,
-    Producto, ProductoAlias, ProductoCliente, Role, Tenant, User,
+    Almacen, CategoriaProducto, Cliente, EsquemaImpuesto, ListaPrecios,
+    Membership, Precio, Producto, ProductoAlias, ProductoCliente, Role,
+    Tenant, User,
 )
 
 _PURGE = (
     "movimientos_inventario", "lineas_factura", "facturas", "lotes_inventario",
     "producto_clientes", "producto_alias", "precios", "listas_precios",
-    "productos", "esquemas_impuesto", "clientes", "almacenes",
+    "productos", "categorias_producto", "esquemas_impuesto", "clientes", "almacenes",
 )
 
 
@@ -477,3 +478,216 @@ def test_preview_dos_filas_al_mismo_producto(client, env, auth_as):
     assert f1["producto_id"] == f2["producto_id"] and f1["producto_id"] is not None
     assert f1["mismo_producto_que"] is None
     assert f2["mismo_producto_que"] == 1
+
+
+# ─── F1/F2: catálogo SAT en la base + plantilla v2 + preguntas en lote ───────
+def test_sat_catalogo_busqueda(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.get("/api/v1/sat/claves", headers=h, params={"q": "cilantro"})
+    assert r.status_code == 200, r.text
+    claves = {c["clave"] for c in r.json()}
+    assert "50404106" in claves          # "Cilantro" del catálogo oficial
+
+    r = client.get("/api/v1/sat/claves", headers=h, params={"q": "504041"})
+    assert any(c["clave"].startswith("504041") for c in r.json())   # por prefijo
+
+    r = client.get("/api/v1/sat/unidades", headers=h, params={"q": "KGM"})
+    assert r.status_code == 200
+    assert any(u["clave"] == "KGM" for u in r.json())
+
+
+def test_sugerir_sat_batch_solo_catalogo(client, env, auth_as):
+    """Sin IA (tests corren sin API key): gana el mejor candidato del catálogo;
+    sin candidatos, la genérica 01010101. Nunca claves inventadas."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/sugerir-sat-batch", headers=h, json={
+        "productos": [
+            {"nombre": "CILANTRO", "unidad": "KILO"},
+            {"nombre": "ZZZKQJWX INEXISTENTE", "unidad": "PIEZA"},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    s1, s2 = r.json()
+    assert len(s1["clave_sat"]) == 8 and s1["clave_sat"] != "01010101"
+    assert "cilantro" in s1["descripcion_sat"].lower()
+    assert s1["unidad_sat"] == "KGM"
+    assert s2["clave_sat"] == "01010101"
+    assert s2["unidad_sat"] == "H87"
+
+
+def test_preview_sae_completo_y_meta(client, env, auth_as):
+    """Export SAE completo: CATEGORÍA/ESTATUS/UNIDAD DE SALIDA (SAT) mapean;
+    claves validadas contra el catálogo oficial; meta para preguntas en lote."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["CLAVE", "DESCRIPCIÓN", "UNIDAD DE SALIDA", "CLAVE SAT", "UNIDAD DE SALIDA SAT",
+         "PRECIO", "CATEGORÍA", "ESTATUS"],
+        ["ACEI-1", "ACEITE CANOLA 946 ML", "PZ", "50151513", "H87", "47.6", "ABARROTE", "ALTA"],
+        ["XX-2", "PRODUCTO CLAVE MALA", "PZ", "99999999", "ZZZ", "10", "ABARROTE", "ALTA"],
+        ["XX-3", "PRODUCTO SIN CLAVES", "KILOGRAMO", "", "", "5", "— sin categoría —", "ALTA"],
+        ["XX-4", "PRODUCTO DADO DE BAJA", "PZ", "", "", "1", "ABARROTE", "BAJA"],
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("sae.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    f1, f2, f3, f4 = body["filas"]
+    assert f1["clave_sat_valida"] is True and f1["unidad_sat_valida"] is True
+    assert f1["unidad"] == "PIEZA" and f1["categoria"] == "ABARROTE"
+    assert f2["clave_sat_valida"] is False and f2["unidad_sat_valida"] is False
+    assert f3["clave_sat_valida"] is None and f3["categoria"] == ""   # sin categoría
+    assert f3["unidad"] == "KILO"
+    assert f4["baja"] is True
+    # Meta (la fila BAJA no cuenta): 1 sin clave, 1 sin unidad, sí hay precios.
+    assert body["faltan_clave_sat"] == 1
+    assert body["faltan_unidad_sat"] == 1
+    assert body["categorias_nuevas"] == ["ABARROTE"]
+    assert body["tiene_precios"] is True
+
+
+def test_importar_categoria_esquema_y_baja(client, env, auth_as):
+    db = SessionLocal()
+    try:
+        esq = EsquemaImpuesto(tenant_id=env["tenant_id"], codigo="IVA16X",
+                              nombre="IVA 16 import", iva_tasa=Decimal("0.16"))
+        db.add(esq); db.commit()
+        esq_id = str(esq.id)
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/importar", headers=h, json={
+        "crear_categorias": True,
+        "filas": [
+            {"accion": "crear", "nombre": "REFRESCO COLA 600", "unidad_base": "PIEZA",
+             "categoria": "BEBIDAS", "esquema": "IVA16X"},
+            {"accion": "crear", "nombre": "PRODUCTO INACTIVO", "activo": False,
+             "categoria": "BEBIDAS"},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert res["creados"] == 2 and res["categorias_creadas"] == 1
+    db = SessionLocal()
+    try:
+        cat = db.query(CategoriaProducto).filter(
+            CategoriaProducto.tenant_id == env["tenant_id"],
+            CategoriaProducto.nombre == "BEBIDAS").one()
+        p1 = db.query(Producto).filter(
+            Producto.tenant_id == env["tenant_id"],
+            Producto.nombre == "REFRESCO COLA 600").one()
+        assert p1.categoria_id == cat.id
+        assert str(p1.esquema_impuesto_id) == esq_id
+        p2 = db.query(Producto).filter(
+            Producto.tenant_id == env["tenant_id"],
+            Producto.nombre == "PRODUCTO INACTIVO").one()
+        assert p2.activo is False and p2.categoria_id == cat.id
+    finally:
+        db.close()
+
+
+# ─── F3: un producto, varias presentaciones (Cilantro) ───────────────────────
+def test_importar_variante_presentacion(client, env, auth_as):
+    """'Cilantro por manojo 500 grms' del cliente = el MISMO producto CILANTRO
+    con la presentación MANOJO agregada (factor 0.5 KILO) y su precio propio."""
+    db = SessionLocal()
+    try:
+        cil = Producto(tenant_id=env["tenant_id"], sku="00000050", nombre="CILANTRO",
+                       clave_sat="50404106", unidad_sat="KGM", unidad_base="KILO",
+                       presentaciones={"KILO": 1}, presentacion_default="KILO")
+        db.add(cil); db.commit()
+        cil_id = str(cil.id)
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+
+    # El preview detecta la variante nueva.
+    data = _xlsx([["NOMBRE", "UNIDAD", "PRECIO"], ["CILANTRO", "MANOJO", "12.50"]])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false", "cliente_id": env["cli_id"]},
+    )
+    assert r.status_code == 200, r.text
+    f1 = r.json()["filas"][0]
+    assert f1["producto_id"] == cil_id and f1["nueva_presentacion"] is True
+
+    # Importar con el factor confirma la variante.
+    r = client.post("/api/v1/productos/importar", headers=h, json={
+        "cliente_id": env["cli_id"], "guardar_precios": True,
+        "filas": [{
+            "accion": "vincular", "producto_id": cil_id, "nombre": "CILANTRO",
+            "unidad_base": "MANOJO", "presentacion_factor": "0.5",
+            "nombre_cliente": "Cilantro por manojo 500 grms", "precio": "12.50",
+        }],
+    })
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert res["vinculados"] == 1 and res["presentaciones_agregadas"] == 1
+    db = SessionLocal()
+    try:
+        cil = db.query(Producto).filter(Producto.id == uuid.UUID(cil_id)).one()
+        assert cil.presentaciones["MANOJO"] == {"factor": 0.5, "sat": "H87"}
+        pc = db.query(ProductoCliente).filter(
+            ProductoCliente.producto_id == uuid.UUID(cil_id)).one()
+        assert pc.presentacion == "MANOJO"
+        assert pc.nombre_cliente == "Cilantro por manojo 500 grms"
+        precio = db.query(Precio).filter(
+            Precio.lista_id == uuid.UUID(env["lista_id"]),
+            Precio.producto_id == uuid.UUID(cil_id)).one()
+        assert precio.presentacion == "MANOJO"    # el precio es del MANOJO
+    finally:
+        db.close()
+
+
+# ─── F4: crear lista al importar y asignarla (default / clientes) ────────────
+def test_importar_crea_lista_y_se_asigna(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/importar", headers=h, json={
+        "guardar_precios": True, "lista_nombre": "Lista Mayoreo 2026",
+        "filas": [{"accion": "crear", "nombre": "AZUCAR ESTANDAR 50 KG",
+                   "unidad_base": "BULTO", "precio": "1150"}],
+    })
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert res["lista_id"] and res["lista_nombre"] == "Lista Mayoreo 2026"
+    lista_id = res["lista_id"]
+
+    # Asignar: default del negocio + al cliente del fixture.
+    r = client.post(f"/api/v1/listas-precios/{lista_id}/asignar", headers=h,
+                    json={"default": True, "cliente_ids": [env["cli_id"]]})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"default": True, "clientes_asignados": 1}
+    db = SessionLocal()
+    try:
+        lista = db.query(ListaPrecios).filter(ListaPrecios.id == uuid.UUID(lista_id)).one()
+        assert lista.es_default is True
+        cli = db.query(Cliente).filter(Cliente.id == uuid.UUID(env["cli_id"])).one()
+        assert str(cli.lista_precios_id) == lista_id
+        # La resolución de precios la toma como lista base.
+        from app.services.precios import _lista_default
+        # (sesión owner ve todos los tenants; filtra por el nuestro)
+        assert db.query(ListaPrecios).filter(
+            ListaPrecios.tenant_id == env["tenant_id"],
+            ListaPrecios.es_default.is_(True)).count() == 1
+    finally:
+        db.close()
+
+    # Otra lista marcada default → la anterior se limpia (solo una default).
+    r = client.post("/api/v1/productos/importar", headers=h, json={
+        "guardar_precios": True, "lista_nombre": "Lista Menudeo",
+        "filas": [{"accion": "crear", "nombre": "SAL DE MESA 1 KG", "precio": "18"}],
+    })
+    lista2 = r.json()["lista_id"]
+    client.post(f"/api/v1/listas-precios/{lista2}/asignar", headers=h,
+                json={"default": True, "cliente_ids": []})
+    db = SessionLocal()
+    try:
+        defaults = db.query(ListaPrecios).filter(
+            ListaPrecios.tenant_id == env["tenant_id"],
+            ListaPrecios.es_default.is_(True)).all()
+        assert len(defaults) == 1 and str(defaults[0].id) == lista2
+    finally:
+        db.close()

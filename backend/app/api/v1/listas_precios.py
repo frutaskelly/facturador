@@ -17,8 +17,10 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import ListaPrecios, Precio, Producto
+from ...models import Cliente, ListaPrecios, Precio, Producto
 from ...schemas.lista_precios import (
+    ListaAsignarIn,
+    ListaAsignarOut,
     ListaPreciosCreate,
     ListaPreciosOut,
     ListaPreciosUpdate,
@@ -298,3 +300,34 @@ def delete_precio(
     db.delete(obj)
     db.flush()
     return None
+
+
+@router.post("/{lista_id}/asignar", response_model=ListaAsignarOut)
+def asignar_lista(
+    lista_id: UUID,
+    payload: ListaAsignarIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Asignar la lista como DEFAULT del negocio (la usan los clientes sin lista
+    propia) y/o a clientes específicos — el último paso del wizard de
+    importación, también disponible desde la administración de listas."""
+    lista = get_or_404(db, ListaPrecios, lista_id)
+    if payload.default:
+        # Solo puede haber una default: se limpia la anterior.
+        db.query(ListaPrecios).filter(
+            ListaPrecios.es_default.is_(True), ListaPrecios.id != lista.id
+        ).update({"es_default": False})
+        lista.es_default = True
+    asignados = 0
+    for cid in payload.cliente_ids:
+        cli = (
+            db.query(Cliente)
+            .filter(Cliente.id == cid, Cliente.deleted_at.is_(None))
+            .one_or_none()
+        )
+        if cli is not None:
+            cli.lista_precios_id = lista.id
+            asignados += 1
+    db.flush()
+    return ListaAsignarOut(default=lista.es_default, clientes_asignados=asignados)
