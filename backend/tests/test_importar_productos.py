@@ -448,3 +448,32 @@ def test_preview_no_liga_a_procesado(client, env, auth_as):
     f1 = r.json()["filas"][0]
     assert f1["producto_id"] is None        # transformación solo en el candidato
     assert len(f1["candidatos"]) >= 1       # pero se ofrece en el desplegable
+
+
+def test_preview_dos_filas_al_mismo_producto(client, env, auth_as):
+    """'PIMIENTA' y 'PIMIENTA BLANCA' vinculadas al mismo producto: la segunda
+    se marca — si se importan ambas, la última pisa el alias del cliente."""
+    db = SessionLocal()
+    try:
+        db.add(Producto(tenant_id=env["tenant_id"], sku="00000040",
+                        nombre="PIMIENTA BLANCA MEMBERS BOTE 500 GR",
+                        clave_sat="50171800", unidad_sat="H87"))
+        db.commit()
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["NOMBRE", "UNIDAD", "PRECIO"],
+        ["PIMIENTA", "KILO", "224.50"],
+        ["PIMIENTA BLANCA", "KILO", "270.00"],
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    f1, f2 = r.json()["filas"]
+    assert f1["producto_id"] == f2["producto_id"] and f1["producto_id"] is not None
+    assert f1["mismo_producto_que"] is None
+    assert f2["mismo_producto_que"] == 1

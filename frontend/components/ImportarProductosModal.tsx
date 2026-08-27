@@ -309,6 +309,11 @@ export function ImportarProductosModal({
                             : `Repetida (ver fila ${f.duplicada_de})`}
                         </Badge>
                       ) : null}
+                      {f.mismo_producto_que ? (
+                        <Badge tone="warning">
+                          Mismo producto que fila {f.mismo_producto_que}
+                        </Badge>
+                      ) : null}
                     </td>
                     <td className="px-2 py-2 tabular-nums">{f.codigo || "—"}</td>
                     <td className="px-2 py-2 tabular-nums">{f.precio || "—"}</td>

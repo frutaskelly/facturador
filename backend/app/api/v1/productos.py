@@ -453,6 +453,18 @@ def importar_preview(
             duplicada_de=duplicada_de,
             precio_distinto=precio_distinto,
         ))
+
+    # Dos filas distintas del archivo vinculadas al MISMO producto ("PIMIENTA" y
+    # "PIMIENTA BLANCA" → un solo bote): se marca la segunda para revisarla —
+    # si se importan ambas, la última pisa el código/nombre/precio del cliente.
+    primera_por_producto: dict = {}
+    for fila in out:
+        if fila.producto_id is None or fila.duplicada_de is not None:
+            continue
+        if fila.producto_id in primera_por_producto:
+            fila.mismo_producto_que = primera_por_producto[fila.producto_id]
+        else:
+            primera_por_producto[fila.producto_id] = fila.fila
     return ImportPreviewOut(formato=formato, filas=out)
 
 

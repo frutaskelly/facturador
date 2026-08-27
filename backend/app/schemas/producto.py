@@ -143,6 +143,9 @@ class ImportFilaPreview(BaseModel):
     duplicada_de: Optional[int] = None
     # La repetición trae OTRO precio que la fila original — conflicto a revisar.
     precio_distinto: bool = False
+    # Otra fila del archivo ya se vinculó al MISMO producto del catálogo: si se
+    # importan ambas, la última pisa el código/nombre/precio del cliente.
+    mismo_producto_que: Optional[int] = None
 
 
 class ImportPreviewOut(BaseModel):

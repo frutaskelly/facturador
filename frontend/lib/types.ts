@@ -332,6 +332,7 @@ export type ImportFilaPreview = {
   ya_vinculado: boolean;           // el cliente ya tiene código/nombre para él
   duplicada_de?: number | null;    // el archivo repite este producto (fila original)
   precio_distinto?: boolean;       // la repetición trae OTRO precio (conflicto)
+  mismo_producto_que?: number | null; // otra fila ya se vinculó al mismo producto
 };
 export type ImportPreview = { formato: "plantilla" | "ia"; filas: ImportFilaPreview[] };
 export type ImportResult = {
