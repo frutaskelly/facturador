@@ -7,7 +7,7 @@
 // sola pregunta —¿está entrando lo que debe?—, que es lo único que alguien
 // viene a mirar aquí una vez que funciona.
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -17,6 +17,7 @@ import {
   MessageCircle,
   Power,
   RefreshCw,
+  RotateCw,
   X,
 } from "lucide-react";
 
@@ -69,12 +70,23 @@ export default function Page() {
   const [ocupado, setOcupado] = useState(false);
   const [aDesconectar, setADesconectar] = useState<ConexionEstado | null>(null);
   const [aRegenerar, setARegenerar] = useState<ConexionEstado | null>(null);
+  const [refrescando, setRefrescando] = useState(false);
+  // Para saber si la conexión acaba de ponerse en verde mientras mirabas.
+  const eraPendiente = useRef(false);
 
   const reload = useCallback(() => {
     setError(false);
-    apiFetch<ConexionEstado[]>("/api/v1/conexiones")
+    return apiFetch<ConexionEstado[]>("/api/v1/conexiones")
       .then((cs) => {
         setEstados(cs);
+        // El momento en que se pega la clave en WhatsApp: la pantalla se pone en
+        // verde sola y se quita la clave de en medio, sin que nadie recargue.
+        if (eraPendiente.current && cs.some((c) => c.conexion?.estado === "ACTIVA")) {
+          setNueva(null);
+          toast.success("Conectado — Smart Supply ya puede dejar órdenes.");
+        }
+        eraPendiente.current = cs.some((c) => c.conexion?.estado === "PENDIENTE");
+
         if (cs.some((c) => c.conexion && c.conexion.estado !== "REVOCADA")) {
           apiFetch<ActividadConexion[]>("/api/v1/conexiones/SMART_SUPPLY/actividad")
             .then(setActividad)
@@ -84,9 +96,32 @@ export default function Page() {
         }
       })
       .catch(() => setError(true));
-  }, []);
+  }, [toast]);
 
-  useEffect(() => reload(), [reload]);
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  // Se refresca sola. Rápido mientras espera la clave —que es justo cuando estás
+  // viendo la pantalla— y despacio una vez conectada, donde lo único que cambia
+  // son los contadores. En una pestaña de fondo no consulta nada.
+  const esperandoClave = estados?.some((e) => e.conexion?.estado === "PENDIENTE") ?? false;
+  const hayConexion = estados?.some((e) => e.conexion && e.conexion.estado !== "REVOCADA") ?? false;
+  useEffect(() => {
+    if (!esperandoClave && !hayConexion) return;
+    const cada = esperandoClave ? 4000 : 30000;
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      reload();
+    }, cada);
+    return () => clearInterval(id);
+  }, [esperandoClave, hayConexion, reload]);
+
+  async function refrescar() {
+    setRefrescando(true);
+    await reload();
+    setRefrescando(false);
+  }
 
   async function generar(tipo: string) {
     setOcupado(true);
@@ -147,6 +182,12 @@ export default function Page() {
       <PageHeader
         title="Conexiones"
         subtitle="Lo que otros sistemas pueden hacer dentro de tu Facturador"
+        actions={
+          <Button variant="secondary" onClick={refrescar} disabled={refrescando}>
+            <RotateCw size={16} className={refrescando ? "animate-spin" : ""} />
+            Actualizar
+          </Button>
+        }
       />
 
       {estados.map((e) => {
@@ -201,6 +242,11 @@ export default function Page() {
                     deja de servir — nada más se rompe.
                   </Alert>
                 </div>
+
+                <p className="mt-3 flex items-center gap-2 text-sm text-muted">
+                  <RotateCw size={14} className="animate-spin" />
+                  Esperando a que la pegues en Smart Supply… esta pantalla se pone en verde sola.
+                </p>
 
                 <ol className="mt-4 space-y-2.5">
                   {[
