@@ -820,14 +820,18 @@ export default function RemisionesPage() {
   // Carga el detalle de una remisión (usa caché `detalles` si está disponible).
   // ── Importación masiva estilo SAE (Excel → varias remisiones) ──
   type ImportLinea = {
-    clave: string; cantidad: string; precio: string | null;
+    clave: string; cruce: "sku" | "cliente" | "descripcion" | null;
+    descripcion: string | null; unidad: string | null;
+    cantidad: string; precio: string | null;
     producto_id: string | null; producto_nombre: string | null; presentacion: string | null;
-    candidatos: { producto_id: string; sku: string; nombre: string; score: number }[];
+    candidatos: { producto_id: string; sku: string; nombre: string; score: number; origen: string; parecido: number }[];
     omitir?: boolean;
   };
   type ImportGrupo = {
     folio_ref: string; fecha: string | null; su_pedido: string | null; observaciones: string | null;
-    cliente_codigo: string; cliente_id: string | null; cliente_nombre: string | null;
+    cliente_codigo: string; cliente_rfc: string | null;
+    requisicion: string | null; entregar_bodega: string | null;
+    cliente_id: string | null; cliente_nombre: string | null;
     lineas: ImportLinea[];
   };
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -871,8 +875,10 @@ export default function RemisionesPage() {
         }));
         if (!g.cliente_id || lineas.length === 0) { fail += 1; continue; }
         const notas = [
-          `Ref SAE ${g.folio_ref}`,
+          `Ref ${g.folio_ref}`,
+          g.requisicion ? `Req ${g.requisicion}` : null,
           g.su_pedido ? `Su pedido: ${g.su_pedido}` : null,
+          g.entregar_bodega ? `Entregar en bodega: ${g.entregar_bodega}` : null,
           g.observaciones,
         ].filter(Boolean).join(" · ");
         try {
@@ -1770,18 +1776,29 @@ export default function RemisionesPage() {
           {(importGrupos ?? []).map((g, gi) => {
             const cruzadas = g.lineas.filter((l) => l.producto_id && !l.omitir).length;
             const pendientes = g.lineas.filter((l) => !l.producto_id && !l.omitir);
+            const importe = g.lineas
+              .filter((l) => !l.omitir)
+              .reduce((s, l) => s + Number(l.cantidad || 0) * Number(l.precio || 0), 0);
             return (
               <div key={g.folio_ref} className="rounded-xl border border-border p-3">
                 <div className="flex flex-wrap items-center gap-3 text-sm">
-                  <span className="font-medium">Ref SAE {g.folio_ref}</span>
+                  <span className="font-medium">Ref {g.folio_ref}</span>
+                  {g.requisicion && <span className="text-muted">Req {g.requisicion}</span>}
                   {g.fecha && <span className="text-muted">{fmtDate(g.fecha)}</span>}
                   {g.su_pedido && <span className="text-muted">Su pedido: {g.su_pedido}</span>}
-                  <span className="text-muted">· {cruzadas} línea(s) cruzada(s)</span>
+                  {g.entregar_bodega && (
+                    <span className="text-muted">Bodega: {g.entregar_bodega}</span>
+                  )}
+                  <span className="text-muted">
+                    · {g.lineas.length} línea(s), {cruzadas} cruzada(s)
+                    {pendientes.length > 0 ? `, ${pendientes.length} por resolver` : ""}
+                    {" · "}{fmtMoney(importe)}
+                  </span>
                   {g.cliente_id ? (
                     <Badge tone="success">{g.cliente_nombre}</Badge>
                   ) : (
                     <span className="flex items-center gap-2">
-                      <Badge tone="warning">Cliente {g.cliente_codigo} sin cruce</Badge>
+                      <Badge tone="warning">Cliente {g.cliente_rfc ?? g.cliente_codigo} sin cruce</Badge>
                       <Select
                         value=""
                         onChange={(e) => {
@@ -1796,12 +1813,36 @@ export default function RemisionesPage() {
                     </span>
                   )}
                 </div>
-                {pendientes.length > 0 && (
+                {g.observaciones && (
+                  <p className="mt-1 text-xs text-muted">{g.observaciones}</p>
+                )}
+                {(
                   <div className="mt-2 space-y-1">
-                    {g.lineas.map((l, li) => (!l.producto_id && !l.omitir) ? (
+                    {g.lineas.map((l, li) => l.omitir ? (
+                      <div key={`${g.folio_ref}-${li}`} className="flex flex-wrap items-center gap-2 text-sm opacity-50">
+                        <Badge>{l.clave}</Badge>
+                        <span className="text-muted line-through">{l.descripcion ?? "—"}</span>
+                        <span className="text-muted">omitida</span>
+                      </div>
+                    ) : l.producto_id ? (
+                      <div key={`${g.folio_ref}-${li}`} className="flex flex-wrap items-center gap-2 text-sm">
+                        <Badge tone="success">{l.clave}</Badge>
+                        <span>{l.producto_nombre}</span>
+                        {l.cruce === "descripcion" && l.descripcion && (
+                          <span className="text-muted">← {l.descripcion}</span>
+                        )}
+                        <span className="text-muted">
+                          {fmtNumber(l.cantidad)}{l.unidad ? ` ${l.unidad.toLowerCase()}` : ""}
+                          {l.precio ? ` × ${fmtMoney(Number(l.precio))}` : ""}
+                        </span>
+                      </div>
+                    ) : (
                       <div key={`${g.folio_ref}-${li}`} className="flex flex-wrap items-center gap-2 text-sm">
                         <Badge tone="warning">{l.clave}</Badge>
-                        <span className="text-muted">x{fmtNumber(l.cantidad)}</span>
+                        {l.descripcion && <span className="text-muted">{l.descripcion}</span>}
+                        <span className="text-muted">
+                          x{fmtNumber(l.cantidad)}{l.unidad ? ` ${l.unidad.toLowerCase()}` : ""}
+                        </span>
                         <Select
                           value=""
                           onChange={(e) => {
@@ -1826,7 +1867,7 @@ export default function RemisionesPage() {
                           <option value="__omitir__">Omitir esta línea</option>
                         </Select>
                       </div>
-                    ) : null)}
+                    ))}
                   </div>
                 )}
               </div>

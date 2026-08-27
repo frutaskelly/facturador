@@ -13,6 +13,8 @@ FIFO is a later refinement. `cantidad_reservada` ya no se usa (decisión
 from __future__ import annotations
 
 import html as html_mod
+import re
+import unicodedata
 
 from datetime import date
 from decimal import Decimal
@@ -20,6 +22,7 @@ from typing import Optional
 from uuid import UUID
 
 from email_validator import EmailNotValidError, validate_email
+from rapidfuzz import fuzz
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, Field as PydField
 from sqlalchemy import func
@@ -37,6 +40,7 @@ from ...models import (
     ListaPrecios,
     LoteInventario,
     Producto,
+    ProductoCliente,
     Proyecto,
     Remision,
     Sucursal,
@@ -44,8 +48,20 @@ from ...models import (
 )
 from ...services import email as email_service
 from ...services.fiscal import calcular_linea_producto
-from ...services.importar_remisiones import ImportError_, agrupar_por_folio, normalizar_folio, parsear_excel
-from ...services.producto_match import buscar, productos_activos
+from ...services.importar_remisiones import (
+    ImportError_,
+    agrupar_por_folio,
+    normalizar_folio,
+    normalizar_nombre,
+    parsear_excel,
+)
+from ...services.producto_match import (
+    alias_del_tenant,
+    buscar,
+    normalizar,
+    normalizar_catalogo,
+    productos_activos,
+)
 from ...services.precios import resolver_precio
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ...schemas.common import Page
@@ -66,6 +82,17 @@ _READ = "menu:remisiones"
 _WRITE = "remision:gestionar"
 _ZERO = Decimal("0")
 _DUP = "Folio de remisión duplicado"
+
+
+def _norm_codigo(v) -> str:
+    """Clave del cliente comparable: sin espacios, sin acentos y en mayúsculas.
+
+    El master escribe "AJO -FRUT-017" donde el catálogo guarda "AJO-FRUT-017", y
+    la ñ va y viene entre los dos ("PIÑA-FRUT-350" = "PINA-FRUT-350"). El cruce
+    sigue siendo exacto, solo que no castiga el espaciado ni la acentuación.
+    """
+    s = unicodedata.normalize("NFKD", str(v or "")).encode("ascii", "ignore").decode()
+    return re.sub(r"\s+", "", s).upper()
 
 
 def _fiscal_por_producto(db: Session, producto_ids) -> dict:
@@ -591,10 +618,11 @@ def importar_preview(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
-    """Importación masiva estilo SAE: parsea el Excel, agrupa por FOLIO (una
-    remisión por folio del archivo) y cruza cliente (código) y productos (CLAVE/
-    SKU exacto; si no, candidatos del cruce). NO crea nada: la UI muestra el
-    preview, el usuario resuelve lo no cruzado y crea con POST /remisiones."""
+    """Importación masiva (SAE o Master Ordenes): parsea el Excel, agrupa por
+    FOLIO (una remisión por folio del archivo) y cruza cliente (código, RFC o
+    nombre) y productos (CLAVE/SKU exacto; si no, candidatos del cruce). NO crea
+    nada: la UI muestra el preview, el usuario resuelve lo no cruzado y crea con
+    POST /remisiones."""
     _MAX = 5 * 1024 * 1024
     data = archivo.file.read(_MAX + 1)
     if len(data) > _MAX:
@@ -606,39 +634,139 @@ def importar_preview(
     if len(grupos) > 200:
         raise HTTPException(status_code=422, detail="Máximo 200 remisiones por archivo")
 
-    # Cruce de clientes por código (exacto y sin ceros a la izquierda).
+    # Cruce de clientes: código (SAE, exacto y sin ceros a la izquierda), RFC o
+    # nombre normalizado (Master Ordenes trae "RFC Cliente"/"Nombre Cliente").
     clientes = db.query(Cliente).filter(Cliente.deleted_at.is_(None)).all()
     por_codigo: dict[str, Cliente] = {}
+    por_rfc: dict[str, Cliente] = {}
+    por_nombre: dict[str, Cliente] = {}
     for c in clientes:
         cod = (c.codigo or "").strip().upper()
         if cod:
             por_codigo.setdefault(cod, c)
             por_codigo.setdefault(normalizar_folio(cod).upper(), c)
+        rfc = (c.rfc or "").strip().upper()
+        if rfc:
+            por_rfc.setdefault(rfc, c)
+        for nombre in (c.legal_name, getattr(c, "nombre_comercial", None)):
+            nom = normalizar_nombre(nombre)
+            if nom:
+                por_nombre.setdefault(nom, c)
 
     # Cruce de productos por CLAVE = SKU (exacto); si no, candidatos del cruce.
+    # Alias y catálogo normalizado se cargan UNA vez: sin esto, cada línea sin
+    # cruce hace un SELECT de alias y renormaliza el catálogo entero (1,125
+    # líneas del master = minutos contra la base en la nube).
     catalogo = productos_activos(db)
     por_sku = {p.sku.strip().upper(): p for p in catalogo if p.sku}
+    aliases = alias_del_tenant(db)
+    norms = normalizar_catalogo(catalogo)
+    cache_candidatos: dict[tuple, list[dict]] = {}
+    por_id = {p.id: p for p in catalogo}
+    # Código del cliente → producto: el master trae la CLAVE del cliente, no el
+    # SKU propio ("AJO -FRUT-017" vs "00000282"). Es el cruce EXACTO y va antes
+    # que cualquier parecido de texto.
+    #   1) (cliente, código) — lo que ese cliente pidió con esa clave.
+    #   2) (código) a secas — la misma clave usada con otro cliente; el esquema
+    #      de claves es uno solo, así que sirve mientras no apunte a productos
+    #      distintos (ahí se descarta y decide el usuario).
+    por_codigo_cliente: dict[tuple, Producto] = {}
+    por_codigo: dict[str, Optional[Producto]] = {}
+    for pc in db.query(ProductoCliente).all():
+        cod = _norm_codigo(pc.codigo_cliente)
+        prod_pc = por_id.get(pc.producto_id)
+        if not cod or prod_pc is None:
+            continue
+        por_codigo_cliente.setdefault((pc.cliente_id, cod), prod_pc)
+        if cod in por_codigo:
+            if por_codigo[cod] is not None and por_codigo[cod].id != prod_pc.id:
+                por_codigo[cod] = None      # la misma clave en dos productos: ambigua
+        else:
+            por_codigo[cod] = prod_pc
 
     sin_cliente = 0
     sin_producto = 0
     out = []
     for g in grupos:
         cod = str(g["cliente"]).strip().upper()
-        cli = por_codigo.get(cod) or por_codigo.get(normalizar_folio(cod).upper())
+        rfc = str(g.get("cliente_rfc") or "").strip().upper()
+        cli = (
+            por_rfc.get(rfc)
+            or por_codigo.get(cod)
+            or por_codigo.get(normalizar_folio(cod).upper())
+            or por_nombre.get(normalizar_nombre(g["cliente"]))
+        )
         if cli is None:
             sin_cliente += 1
         lineas = []
         for ln in g["lineas"]:
-            prod = por_sku.get(ln["clave"].strip().upper())
+            clave = ln["clave"].strip().upper()
+            cod = _norm_codigo(ln["clave"])
+            prod = por_sku.get(clave)
+            cruce = "sku" if prod else None
+            if prod is None and cli is not None:
+                prod = por_codigo_cliente.get((cli.id, cod))
+                cruce = "cliente" if prod else None
+            if prod is None:
+                prod = por_codigo.get(cod)
+                cruce = "codigo" if prod else None
             candidatos = []
             if prod is None:
                 sin_producto += 1
-                candidatos = [
-                    {"producto_id": c.producto_id, "sku": c.sku, "nombre": c.nombre, "score": c.score}
-                    for c in buscar(db, ctx.tenant_id, ln["clave"], limit=3, prods=catalogo)
-                ]
+                # Candidatos por CLAVE y, si el archivo la trae (Master Ordenes),
+                # también por DESCRIPCION: el nombre cruza mejor que la clave ajena.
+                # El master repite las mismas claves en las 64 órdenes → se cachea
+                # el resultado por (clave, descripción).
+                # La descripción es el texto que describe la mercancía; la
+                # clave es el código del cliente y solo sirve si no hay otra cosa.
+                texto_ref = ln.get("descripcion") or ln["clave"]
+                key = (ln["clave"], ln.get("descripcion"))
+                candidatos = cache_candidatos.get(key)
+                if candidatos is None:
+                    vistos: set = set()
+                    candidatos = []
+                    for texto in key:
+                        if not texto:
+                            continue
+                        for c in buscar(db, ctx.tenant_id, texto, limit=3, prods=catalogo,
+                                        aliases=aliases, norms=norms):
+                            if c.producto_id in vistos:
+                                continue
+                            vistos.add(c.producto_id)
+                            candidatos.append({
+                                "producto_id": c.producto_id, "sku": c.sku,
+                                "nombre": c.nombre, "score": c.score,
+                                "origen": c.origen,
+                                # El score del catálogo premia al SUBCONJUNTO
+                                # ("TOMATE" saca 100 contra "TOMATE SERRANO"),
+                                # necesario porque los nombres vienen cortados a
+                                # 30 caracteres. `parecido` compara los textos
+                                # COMPLETOS y desempata entre esos empates.
+                                "parecido": int(fuzz.ratio(normalizar(texto_ref), normalizar(c.nombre))),
+                            })
+                    candidatos.sort(key=lambda c: (c["score"], c["parecido"]), reverse=True)
+                    candidatos = cache_candidatos[key] = candidatos[:5]
+                # Se cruza solo cuando el mejor candidato es inequívoco: score
+                # máximo del catálogo, parecido real con el texto completo, y
+                # ventaja clara sobre los que empatan en score. Lo dudoso queda
+                # en ámbar para que lo resuelva el usuario.
+                mejor = candidatos[0] if candidatos else None
+                empatados = [c for c in candidatos[1:] if mejor and c["score"] == mejor["score"]]
+                if (
+                    mejor is not None
+                    and mejor["score"] == 100
+                    and mejor["parecido"] >= 60
+                    and all(mejor["parecido"] - c["parecido"] >= 10 for c in empatados)
+                ):
+                    prod = por_id.get(mejor["producto_id"])
+                    if prod is not None:
+                        cruce = "descripcion"
+                        sin_producto -= 1
             lineas.append({
                 "clave": ln["clave"],
+                "cruce": cruce,
+                "descripcion": ln.get("descripcion"),
+                "unidad": ln.get("unidad"),
                 "cantidad": ln["cantidad"],
                 "precio": ln["precio"],
                 "producto_id": prod.id if prod else None,
@@ -652,6 +780,9 @@ def importar_preview(
             "su_pedido": g["su_pedido"],
             "observaciones": g["observaciones"],
             "cliente_codigo": g["cliente"],
+            "cliente_rfc": g.get("cliente_rfc"),
+            "requisicion": g.get("requisicion"),
+            "entregar_bodega": g.get("entregar_bodega"),
             "cliente_id": cli.id if cli else None,
             "cliente_nombre": cli.legal_name if cli else None,
             "lineas": lineas,
