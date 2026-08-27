@@ -184,6 +184,41 @@ export interface paths {
         patch: operations["update_cliente_api_v1_clientes__cliente_id__patch"];
         trace?: never;
     };
+    "/api/v1/clientes/{cliente_id}/catalogo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Catalogo Cliente */
+        get: operations["catalogo_cliente_api_v1_clientes__cliente_id__catalogo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clientes/{cliente_id}/catalogo/{producto_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Upsert Catalogo Cliente */
+        put: operations["upsert_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__put"];
+        post?: never;
+        /** Delete Catalogo Cliente */
+        delete: operations["delete_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cobranza/estado-cuenta/{cliente_id}": {
         parameters: {
             query?: never;
@@ -343,6 +378,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/contacto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Contacto */
+        post: operations["contacto_api_v1_contacto_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conversiones": {
         parameters: {
             query?: never;
@@ -453,6 +505,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/empresa/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Checklist Inicio
+         * @description Primeros pasos para el Dashboard: guía tipo checklist de qué falta para
+         *     empezar a trabajar (fiscal + operativo), calculada de datos vivos.
+         */
+        get: operations["checklist_inicio_api_v1_empresa_checklist_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/empresa/csd": {
         parameters: {
             query?: never;
@@ -471,6 +544,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/empresa/csd/validar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validar Csd Endpoint
+         * @description Prueba LOCAL del CSD (sin tocar Facturama): certifica que el .cer es un
+         *     certificado real y vigente del RFC del emisor, que la contraseña abre el
+         *     .key y que la llave corresponde al certificado. La UI pinta ✓/✗ por campo.
+         */
+        post: operations["validar_csd_endpoint_api_v1_empresa_csd_validar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/empresa/grupo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Empresas Del Grupo
+         * @description Las empresas del usuario, cada una con lo que le falta para facturar.
+         *
+         *     No exige permiso: devuelve exactamente el mismo conjunto que ya ve en el
+         *     switcher del Topbar (sus membresías activas), solo que enriquecido con el
+         *     estado de configuración. La pantalla que lo consume sí está gateada en el menú.
+         */
+        get: operations["empresas_del_grupo_api_v1_empresa_grupo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/empresa/hijas": {
         parameters: {
             query?: never;
@@ -483,13 +602,16 @@ export interface paths {
         /**
          * Crear Empresa Hija
          * @description Crea una empresa HIJA del grupo: otro RFC/razón social del mismo dueño,
-         *     como tenant `SUB` colgado de la raíz del grupo. El creador queda como OWNER
-         *     de la nueva (el switcher del Topbar la muestra al instante).
+         *     como tenant `SUB` colgado de la raíz del grupo (el switcher del Topbar la
+         *     muestra al instante).
+         *
+         *     Pueden crearla el dueño y los administradores (`membership:gestionar`), pero
+         *     quién MANDA en la nueva lo decide `_asignar_membresias_de_la_hija`.
          *
          *     Usa la sesión plana `get_db` a propósito: la política RLS de `tenants`
          *     (id = current_tenant_id) impide insertar OTRO tenant desde la sesión
-         *     scopeada. La única barrera aquí es el código: `parent` sale SIEMPRE de
-         *     ctx.tenant_id (jamás del payload) y se exige ser OWNER.
+         *     scopeada. La barrera aquí es el código: `parent` sale SIEMPRE de
+         *     ctx.tenant_id, jamás del payload.
          */
         post: operations["crear_empresa_hija_api_v1_empresa_hijas_post"];
         delete?: never;
@@ -538,6 +660,95 @@ export interface paths {
         get: operations["onboarding_status_api_v1_empresa_onboarding_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/empresa/{tenant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Empresa Por Id
+         * @description Edita los datos fiscales de CUALQUIER empresa del usuario sin cambiarse a
+         *     ella (Ajustes › Empresas › Editar).
+         */
+        put: operations["put_empresa_por_id_api_v1_empresa__tenant_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/empresa/{tenant_id}/color": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Color Empresa
+         * @description Elige el color de la empresa. `null` la devuelve al automático.
+         *
+         *     Vive en `tenants.config` (JSONB) en vez de una columna propia: es una
+         *     preferencia de presentación, no un dato fiscal.
+         */
+        put: operations["put_color_empresa_api_v1_empresa__tenant_id__color_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/empresa/{tenant_id}/csd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Listar Csd Por Id
+         * @description Sellos cargados de esa empresa (solo los de SU RFC).
+         */
+        get: operations["listar_csd_por_id_api_v1_empresa__tenant_id__csd_get"];
+        put?: never;
+        /**
+         * Subir Csd Por Id
+         * @description Sube el sello de CUALQUIER empresa del usuario desde la lista, sin
+         *     cambiarse a ella (Ajustes › Empresas › Editar › Sello digital).
+         */
+        post: operations["subir_csd_por_id_api_v1_empresa__tenant_id__csd_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/empresa/{tenant_id}/csd/validar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validar Csd Por Id
+         * @description Prueba LOCAL del CSD contra el RFC de esa empresa (no toca Facturama).
+         */
+        post: operations["validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -940,6 +1151,28 @@ export interface paths {
         head?: never;
         /** Update Lista */
         patch: operations["update_lista_api_v1_listas_precios__lista_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/listas-precios/{lista_id}/asignar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Asignar Lista
+         * @description Asignar la lista como DEFAULT del negocio (la usan los clientes sin lista
+         *     propia) y/o a clientes específicos — el último paso del wizard de
+         *     importación, también disponible desde la administración de listas.
+         */
+        post: operations["asignar_lista_api_v1_listas_precios__lista_id__asignar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/listas-precios/{lista_id}/copiar": {
@@ -1532,6 +1765,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/importar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Importar Productos
+         * @description Aplica el preview confirmado: crea productos nuevos (SKU automático),
+         *     vincula existentes y, si la lista es de UN cliente, guarda su código/nombre
+         *     en el catálogo del cliente (+ alias para el cruce) y opcionalmente sus
+         *     precios en la lista de precios del cliente.
+         */
+        post: operations["importar_productos_api_v1_productos_importar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/productos/importar-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Importar Preview
+         * @description Archivo → filas estructuradas + cruce contra el catálogo. NO crea nada.
+         *
+         *     Plantilla (trae columna NOMBRE/PRODUCTO) → parseo determinista. Cualquier
+         *     otro acomodo, PDF o foto → IA. Cada fila regresa candidatos del catálogo
+         *     (exacto → alias → difuso) para vincular en vez de duplicar; si se manda
+         *     `cliente_id`, también se marca lo que ese cliente ya tiene vinculado.
+         */
+        post: operations["importar_preview_api_v1_productos_importar_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/match": {
         parameters: {
             query?: never;
@@ -1576,6 +1857,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/plantilla-importacion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Plantilla Importacion
+         * @description Descarga la plantilla oficial .xlsx para el alta masiva de productos.
+         */
+        get: operations["plantilla_importacion_api_v1_productos_plantilla_importacion_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/similares": {
         parameters: {
             query?: never;
@@ -1592,6 +1893,29 @@ export interface paths {
         get: operations["productos_similares_api_v1_productos_similares_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/productos/sugerir-sat-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sugerir Sat Batch
+         * @description Pregunta 1/2 del wizard: claves y unidades SAT sugeridas para N productos
+         *     en una pasada. SOLO devuelve claves que existen en el catálogo SAT oficial
+         *     cargado en el sistema (la IA elige entre candidatos del catálogo; sin IA,
+         *     gana el mejor candidato por texto; sin candidatos, la genérica 01010101).
+         */
+        post: operations["sugerir_sat_batch_api_v1_productos_sugerir_sat_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1946,6 +2270,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sat/claves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Buscar Claves Sat
+         * @description Búsqueda en el catálogo SAT oficial (c_ClaveProdServ) cargado en la base:
+         *     por texto (FTS español + variantes) o por prefijo de clave. Alimenta el
+         *     autocompletar del formulario de producto y del wizard de importación.
+         */
+        get: operations["buscar_claves_sat_api_v1_sat_claves_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sat/sugerir": {
         parameters: {
             query?: never;
@@ -1957,6 +2303,26 @@ export interface paths {
         put?: never;
         /** Sugerir */
         post: operations["sugerir_api_v1_sat_sugerir_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sat/unidades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Buscar Unidades Sat
+         * @description Búsqueda en el catálogo SAT de unidades (c_ClaveUnidad).
+         */
+        get: operations["buscar_unidades_sat_api_v1_sat_unidades_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2208,6 +2574,26 @@ export interface components {
             /** Pesos */
             pesos?: components["schemas"]["PesoLineaIn"][] | null;
         };
+        /** Body_importar_preview_api_v1_productos_importar_preview_post */
+        Body_importar_preview_api_v1_productos_importar_preview_post: {
+            /**
+             * Archivo
+             * Format: binary
+             */
+            archivo: string;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /**
+             * Cliente Ids
+             * @default []
+             */
+            cliente_ids: string[];
+            /**
+             * Usar Ia
+             * @default true
+             */
+            usar_ia: boolean;
+        };
         /** Body_importar_preview_api_v1_remisiones_importar_preview_post */
         Body_importar_preview_api_v1_remisiones_importar_preview_post: {
             /**
@@ -2231,6 +2617,21 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post */
+        Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post: {
+            /**
+             * Cer
+             * Format: binary
+             */
+            cer: string;
+            /**
+             * Key
+             * Format: binary
+             */
+            key: string;
+            /** Password */
+            password: string;
+        };
         /** Body_subir_logo_api_v1_empresa_logo_post */
         Body_subir_logo_api_v1_empresa_logo_post: {
             /**
@@ -2238,6 +2639,36 @@ export interface components {
              * Format: binary
              */
             logo: string;
+        };
+        /** Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post */
+        Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post: {
+            /**
+             * Cer
+             * Format: binary
+             */
+            cer: string;
+            /**
+             * Key
+             * Format: binary
+             */
+            key: string;
+            /** Password */
+            password: string;
+        };
+        /** Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post */
+        Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post: {
+            /**
+             * Cer
+             * Format: binary
+             */
+            cer: string;
+            /**
+             * Key
+             * Format: binary
+             */
+            key: string;
+            /** Password */
+            password: string;
         };
         /** CambiarPasswordIn */
         CambiarPasswordIn: {
@@ -2563,6 +2994,31 @@ export interface components {
             /** Pesos */
             pesos?: components["schemas"]["PesoLinea"][] | null;
         };
+        /** ContactoIn */
+        ContactoIn: {
+            /** Correo */
+            correo?: string | null;
+            /** Empresa */
+            empresa?: string | null;
+            /** Mensaje */
+            mensaje: string;
+            /** Nombre */
+            nombre: string;
+            /** Telefono */
+            telefono?: string | null;
+            /** Turnstile Token */
+            turnstile_token?: string | null;
+            /** Website */
+            website?: string | null;
+        };
+        /** ContactoOut */
+        ContactoOut: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+        };
         /** ConversionCreate */
         ConversionCreate: {
             /**
@@ -2721,6 +3177,8 @@ export interface components {
         };
         /** CorreoConfigOut */
         CorreoConfigOut: {
+            /** Aviso */
+            aviso?: string | null;
             /**
              * Configured
              * @default false
@@ -2835,6 +3293,133 @@ export interface components {
             lineas: components["schemas"]["LineaDevolucionOut"][];
             /** Motivo */
             motivo?: string | null;
+        };
+        /**
+         * EmpresaColorIn
+         * @description `null` devuelve la empresa al color automático.
+         */
+        EmpresaColorIn: {
+            /** Color */
+            color?: string | null;
+        };
+        /** EmpresaColorOut */
+        EmpresaColorOut: {
+            /** Color */
+            color?: string | null;
+        };
+        /**
+         * EmpresaGrupoItem
+         * @description Una empresa del usuario, con lo que le falta para poder facturar.
+         */
+        EmpresaGrupoItem: {
+            /** Color */
+            color?: string | null;
+            /**
+             * Correo
+             * @default false
+             */
+            correo: boolean;
+            /**
+             * Csd
+             * @default false
+             */
+            csd: boolean;
+            /**
+             * Datos Fiscales
+             * @default false
+             */
+            datos_fiscales: boolean;
+            /** Domicilio Fiscal */
+            domicilio_fiscal?: Record<string, never>;
+            /**
+             * Domicilio Fiscal Cp
+             * @default
+             */
+            domicilio_fiscal_cp: string;
+            /**
+             * En Grupo
+             * @default true
+             */
+            en_grupo: boolean;
+            /**
+             * Es Actual
+             * @default false
+             */
+            es_actual: boolean;
+            /**
+             * Es Principal
+             * @default false
+             */
+            es_principal: boolean;
+            /**
+             * Legal Name
+             * @default
+             */
+            legal_name: string;
+            /**
+             * Listo Para Facturar
+             * @default false
+             */
+            listo_para_facturar: boolean;
+            /**
+             * Logo
+             * @default false
+             */
+            logo: boolean;
+            /**
+             * Puede Editar
+             * @default false
+             */
+            puede_editar: boolean;
+            /**
+             * Regimen Fiscal Sat
+             * @default
+             */
+            regimen_fiscal_sat: string;
+            /**
+             * Rfc
+             * @default
+             */
+            rfc: string;
+            /**
+             * Rol
+             * @default
+             */
+            rol: string;
+            /**
+             * Series
+             * @default false
+             */
+            series: boolean;
+            /** Slug */
+            slug: string;
+            /** Tenant Id */
+            tenant_id: string;
+            /**
+             * Trade Name
+             * @default
+             */
+            trade_name: string;
+        };
+        /** EmpresaGrupoOut */
+        EmpresaGrupoOut: {
+            /** Empresas */
+            empresas?: components["schemas"]["EmpresaGrupoItem"][];
+            /**
+             * Grupo Max
+             * @default 0
+             */
+            grupo_max: number;
+            /**
+             * Grupo Total
+             * @default 0
+             */
+            grupo_total: number;
+            /**
+             * Puede Agregar
+             * @default false
+             */
+            puede_agregar: boolean;
         };
         /**
          * EmpresaHijaIn
@@ -3390,6 +3975,224 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImportErrorFila */
+        ImportErrorFila: {
+            /** Error */
+            error: string;
+            /** Fila */
+            fila: number;
+        };
+        /** ImportFilaIn */
+        ImportFilaIn: {
+            /** Accion */
+            accion: string;
+            /**
+             * Activo
+             * @default true
+             */
+            activo: boolean;
+            /** Categoria */
+            categoria?: string | null;
+            /** Categoria Id */
+            categoria_id?: string | null;
+            /** Clave Sat */
+            clave_sat?: string | null;
+            /** Codigo Barras */
+            codigo_barras?: string | null;
+            /** Codigo Cliente */
+            codigo_cliente?: string | null;
+            /** Descripcion */
+            descripcion?: string | null;
+            /** Esquema */
+            esquema?: string | null;
+            /** Esquema Impuesto Id */
+            esquema_impuesto_id?: string | null;
+            /** Nombre */
+            nombre: string;
+            /** Nombre Cliente */
+            nombre_cliente?: string | null;
+            /** Precio */
+            precio?: number | string | null;
+            /** Presentacion Factor */
+            presentacion_factor?: number | string | null;
+            /** Producto Id */
+            producto_id?: string | null;
+            /** Sku */
+            sku?: string | null;
+            /** Unidad Base */
+            unidad_base?: string | null;
+            /** Unidad Sat */
+            unidad_sat?: string | null;
+        };
+        /** ImportFilaPreview */
+        ImportFilaPreview: {
+            /**
+             * Baja
+             * @default false
+             */
+            baja: boolean;
+            /** Candidatos */
+            candidatos?: components["schemas"]["CandidatoOut"][];
+            /**
+             * Categoria
+             * @default
+             */
+            categoria: string;
+            /**
+             * Clave Sat
+             * @default
+             */
+            clave_sat: string;
+            /** Clave Sat Valida */
+            clave_sat_valida?: boolean | null;
+            /**
+             * Codigo
+             * @default
+             */
+            codigo: string;
+            /**
+             * Codigo Barras
+             * @default
+             */
+            codigo_barras: string;
+            /**
+             * Descripcion
+             * @default
+             */
+            descripcion: string;
+            /** Duplicada De */
+            duplicada_de?: number | null;
+            /**
+             * Esquema
+             * @default
+             */
+            esquema: string;
+            /** Fila */
+            fila: number;
+            /** Mismo Producto Que */
+            mismo_producto_que?: number | null;
+            /** Nombre */
+            nombre: string;
+            /**
+             * Nueva Presentacion
+             * @default false
+             */
+            nueva_presentacion: boolean;
+            /**
+             * Precio
+             * @default
+             */
+            precio: string;
+            /**
+             * Precio Distinto
+             * @default false
+             */
+            precio_distinto: boolean;
+            /** Producto Id */
+            producto_id?: string | null;
+            /**
+             * Unidad
+             * @default
+             */
+            unidad: string;
+            /**
+             * Unidad Sat
+             * @default
+             */
+            unidad_sat: string;
+            /** Unidad Sat Valida */
+            unidad_sat_valida?: boolean | null;
+            /**
+             * Ya Vinculado
+             * @default false
+             */
+            ya_vinculado: boolean;
+        };
+        /** ImportIn */
+        ImportIn: {
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Ids */
+            cliente_ids?: string[];
+            /**
+             * Crear Categorias
+             * @default false
+             */
+            crear_categorias: boolean;
+            /** Esquema Default Id */
+            esquema_default_id?: string | null;
+            /** Filas */
+            filas: components["schemas"]["ImportFilaIn"][];
+            /**
+             * Guardar Precios
+             * @default false
+             */
+            guardar_precios: boolean;
+            /** Lista Id */
+            lista_id?: string | null;
+            /** Lista Nombre */
+            lista_nombre?: string | null;
+        };
+        /** ImportPreviewOut */
+        ImportPreviewOut: {
+            /** Categorias Nuevas */
+            categorias_nuevas?: string[];
+            /** Esquemas No Encontrados */
+            esquemas_no_encontrados?: string[];
+            /**
+             * Faltan Clave Sat
+             * @default 0
+             */
+            faltan_clave_sat: number;
+            /**
+             * Faltan Unidad Sat
+             * @default 0
+             */
+            faltan_unidad_sat: number;
+            /** Filas */
+            filas: components["schemas"]["ImportFilaPreview"][];
+            /**
+             * Filas Sin Esquema
+             * @default 0
+             */
+            filas_sin_esquema: number;
+            /** Formato */
+            formato: string;
+            /**
+             * Tiene Precios
+             * @default false
+             */
+            tiene_precios: boolean;
+        };
+        /** ImportResultOut */
+        ImportResultOut: {
+            /** Alias Guardados */
+            alias_guardados: number;
+            /**
+             * Categorias Creadas
+             * @default 0
+             */
+            categorias_creadas: number;
+            /** Creados */
+            creados: number;
+            /** Errores */
+            errores?: components["schemas"]["ImportErrorFila"][];
+            /** Lista Id */
+            lista_id?: string | null;
+            /** Lista Nombre */
+            lista_nombre?: string | null;
+            /** Omitidos */
+            omitidos: number;
+            /** Precios Guardados */
+            precios_guardados: number;
+            /**
+             * Presentaciones Agregadas
+             * @default 0
+             */
+            presentaciones_agregadas: number;
+            /** Vinculados */
+            vinculados: number;
+        };
         /** LineaDevolucionOut */
         LineaDevolucionOut: {
             /** Cantidad */
@@ -3577,10 +4380,35 @@ export interface components {
             /** Producto Nombre */
             producto_nombre?: string | null;
         };
+        /**
+         * ListaAsignarIn
+         * @description Asignar la lista como default del negocio y/o a clientes específicos.
+         */
+        ListaAsignarIn: {
+            /** Cliente Ids */
+            cliente_ids?: string[];
+            /**
+             * Default
+             * @default false
+             */
+            default: boolean;
+        };
+        /** ListaAsignarOut */
+        ListaAsignarOut: {
+            /** Clientes Asignados */
+            clientes_asignados: number;
+            /** Default */
+            default: boolean;
+        };
         /** ListaPreciosCreate */
         ListaPreciosCreate: {
             /** Codigo */
             codigo: string;
+            /**
+             * Es Default
+             * @default false
+             */
+            es_default: boolean;
             /**
              * Moneda
              * @default MXN
@@ -3609,6 +4437,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Es Default
+             * @default false
+             */
+            es_default: boolean;
             /**
              * Id
              * Format: uuid
@@ -3647,6 +4480,8 @@ export interface components {
         ListaPreciosUpdate: {
             /** Codigo */
             codigo?: string | null;
+            /** Es Default */
+            es_default?: boolean | null;
             /** Moneda */
             moneda?: string | null;
             /** Nombre */
@@ -4526,6 +5361,33 @@ export interface components {
             descuento: number | string;
             /** Lineas */
             lineas: components["schemas"]["PreviewLineaIn"][];
+        };
+        /** ProductoClienteOut */
+        ProductoClienteOut: {
+            /** Codigo Cliente */
+            codigo_cliente?: string | null;
+            /** Nombre Cliente */
+            nombre_cliente?: string | null;
+            /** Presentacion */
+            presentacion?: string | null;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Producto Nombre */
+            producto_nombre: string;
+            /** Producto Sku */
+            producto_sku: string;
+        };
+        /** ProductoClienteUpsert */
+        ProductoClienteUpsert: {
+            /** Codigo Cliente */
+            codigo_cliente?: string | null;
+            /** Nombre Cliente */
+            nombre_cliente?: string | null;
+            /** Presentacion */
+            presentacion?: string | null;
         };
         /** ProductoCreate */
         ProductoCreate: {
@@ -5556,6 +6418,24 @@ export interface components {
             /** Telefono */
             telefono?: string | null;
         };
+        /** SugerenciaSatOut */
+        SugerenciaSatOut: {
+            /** Clave Sat */
+            clave_sat: string;
+            /** Descripcion Sat */
+            descripcion_sat: string;
+            /** Nombre */
+            nombre: string;
+            /** Unidad Sat */
+            unidad_sat: string;
+            /** Unidad Sat Generica */
+            unidad_sat_generica: string;
+        };
+        /** SugerirSatBatchIn */
+        SugerirSatBatchIn: {
+            /** Productos */
+            productos: Record<string, never>[];
+        };
         /**
          * SustituirIn
          * @description Crea la factura sustituta (refacturación) como copia de la vieja, ligada a
@@ -6215,6 +7095,109 @@ export interface operations {
             };
         };
     };
+    catalogo_cliente_api_v1_clientes__cliente_id__catalogo_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                cliente_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductoClienteOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                cliente_id: string;
+                producto_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductoClienteUpsert"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductoClienteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                cliente_id: string;
+                producto_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     estado_cuenta_api_v1_cobranza_estado_cuenta__cliente_id__get: {
         parameters: {
             query?: {
@@ -6514,6 +7497,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    contacto_api_v1_contacto_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContactoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactoOut"];
                 };
             };
             /** @description Validation Error */
@@ -6900,6 +7916,37 @@ export interface operations {
             };
         };
     };
+    checklist_inicio_api_v1_empresa_checklist_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listar_csd_api_v1_empresa_csd_get: {
         parameters: {
             query?: never;
@@ -6953,6 +8000,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validar_csd_endpoint_api_v1_empresa_csd_validar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    empresas_del_grupo_api_v1_empresa_grupo_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmpresaGrupoOut"];
                 };
             };
             /** @description Validation Error */
@@ -7116,6 +8229,187 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EmpresaOnboardingOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_empresa_por_id_api_v1_empresa__tenant_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmpresaUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmpresaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_color_empresa_api_v1_empresa__tenant_id__color_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmpresaColorIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmpresaColorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listar_csd_por_id_api_v1_empresa__tenant_id__csd_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    subir_csd_por_id_api_v1_empresa__tenant_id__csd_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -8090,6 +9384,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListaPreciosOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    asignar_lista_api_v1_listas_precios__lista_id__asignar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                lista_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListaAsignarIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListaAsignarOut"];
                 };
             };
             /** @description Validation Error */
@@ -9433,6 +10764,76 @@ export interface operations {
             };
         };
     };
+    importar_productos_api_v1_productos_importar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResultOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    importar_preview_api_v1_productos_importar_preview_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_importar_preview_api_v1_productos_importar_preview_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportPreviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     match_productos_api_v1_productos_match_post: {
         parameters: {
             query?: never;
@@ -9503,6 +10904,37 @@ export interface operations {
             };
         };
     };
+    plantilla_importacion_api_v1_productos_plantilla_importacion_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     productos_similares_api_v1_productos_similares_get: {
         parameters: {
             query: {
@@ -9523,6 +10955,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sugerir_sat_batch_api_v1_productos_sugerir_sat_batch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SugerirSatBatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SugerenciaSatOut"][];
                 };
             };
             /** @description Validation Error */
@@ -10536,6 +12003,40 @@ export interface operations {
             };
         };
     };
+    buscar_claves_sat_api_v1_sat_claves_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     sugerir_api_v1_sat_sugerir_post: {
         parameters: {
             query?: never;
@@ -10558,6 +12059,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SatSugerenciaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    buscar_unidades_sat_api_v1_sat_unidades_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

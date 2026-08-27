@@ -96,3 +96,62 @@ export const METODO_PAGO_OPTS: SatOption[] = [
 export const USO_CFDI_FALLBACK = "G01";
 export const FORMA_PAGO_FALLBACK = "99";
 export const METODO_PAGO_FALLBACK = "PPD";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Emisor: entidades federativas y validación local del RFC. Compartido por
+// Ajustes › Empresas (el panel de edición) y Ajustes › Empresa › Configuración.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Catálogo SAT c_Estado (clave de 3 letras). */
+export const ESTADOS_MX: SatOption[] = [
+  ["AGU", "Aguascalientes"], ["BCN", "Baja California"], ["BCS", "Baja California Sur"],
+  ["CAM", "Campeche"], ["CHP", "Chiapas"], ["CHH", "Chihuahua"], ["COA", "Coahuila"],
+  ["COL", "Colima"], ["CMX", "Ciudad de México"], ["DUR", "Durango"], ["MEX", "Estado de México"],
+  ["GUA", "Guanajuato"], ["GRO", "Guerrero"], ["HID", "Hidalgo"], ["JAL", "Jalisco"],
+  ["MIC", "Michoacán"], ["MOR", "Morelos"], ["NAY", "Nayarit"], ["NLE", "Nuevo León"],
+  ["OAX", "Oaxaca"], ["PUE", "Puebla"], ["QUE", "Querétaro"], ["ROO", "Quintana Roo"],
+  ["SLP", "San Luis Potosí"], ["SIN", "Sinaloa"], ["SON", "Sonora"], ["TAB", "Tabasco"],
+  ["TAM", "Tamaulipas"], ["TLA", "Tlaxcala"], ["VER", "Veracruz"], ["YUC", "Yucatán"],
+  ["ZAC", "Zacatecas"],
+].map(([value, label]) => ({ value, label }));
+
+/** Acepta una clave SAT ("JAL") o un nombre ("Jalisco") y devuelve la clave. */
+export function normalizaEstado(v: string): string {
+  const s = v.trim();
+  if (!s) return "";
+  if (ESTADOS_MX.some((o) => o.value === s)) return s;
+  const byLabel = ESTADOS_MX.find((o) => o.label.toLowerCase() === s.toLowerCase());
+  return byLabel ? byLabel.value : s;
+}
+
+// ── Validación local de RFC: formato + dígito verificador del SAT ──────────
+// Espejo de backend/app/services/rfc.py: el último carácter del RFC es un
+// dígito verificador determinista — atrapa dígitos transpuestos y typos al
+// instante, sin consultar al SAT ni gastar folios.
+const RFC_RE = /^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/;
+const RFC_TABLA = "0123456789ABCDEFGHIJKLMN&OPQRSTUVWXYZ";
+
+function rfcDigitoVerificador(rfcSinDv: string): string {
+  const base = rfcSinDv.padStart(12, " ");
+  let suma = 0;
+  for (let i = 0; i < 12; i++) {
+    const ch = base[i];
+    const val = ch === " " ? 37 : ch === "Ñ" ? 38 : RFC_TABLA.indexOf(ch);
+    suma += (val < 0 ? 0 : val) * (13 - i);
+  }
+  const r = 11 - (suma % 11);
+  return r === 11 ? "0" : r === 10 ? "A" : String(r);
+}
+
+/** ¿Sirve este RFC como EMISOR? (los genéricos del SAT no). */
+export function validarRfcEmisor(rfc: string): { ok: boolean; motivo: string } {
+  const r = rfc.trim().toUpperCase();
+  if (!r) return { ok: false, motivo: "" };
+  if (r === "XAXX010101000" || r === "XEXX010101000")
+    return { ok: false, motivo: "Los RFC genéricos del SAT no pueden ser el emisor" };
+  if (!RFC_RE.test(r))
+    return { ok: false, motivo: "Formato inválido: 3-4 letras + fecha (AAMMDD) + homoclave" };
+  if (rfcDigitoVerificador(r.slice(0, -1)) !== r[r.length - 1])
+    return { ok: false, motivo: "No pasa el dígito verificador del SAT — revisa dígitos transpuestos o la última letra" };
+  return { ok: true, motivo: "" };
+}

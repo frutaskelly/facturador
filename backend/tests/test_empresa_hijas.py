@@ -111,10 +111,32 @@ def test_owner_crea_hija_y_el_switcher_la_ve(client, env, auth_as):
     assert me2["active_tenant"]["is_owner"] is True         # OWNER de la nueva
 
 
-def test_no_owner_no_puede(client, env, auth_as):
+def test_admin_crea_hija_pero_no_se_hace_dueno(client, env, auth_as):
+    """Un administrador puede agregar empresas, pero NO se corona OWNER de la
+    nueva: eso sería una escalada (OWNER bypassa todos los permisos). Entra como
+    ADMIN y el dueño del grupo hereda la empresa."""
     auth_as(env["admin"]); h = _h(env["admin"])
     r = client.post("/api/v1/empresa/hijas", headers=h, json=_payload())
-    assert r.status_code == 403 and "OWNER" in r.json()["detail"]
+    assert r.status_code == 201, r.text
+    hija_id = uuid.UUID(r.json()["tenant_id"])
+
+    db = SessionLocal()
+    try:
+        roles = {
+            (m.user_id): db.query(Role).filter(Role.id == m.role_id).one().nombre
+            for m in db.query(Membership).filter(Membership.tenant_id == hija_id).all()
+        }
+        admin_uid = db.query(User).filter(User.email == env["admin"]["email"]).one().id
+        owner_uid = db.query(User).filter(User.email == env["owner"]["email"]).one().id
+        assert roles[admin_uid] == "ADMIN"
+        assert roles[owner_uid] == "OWNER"
+    finally:
+        db.close()
+
+    # Y para el admin la empresa nueva ya es seleccionable en el switcher.
+    me = client.get("/api/v1/auth/me", headers={"X-Tenant-Id": str(hija_id)}).json()
+    assert me["active_tenant"]["tenant_id"] == str(hija_id)
+    assert me["active_tenant"]["is_owner"] is False
 
 
 def test_rfc_duplicado_409(client, env, auth_as):

@@ -11,14 +11,14 @@ import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 
 import { ApiError, apiFetch } from "./api";
 import { getSupabase } from "./supabaseClient";
-import { ACTIVE_TENANT_KEY, setActiveTenantId } from "./tenant";
+import { esUuid, setActiveTenantId, setTabTenantId, tomarEmpresaDeUrl } from "./tenant";
 
 export type Me = {
   auth_user_id: string;
   user_id: string;
   email: string | null;
   active_tenant: { tenant_id: string; role: string; is_owner: boolean };
-  tenants: { tenant_id: string; slug: string; name: string; role: string }[];
+  tenants: { tenant_id: string; slug: string; name: string; role: string; color: string | null }[];
   permissions: string[];
 };
 
@@ -35,6 +35,15 @@ type AuthState = {
 };
 
 const AuthContext = createContext<AuthState | null>(null);
+
+// `?empresa=` abre una empresa concreta EN ESTA PESTAÑA (el botón "abrir en
+// pestaña nueva" de Ajustes › Empresas, o un enlace compartido). Se lee una sola
+// vez por pestaña y se borra de la URL en cuanto se lee.
+let empresaDeUrl: string | null | undefined;
+function empresaPendiente(): string | null {
+  if (empresaDeUrl === undefined) empresaDeUrl = tomarEmpresaDeUrl();
+  return empresaDeUrl;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -89,7 +98,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Nota: si el selector de empresa guardado ya no es válido, apiFetch se
     // auto-repara (healStaleTenantSelection): limpia la selección y recarga la
     // app completa — aquí solo se refleja el error mientras esa recarga llega.
-    apiFetch<Me>("/api/v1/auth/me")
+    // Si la URL pidió una empresa por id, se aplica ANTES de la primera petición.
+    // Si la pidió por slug hay que resolverlo contra las empresas del usuario,
+    // que solo se conocen tras /auth/me — de ahí la segunda petición.
+    const pedida = empresaPendiente();
+    if (pedida && esUuid(pedida)) setTabTenantId(pedida);
+    const resolverMe = async (): Promise<Me> => {
+      const data = await apiFetch<Me>("/api/v1/auth/me");
+      if (!pedida || esUuid(pedida)) return data;
+      const t = data.tenants.find((x) => x.slug === pedida);
+      // Slug desconocido (o ya es la empresa activa): se ignora en silencio,
+      // igual que un X-Tenant-Id obsoleto — nunca se queda sin cargar la app.
+      if (!t || t.tenant_id === data.active_tenant.tenant_id) return data;
+      setTabTenantId(t.tenant_id);
+      return apiFetch<Me>("/api/v1/auth/me");
+    };
+    resolverMe()
       .then((data) => {
         if (!active) return;
         setMe(data);
@@ -120,21 +144,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Multi-pestaña: si OTRA pestaña cambia la empresa activa (localStorage es
-  // compartido y cada request lee la clave), esta pestaña quedaría mostrando la
-  // empresa vieja mientras sus fetch salen a la nueva — mezcla de datos y
-  // escrituras cruzadas. El evento `storage` solo dispara en las demás
-  // pestañas: recarga dura para reconstruir todo en la empresa nueva.
-  useEffect(() => {
-    if (!me) return;
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === ACTIVE_TENANT_KEY && e.newValue !== e.oldValue) {
-        window.location.assign("/dashboard");
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [me]);
+  // Antes había aquí un listener de `storage` que recargaba LAS DEMÁS pestañas
+  // al cambiar de empresa: hacía falta porque la selección vivía en
+  // localStorage, compartido por todas. Ya no: cada pestaña guarda su empresa en
+  // su propio sessionStorage (lib/tenant.ts), así que dos pestañas pueden estar
+  // en empresas distintas sin pisarse.
 
   const switchTenant = (tenantId: string) => {
     if (tenantId === me?.active_tenant.tenant_id) return;

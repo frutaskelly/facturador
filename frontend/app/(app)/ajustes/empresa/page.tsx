@@ -1,103 +1,165 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Building2, CheckCircle2, Pencil, ShieldCheck, Upload, Check, X } from "lucide-react";
+// Ajustes › Empresas — la lista de las empresas del usuario.
+//
+// Una tarjeta por empresa, con lo que le falta a cada una para poder facturar y
+// sus tres verbos: Editar (panel lateral, sin cambiarte de empresa), Entrar
+// (switch en esta pestaña) y abrir en pestaña nueva. La configuración pesada de
+// una empresa (sello CSD, logo, correo) vive en /ajustes/empresa/configuracion,
+// que siempre actúa sobre la empresa de ESA pestaña.
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
+import {
+  Check,
+  ExternalLink,
+  LogIn,
+  Pencil,
+  Plus,
+  Settings2,
+  ShieldCheck,
+  Wand2,
+  Upload,
+  X,
+} from "lucide-react";
 
+import { AgregarEmpresaModal } from "@/components/AgregarEmpresaModal";
+import { KeyboardCombobox } from "@/components/KeyboardCombobox";
 import { Alert } from "@/components/ui/Alert";
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Field, Input, PasswordInput, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
-import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
-import { OnboardingChecklist, useOnboarding } from "@/components/OnboardingChecklist";
-import { ApiError, apiBaseUrl, apiFetch } from "@/lib/api";
-import { can, useAuth } from "@/lib/auth";
+import { ApiError, apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { COLORES_EMPRESA, colorEmpresa, inicialesEmpresa } from "@/lib/empresa-color";
 import { fmtDate } from "@/lib/format";
-import { REGIMENES_FISCALES } from "@/lib/sat";
-import { getSupabase } from "@/lib/supabaseClient";
-import { tenantHeader } from "@/lib/tenant";
+import { useMutation, useResource } from "@/lib/hooks";
+import { ESTADOS_MX, REGIMENES_FISCALES, normalizaEstado, validarRfcEmisor } from "@/lib/sat";
+import { urlEnEmpresa } from "@/lib/tenant";
+import type { EmpresaGrupo, EmpresasGrupo } from "@/lib/types";
 
-const WRITE = "membership:gestionar";
+const CONFIGURACION = "/ajustes/empresa/configuracion";
 
-// apiFetch fuerza Content-Type JSON, así que los endpoints binarios/multipart
-// (logo GET/POST, CSD POST) usan este fetch crudo con el mismo Bearer token.
-async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const supabase = getSupabase();
-  const { data: { session } } = await supabase.auth.getSession();
-  const headers = new Headers(init.headers);
-  if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
-  tenantHeader(headers);   // misma selección de empresa que apiFetch
-  return fetch(`${apiBaseUrl()}${path}`, { ...init, headers });
+function Cuadro({ color, texto, grande }: { color: string; texto: string; grande?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex shrink-0 items-center justify-center rounded-lg font-semibold text-white ${
+        grande ? "h-9 w-9 text-sm" : "h-5 w-5 rounded-md text-[10px]"
+      }`}
+      style={{ background: color }}
+    >
+      {texto}
+    </span>
+  );
 }
 
-// Respuesta no-ok → ApiError con el `detail` del backend (o el statusText).
-async function toApiError(res: Response): Promise<ApiError> {
-  let detail = res.statusText;
-  try {
-    detail = (await res.json()).detail ?? detail;
-  } catch {
-    /* cuerpo no-JSON */
-  }
-  return new ApiError(res.status, detail);
+function Chip({ ok, children }: { ok: boolean; children: ReactNode }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${
+        ok
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : "border-amber-200 bg-amber-50 text-amber-700"
+      }`}
+    >
+      {ok ? (
+        <Check size={11} strokeWidth={3} />
+      ) : (
+        <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
+      )}
+      {children}
+    </span>
+  );
 }
 
-// ── Validación local de RFC: formato + dígito verificador del SAT ──────────
-// Espejo de backend/app/services/rfc.py: el último carácter del RFC es un
-// dígito verificador determinista — atrapa dígitos transpuestos y typos al
-// instante, sin consultar al SAT ni gastar folios.
-const RFC_RE = /^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/;
-const RFC_TABLA = "0123456789ABCDEFGHIJKLMN&OPQRSTUVWXYZ";
-function rfcDigitoVerificador(rfcSinDv: string): string {
-  const base = rfcSinDv.padStart(12, " ");
-  let suma = 0;
-  for (let i = 0; i < 12; i++) {
-    const ch = base[i];
-    const val = ch === " " ? 37 : ch === "Ñ" ? 38 : RFC_TABLA.indexOf(ch);
-    suma += (val < 0 ? 0 : val) * (13 - i);
-  }
-  const r = 11 - (suma % 11);
-  return r === 11 ? "0" : r === 10 ? "A" : String(r);
+// ── Panel lateral ───────────────────────────────────────────────────────────
+// Misma regla que <Modal>: NO se cierra con Escape ni con clic fuera — cerrarlo
+// por accidente a media captura tira todo lo escrito. Solo Cancelar y la X.
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function PanelLateral({
+  open,
+  onClose,
+  encabezado,
+  children,
+  footer,
+}: {
+  open: boolean;
+  onClose: () => void;
+  encabezado: ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const previo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    panelRef.current?.focus();
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Tab") return;
+      const root = panelRef.current;
+      if (!root) return;
+      const focusables = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (focusables.length === 0) return;
+      const primero = focusables[0];
+      const ultimo = focusables[focusables.length - 1];
+      const activo = document.activeElement;
+      if (!(activo instanceof Node) || !root.contains(activo)) {
+        e.preventDefault();
+        primero.focus();
+      } else if (e.shiftKey && (activo === primero || activo === root)) {
+        e.preventDefault();
+        ultimo.focus();
+      } else if (!e.shiftKey && activo === ultimo) {
+        e.preventDefault();
+        primero.focus();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      previo?.focus();
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end bg-black/30">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+        className="flex h-full w-full max-w-md flex-col border-l border-border bg-background shadow-xl outline-none"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-5 py-3">
+          {encabezado}
+          <button
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="rounded-lg p-1.5 text-muted hover:bg-surface-2"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto px-5 py-4">{children}</div>
+        {footer && (
+          <div className="flex shrink-0 items-center gap-2 border-t border-border px-5 py-3">
+            {footer}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
-function validarRfcEmisor(rfc: string): { ok: boolean; motivo: string } {
-  const r = rfc.trim().toUpperCase();
-  if (!r) return { ok: false, motivo: "" };
-  if (r === "XAXX010101000" || r === "XEXX010101000")
-    return { ok: false, motivo: "Los RFC genéricos del SAT no pueden ser el emisor" };
-  if (!RFC_RE.test(r))
-    return { ok: false, motivo: "Formato inválido: 3-4 letras + fecha (AAMMDD) + homoclave" };
-  if (rfcDigitoVerificador(r.slice(0, -1)) !== r[r.length - 1])
-    return { ok: false, motivo: "No pasa el dígito verificador del SAT — revisa dígitos transpuestos o la última letra" };
-  return { ok: true, motivo: "" };
-}
 
-// Catálogo de entidades federativas (clave de 3 letras del SAT c_Estado).
-const MX_ESTADOS: ComboOption[] = [
-  ["AGU", "Aguascalientes"], ["BCN", "Baja California"], ["BCS", "Baja California Sur"],
-  ["CAM", "Campeche"], ["CHP", "Chiapas"], ["CHH", "Chihuahua"], ["COA", "Coahuila"],
-  ["COL", "Colima"], ["CMX", "Ciudad de México"], ["DUR", "Durango"], ["MEX", "Estado de México"],
-  ["GUA", "Guanajuato"], ["GRO", "Guerrero"], ["HID", "Hidalgo"], ["JAL", "Jalisco"],
-  ["MIC", "Michoacán"], ["MOR", "Morelos"], ["NAY", "Nayarit"], ["NLE", "Nuevo León"],
-  ["OAX", "Oaxaca"], ["PUE", "Puebla"], ["QUE", "Querétaro"], ["ROO", "Quintana Roo"],
-  ["SLP", "San Luis Potosí"], ["SIN", "Sinaloa"], ["SON", "Sonora"], ["TAB", "Tabasco"],
-  ["TAM", "Tamaulipas"], ["TLA", "Tlaxcala"], ["VER", "Veracruz"], ["YUC", "Yucatán"],
-  ["ZAC", "Zacatecas"],
-].map(([value, label]) => ({ value, label }));
-
-type Empresa = {
-  legal_name: string;
-  rfc: string;
-  regimen_fiscal_sat: string;
-  domicilio_fiscal_cp: string;
-  domicilio_fiscal: Record<string, unknown>;
-  has_logo: boolean;
-};
-
+/** Pass-through de Facturama: cada sello trae su serie y su vigencia. */
 type Csd = {
-  Rfc?: string;
-  rfc?: string;
   CsdCerExpirationDate?: string;
   ExpirationDate?: string;
   SerialNumber?: string;
@@ -105,6 +167,7 @@ type Csd = {
   [k: string]: unknown;
 };
 
+// ── Formulario fiscal del panel ─────────────────────────────────────────────
 type FormState = {
   legal_name: string;
   rfc: string;
@@ -114,651 +177,530 @@ type FormState = {
   colonia: string;
   ciudad: string;
   estado: string;
-  pais: string;
 };
-
-const emptyForm = (): FormState => ({
-  legal_name: "",
-  rfc: "",
-  regimen_fiscal_sat: "",
-  domicilio_fiscal_cp: "",
-  calle: "",
-  colonia: "",
-  ciudad: "",
-  estado: "",
-  pais: "",
-});
 
 function str(v: unknown): string {
   return typeof v === "string" ? v : v == null ? "" : String(v);
 }
 
-// Acepta una clave SAT ("JAL") o un nombre ("Jalisco") y devuelve la clave.
-function normalizaEstado(v: string): string {
-  const s = v.trim();
-  if (!s) return "";
-  if (MX_ESTADOS.some((o) => o.value === s)) return s;
-  const byLabel = MX_ESTADOS.find((o) => o.label.toLowerCase() === s.toLowerCase());
-  return byLabel ? byLabel.value : s;
+function formDesde(e: EmpresaGrupo): FormState {
+  const dom = e.domicilio_fiscal ?? {};
+  return {
+    legal_name: e.legal_name,
+    rfc: e.rfc,
+    regimen_fiscal_sat: e.regimen_fiscal_sat,
+    domicilio_fiscal_cp: e.domicilio_fiscal_cp,
+    calle: str(dom.calle),
+    colonia: str(dom.colonia),
+    ciudad: str(dom.ciudad),
+    estado: normalizaEstado(str(dom.estado)),
+  };
 }
 
-export default function EmpresaPage() {
-  const { me } = useAuth();
+export default function EmpresasPage() {
+  const { me, switchTenant, refreshMe } = useAuth();
   const toast = useToast();
-  const canWrite = can(me, WRITE);
+  const { put, loading: guardando } = useMutation();
+  const { data, loading, error, reload, setData } = useResource<EmpresasGrupo>("/api/v1/empresa/grupo");
 
-  const [form, setForm] = useState<FormState>(emptyForm());
-  const [loading, setLoading] = useState(true);
-  // Error real (500/red) al cargar los datos del emisor. Mientras esté activo
-  // el formulario queda bloqueado: guardar con el form vacío sobrescribiría
-  // los datos fiscales reales.
-  const [loadError, setLoadError] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [verifying, setVerifying] = useState(false);
-  // null = sin verificar · true = SAT ok · false = el SAT lo rechazó
-  const [verified, setVerified] = useState<boolean | null>(null);
-  // Modo bloqueado: tras guardar, los campos quedan de solo lectura hasta
-  // confirmar la edición (evita cambios accidentales en datos fiscales).
-  const [locked, setLocked] = useState(false);
-  const [editConfirmOpen, setEditConfirmOpen] = useState(false);
+  const [agregar, setAgregar] = useState(false);
+  const [editando, setEditando] = useState<EmpresaGrupo | null>(null);
+  const [form, setForm] = useState<FormState | null>(null);
 
-  // Recarga el checklist de onboarding tras guardar datos o subir CSD.
-  const [onboardingKey, setOnboardingKey] = useState(0);
-  const { status: onboardingStatus } = useOnboarding(onboardingKey);
-  const ambiente = onboardingStatus?.ambiente ?? "sandbox";
-
-  const [csds, setCsds] = useState<Csd[]>([]);
-
-  // Validación LOCAL del CSD (sin subirlo a Facturama): en cuanto están los 3
-  // datos, el backend prueba cert/llave/contraseña y la UI pinta ✓/✗ por campo.
-  type CsdCheck = {
-    cer_ok: boolean; cer_detalle: string;
-    key_ok: boolean; key_detalle: string;
-    password_ok: boolean; password_detalle: string;
-    par_ok: boolean; par_detalle: string;
-    rfc_cert: string | null; rfc_coincide: boolean | null;
-    vigente: boolean | null; vigencia_fin: string | null;
-    es_fiel: boolean | null; valido: boolean;
-  };
-  const [csdCheck, setCsdCheck] = useState<CsdCheck | null>(null);
-  const [checking, setChecking] = useState(false);
+  // ── Sello digital de la empresa que se está editando ──
+  const [csds, setCsds] = useState<Csd[] | null>(null);
+  const [csdNota, setCsdNota] = useState<string | null>(null);
   const [cerFile, setCerFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
   const [csdPassword, setCsdPassword] = useState("");
-  const [uploading, setUploading] = useState(false);
+  const [subiendo, setSubiendo] = useState(false);
+  const [cambiandoColor, setCambiandoColor] = useState(false);
 
-  // Logo del emisor (para el PDF de las facturas). Se previsualiza vía fetch
-  // autenticado → object URL (el endpoint requiere Bearer, un <img src> no basta).
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
-  const [logoUploading, setLogoUploading] = useState(false);
+  const editandoId = editando?.tenant_id ?? null;
+  useEffect(() => {
+    if (!editandoId) return;
+    let vivo = true;
+    setCsds(null);
+    setCsdNota(null);
+    apiFetch<Csd[]>(`/api/v1/empresa/${editandoId}/csd`)
+      .then((data) => vivo && setCsds(data))
+      .catch((e: unknown) => {
+        if (!vivo) return;
+        setCsds([]);
+        // 503 = Facturama sin configurar: no es un error del usuario.
+        setCsdNota(e instanceof ApiError ? e.message : "No se pudo consultar el sello");
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [editandoId]);
 
-  async function loadLogo() {
+  function abrirEdicion(e: EmpresaGrupo) {
+    setEditando(e);
+    setForm(formDesde(e));
+  }
+
+  function cerrarEdicion() {
+    setEditando(null);
+    setForm(null);
+    setCerFile(null);
+    setKeyFile(null);
+    setCsdPassword("");
+  }
+
+  /** `null` devuelve la empresa al color automático. Se aplica al instante. */
+  async function elegirColor(color: string | null) {
+    if (!editando || cambiandoColor) return;
+    setCambiandoColor(true);
     try {
-      const res = await authFetch("/api/v1/empresa/logo");
-      if (!res.ok) { setLogoUrl((u) => { if (u) URL.revokeObjectURL(u); return null; }); return; }
-      const blob = await res.blob();
-      setLogoUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(blob); });
-    } catch {
-      setLogoUrl(null);
+      await apiFetch(`/api/v1/empresa/${editando.tenant_id}/color`, {
+        method: "PUT",
+        body: JSON.stringify({ color }),
+      });
+      setEditando({ ...editando, color });
+      // Repinta la tarjeta en su lugar: recargar la lista entera cerraría el
+      // sentido de "ver el cambio mientras eliges".
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              empresas: prev.empresas.map((x) =>
+                x.tenant_id === editando.tenant_id ? { ...x, color } : x
+              ),
+            }
+          : prev
+      );
+      if (editando.es_actual) refreshMe(); // el switcher del Topbar
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo cambiar el color");
+    } finally {
+      setCambiandoColor(false);
     }
   }
 
-  function loadCsds() {
-    apiFetch<Csd[]>("/api/v1/empresa/csd")
-      .then((list) => setCsds(Array.isArray(list) ? list : []))
-      .catch(() => setCsds([]));
+  async function subirSello() {
+    if (!editando || !cerFile || !keyFile || !csdPassword) return;
+    const fd = new FormData();
+    fd.append("cer", cerFile);
+    fd.append("key", keyFile);
+    fd.append("password", csdPassword);
+    setSubiendo(true);
+    try {
+      // apiFetch respeta el FormData (no fuerza Content-Type JSON).
+      await apiFetch(`/api/v1/empresa/${editando.tenant_id}/csd`, { method: "POST", body: fd });
+      toast.success(`Sello cargado en ${editando.legal_name}`);
+      setCerFile(null);
+      setKeyFile(null);
+      setCsdPassword("");
+      setCsds(await apiFetch<Csd[]>(`/api/v1/empresa/${editando.tenant_id}/csd`));
+      reload(); // el chip "Sello CSD" de la tarjeta
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo subir el sello");
+    } finally {
+      setSubiendo(false);
+    }
   }
-
-  useEffect(() => {
-    apiFetch<Empresa>("/api/v1/empresa")
-      .then((e) => {
-        const dom = (e.domicilio_fiscal ?? {}) as Record<string, unknown>;
-        setForm({
-          legal_name: e.legal_name || "",
-          rfc: e.rfc || "",
-          regimen_fiscal_sat: e.regimen_fiscal_sat || "",
-          domicilio_fiscal_cp: e.domicilio_fiscal_cp || "",
-          calle: str(dom.calle),
-          colonia: str(dom.colonia),
-          ciudad: str(dom.ciudad),
-          estado: normalizaEstado(str(dom.estado)),
-          // País fijo: siempre México (se ignora cualquier valor guardado distinto).
-          pais: "México",
-        });
-        // Si ya hay datos fiscales guardados, arranca bloqueado.
-        if ((e.legal_name || "").trim() || (e.rfc || "").trim()) setLocked(true);
-      })
-      .catch((e: unknown) => {
-        if (e instanceof ApiError && e.status === 404) {
-          // Sin datos previos: deja el formulario vacío (modo edición).
-          return;
-        }
-        // Error real (500/red): NO tratarlo como "sin datos" — un guardado con
-        // el formulario vacío pisaría los datos fiscales reales del emisor.
-        setLoadError(true);
-      })
-      .finally(() => setLoading(false));
-    loadCsds();
-    loadLogo();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function set(patch: Partial<FormState>) {
-    setForm((f) => ({ ...f, ...patch }));
+    setForm((f) => (f ? { ...f, ...patch } : f));
   }
 
-  // Veredicto local en vivo (formato + dígito verificador), sin gastar folios.
-  const rfcLocal = validarRfcEmisor(form.rfc);
-  const rfcEnRojo = (form.rfc.trim() !== "" && !rfcLocal.ok) || verified === false;
-
-  // Si el RFC está en rojo, el formulario se queda en modo edición solo —
-  // sin que el usuario tenga que dar clic en "Editar".
-  useEffect(() => {
-    if (rfcEnRojo) setLocked(false);
-  }, [rfcEnRojo]);
-
-  async function verificarRfc() {
-    const rfc = form.rfc.trim().toUpperCase();
-    if (!rfc) {
-      toast.error("Captura primero el RFC");
-      return;
-    }
-    if (!rfcLocal.ok) {
-      // Ni siquiera pasa la validación local: no gastar un folio del PAC.
-      setVerified(false);
-      toast.error(rfcLocal.motivo);
-      return;
-    }
-    setVerifying(true);
-    try {
-      const r = await apiFetch<{ FormatoCorrecto: boolean; Activo: boolean; Localizado: boolean }>(
-        `/api/v1/clientes/validar-rfc?rfc=${encodeURIComponent(rfc)}`,
-      );
-      const ok = r.FormatoCorrecto && r.Activo && r.Localizado;
-      setVerified(ok);
-      if (ok) {
-        toast.success("RFC verificado: activo y localizado en el SAT");
-      } else {
-        toast.error(
-          `RFC: formato ${r.FormatoCorrecto ? "ok" : "inválido"}, activo ${r.Activo ? "sí" : "no"}, localizado ${r.Localizado ? "sí" : "no"}`,
-        );
-      }
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo verificar el RFC");
-    } finally {
-      setVerifying(false);
-    }
-  }
+  const rfcCheck = form ? validarRfcEmisor(form.rfc) : { ok: true, motivo: "" };
 
   async function guardar() {
-    if (loadError) {
-      toast.error("No se pudieron cargar los datos actuales; recarga la página antes de guardar");
-      return;
-    }
+    if (!editando || !form) return;
     if (!form.legal_name.trim()) {
       toast.error("La razón social es obligatoria");
       return;
     }
-    if (!form.rfc.trim()) {
-      toast.error("El RFC es obligatorio");
+    if (!rfcCheck.ok) {
+      toast.error(`RFC inválido: ${rfcCheck.motivo}`);
       return;
     }
-    if (!rfcLocal.ok) {
-      toast.error(`RFC inválido: ${rfcLocal.motivo}`);
-      return;
-    }
-    if (!form.domicilio_fiscal_cp.trim()) {
-      toast.error("El código postal es obligatorio");
+    if (!/^\d{5}$/.test(form.domicilio_fiscal_cp.trim())) {
+      toast.error("El código postal debe tener 5 dígitos");
       return;
     }
     const domicilio_fiscal: Record<string, string> = {};
-    for (const k of ["calle", "colonia", "ciudad", "estado", "pais"] as const) {
+    for (const k of ["calle", "colonia", "ciudad", "estado"] as const) {
       const val = form[k].trim();
       if (val) domicilio_fiscal[k] = val;
     }
-    setSaving(true);
     try {
-      await apiFetch<Empresa>("/api/v1/empresa", {
-        method: "PUT",
-        body: JSON.stringify({
-          legal_name: form.legal_name.trim(),
-          rfc: form.rfc.trim().toUpperCase(),
-          regimen_fiscal_sat: form.regimen_fiscal_sat.trim(),
-          domicilio_fiscal_cp: form.domicilio_fiscal_cp.trim(),
-          domicilio_fiscal,
-        }),
+      await put(`/api/v1/empresa/${editando.tenant_id}`, {
+        legal_name: form.legal_name.trim(),
+        rfc: form.rfc.trim().toUpperCase(),
+        regimen_fiscal_sat: form.regimen_fiscal_sat.trim(),
+        domicilio_fiscal_cp: form.domicilio_fiscal_cp.trim(),
+        domicilio_fiscal,
       });
-      toast.success("Datos fiscales guardados");
-      setLocked(true);
-      setOnboardingKey((k) => k + 1);
+      toast.success(`Datos guardados en ${form.legal_name.trim()}`);
+      cerrarEdicion();
+      reload();
+      // El nombre de la empresa activa se pinta desde /auth/me (Topbar, switcher).
+      if (editando.es_actual) refreshMe();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo guardar");
-    } finally {
-      setSaving(false);
     }
   }
 
-  // Corre la prueba local cada que cambian archivo/contraseña (debounce para
-  // no disparar en cada tecla de la contraseña).
-  useEffect(() => {
-    if (!cerFile || !keyFile || !csdPassword) {
-      setCsdCheck(null);
-      return;
-    }
-    let cancelado = false;
-    const t = setTimeout(async () => {
-      setChecking(true);
-      try {
-        const fd = new FormData();
-        fd.append("cer", cerFile);
-        fd.append("key", keyFile);
-        fd.append("password", csdPassword);
-        const res = await authFetch("/api/v1/empresa/csd/validar", { method: "POST", body: fd });
-        if (!res.ok) throw await toApiError(res);
-        const data = (await res.json()) as CsdCheck;
-        if (!cancelado) setCsdCheck(data);
-      } catch {
-        if (!cancelado) setCsdCheck(null);
-      } finally {
-        if (!cancelado) setChecking(false);
-      }
-    }, 600);
-    return () => { cancelado = true; clearTimeout(t); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cerFile, keyFile, csdPassword]);
-
-  // Label de campo del CSD con su veredicto: ✓ verde, ✗ rojo o neutro.
-  function EtiquetaCsd({ texto, ok }: { texto: string; ok: boolean | null }) {
-    return (
-      <span className="mb-1 flex items-center gap-1.5 text-sm font-medium">
-        {texto}
-        {ok === true && <Check size={15} className="text-success" aria-label="válido" />}
-        {ok === false && <X size={15} className="text-danger" aria-label="inválido" />}
-      </span>
-    );
-  }
-
-  async function subirCsd() {
-    if (!cerFile || !keyFile) {
-      toast.error("Selecciona el archivo .cer y el .key");
-      return;
-    }
-    if (!csdPassword) {
-      toast.error("Indica la contraseña de la llave privada");
-      return;
-    }
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("cer", cerFile);
-      fd.append("key", keyFile);
-      fd.append("password", csdPassword);
-      const res = await authFetch("/api/v1/empresa/csd", { method: "POST", body: fd });
-      if (!res.ok) throw await toApiError(res);
-      toast.success("CSD subido correctamente");
-      setCerFile(null);
-      setKeyFile(null);
-      setCsdPassword("");
-      loadCsds();
-      setOnboardingKey((k) => k + 1);
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo subir el CSD");
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  // Sube el logo EN CUANTO se selecciona el archivo (sin botón intermedio):
-  // recibe el File directo del evento para no depender del estado de React.
-  async function subirLogo(file: File) {
-    if (file.size > 2 * 1024 * 1024) {
-      toast.error("La imagen pesa más de 2 MB. Reduce el tamaño e inténtalo de nuevo.");
-      return;
-    }
-    setLogoUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("logo", file);
-      const res = await authFetch("/api/v1/empresa/logo", { method: "POST", body: fd });
-      if (!res.ok) throw await toApiError(res);
-      toast.success("Logo actualizado");
-      loadLogo();
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo subir el logo");
-    } finally {
-      setLogoUploading(false);
-    }
-  }
-
-  async function quitarLogo() {
-    setLogoUploading(true);
-    try {
-      await apiFetch("/api/v1/empresa/logo", { method: "DELETE" });
-      toast.success("Logo eliminado");
-      setLogoUrl((u) => { if (u) URL.revokeObjectURL(u); return null; });
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo eliminar el logo");
-    } finally {
-      setLogoUploading(false);
-    }
-  }
-
-  // Solo lectura mientras no se esté editando (loading, sin permiso, bloqueado
-  // o con error de carga: sin los datos actuales no es seguro editar/guardar).
-  const ro = !canWrite || loading || locked || loadError;
+  const empresas = data?.empresas ?? [];
+  const puedeAgregar = !!data?.puede_agregar;
 
   return (
-    <div className="space-y-4">
+    <>
       <PageHeader
-        title="Empresa"
-        subtitle="Datos fiscales del emisor y sellos digitales (CSD)"
+        title="Empresas"
+        subtitle={
+          data
+            ? `${data.grupo_total} de ${data.grupo_max} · todas comparten tu plan y tus usuarios`
+            : undefined
+        }
+        actions={
+          puedeAgregar ? (
+            <Button onClick={() => setAgregar(true)}>
+              <Plus size={16} /> Agregar empresa
+            </Button>
+          ) : undefined
+        }
       />
 
-      <OnboardingChecklist refreshKey={onboardingKey} />
-
-      <Card title="Datos fiscales" subtitle="Información del emisor que aparece en los CFDIs">
-        {loadError && (
-          <Alert tone="danger" title="No se pudieron cargar los datos fiscales">
-            El formulario queda bloqueado para no sobrescribir la información real del emisor.
-            Recarga la página e inténtalo de nuevo.
-          </Alert>
-        )}
-        <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${loadError ? "mt-4" : ""}`}>
-          <div className="sm:col-span-2">
-            <Field label="Razón social" required>
-              <Input
-                placeholder="Empresa SA de CV"
-                value={form.legal_name}
-                onChange={(e) => set({ legal_name: e.target.value })}
-                disabled={ro}
-              />
-            </Field>
-          </div>
-          <Field label="RFC" required>
-            <div className="flex items-center gap-2">
-              <Input
-                placeholder="XAXX010101000"
-                value={form.rfc}
-                onChange={(e) => {
-                  set({ rfc: e.target.value.toUpperCase() });
-                  setVerified(null); // cualquier cambio invalida la verificación previa
-                }}
-                disabled={ro}
-              />
-              {verified === true ? (
-                <Button variant="success" onClick={verificarRfc} disabled={verifying || loadError}>
-                  <Check size={16} /> RFC verificado
-                </Button>
-              ) : rfcEnRojo ? (
-                <Button variant="danger" onClick={verificarRfc} disabled={verifying || loadError}>
-                  <X size={16} /> {verifying ? "Verificando…" : "RFC inválido"}
-                </Button>
-              ) : (
-                <Button
-                  variant="secondary"
-                  onClick={verificarRfc}
-                  disabled={verifying || loading || loadError}
-                >
-                  <ShieldCheck size={16} /> {verifying ? "Verificando…" : "Verificar RFC"}
-                </Button>
-              )}
-            </div>
-            {form.rfc.trim() !== "" && !rfcLocal.ok && rfcLocal.motivo && (
-              <span className="mt-1 block text-xs text-danger">{rfcLocal.motivo}</span>
-            )}
-            {verified === false && rfcLocal.ok && (
-              <span className="mt-1 block text-xs text-danger">
-                El SAT no valida este RFC (inactivo o no localizado). Corrígelo antes de continuar.
-              </span>
-            )}
-          </Field>
-          <Field label="Régimen fiscal SAT">
-            <Select
-              value={form.regimen_fiscal_sat}
-              onChange={(e) => set({ regimen_fiscal_sat: e.target.value })}
-              disabled={ro}
-            >
-              <option value="">— Selecciona —</option>
-              {REGIMENES_FISCALES.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Código postal" required>
-            <Input
-              placeholder="11000"
-              value={form.domicilio_fiscal_cp}
-              onChange={(e) => set({ domicilio_fiscal_cp: e.target.value })}
-              disabled={ro}
-            />
-          </Field>
-          <div className="sm:col-span-2">
-            <Field label="Calle y número">
-              <Input
-                value={form.calle}
-                onChange={(e) => set({ calle: e.target.value })}
-                disabled={ro}
-              />
-            </Field>
-          </div>
-          <Field label="Colonia">
-            <Input
-              value={form.colonia}
-              onChange={(e) => set({ colonia: e.target.value })}
-              disabled={ro}
-            />
-          </Field>
-          <Field label="Ciudad/Municipio">
-            <Input
-              value={form.ciudad}
-              onChange={(e) => set({ ciudad: e.target.value })}
-              disabled={ro}
-            />
-          </Field>
-          <Field label="Estado">
-            <KeyboardCombobox
-              options={MX_ESTADOS}
-              value={form.estado}
-              onSelect={(v) => set({ estado: v })}
-              disabled={ro}
-              placeholder="Busca tu estado…"
-              emptyText="Sin coincidencias"
-            />
-          </Field>
-          <Field label="País">
-            {/* Fijo: el emisor de un CFDI siempre es mexicano. */}
-            <Input value="México" disabled />
-          </Field>
+      {loading && (
+        <div className="flex justify-center py-16">
+          <Spinner />
         </div>
+      )}
 
-        {canWrite && (
-          <div className="mt-4 flex items-center gap-2 border-t border-border pt-4">
-            {locked ? (
-              <Button variant="secondary" onClick={() => setEditConfirmOpen(true)} disabled={loading}>
-                <Pencil size={16} /> Editar
-              </Button>
-            ) : (
-              <Button onClick={guardar} disabled={saving || loading || loadError}>
-                <Building2 size={16} /> {saving ? "Guardando…" : "Guardar"}
-              </Button>
-            )}
-            {locked && (
-              <span className="text-xs text-muted">
-                Datos bloqueados. Pulsa Editar para modificarlos.
-              </span>
-            )}
-          </div>
-        )}
-      </Card>
+      {error && !loading && (
+        <Alert tone="danger" title="No se pudieron cargar tus empresas">
+          {error}
+        </Alert>
+      )}
 
-      <Card title="Sellos digitales (CSD)" subtitle="Certificado de Sello Digital del SAT para timbrar">
-        <div className="space-y-4">
-          {ambiente === "producción" ? (
-            <Alert tone="success">
-              Ambiente de <b>producción</b>: los CFDI que timbres aquí son reales ante el SAT.
-            </Alert>
-          ) : (
-            <Alert tone="warning">
-              En modo sandbox se usan certificados de prueba; para timbrar con tu CSD
-              real se requiere la cuenta de Facturama en producción.
-            </Alert>
+      {!loading && !error && (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {empresas.map((e) => {
+            const color = colorEmpresa(e.tenant_id, e.color);
+            const nombre = e.legal_name || e.trade_name || e.slug;
+            return (
+              <article
+                key={e.tenant_id}
+                className="relative flex flex-col gap-3 overflow-hidden rounded-xl border border-border bg-background p-4"
+                style={e.es_actual ? { boxShadow: `0 0 0 1.5px ${color}` } : undefined}
+              >
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-y-0 left-0 w-[3px]"
+                  style={{ background: color }}
+                />
+
+                <div className="flex items-start gap-2.5">
+                  <Cuadro color={color} texto={inicialesEmpresa(nombre)} grande />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold" title={nombre}>
+                      {nombre}
+                    </div>
+                    <div className="font-mono text-xs text-muted">{e.rfc || "Sin RFC"}</div>
+                  </div>
+                  {e.es_actual && (
+                    <span
+                      className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
+                      style={{ background: color }}
+                    >
+                      Aquí estás
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  <Chip ok={e.datos_fiscales}>Datos fiscales</Chip>
+                  <Chip ok={e.csd}>Sello CSD</Chip>
+                  <Chip ok={e.logo}>Logo</Chip>
+                  <Chip ok={e.series}>Series</Chip>
+                  <Chip ok={e.correo}>Correo</Chip>
+                </div>
+
+                <div className="mt-auto flex items-center gap-2 border-t border-border pt-3">
+                  {e.puede_editar && (
+                    <Button variant="secondary" onClick={() => abrirEdicion(e)}>
+                      <Pencil size={15} /> Editar
+                    </Button>
+                  )}
+                  {e.es_actual ? (
+                    e.puede_editar && (
+                    <Link
+                      href={CONFIGURACION}
+                      className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-sm text-muted hover:bg-surface-2 hover:text-foreground"
+                    >
+                      <Settings2 size={15} /> Logo y correo
+                    </Link>
+                    )
+                  ) : (
+                    <>
+                      <Button variant="secondary" onClick={() => switchTenant(e.tenant_id)}>
+                        <LogIn size={15} /> Entrar
+                      </Button>
+                      <a
+                        href={urlEnEmpresa("/dashboard", e.slug)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`Abrir ${nombre} en otra pestaña`}
+                        aria-label={`Abrir ${nombre} en otra pestaña`}
+                        className="ml-auto inline-flex items-center rounded-lg border border-border px-2.5 py-2 text-muted hover:bg-surface-2 hover:text-foreground"
+                      >
+                        <ExternalLink size={15} />
+                      </a>
+                    </>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+
+          {puedeAgregar && (
+            <button
+              onClick={() => setAgregar(true)}
+              className="flex min-h-[9rem] flex-col items-center justify-center gap-1 rounded-xl border-[1.5px] border-dashed border-border p-5 text-center text-muted transition hover:border-accent hover:text-foreground"
+            >
+              <Plus size={20} className="text-accent" />
+              <span className="text-sm font-semibold text-foreground">Agregar empresa</span>
+              <span className="text-xs">Otro RFC del mismo dueño</span>
+            </button>
           )}
+        </div>
+      )}
 
-          <p className="text-sm text-muted">
-            Sube tu .cer y .key del SAT y la contraseña de la llave privada.
-            Necesario para timbrar con tu RFC.
-          </p>
+      {agregar && <AgregarEmpresaModal onClose={() => setAgregar(false)} />}
 
-          {canWrite && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <label className="block">
-                <EtiquetaCsd
-                  texto="Certificado (.cer)"
-                  ok={csdCheck ? csdCheck.cer_ok && csdCheck.vigente !== false && csdCheck.rfc_coincide !== false && !csdCheck.es_fiel : null}
-                />
-                <Input
-                  type="file"
-                  accept=".cer"
-                  onChange={(e) => setCerFile(e.target.files?.[0] ?? null)}
-                  disabled={uploading}
-                />
-                {csdCheck?.cer_detalle && (
-                  <span className="mt-1 block text-xs text-danger">{csdCheck.cer_detalle}</span>
-                )}
-              </label>
-              <label className="block">
-                <EtiquetaCsd texto="Llave privada (.key)" ok={csdCheck ? csdCheck.key_ok && (csdCheck.par_ok || !csdCheck.password_ok) : null} />
-                <Input
-                  type="file"
-                  accept=".key"
-                  onChange={(e) => setKeyFile(e.target.files?.[0] ?? null)}
-                  disabled={uploading}
-                />
-                {csdCheck?.key_detalle && (
-                  <span className="mt-1 block text-xs text-danger">{csdCheck.key_detalle}</span>
-                )}
-                {csdCheck?.par_detalle && (
-                  <span className="mt-1 block text-xs text-danger">{csdCheck.par_detalle}</span>
-                )}
-              </label>
-              <label className="block">
-                <EtiquetaCsd texto="Contraseña de la llave privada" ok={csdCheck ? csdCheck.password_ok : null} />
-                <PasswordInput
-                  value={csdPassword}
-                  onChange={(e) => setCsdPassword(e.target.value)}
-                  disabled={uploading}
-                />
-                {csdCheck?.password_detalle && (
-                  <span className="mt-1 block text-xs text-danger">{csdCheck.password_detalle}</span>
-                )}
-              </label>
-              <div className="flex items-end">
-                <Button onClick={subirCsd} disabled={uploading}>
-                  <Upload size={16} /> {uploading ? "Subiendo…" : "Subir CSD"}
-                </Button>
+      <PanelLateral
+        open={!!editando && !!form}
+        onClose={cerrarEdicion}
+        encabezado={
+          editando ? (
+            <div className="flex min-w-0 items-center gap-2.5">
+              <Cuadro
+                color={colorEmpresa(editando.tenant_id, editando.color)}
+                texto={inicialesEmpresa(editando.legal_name || editando.slug)}
+                grande
+              />
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold">{editando.legal_name}</div>
+                <div className="font-mono text-xs text-muted">{editando.rfc}</div>
               </div>
             </div>
-          )}
-
-          {checking && (
-            <p className="text-xs text-muted">Probando el certificado y la llave…</p>
-          )}
-          {csdCheck?.valido && (
-            <Alert tone="success">
-              ✅ CSD válido: RFC {csdCheck.rfc_cert}, la contraseña abre la llave y corresponde
-              al certificado{csdCheck.vigencia_fin ? ` (vigente hasta ${csdCheck.vigencia_fin})` : ""}.
-              Ya puedes dar clic en “Subir CSD”.
-            </Alert>
-          )}
-
-          <div>
-            <div className="mb-2 text-sm font-medium">CSD cargados</div>
-            {csds.length === 0 ? (
-              <p className="text-sm text-muted">No hay sellos digitales cargados.</p>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-muted">
-                    <th className="py-1.5 pr-3 font-medium">RFC</th>
-                    <th className="py-1.5 pr-3 font-medium">No. de serie</th>
-                    <th className="py-1.5 font-medium">Vigencia</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {csds.map((c, i) => (
-                    <tr key={i} className="border-b border-border last:border-0">
-                      <td className="py-1.5 pr-3">{c.Rfc ?? c.rfc ?? "—"}</td>
-                      <td className="py-1.5 pr-3">{c.SerialNumber ?? c.Serial ?? "—"}</td>
-                      <td className="py-1.5">
-                        {fmtDate((c.ExpirationDate ?? c.CsdCerExpirationDate) as string | undefined)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      </Card>
-
-      <Card title="Logo de la empresa" subtitle="Aparece en la representación impresa de tus facturas (arriba a la derecha)">
-        <div className="space-y-4">
-          <p className="text-sm text-muted">
-            Sube tu logo en PNG, JPG o WebP (máx. 2 MB). Se mostrará en el PDF de las facturas.
-          </p>
-
-          {logoUrl && (
-            <div className="flex items-center gap-4">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={logoUrl} alt="Logo de la empresa" className="max-h-20 rounded border border-border bg-white p-2" />
-              <span className="flex items-center gap-1.5 text-sm font-medium text-success">
-                <Check size={15} /> Logo cargado
-              </span>
-              {canWrite && (
-                <Button variant="secondary" onClick={quitarLogo} disabled={logoUploading}>
-                  Quitar logo
-                </Button>
+          ) : null
+        }
+        footer={
+          editando ? (
+            <>
+              {!editando.es_actual && (
+                <a
+                  href={urlEnEmpresa(CONFIGURACION, editando.slug)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm text-accent hover:underline"
+                >
+                  Logo y correo <ExternalLink size={13} />
+                </a>
               )}
-            </div>
-          )}
+              <div className="ml-auto flex gap-2">
+                <Button variant="secondary" onClick={cerrarEdicion} disabled={guardando}>
+                  Cancelar
+                </Button>
+                <Button onClick={guardar} disabled={guardando}>
+                  {guardando ? "Guardando…" : "Guardar"}
+                </Button>
+              </div>
+            </>
+          ) : null
+        }
+      >
+        {form && editando && (
+          <div className="flex flex-col gap-3">
+            {!editando.es_actual && (
+              <Alert tone="info">
+                Estás editando otra empresa. Tu sesión sigue en{" "}
+                <strong>
+                  {me?.tenants.find((t) => t.tenant_id === me?.active_tenant.tenant_id)?.name ??
+                    "la empresa actual"}
+                </strong>
+                .
+              </Alert>
+            )}
 
-          {canWrite && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Imagen del logo" hint="Se sube automáticamente al seleccionarla.">
-                <Input
+            <div>
+              <span className="mb-1.5 block text-sm font-medium">Color</span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => elegirColor(null)}
+                  disabled={cambiandoColor}
+                  aria-pressed={!editando.color}
+                  title="Automático"
+                  className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs transition disabled:opacity-50 ${
+                    !editando.color
+                      ? "border-accent text-foreground"
+                      : "border-border text-muted hover:bg-surface-2"
+                  }`}
+                >
+                  <Wand2 size={12} /> Automático
+                </button>
+                {COLORES_EMPRESA.map((c) => {
+                  const elegido = editando.color === c;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => elegirColor(c)}
+                      disabled={cambiandoColor}
+                      aria-pressed={elegido}
+                      aria-label={`Usar el color ${c}`}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg transition disabled:opacity-50"
+                      style={{
+                        background: c,
+                        boxShadow: elegido ? "0 0 0 2px var(--background), 0 0 0 4px var(--accent)" : undefined,
+                      }}
+                    >
+                      {elegido && <Check size={13} strokeWidth={3} className="text-white" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <Field label="Razón social" required>
+              <Input
+                value={form.legal_name}
+                onChange={(ev) => set({ legal_name: ev.target.value })}
+                placeholder="Como aparece en la constancia de situación fiscal"
+              />
+            </Field>
+
+            <Field label="RFC" required hint={form.rfc && !rfcCheck.ok ? rfcCheck.motivo : undefined}>
+              <Input
+                value={form.rfc}
+                onChange={(ev) => set({ rfc: ev.target.value.toUpperCase() })}
+                className={form.rfc && !rfcCheck.ok ? "border-danger" : ""}
+                maxLength={13}
+              />
+            </Field>
+
+            <Field label="Régimen fiscal" required>
+              <Select
+                value={form.regimen_fiscal_sat}
+                onChange={(ev) => set({ regimen_fiscal_sat: ev.target.value })}
+              >
+                <option value="">Selecciona…</option>
+                {REGIMENES_FISCALES.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field label="Código postal" required>
+              <Input
+                value={form.domicilio_fiscal_cp}
+                onChange={(ev) => set({ domicilio_fiscal_cp: ev.target.value })}
+                inputMode="numeric"
+                maxLength={5}
+              />
+            </Field>
+
+            <Field label="Calle y número">
+              <Input value={form.calle} onChange={(ev) => set({ calle: ev.target.value })} />
+            </Field>
+
+            <Field label="Colonia">
+              <Input value={form.colonia} onChange={(ev) => set({ colonia: ev.target.value })} />
+            </Field>
+
+            <Field label="Ciudad">
+              <Input value={form.ciudad} onChange={(ev) => set({ ciudad: ev.target.value })} />
+            </Field>
+
+            <Field label="Estado">
+              <KeyboardCombobox
+                value={form.estado}
+                onSelect={(v) => set({ estado: v })}
+                options={ESTADOS_MX}
+                placeholder="Busca la entidad…"
+                ariaLabel="Estado"
+              />
+            </Field>
+
+            {/* ── Sello digital ──────────────────────────────────────────── */}
+            <div className="mt-2 flex flex-col gap-3 border-t border-border pt-4">
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={16} className="text-muted" />
+                <h3 className="text-sm font-semibold">Sello digital (CSD)</h3>
+              </div>
+
+              {csds === null ? (
+                <div className="flex items-center gap-2 text-sm text-muted">
+                  <Spinner /> Consultando el sello…
+                </div>
+              ) : csds.length > 0 ? (
+                <div className="flex flex-col gap-1">
+                  {csds.map((c, i) => (
+                    <Chip key={i} ok>
+                      Vigente al{" "}
+                      {fmtDate((c.ExpirationDate ?? c.CsdCerExpirationDate) as string | undefined)}
+                      {" · serie "}
+                      {(c.SerialNumber ?? c.Serial ?? "—") as string}
+                    </Chip>
+                  ))}
+                </div>
+              ) : (
+                <Chip ok={false}>Sin sello cargado — esta empresa no puede timbrar</Chip>
+              )}
+
+              {csdNota && <p className="text-xs text-muted">{csdNota}</p>}
+
+              {/* El sello se emite POR RFC: se valida contra el RFC ya guardado,
+                  no contra lo que esté escrito arriba sin guardar. */}
+              <p className="text-xs text-muted">
+                Se valida contra el RFC guardado: <span className="font-mono">{editando.rfc || "—"}</span>
+              </p>
+
+              <Field label="Certificado (.cer)">
+                <input
                   type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    if (f) void subirLogo(f);
-                    // permite re-seleccionar el mismo archivo tras un error
-                    e.target.value = "";
-                  }}
-                  disabled={logoUploading}
+                  accept=".cer"
+                  onChange={(ev) => setCerFile(ev.target.files?.[0] ?? null)}
+                  className="block w-full text-sm text-muted file:mr-3 file:rounded-lg file:border file:border-border file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-foreground hover:file:bg-surface-2"
                 />
               </Field>
-              {logoUploading && (
-                <div className="flex items-end pb-2 text-sm text-muted">Subiendo logo…</div>
-              )}
-            </div>
-          )}
-        </div>
-      </Card>
 
-      <ConfirmDialog
-        open={editConfirmOpen}
-        title="Editar datos fiscales"
-        message="Estás a punto de modificar los datos fiscales del emisor. Estos datos aparecen en los CFDIs timbrados. ¿Deseas continuar?"
-        confirmLabel="Sí, editar"
-        confirmVariant="primary"
-        onConfirm={() => {
-          setLocked(false);
-          setEditConfirmOpen(false);
-        }}
-        onClose={() => setEditConfirmOpen(false)}
-      />
-    </div>
+              <Field label="Llave privada (.key)">
+                <input
+                  type="file"
+                  accept=".key"
+                  onChange={(ev) => setKeyFile(ev.target.files?.[0] ?? null)}
+                  className="block w-full text-sm text-muted file:mr-3 file:rounded-lg file:border file:border-border file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-foreground hover:file:bg-surface-2"
+                />
+              </Field>
+
+              <Field label="Contraseña de la llave privada">
+                <PasswordInput
+                  value={csdPassword}
+                  onChange={(ev) => setCsdPassword(ev.target.value)}
+                  autoComplete="off"
+                />
+              </Field>
+
+              <Button
+                variant="secondary"
+                onClick={subirSello}
+                disabled={subiendo || !cerFile || !keyFile || !csdPassword || !editando.rfc}
+              >
+                <Upload size={15} /> {subiendo ? "Subiendo…" : "Subir sello"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </PanelLateral>
+    </>
   );
 }

@@ -388,6 +388,46 @@
     "title": "AvanzarIn",
     "type": "object"
    },
+   "Body_importar_preview_api_v1_productos_importar_preview_post": {
+    "properties": {
+     "archivo": {
+      "format": "binary",
+      "title": "Archivo",
+      "type": "string"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "cliente_ids": {
+      "default": [],
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Cliente Ids",
+      "type": "array"
+     },
+     "usar_ia": {
+      "default": true,
+      "title": "Usar Ia",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "archivo"
+    ],
+    "title": "Body_importar_preview_api_v1_productos_importar_preview_post",
+    "type": "object"
+   },
    "Body_importar_preview_api_v1_remisiones_importar_preview_post": {
     "properties": {
      "archivo": {
@@ -427,6 +467,31 @@
     "title": "Body_subir_csd_api_v1_empresa_csd_post",
     "type": "object"
    },
+   "Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post": {
+    "properties": {
+     "cer": {
+      "format": "binary",
+      "title": "Cer",
+      "type": "string"
+     },
+     "key": {
+      "format": "binary",
+      "title": "Key",
+      "type": "string"
+     },
+     "password": {
+      "title": "Password",
+      "type": "string"
+     }
+    },
+    "required": [
+     "cer",
+     "key",
+     "password"
+    ],
+    "title": "Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post",
+    "type": "object"
+   },
    "Body_subir_logo_api_v1_empresa_logo_post": {
     "properties": {
      "logo": {
@@ -439,6 +504,56 @@
      "logo"
     ],
     "title": "Body_subir_logo_api_v1_empresa_logo_post",
+    "type": "object"
+   },
+   "Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post": {
+    "properties": {
+     "cer": {
+      "format": "binary",
+      "title": "Cer",
+      "type": "string"
+     },
+     "key": {
+      "format": "binary",
+      "title": "Key",
+      "type": "string"
+     },
+     "password": {
+      "title": "Password",
+      "type": "string"
+     }
+    },
+    "required": [
+     "cer",
+     "key",
+     "password"
+    ],
+    "title": "Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post",
+    "type": "object"
+   },
+   "Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post": {
+    "properties": {
+     "cer": {
+      "format": "binary",
+      "title": "Cer",
+      "type": "string"
+     },
+     "key": {
+      "format": "binary",
+      "title": "Key",
+      "type": "string"
+     },
+     "password": {
+      "title": "Password",
+      "type": "string"
+     }
+    },
+    "required": [
+     "cer",
+     "key",
+     "password"
+    ],
+    "title": "Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post",
     "type": "object"
    },
    "CambiarPasswordIn": {
@@ -1469,6 +1584,99 @@
     "title": "ConfirmarRemisionIn",
     "type": "object"
    },
+   "ContactoIn": {
+    "properties": {
+     "correo": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Correo"
+     },
+     "empresa": {
+      "anyOf": [
+       {
+        "maxLength": 160,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Empresa"
+     },
+     "mensaje": {
+      "maxLength": 4000,
+      "minLength": 5,
+      "title": "Mensaje",
+      "type": "string"
+     },
+     "nombre": {
+      "maxLength": 120,
+      "minLength": 2,
+      "title": "Nombre",
+      "type": "string"
+     },
+     "telefono": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Telefono"
+     },
+     "turnstile_token": {
+      "anyOf": [
+       {
+        "maxLength": 4096,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Turnstile Token"
+     },
+     "website": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Website"
+     }
+    },
+    "required": [
+     "nombre",
+     "mensaje"
+    ],
+    "title": "ContactoIn",
+    "type": "object"
+   },
+   "ContactoOut": {
+    "properties": {
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "title": "ContactoOut",
+    "type": "object"
+   },
    "ConversionCreate": {
     "properties": {
      "activo": {
@@ -1890,6 +2098,17 @@
    },
    "CorreoConfigOut": {
     "properties": {
+     "aviso": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Aviso"
+     },
      "configured": {
       "default": false,
       "title": "Configured",
@@ -2147,6 +2366,183 @@
      "created_at"
     ],
     "title": "DevolucionOut",
+    "type": "object"
+   },
+   "EmpresaColorIn": {
+    "description": "`null` devuelve la empresa al color automático.",
+    "properties": {
+     "color": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Color"
+     }
+    },
+    "title": "EmpresaColorIn",
+    "type": "object"
+   },
+   "EmpresaColorOut": {
+    "properties": {
+     "color": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Color"
+     }
+    },
+    "title": "EmpresaColorOut",
+    "type": "object"
+   },
+   "EmpresaGrupoItem": {
+    "description": "Una empresa del usuario, con lo que le falta para poder facturar.",
+    "properties": {
+     "color": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Color"
+     },
+     "correo": {
+      "default": false,
+      "title": "Correo",
+      "type": "boolean"
+     },
+     "csd": {
+      "default": false,
+      "title": "Csd",
+      "type": "boolean"
+     },
+     "datos_fiscales": {
+      "default": false,
+      "title": "Datos Fiscales",
+      "type": "boolean"
+     },
+     "domicilio_fiscal": {
+      "title": "Domicilio Fiscal",
+      "type": "object"
+     },
+     "domicilio_fiscal_cp": {
+      "default": "",
+      "title": "Domicilio Fiscal Cp",
+      "type": "string"
+     },
+     "en_grupo": {
+      "default": true,
+      "title": "En Grupo",
+      "type": "boolean"
+     },
+     "es_actual": {
+      "default": false,
+      "title": "Es Actual",
+      "type": "boolean"
+     },
+     "es_principal": {
+      "default": false,
+      "title": "Es Principal",
+      "type": "boolean"
+     },
+     "legal_name": {
+      "default": "",
+      "title": "Legal Name",
+      "type": "string"
+     },
+     "listo_para_facturar": {
+      "default": false,
+      "title": "Listo Para Facturar",
+      "type": "boolean"
+     },
+     "logo": {
+      "default": false,
+      "title": "Logo",
+      "type": "boolean"
+     },
+     "puede_editar": {
+      "default": false,
+      "title": "Puede Editar",
+      "type": "boolean"
+     },
+     "regimen_fiscal_sat": {
+      "default": "",
+      "title": "Regimen Fiscal Sat",
+      "type": "string"
+     },
+     "rfc": {
+      "default": "",
+      "title": "Rfc",
+      "type": "string"
+     },
+     "rol": {
+      "default": "",
+      "title": "Rol",
+      "type": "string"
+     },
+     "series": {
+      "default": false,
+      "title": "Series",
+      "type": "boolean"
+     },
+     "slug": {
+      "title": "Slug",
+      "type": "string"
+     },
+     "tenant_id": {
+      "title": "Tenant Id",
+      "type": "string"
+     },
+     "trade_name": {
+      "default": "",
+      "title": "Trade Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "tenant_id",
+     "slug"
+    ],
+    "title": "EmpresaGrupoItem",
+    "type": "object"
+   },
+   "EmpresaGrupoOut": {
+    "properties": {
+     "empresas": {
+      "items": {
+       "$ref": "#/components/schemas/EmpresaGrupoItem"
+      },
+      "title": "Empresas",
+      "type": "array"
+     },
+     "grupo_max": {
+      "default": 0,
+      "title": "Grupo Max",
+      "type": "integer"
+     },
+     "grupo_total": {
+      "default": 0,
+      "title": "Grupo Total",
+      "type": "integer"
+     },
+     "puede_agregar": {
+      "default": false,
+      "title": "Puede Agregar",
+      "type": "boolean"
+     }
+    },
+    "title": "EmpresaGrupoOut",
     "type": "object"
    },
    "EmpresaHijaIn": {
@@ -3655,6 +4051,595 @@
     "title": "HTTPValidationError",
     "type": "object"
    },
+   "ImportErrorFila": {
+    "properties": {
+     "error": {
+      "title": "Error",
+      "type": "string"
+     },
+     "fila": {
+      "title": "Fila",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "fila",
+     "error"
+    ],
+    "title": "ImportErrorFila",
+    "type": "object"
+   },
+   "ImportFilaIn": {
+    "properties": {
+     "accion": {
+      "pattern": "^(crear|vincular|omitir)$",
+      "title": "Accion",
+      "type": "string"
+     },
+     "activo": {
+      "default": true,
+      "title": "Activo",
+      "type": "boolean"
+     },
+     "categoria": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Categoria"
+     },
+     "categoria_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Categoria Id"
+     },
+     "clave_sat": {
+      "anyOf": [
+       {
+        "maxLength": 8,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sat"
+     },
+     "codigo_barras": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Codigo Barras"
+     },
+     "codigo_cliente": {
+      "anyOf": [
+       {
+        "maxLength": 50,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Codigo Cliente"
+     },
+     "descripcion": {
+      "anyOf": [
+       {
+        "maxLength": 1000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Descripcion"
+     },
+     "esquema": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Esquema"
+     },
+     "esquema_impuesto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Esquema Impuesto Id"
+     },
+     "nombre": {
+      "maxLength": 254,
+      "minLength": 1,
+      "title": "Nombre",
+      "type": "string"
+     },
+     "nombre_cliente": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre Cliente"
+     },
+     "precio": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Precio"
+     },
+     "presentacion_factor": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion Factor"
+     },
+     "producto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
+     },
+     "sku": {
+      "anyOf": [
+       {
+        "maxLength": 50,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sku"
+     },
+     "unidad_base": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Base"
+     },
+     "unidad_sat": {
+      "anyOf": [
+       {
+        "maxLength": 3,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Sat"
+     }
+    },
+    "required": [
+     "accion",
+     "nombre"
+    ],
+    "title": "ImportFilaIn",
+    "type": "object"
+   },
+   "ImportFilaPreview": {
+    "properties": {
+     "baja": {
+      "default": false,
+      "title": "Baja",
+      "type": "boolean"
+     },
+     "candidatos": {
+      "items": {
+       "$ref": "#/components/schemas/CandidatoOut"
+      },
+      "title": "Candidatos",
+      "type": "array"
+     },
+     "categoria": {
+      "default": "",
+      "title": "Categoria",
+      "type": "string"
+     },
+     "clave_sat": {
+      "default": "",
+      "title": "Clave Sat",
+      "type": "string"
+     },
+     "clave_sat_valida": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sat Valida"
+     },
+     "codigo": {
+      "default": "",
+      "title": "Codigo",
+      "type": "string"
+     },
+     "codigo_barras": {
+      "default": "",
+      "title": "Codigo Barras",
+      "type": "string"
+     },
+     "descripcion": {
+      "default": "",
+      "title": "Descripcion",
+      "type": "string"
+     },
+     "duplicada_de": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Duplicada De"
+     },
+     "esquema": {
+      "default": "",
+      "title": "Esquema",
+      "type": "string"
+     },
+     "fila": {
+      "title": "Fila",
+      "type": "integer"
+     },
+     "mismo_producto_que": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mismo Producto Que"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "nueva_presentacion": {
+      "default": false,
+      "title": "Nueva Presentacion",
+      "type": "boolean"
+     },
+     "precio": {
+      "default": "",
+      "title": "Precio",
+      "type": "string"
+     },
+     "precio_distinto": {
+      "default": false,
+      "title": "Precio Distinto",
+      "type": "boolean"
+     },
+     "producto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
+     },
+     "unidad": {
+      "default": "",
+      "title": "Unidad",
+      "type": "string"
+     },
+     "unidad_sat": {
+      "default": "",
+      "title": "Unidad Sat",
+      "type": "string"
+     },
+     "unidad_sat_valida": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Sat Valida"
+     },
+     "ya_vinculado": {
+      "default": false,
+      "title": "Ya Vinculado",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "fila",
+     "nombre"
+    ],
+    "title": "ImportFilaPreview",
+    "type": "object"
+   },
+   "ImportIn": {
+    "properties": {
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "cliente_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "maxItems": 200,
+      "title": "Cliente Ids",
+      "type": "array"
+     },
+     "crear_categorias": {
+      "default": false,
+      "title": "Crear Categorias",
+      "type": "boolean"
+     },
+     "esquema_default_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Esquema Default Id"
+     },
+     "filas": {
+      "items": {
+       "$ref": "#/components/schemas/ImportFilaIn"
+      },
+      "maxItems": 2000,
+      "minItems": 1,
+      "title": "Filas",
+      "type": "array"
+     },
+     "guardar_precios": {
+      "default": false,
+      "title": "Guardar Precios",
+      "type": "boolean"
+     },
+     "lista_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Id"
+     },
+     "lista_nombre": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Nombre"
+     }
+    },
+    "required": [
+     "filas"
+    ],
+    "title": "ImportIn",
+    "type": "object"
+   },
+   "ImportPreviewOut": {
+    "properties": {
+     "categorias_nuevas": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Categorias Nuevas",
+      "type": "array"
+     },
+     "esquemas_no_encontrados": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Esquemas No Encontrados",
+      "type": "array"
+     },
+     "faltan_clave_sat": {
+      "default": 0,
+      "title": "Faltan Clave Sat",
+      "type": "integer"
+     },
+     "faltan_unidad_sat": {
+      "default": 0,
+      "title": "Faltan Unidad Sat",
+      "type": "integer"
+     },
+     "filas": {
+      "items": {
+       "$ref": "#/components/schemas/ImportFilaPreview"
+      },
+      "title": "Filas",
+      "type": "array"
+     },
+     "filas_sin_esquema": {
+      "default": 0,
+      "title": "Filas Sin Esquema",
+      "type": "integer"
+     },
+     "formato": {
+      "title": "Formato",
+      "type": "string"
+     },
+     "tiene_precios": {
+      "default": false,
+      "title": "Tiene Precios",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "formato",
+     "filas"
+    ],
+    "title": "ImportPreviewOut",
+    "type": "object"
+   },
+   "ImportResultOut": {
+    "properties": {
+     "alias_guardados": {
+      "title": "Alias Guardados",
+      "type": "integer"
+     },
+     "categorias_creadas": {
+      "default": 0,
+      "title": "Categorias Creadas",
+      "type": "integer"
+     },
+     "creados": {
+      "title": "Creados",
+      "type": "integer"
+     },
+     "errores": {
+      "items": {
+       "$ref": "#/components/schemas/ImportErrorFila"
+      },
+      "title": "Errores",
+      "type": "array"
+     },
+     "lista_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Id"
+     },
+     "lista_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Nombre"
+     },
+     "omitidos": {
+      "title": "Omitidos",
+      "type": "integer"
+     },
+     "precios_guardados": {
+      "title": "Precios Guardados",
+      "type": "integer"
+     },
+     "presentaciones_agregadas": {
+      "default": 0,
+      "title": "Presentaciones Agregadas",
+      "type": "integer"
+     },
+     "vinculados": {
+      "title": "Vinculados",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "creados",
+     "vinculados",
+     "alias_guardados",
+     "precios_guardados",
+     "omitidos"
+    ],
+    "title": "ImportResultOut",
+    "type": "object"
+   },
    "LineaDevolucionOut": {
     "properties": {
      "cantidad": {
@@ -4162,12 +5147,56 @@
     "title": "LineaRemisionOut",
     "type": "object"
    },
+   "ListaAsignarIn": {
+    "description": "Asignar la lista como default del negocio y/o a clientes específicos.",
+    "properties": {
+     "cliente_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "maxItems": 2000,
+      "title": "Cliente Ids",
+      "type": "array"
+     },
+     "default": {
+      "default": false,
+      "title": "Default",
+      "type": "boolean"
+     }
+    },
+    "title": "ListaAsignarIn",
+    "type": "object"
+   },
+   "ListaAsignarOut": {
+    "properties": {
+     "clientes_asignados": {
+      "title": "Clientes Asignados",
+      "type": "integer"
+     },
+     "default": {
+      "title": "Default",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "default",
+     "clientes_asignados"
+    ],
+    "title": "ListaAsignarOut",
+    "type": "object"
+   },
    "ListaPreciosCreate": {
     "properties": {
      "codigo": {
       "maxLength": 20,
       "title": "Codigo",
       "type": "string"
+     },
+     "es_default": {
+      "default": false,
+      "title": "Es Default",
+      "type": "boolean"
      },
      "moneda": {
       "default": "MXN",
@@ -4240,6 +5269,11 @@
       "format": "date-time",
       "title": "Created At",
       "type": "string"
+     },
+     "es_default": {
+      "default": false,
+      "title": "Es Default",
+      "type": "boolean"
      },
      "id": {
       "format": "uuid",
@@ -4333,6 +5367,17 @@
        }
       ],
       "title": "Codigo"
+     },
+     "es_default": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Es Default"
      },
      "moneda": {
       "anyOf": [
@@ -6726,6 +7771,105 @@
      "lineas"
     ],
     "title": "PreviewTotalesIn",
+    "type": "object"
+   },
+   "ProductoClienteOut": {
+    "properties": {
+     "codigo_cliente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Codigo Cliente"
+     },
+     "nombre_cliente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre Cliente"
+     },
+     "presentacion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     },
+     "producto_nombre": {
+      "title": "Producto Nombre",
+      "type": "string"
+     },
+     "producto_sku": {
+      "title": "Producto Sku",
+      "type": "string"
+     }
+    },
+    "required": [
+     "producto_id",
+     "producto_sku",
+     "producto_nombre"
+    ],
+    "title": "ProductoClienteOut",
+    "type": "object"
+   },
+   "ProductoClienteUpsert": {
+    "properties": {
+     "codigo_cliente": {
+      "anyOf": [
+       {
+        "maxLength": 50,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Codigo Cliente"
+     },
+     "nombre_cliente": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre Cliente"
+     },
+     "presentacion": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     }
+    },
+    "title": "ProductoClienteUpsert",
     "type": "object"
    },
    "ProductoCreate": {
@@ -9943,6 +11087,57 @@
     "title": "SucursalUpdate",
     "type": "object"
    },
+   "SugerenciaSatOut": {
+    "properties": {
+     "clave_sat": {
+      "title": "Clave Sat",
+      "type": "string"
+     },
+     "descripcion_sat": {
+      "title": "Descripcion Sat",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "unidad_sat": {
+      "title": "Unidad Sat",
+      "type": "string"
+     },
+     "unidad_sat_generica": {
+      "title": "Unidad Sat Generica",
+      "type": "string"
+     }
+    },
+    "required": [
+     "nombre",
+     "clave_sat",
+     "descripcion_sat",
+     "unidad_sat",
+     "unidad_sat_generica"
+    ],
+    "title": "SugerenciaSatOut",
+    "type": "object"
+   },
+   "SugerirSatBatchIn": {
+    "properties": {
+     "productos": {
+      "items": {
+       "type": "object"
+      },
+      "maxItems": 2000,
+      "minItems": 1,
+      "title": "Productos",
+      "type": "array"
+     }
+    },
+    "required": [
+     "productos"
+    ],
+    "title": "SugerirSatBatchIn",
+    "type": "object"
+   },
    "SustituirIn": {
     "description": "Crea la factura sustituta (refacturación) como copia de la vieja, ligada a\nella con relación CFDI \"04\". Opcionalmente corrige los datos fiscales de\ncabecera que suelen ser el error a subsanar (uso de CFDI, forma/método de\npago). El importe/conceptos se copian tal cual de la factura original.",
     "properties": {
@@ -10084,8 +11279,8 @@
   }
  },
  "info": {
-  "description": "Plataforma SaaS multi-tenant — cadena de suministro gobierno-alimentos.",
-  "title": "SmartSupply v2.0",
+  "description": "Facturación electrónica CFDI 4.0 con IA — plataforma SaaS multi-tenant.",
+  "title": "Facturador",
   "version": "2.0.0"
  },
  "openapi": "3.1.0",
@@ -11386,6 +12581,223 @@
     ]
    }
   },
+  "/api/v1/clientes/{cliente_id}/catalogo": {
+   "get": {
+    "operationId": "catalogo_cliente_api_v1_clientes__cliente_id__catalogo_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ProductoClienteOut"
+         },
+         "title": "Response Catalogo Cliente Api V1 Clientes  Cliente Id  Catalogo Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Catalogo Cliente",
+    "tags": [
+     "clientes"
+    ]
+   }
+  },
+  "/api/v1/clientes/{cliente_id}/catalogo/{producto_id}": {
+   "delete": {
+    "operationId": "delete_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "producto_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Producto Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Delete Catalogo Cliente",
+    "tags": [
+     "clientes"
+    ]
+   },
+   "put": {
+    "operationId": "upsert_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "producto_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Producto Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ProductoClienteUpsert"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProductoClienteOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Upsert Catalogo Cliente",
+    "tags": [
+     "clientes"
+    ]
+   }
+  },
   "/api/v1/cobranza/estado-cuenta/{cliente_id}": {
    "get": {
     "description": "Estado de cuenta de un cliente: sus facturas PPD timbradas con saldo\npendiente + antigüedad de saldos por fecha de vencimiento.",
@@ -12015,6 +13427,47 @@
     "summary": "Recibo Xml",
     "tags": [
      "cobranza"
+    ]
+   }
+  },
+  "/api/v1/contacto": {
+   "post": {
+    "operationId": "contacto_api_v1_contacto_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ContactoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContactoOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Contacto",
+    "tags": [
+     "contacto"
     ]
    }
   },
@@ -12761,6 +14214,59 @@
     ]
    }
   },
+  "/api/v1/empresa/checklist": {
+   "get": {
+    "description": "Primeros pasos para el Dashboard: guía tipo checklist de qué falta para\nempezar a trabajar (fiscal + operativo), calculada de datos vivos.",
+    "operationId": "checklist_inicio_api_v1_empresa_checklist_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Checklist Inicio",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
   "/api/v1/empresa/csd": {
    "get": {
     "operationId": "listar_csd_api_v1_empresa_csd_get",
@@ -12873,9 +14379,127 @@
     ]
    }
   },
+  "/api/v1/empresa/csd/validar": {
+   "post": {
+    "description": "Prueba LOCAL del CSD (sin tocar Facturama): certifica que el .cer es un\ncertificado real y vigente del RFC del emisor, que la contraseña abre el\n.key y que la llave corresponde al certificado. La UI pinta ✓/✗ por campo.",
+    "operationId": "validar_csd_endpoint_api_v1_empresa_csd_validar_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Validar Csd Endpoint",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
+  "/api/v1/empresa/grupo": {
+   "get": {
+    "description": "Las empresas del usuario, cada una con lo que le falta para facturar.\n\nNo exige permiso: devuelve exactamente el mismo conjunto que ya ve en el\nswitcher del Topbar (sus membresías activas), solo que enriquecido con el\nestado de configuración. La pantalla que lo consume sí está gateada en el menú.",
+    "operationId": "empresas_del_grupo_api_v1_empresa_grupo_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EmpresaGrupoOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Empresas Del Grupo",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
   "/api/v1/empresa/hijas": {
    "post": {
-    "description": "Crea una empresa HIJA del grupo: otro RFC/razón social del mismo dueño,\ncomo tenant `SUB` colgado de la raíz del grupo. El creador queda como OWNER\nde la nueva (el switcher del Topbar la muestra al instante).\n\nUsa la sesión plana `get_db` a propósito: la política RLS de `tenants`\n(id = current_tenant_id) impide insertar OTRO tenant desde la sesión\nscopeada. La única barrera aquí es el código: `parent` sale SIEMPRE de\nctx.tenant_id (jamás del payload) y se exige ser OWNER.",
+    "description": "Crea una empresa HIJA del grupo: otro RFC/razón social del mismo dueño,\ncomo tenant `SUB` colgado de la raíz del grupo (el switcher del Topbar la\nmuestra al instante).\n\nPueden crearla el dueño y los administradores (`membership:gestionar`), pero\nquién MANDA en la nueva lo decide `_asignar_membresias_de_la_hija`.\n\nUsa la sesión plana `get_db` a propósito: la política RLS de `tenants`\n(id = current_tenant_id) impide insertar OTRO tenant desde la sesión\nscopeada. La barrera aquí es el código: `parent` sale SIEMPRE de\nctx.tenant_id, jamás del payload.",
     "operationId": "crear_empresa_hija_api_v1_empresa_hijas_post",
     "parameters": [
      {
@@ -13156,6 +14780,363 @@
      }
     ],
     "summary": "Onboarding Status",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
+  "/api/v1/empresa/{tenant_id}": {
+   "put": {
+    "description": "Edita los datos fiscales de CUALQUIER empresa del usuario sin cambiarse a\nella (Ajustes › Empresas › Editar).",
+    "operationId": "put_empresa_por_id_api_v1_empresa__tenant_id__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tenant_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Tenant Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EmpresaUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EmpresaOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Put Empresa Por Id",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
+  "/api/v1/empresa/{tenant_id}/color": {
+   "put": {
+    "description": "Elige el color de la empresa. `null` la devuelve al automático.\n\nVive en `tenants.config` (JSONB) en vez de una columna propia: es una\npreferencia de presentación, no un dato fiscal.",
+    "operationId": "put_color_empresa_api_v1_empresa__tenant_id__color_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tenant_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Tenant Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EmpresaColorIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EmpresaColorOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Put Color Empresa",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
+  "/api/v1/empresa/{tenant_id}/csd": {
+   "get": {
+    "description": "Sellos cargados de esa empresa (solo los de SU RFC).",
+    "operationId": "listar_csd_por_id_api_v1_empresa__tenant_id__csd_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tenant_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Tenant Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar Csd Por Id",
+    "tags": [
+     "empresa"
+    ]
+   },
+   "post": {
+    "description": "Sube el sello de CUALQUIER empresa del usuario desde la lista, sin\ncambiarse a ella (Ajustes › Empresas › Editar › Sello digital).",
+    "operationId": "subir_csd_por_id_api_v1_empresa__tenant_id__csd_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tenant_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Tenant Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Subir Csd Por Id",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
+  "/api/v1/empresa/{tenant_id}/csd/validar": {
+   "post": {
+    "description": "Prueba LOCAL del CSD contra el RFC de esa empresa (no toca Facturama).",
+    "operationId": "validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tenant_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Tenant Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Validar Csd Por Id",
     "tags": [
      "empresa"
     ]
@@ -15311,6 +17292,81 @@
      }
     ],
     "summary": "Update Lista",
+    "tags": [
+     "listas de precios"
+    ]
+   }
+  },
+  "/api/v1/listas-precios/{lista_id}/asignar": {
+   "post": {
+    "description": "Asignar la lista como DEFAULT del negocio (la usan los clientes sin lista\npropia) y/o a clientes específicos — el último paso del wizard de\nimportación, también disponible desde la administración de listas.",
+    "operationId": "asignar_lista_api_v1_listas_precios__lista_id__asignar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "lista_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Lista Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ListaAsignarIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ListaAsignarOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Asignar Lista",
     "tags": [
      "listas de precios"
     ]
@@ -18125,6 +20181,136 @@
     ]
    }
   },
+  "/api/v1/productos/importar": {
+   "post": {
+    "description": "Aplica el preview confirmado: crea productos nuevos (SKU automático),\nvincula existentes y, si la lista es de UN cliente, guarda su código/nombre\nen el catálogo del cliente (+ alias para el cruce) y opcionalmente sus\nprecios en la lista de precios del cliente.",
+    "operationId": "importar_productos_api_v1_productos_importar_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ImportIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ImportResultOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Importar Productos",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/importar-preview": {
+   "post": {
+    "description": "Archivo → filas estructuradas + cruce contra el catálogo. NO crea nada.\n\nPlantilla (trae columna NOMBRE/PRODUCTO) → parseo determinista. Cualquier\notro acomodo, PDF o foto → IA. Cada fila regresa candidatos del catálogo\n(exacto → alias → difuso) para vincular en vez de duplicar; si se manda\n`cliente_id`, también se marca lo que ese cliente ya tiene vinculado.",
+    "operationId": "importar_preview_api_v1_productos_importar_preview_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_importar_preview_api_v1_productos_importar_preview_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ImportPreviewOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Importar Preview",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
   "/api/v1/productos/match": {
    "post": {
     "description": "Cruza textos libres (tecleados/pegados) contra el catálogo: exacto → alias\naprendido → difuso, y opcionalmente IA para los que no resuelvan.",
@@ -18263,6 +20449,59 @@
     ]
    }
   },
+  "/api/v1/productos/plantilla-importacion": {
+   "get": {
+    "description": "Descarga la plantilla oficial .xlsx para el alta masiva de productos.",
+    "operationId": "plantilla_importacion_api_v1_productos_plantilla_importacion_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Plantilla Importacion",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
   "/api/v1/productos/similares": {
    "get": {
     "description": "Posibles duplicados: productos cuyo nombre/sinónimos coinciden. Se llama\nantes de crear para evitar dar de alta dos veces el mismo bien (jitomate vs\ntomate). Declarado antes de /{producto_id} para no capturarse como UUID.",
@@ -18328,6 +20567,75 @@
      }
     ],
     "summary": "Productos Similares",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/sugerir-sat-batch": {
+   "post": {
+    "description": "Pregunta 1/2 del wizard: claves y unidades SAT sugeridas para N productos\nen una pasada. SOLO devuelve claves que existen en el catálogo SAT oficial\ncargado en el sistema (la IA elige entre candidatos del catálogo; sin IA,\ngana el mejor candidato por texto; sin candidatos, la genérica 01010101).",
+    "operationId": "sugerir_sat_batch_api_v1_productos_sugerir_sat_batch_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SugerirSatBatchIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/SugerenciaSatOut"
+         },
+         "title": "Response Sugerir Sat Batch Api V1 Productos Sugerir Sat Batch Post",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Sugerir Sat Batch",
     "tags": [
      "productos"
     ]
@@ -20326,6 +22634,82 @@
     ]
    }
   },
+  "/api/v1/sat/claves": {
+   "get": {
+    "description": "Búsqueda en el catálogo SAT oficial (c_ClaveProdServ) cargado en la base:\npor texto (FTS español + variantes) o por prefijo de clave. Alimenta el\nautocompletar del formulario de producto y del wizard de importación.",
+    "operationId": "buscar_claves_sat_api_v1_sat_claves_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "q",
+      "required": true,
+      "schema": {
+       "maxLength": 254,
+       "minLength": 2,
+       "title": "Q",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 10,
+       "maximum": 30,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Buscar Claves Sat",
+    "tags": [
+     "sat"
+    ]
+   }
+  },
   "/api/v1/sat/sugerir": {
    "post": {
     "operationId": "sugerir_api_v1_sat_sugerir_post",
@@ -20385,6 +22769,82 @@
      }
     ],
     "summary": "Sugerir",
+    "tags": [
+     "sat"
+    ]
+   }
+  },
+  "/api/v1/sat/unidades": {
+   "get": {
+    "description": "Búsqueda en el catálogo SAT de unidades (c_ClaveUnidad).",
+    "operationId": "buscar_unidades_sat_api_v1_sat_unidades_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "q",
+      "required": true,
+      "schema": {
+       "maxLength": 100,
+       "minLength": 1,
+       "title": "Q",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 10,
+       "maximum": 30,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Buscar Unidades Sat",
     "tags": [
      "sat"
     ]

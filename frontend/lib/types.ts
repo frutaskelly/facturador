@@ -534,3 +534,36 @@ export type Producto = {
   created_at: string;
   updated_at: string;
 };
+
+// ── Empresas del grupo (Ajustes › Empresas) ──
+export type EmpresaGrupo = {
+  tenant_id: string;
+  slug: string;
+  legal_name: string;
+  trade_name: string;
+  rfc: string;
+  regimen_fiscal_sat: string;
+  domicilio_fiscal_cp: string;
+  domicilio_fiscal: Record<string, unknown>;
+  /** Color elegido; null = automático (se deriva del id en lib/empresa-color). */
+  color: string | null;
+  es_principal: boolean;
+  es_actual: boolean;
+  /** ¿Es del grupo de la empresa activa? (falso = invitado por otro dueño). */
+  en_grupo: boolean;
+  rol: string;
+  puede_editar: boolean;
+  datos_fiscales: boolean;
+  csd: boolean;
+  logo: boolean;
+  series: boolean;
+  correo: boolean;
+  listo_para_facturar: boolean;
+};
+
+export type EmpresasGrupo = {
+  empresas: EmpresaGrupo[];
+  grupo_total: number;
+  grupo_max: number;
+  puede_agregar: boolean;
+};
