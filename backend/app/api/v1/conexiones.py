@@ -39,6 +39,7 @@ from ...schemas.conexion import (
     ConexionEstadoOut,
     ConexionOut,
     GrupoOut,
+    GrupoUpdate,
     PruebaOut,
     SincronizarGruposIn,
 )
@@ -249,20 +250,27 @@ def sincronizar_grupos(
             .filter(GrupoWhatsapp.jid == g.jid)
             .one_or_none()
         )
-        if row is None:
+        nuevo = row is None
+        if nuevo:
             row = GrupoWhatsapp(tenant_id=ctx.tenant_id, jid=g.jid)
             db.add(row)
         row.nombre = g.nombre
         row.rol = (g.rol or "interno").lower()
         row.perfil = (g.perfil or "").lower() or None
-        row.activo = g.activo
+        row.reportado_activo = g.activo
+        # La decisión del dueño MANDA: solo se hereda la del bot al darlo de alta.
+        # Si no, apagar un grupo aquí duraba hasta la siguiente sincronización.
+        if nuevo:
+            row.activo = g.activo
         row.config = g.config or {}
         row.sincronizado_at = datetime.now(timezone.utc)
     if vistos:
+        # Un grupo que el bot dejó de reportar se marca como no reportado; su
+        # `activo` sigue siendo del dueño.
         (
             db.query(GrupoWhatsapp)
             .filter(GrupoWhatsapp.jid.notin_(vistos))
-            .update({GrupoWhatsapp.activo: False}, synchronize_session=False)
+            .update({GrupoWhatsapp.reportado_activo: False}, synchronize_session=False)
         )
     db.flush()
     return {"ok": True, "grupos": len(vistos)}
@@ -276,7 +284,12 @@ def listar_grupos(
     """El mapa de qué grupo alimenta a qué: cliente, sucursales, series y qué ha
     entrado por ahí. Es la pregunta que la pantalla de Conexiones existe para
     responder una vez que el bot ya está conectado."""
-    grupos = db.query(GrupoWhatsapp).order_by(GrupoWhatsapp.nombre).all()
+    # Los activos SIEMPRE arriba (pedido del dueño): es la lista que se opera.
+    grupos = (
+        db.query(GrupoWhatsapp)
+        .order_by(GrupoWhatsapp.activo.desc(), GrupoWhatsapp.nombre)
+        .all()
+    )
 
     # Todo en tres consultas, no una por grupo.
     externos = (
@@ -284,9 +297,9 @@ def listar_grupos(
         .filter(ClienteExterno.sistema == "WHATSAPP")
         .all()
     )
-    por_jid: dict[str, set] = {}
+    por_jid: dict[str, dict] = {}
     for e in externos:
-        por_jid.setdefault(e.clave_normalizada, set()).add(e.cliente_id)
+        por_jid.setdefault(e.clave_normalizada, {})[e.cliente_id] = e.id
 
     clientes = {
         c.id: c
@@ -320,7 +333,8 @@ def listar_grupos(
     salida: list[GrupoOut] = []
     for g in grupos:
         st = stats.get(g.jid, {})
-        registrados = por_jid.get(cliente_match.normalizar_clave("WHATSAPP", g.jid), set())
+        reg = por_jid.get(cliente_match.normalizar_clave("WHATSAPP", g.jid), {})
+        registrados = set(reg)
         # Los que además han recibido órdenes de ahí sin estar registrados: se
         # muestran igual, marcados, porque son una inconsistencia que conviene ver.
         todos = list(registrados | set(st.get("clientes") or set()))
@@ -330,17 +344,22 @@ def listar_grupos(
             if c is None:
                 continue
             filas.append(ClienteDelGrupoOut(
+                externo_id=reg.get(cid),
                 cliente_id=c.id,
                 nombre=c.legal_name,
                 serie_factura=series.get(c.serie_factura_id),
                 serie_remision=series.get(c.serie_remision_id),
+                serie_factura_id=c.serie_factura_id,
+                serie_remision_id=c.serie_remision_id,
                 sucursales=[s.nombre for s in sorted(sucs.get(c.id, []), key=lambda x: x.nombre or "")],
                 almacen=almacenes.get(c.almacen_id),
+                almacen_id=c.almacen_id,
                 registrado=cid in registrados,
             ))
         filas.sort(key=lambda f: f.nombre)
         salida.append(GrupoOut(
-            jid=g.jid, nombre=g.nombre, rol=g.rol, perfil=g.perfil, activo=g.activo,
+            jid=g.jid, nombre=g.nombre, rol=g.rol, perfil=g.perfil,
+            activo=g.activo, reportado_activo=g.reportado_activo,
             clientes=filas,
             ordenes=st.get("n", 0),
             ordenes_24h=st.get("n24", 0),
@@ -349,3 +368,23 @@ def listar_grupos(
             sincronizado_at=g.sincronizado_at,
         ))
     return salida
+
+
+@router.patch("/grupos/{jid}", response_model=GrupoOut)
+def actualizar_grupo(
+    jid: str,
+    payload: GrupoUpdate,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_GESTIONAR)),
+):
+    """Prender o apagar un grupo DESDE AQUÍ.
+
+    Apagarlo no toca a Smart Supply: allá la orden se sigue procesando y entrando
+    al Master. Lo que deja de hacer es ensuciar la bandeja del Facturador.
+    """
+    g = db.query(GrupoWhatsapp).filter(GrupoWhatsapp.jid == jid).one_or_none()
+    if g is None:
+        raise HTTPException(status_code=404, detail="Ese grupo no está registrado")
+    g.activo = payload.activo
+    db.flush()
+    return next(x for x in listar_grupos(db=db, ctx=ctx) if x.jid == jid)

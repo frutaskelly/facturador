@@ -26,6 +26,9 @@ class GrupoWhatsapp(Base):
     nombre = Column(String(254))
     rol = Column(String(12))
     perfil = Column(String(40))
+    # Lo que decidió el DUEÑO desde el Facturador; manda sobre lo del bot.
     activo = Column(Boolean, nullable=False, server_default=text("true"))
+    # Lo que reporta la config del bot. Solo lo escribe la sincronización.
+    reportado_activo = Column(Boolean, nullable=False, server_default=text("true"))
     config = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     sincronizado_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=False)

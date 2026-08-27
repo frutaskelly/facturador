@@ -683,12 +683,17 @@ export type ActividadConexion = {
 };
 
 export type ClienteDelGrupo = {
+  /** Id de la equivalencia, para poder desconectar al cliente del grupo. */
+  externo_id?: string | null;
   cliente_id: string;
   nombre: string;
   serie_factura?: string | null;
   serie_remision?: string | null;
   sucursales: string[];
   almacen?: string | null;
+  serie_factura_id?: string | null;
+  serie_remision_id?: string | null;
+  almacen_id?: string | null;
   /** false = le han llegado órdenes de ese grupo sin estar registrado como candidato. */
   registrado: boolean;
 };
@@ -698,7 +703,8 @@ export type GrupoWhatsapp = {
   nombre?: string | null;
   rol?: string | null;              // interno | cliente
   perfil?: string | null;
-  activo: boolean;
+  activo: boolean;            // lo que decidiste tú aquí
+  reportado_activo: boolean;  // lo que dice la config de Smart Supply
   clientes: ClienteDelGrupo[];
   ordenes: number;
   ordenes_24h: number;

@@ -76,12 +76,17 @@ class SincronizarGruposIn(BaseModel):
 
 class ClienteDelGrupoOut(BaseModel):
     """Un cliente que recibe órdenes por ese grupo, con lo suyo."""
+    # Id de la equivalencia, para poder desconectarlo desde la pantalla.
+    externo_id: Optional[uuid.UUID] = None
     cliente_id: uuid.UUID
     nombre: str
     serie_factura: Optional[str] = None
     serie_remision: Optional[str] = None
     sucursales: list[str] = Field(default_factory=list)
     almacen: Optional[str] = None
+    serie_factura_id: Optional[uuid.UUID] = None
+    serie_remision_id: Optional[uuid.UUID] = None
+    almacen_id: Optional[uuid.UUID] = None
     # Si es candidato del grupo o solo se le han asignado órdenes de ahí.
     registrado: bool = True
 
@@ -91,7 +96,8 @@ class GrupoOut(BaseModel):
     nombre: Optional[str] = None
     rol: Optional[str] = None            # interno | cliente
     perfil: Optional[str] = None
-    activo: bool = True
+    activo: bool = True                  # lo que decidió el dueño aquí
+    reportado_activo: bool = True        # lo que dice la config del bot
     clientes: list[ClienteDelGrupoOut] = Field(default_factory=list)
     # Resumen de lo que ha entrado por ahí.
     ordenes: int = 0
@@ -99,3 +105,8 @@ class GrupoOut(BaseModel):
     ultima_orden_at: Optional[datetime] = None
     sin_resolver: int = 0
     sincronizado_at: Optional[datetime] = None
+
+
+class GrupoUpdate(BaseModel):
+    """Lo único que el dueño decide aquí: si el grupo entra o no."""
+    activo: bool

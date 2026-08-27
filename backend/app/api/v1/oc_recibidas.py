@@ -26,7 +26,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Almacen, Cliente, OCRecibida, Producto, Remision, Sucursal
+from ...models import Almacen, Cliente, GrupoWhatsapp, OCRecibida, Producto, Remision, Sucursal
 from ...schemas.common import Page
 from ...schemas.oc_recibida import (
     CrearRemisionIn,
@@ -86,9 +86,30 @@ def _pistas_de(payload: dict) -> list[cliente_match.Pista]:
     return pistas
 
 
+def _grupo_apagado(db: Session, jid: str) -> bool:
+    """¿El dueño apagó este grupo desde la pantalla de Conexiones?"""
+    if not jid:
+        return False
+    g = db.query(GrupoWhatsapp).filter(GrupoWhatsapp.jid == jid).one_or_none()
+    return g is not None and not g.activo
+
+
 def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
     """(Re)resuelve cliente y destino de una OC desde su payload."""
     payload = oc.payload or {}
+
+    # Grupo apagado desde el Facturador: la orden NO se pierde —eso sería peor
+    # que el problema— pero tampoco ensucia la bandeja. Queda descartada con el
+    # motivo escrito y se puede reabrir de un clic.
+    if _grupo_apagado(db, str(payload.get("jid") or "")):
+        oc.estado = "DESCARTADA"
+        oc.motivo = "Este grupo está apagado en Conexiones; nada se procesó de él"
+        oc.cliente_id = None
+        oc.sucursal_id = None
+        oc.candidatos = None
+        oc.punto_entrega = (payload.get("ubicacion") or "").strip() or None
+        return
+
     res = cliente_match.resolver(db, oc.tenant_id, _pistas_de(payload))
 
     oc.ambiguo = res.ambiguo

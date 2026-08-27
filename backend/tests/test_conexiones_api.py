@@ -283,8 +283,9 @@ def test_el_mapa_de_grupos(client, env, auth_as, sin_sesion):
     assert dos["ordenes"] == 0 and dos["clientes"] == []
 
 
-def test_un_grupo_que_deja_de_reportarse_se_apaga_pero_no_se_borra(client, env, auth_as, sin_sesion):
-    """Borrarlo perdería el historial de las órdenes que ya entraron por ahí."""
+def test_un_grupo_que_deja_de_reportarse_no_se_borra(client, env, auth_as, sin_sesion):
+    """Borrarlo perdería el historial de las órdenes que ya entraron por ahí.
+    Y dejar de reportarse es cosa del BOT: no toca lo que decidió el dueño."""
     auth_as(env["dueno_a"])
     clave = _clave(client, env["dueno_a"]).json()["clave"]
     sin_sesion()
@@ -297,8 +298,9 @@ def test_un_grupo_que_deja_de_reportarse_se_apaga_pero_no_se_borra(client, env, 
     auth_as(env["dueno_a"])
     gs = {g["jid"]: g for g in client.get("/api/v1/conexiones/grupos",
                                           headers=_hdr(env["dueno_a"])).json()}
-    assert gs["viejo@g.us"]["activo"] is False       # sigue ahí, apagado
-    assert gs["nuevo@g.us"]["activo"] is True
+    assert gs["viejo@g.us"]["reportado_activo"] is False   # el bot dejó de verlo
+    assert gs["viejo@g.us"]["activo"] is True              # pero nadie lo apagó aquí
+    assert gs["nuevo@g.us"]["reportado_activo"] is True
 
 
 def test_la_clave_no_puede_leer_el_mapa(client, env, auth_as, sin_sesion):
@@ -307,3 +309,52 @@ def test_la_clave_no_puede_leer_el_mapa(client, env, auth_as, sin_sesion):
     clave = _clave(client, env["dueno_a"]).json()["clave"]
     sin_sesion()
     assert client.get("/api/v1/conexiones/grupos", headers=_con_clave(clave)).status_code == 403
+
+
+def test_apagar_un_grupo_manda_sus_ordenes_a_descartadas(client, env, auth_as, sin_sesion):
+    """Apagarlo no puede PERDER órdenes: se guardan descartadas, con el motivo."""
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"]).json()["clave"]
+    h_owner = _hdr(env["dueno_a"])
+    client.post("/api/v1/clientes/externos", headers=h_owner, json={
+        "sistema": "WHATSAPP", "clave": "g-apagable@g.us", "cliente_id": env["cli"]})
+
+    sin_sesion()
+    h = _con_clave(clave)
+    client.post("/api/v1/conexiones/grupos", headers=h, json={"grupos": [
+        {"jid": "g-apagable@g.us", "nombre": "Se apaga", "rol": "interno"}]})
+
+    auth_as(env["dueno_a"])
+    r = client.patch("/api/v1/conexiones/grupos/g-apagable@g.us", headers=h_owner,
+                     json={"activo": False})
+    assert r.status_code == 200 and r.json()["activo"] is False
+    assert r.json()["reportado_activo"] is True     # el bot sigue diciendo que está vivo
+
+    sin_sesion()
+    oc = client.post("/api/v1/oc-recibidas", headers=h,
+                     json=_oc(jid="g-apagable@g.us")).json()
+    assert oc["estado"] == "DESCARTADA"
+    assert "apagado" in oc["motivo"]
+
+    # Y la sincronización del bot NO lo vuelve a prender.
+    client.post("/api/v1/conexiones/grupos", headers=h, json={"grupos": [
+        {"jid": "g-apagable@g.us", "nombre": "Se apaga", "rol": "interno", "activo": True}]})
+    auth_as(env["dueno_a"])
+    g = next(x for x in client.get("/api/v1/conexiones/grupos", headers=h_owner).json()
+             if x["jid"] == "g-apagable@g.us")
+    assert g["activo"] is False
+
+
+def test_los_activos_van_arriba(client, env, auth_as, sin_sesion):
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"]).json()["clave"]
+    h_owner = _hdr(env["dueno_a"])
+    sin_sesion()
+    client.post("/api/v1/conexiones/grupos", headers=_con_clave(clave), json={"grupos": [
+        {"jid": "aaa@g.us", "nombre": "AAA primero por nombre", "rol": "interno"},
+        {"jid": "zzz@g.us", "nombre": "ZZZ último por nombre", "rol": "interno"},
+    ]})
+    auth_as(env["dueno_a"])
+    client.patch("/api/v1/conexiones/grupos/aaa@g.us", headers=h_owner, json={"activo": False})
+    gs = client.get("/api/v1/conexiones/grupos", headers=h_owner).json()
+    assert [g["jid"] for g in gs] == ["zzz@g.us", "aaa@g.us"]   # el activo, arriba

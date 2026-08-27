@@ -490,6 +490,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conexiones/grupos/{jid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Actualizar Grupo
+         * @description Prender o apagar un grupo DESDE AQUÍ.
+         *
+         *     Apagarlo no toca a Smart Supply: allá la orden se sigue procesando y entrando
+         *     al Master. Lo que deja de hacer es ensuciar la bandeja del Facturador.
+         */
+        patch: operations["actualizar_grupo_api_v1_conexiones_grupos__jid__patch"];
+        trace?: never;
+    };
     "/api/v1/conexiones/probar": {
         parameters: {
             query?: never;
@@ -3279,11 +3302,15 @@ export interface components {
         ClienteDelGrupoOut: {
             /** Almacen */
             almacen?: string | null;
+            /** Almacen Id */
+            almacen_id?: string | null;
             /**
              * Cliente Id
              * Format: uuid
              */
             cliente_id: string;
+            /** Externo Id */
+            externo_id?: string | null;
             /** Nombre */
             nombre: string;
             /**
@@ -3293,8 +3320,12 @@ export interface components {
             registrado: boolean;
             /** Serie Factura */
             serie_factura?: string | null;
+            /** Serie Factura Id */
+            serie_factura_id?: string | null;
             /** Serie Remision */
             serie_remision?: string | null;
+            /** Serie Remision Id */
+            serie_remision_id?: string | null;
             /** Sucursales */
             sucursales?: string[];
         };
@@ -4612,6 +4643,11 @@ export interface components {
             ordenes_24h: number;
             /** Perfil */
             perfil?: string | null;
+            /**
+             * Reportado Activo
+             * @default true
+             */
+            reportado_activo: boolean;
             /** Rol */
             rol?: string | null;
             /**
@@ -4623,6 +4659,14 @@ export interface components {
             sincronizado_at?: string | null;
             /** Ultima Orden At */
             ultima_orden_at?: string | null;
+        };
+        /**
+         * GrupoUpdate
+         * @description Lo único que el dueño decide aquí: si el grupo entra o no.
+         */
+        GrupoUpdate: {
+            /** Activo */
+            activo: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -8815,6 +8859,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": Record<string, never>;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    actualizar_grupo_api_v1_conexiones_grupos__jid__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                jid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrupoUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrupoOut"];
                 };
             };
             /** @description Validation Error */

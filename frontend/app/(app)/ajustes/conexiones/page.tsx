@@ -7,10 +7,12 @@
 // sola pregunta —¿está entrando lo que debe?—, que es lo único que alguien
 // viene a mirar aquí una vez que funciona.
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Inbox,
   KeyRound,
@@ -18,6 +20,7 @@ import {
   Power,
   RefreshCw,
   RotateCw,
+  Unlink,
   X,
 } from "lucide-react";
 
@@ -26,12 +29,21 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Field, Select, Switch } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
-import type { ActividadConexion, ClaveNueva, ConexionEstado, GrupoWhatsapp } from "@/lib/types";
+import type {
+  ActividadConexion,
+  Almacen,
+  ClaveNueva,
+  Cliente,
+  ConexionEstado,
+  GrupoWhatsapp,
+  Serie,
+} from "@/lib/types";
 
 const WRITE = "membership:gestionar";
 
@@ -65,6 +77,12 @@ export default function Page() {
   const [error, setError] = useState(false);
   const [actividad, setActividad] = useState<ActividadConexion[]>([]);
   const [grupos, setGrupos] = useState<GrupoWhatsapp[]>([]);
+  const [abierto, setAbierto] = useState<string | null>(null);   // jid desplegado
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [seriesFac, setSeriesFac] = useState<Serie[]>([]);
+  const [seriesRem, setSeriesRem] = useState<Serie[]>([]);
+  const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
+  const [agregando, setAgregando] = useState("");
   // La clave en claro solo vive aquí, en memoria, hasta que se recarga la página.
   const [nueva, setNueva] = useState<ClaveNueva | null>(null);
   const [copiado, setCopiado] = useState(false);
@@ -106,6 +124,69 @@ export default function Page() {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // Catálogos para poder EDITAR desde el detalle sin salir de la pantalla.
+  useEffect(() => {
+    apiFetch<{ items: Cliente[] }>("/api/v1/clientes?limit=1000")
+      .then((p) => setClientes(p.items)).catch(() => undefined);
+    apiFetch<{ items: Serie[] }>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200")
+      .then((p) => setSeriesFac(p.items)).catch(() => undefined);
+    apiFetch<{ items: Serie[] }>("/api/v1/series?tipo_documento=REMISION&activa=true&limit=200")
+      .then((p) => setSeriesRem(p.items)).catch(() => undefined);
+    apiFetch<{ items: Almacen[] }>("/api/v1/almacenes?limit=200")
+      .then((p) => setAlmacenes(p.items)).catch(() => undefined);
+  }, []);
+
+  /** Prender/apagar un grupo. Apagarlo no toca a Smart Supply. */
+  async function togglear(g: GrupoWhatsapp, activo: boolean) {
+    try {
+      await apiFetch(`/api/v1/conexiones/grupos/${encodeURIComponent(g.jid)}`, {
+        method: "PATCH", body: JSON.stringify({ activo }),
+      });
+      toast.success(activo
+        ? `${g.nombre ?? "El grupo"} vuelve a entrar a la bandeja`
+        : `${g.nombre ?? "El grupo"} apagado — sus órdenes ya no entran a la bandeja`);
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo cambiar");
+    }
+  }
+
+  /** Conecta un cliente más a un grupo (queda como candidato, no decide solo). */
+  async function conectarCliente(jid: string, clienteId: string) {
+    try {
+      await apiFetch("/api/v1/clientes/externos", {
+        method: "POST",
+        body: JSON.stringify({ sistema: "WHATSAPP", clave: jid, cliente_id: clienteId }),
+      });
+      setAgregando("");
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo conectar");
+    }
+  }
+
+  async function desconectarCliente(externoId: string) {
+    try {
+      await apiFetch(`/api/v1/clientes/externos/${externoId}`, { method: "DELETE" });
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo desconectar");
+    }
+  }
+
+  /** Serie o almacén de un cliente. Es campo del CLIENTE, no del grupo: cambiarlo
+   *  aquí lo cambia en todos lados, y por eso la pantalla lo dice. */
+  async function cambiarCliente(clienteId: string, campo: string, valor: string) {
+    try {
+      await apiFetch(`/api/v1/clientes/${clienteId}`, {
+        method: "PATCH", body: JSON.stringify({ [campo]: valor || null }),
+      });
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo guardar");
+    }
+  }
 
   // Se refresca sola. Rápido mientras espera la clave —que es justo cuando estás
   // viendo la pantalla— y despacio una vez conectada, donde lo único que cambia
@@ -459,100 +540,235 @@ export default function Page() {
             para cambiarlo se edita allá.
           </p>
 
-          <div className="space-y-3">
-            {grupos.map((g) => (
-              <div
-                key={g.jid}
-                className={`rounded-lg border border-border p-4 ${g.activo ? "" : "opacity-55"}`}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{g.nombre ?? "Grupo sin nombre"}</span>
-                      {g.rol === "cliente" ? (
-                        <Badge tone="accent">Del cliente</Badge>
-                      ) : (
-                        <Badge tone="muted">Interno</Badge>
-                      )}
-                      {g.perfil ? <Badge tone="default">{g.perfil}</Badge> : null}
-                      {!g.activo ? <Badge tone="warning">Apagado</Badge> : null}
-                    </div>
-                    <div className="mt-0.5 font-mono text-[11px] text-muted">{g.jid}</div>
-                  </div>
-                  <div className="text-right text-sm">
-                    <div className="tabular-nums">
-                      <span className="font-semibold">{g.ordenes}</span>{" "}
-                      <span className="text-muted">órdenes</span>
-                      {g.ordenes_24h ? (
-                        <span className="text-muted"> · {g.ordenes_24h} en 24 h</span>
-                      ) : null}
-                    </div>
-                    <div className="text-xs text-muted">
-                      {g.ultima_orden_at ? `última ${haceCuanto(g.ultima_orden_at)}` : "sin órdenes aún"}
-                      {g.sin_resolver ? (
-                        <span className="text-favorite"> · {g.sin_resolver} sin asignar</span>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="bg-surface-2 text-[11px] uppercase tracking-wider text-muted">
+                <tr>
+                  <th className="w-8 px-2 py-2" />
+                  <th className="px-3 py-2 text-left font-semibold">Grupo</th>
+                  <th className="px-3 py-2 text-left font-semibold">Le factura a</th>
+                  <th className="px-3 py-2 text-right font-semibold">Órdenes</th>
+                  <th className="px-3 py-2 text-center font-semibold">Entra</th>
+                </tr>
+              </thead>
+              <tbody>
+                {grupos.map((g) => {
+                  const open = abierto === g.jid;
+                  return (
+                    <Fragment key={g.jid}>
+                      <tr
+                        className={`cursor-pointer border-t border-border hover:bg-surface-2 ${
+                          g.activo ? "" : "opacity-60"
+                        }`}
+                        onClick={() => setAbierto(open ? null : g.jid)}
+                      >
+                        <td className="px-2 py-2.5 text-muted">
+                          {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">{g.nombre ?? "Grupo sin nombre"}</span>
+                            {g.rol === "cliente" ? (
+                              <Badge tone="accent">Del cliente</Badge>
+                            ) : (
+                              <Badge tone="muted">Interno</Badge>
+                            )}
+                            {g.perfil ? <Badge tone="default">{g.perfil}</Badge> : null}
+                            {!g.reportado_activo ? (
+                              <span
+                                className="text-xs text-muted"
+                                title="Smart Supply ya no reporta este grupo"
+                              >
+                                sin reportar
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {g.clientes.length ? (
+                            <span>
+                              {g.clientes.map((c) => c.nombre.split(" ").slice(0, 2).join(" ")).join(" · ")}
+                            </span>
+                          ) : (
+                            <span className="text-favorite">Sin cliente</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">
+                          {g.ordenes}
+                          {g.sin_resolver ? (
+                            <span className="text-favorite"> · {g.sin_resolver}⚠</span>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                          <Switch
+                            checked={g.activo}
+                            disabled={!canWrite}
+                            onChange={(v) => togglear(g, v)}
+                          />
+                        </td>
+                      </tr>
 
-                {g.clientes.length ? (
-                  <div className="mt-3 overflow-x-auto rounded-lg border border-border">
-                    <table className="w-full min-w-[520px] text-sm">
-                      <thead className="bg-surface-2 text-[11px] uppercase tracking-wider text-muted">
-                        <tr>
-                          <th className="px-3 py-1.5 text-left font-semibold">Cliente</th>
-                          <th className="px-3 py-1.5 text-left font-semibold">Sucursales</th>
-                          <th className="px-3 py-1.5 text-left font-semibold">Series</th>
-                          <th className="px-3 py-1.5 text-left font-semibold">Almacén</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {g.clientes.map((c) => (
-                          <tr key={c.cliente_id} className="border-t border-border">
-                            <td className="px-3 py-2">
-                              {c.nombre}
-                              {!c.registrado ? (
-                                <span
-                                  className="ml-2 text-xs text-favorite"
-                                  title="Le han llegado órdenes de este grupo sin estar registrado como candidato"
+                      {open ? (
+                        <tr className="border-t border-border bg-surface">
+                          <td colSpan={5} className="px-4 py-4">
+                            <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted">
+                              <span className="font-mono">{g.jid}</span>
+                              <span>
+                                {g.ultima_orden_at
+                                  ? `última orden ${haceCuanto(g.ultima_orden_at)}`
+                                  : "sin órdenes aún"}
+                              </span>
+                              {g.ordenes_24h ? <span>{g.ordenes_24h} en 24 h</span> : null}
+                            </div>
+
+                            <div className="overflow-x-auto rounded-lg border border-border">
+                              <table className="w-full min-w-[620px] text-sm">
+                                <thead className="bg-surface-2 text-[11px] uppercase tracking-wider text-muted">
+                                  <tr>
+                                    <th className="px-3 py-1.5 text-left font-semibold">Cliente</th>
+                                    <th className="px-3 py-1.5 text-left font-semibold">Serie factura</th>
+                                    <th className="px-3 py-1.5 text-left font-semibold">Serie remisión</th>
+                                    <th className="px-3 py-1.5 text-left font-semibold">Almacén</th>
+                                    <th className="px-3 py-1.5 text-left font-semibold">Sucursales</th>
+                                    <th className="w-8 px-2 py-1.5" />
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {g.clientes.map((c) => (
+                                    <tr key={c.cliente_id} className="border-t border-border align-top">
+                                      <td className="px-3 py-2">
+                                        {c.nombre}
+                                        {!c.registrado ? (
+                                          <div className="text-xs text-favorite">
+                                            no registrado — le llegaron órdenes de aquí
+                                          </div>
+                                        ) : null}
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <Select
+                                          value={c.serie_factura_id ?? ""}
+                                          disabled={!canWrite}
+                                          onChange={(e) =>
+                                            cambiarCliente(c.cliente_id, "serie_factura_id", e.target.value)
+                                          }
+                                        >
+                                          <option value="">predeterminada</option>
+                                          {seriesFac.map((s) => (
+                                            <option key={s.id} value={s.id}>{s.codigo}</option>
+                                          ))}
+                                        </Select>
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <Select
+                                          value={c.serie_remision_id ?? ""}
+                                          disabled={!canWrite}
+                                          onChange={(e) =>
+                                            cambiarCliente(c.cliente_id, "serie_remision_id", e.target.value)
+                                          }
+                                        >
+                                          <option value="">predeterminada</option>
+                                          {seriesRem.map((s) => (
+                                            <option key={s.id} value={s.id}>{s.codigo}</option>
+                                          ))}
+                                        </Select>
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <Select
+                                          value={c.almacen_id ?? ""}
+                                          disabled={!canWrite}
+                                          onChange={(e) =>
+                                            cambiarCliente(c.cliente_id, "almacen_id", e.target.value)
+                                          }
+                                        >
+                                          <option value="">predeterminado</option>
+                                          {almacenes.map((a) => (
+                                            <option key={a.id} value={a.id}>
+                                              {a.codigo ? `${a.codigo} · ${a.nombre}` : a.nombre}
+                                            </option>
+                                          ))}
+                                        </Select>
+                                      </td>
+                                      <td className="px-3 py-2 text-muted">
+                                        {c.sucursales.length ? (
+                                          c.sucursales.join(" · ")
+                                        ) : (
+                                          <span className="text-favorite">ninguna</span>
+                                        )}
+                                        <Link
+                                          href={`/sucursales?cliente=${c.cliente_id}`}
+                                          className="ml-2 text-xs text-accent hover:underline"
+                                        >
+                                          gestionar
+                                        </Link>
+                                      </td>
+                                      <td className="px-2 py-2 text-right">
+                                        {canWrite && c.externo_id ? (
+                                          <button
+                                            onClick={() => desconectarCliente(c.externo_id!)}
+                                            className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-danger"
+                                            title="Desconectar del grupo"
+                                          >
+                                            <Unlink size={15} />
+                                          </button>
+                                        ) : null}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  {!g.clientes.length ? (
+                                    <tr>
+                                      <td colSpan={6} className="px-3 py-4 text-center text-sm text-muted">
+                                        Sin clientes conectados: las órdenes de este grupo llegan sin asignar.
+                                      </td>
+                                    </tr>
+                                  ) : null}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            {canWrite ? (
+                              <div className="mt-3 flex flex-wrap items-end gap-2">
+                                <div className="w-72">
+                                  <Field label="Conectar otro cliente a este grupo">
+                                    <Select
+                                      value={agregando}
+                                      onChange={(e) => setAgregando(e.target.value)}
+                                    >
+                                      <option value="">— Elegir —</option>
+                                      {clientes
+                                        .filter((c) => !g.clientes.some((x) => x.cliente_id === c.id))
+                                        .map((c) => (
+                                          <option key={c.id} value={c.id}>{c.legal_name}</option>
+                                        ))}
+                                    </Select>
+                                  </Field>
+                                </div>
+                                <Button
+                                  variant="secondary"
+                                  disabled={!agregando}
+                                  onClick={() => conectarCliente(g.jid, agregando)}
                                 >
-                                  no registrado
-                                </span>
-                              ) : null}
-                            </td>
-                            <td className="px-3 py-2 text-muted">
-                              {c.sucursales.length ? c.sucursales.join(" · ") : "—"}
-                            </td>
-                            <td className="px-3 py-2 font-mono text-xs">
-                              {c.serie_factura || c.serie_remision ? (
-                                <>
-                                  {c.serie_factura ?? "—"}
-                                  <span className="text-muted"> / </span>
-                                  {c.serie_remision ?? "—"}
-                                </>
-                              ) : (
-                                <span className="font-sans text-muted">predeterminadas</span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 text-muted">{c.almacen ?? "predeterminado"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm text-favorite">
-                    Sin cliente asignado — las órdenes de este grupo van a llegar sin asignar.
-                  </p>
-                )}
-              </div>
-            ))}
+                                  Conectar
+                                </Button>
+                              </div>
+                            ) : null}
+
+                            <p className="mt-3 text-xs text-muted">
+                              La serie y el almacén son del CLIENTE: cambiarlos aquí los cambia en
+                              todos sus documentos, no solo en los de este grupo.
+                            </p>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
           <p className="mt-4 text-xs text-muted">
-            Las series se muestran como <em>factura / remisión</em>. Un grupo puede alimentar a
-            varias razones sociales: el documento decide cuál, y si no lo dice, la orden espera en
-            la bandeja.
+            Un grupo puede alimentar a varias razones sociales —Balles y Jubran comparten los
+            suyos—: el documento decide cuál, y si no lo dice, la orden espera en la bandeja.
+            Apagar un grupo aquí no toca a Smart Supply; solo deja de entrar a esta bandeja.
           </p>
         </Card>
       ) : null}

@@ -1250,10 +1250,34 @@
       ],
       "title": "Almacen"
      },
+     "almacen_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Almacen Id"
+     },
      "cliente_id": {
       "format": "uuid",
       "title": "Cliente Id",
       "type": "string"
+     },
+     "externo_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Externo Id"
      },
      "nombre": {
       "title": "Nombre",
@@ -1275,6 +1299,18 @@
       ],
       "title": "Serie Factura"
      },
+     "serie_factura_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Factura Id"
+     },
      "serie_remision": {
       "anyOf": [
        {
@@ -1285,6 +1321,18 @@
        }
       ],
       "title": "Serie Remision"
+     },
+     "serie_remision_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Remision Id"
      },
      "sucursales": {
       "items": {
@@ -4779,6 +4827,11 @@
       ],
       "title": "Perfil"
      },
+     "reportado_activo": {
+      "default": true,
+      "title": "Reportado Activo",
+      "type": "boolean"
+     },
      "rol": {
       "anyOf": [
        {
@@ -4824,6 +4877,20 @@
      "jid"
     ],
     "title": "GrupoOut",
+    "type": "object"
+   },
+   "GrupoUpdate": {
+    "description": "Lo único que el dueño decide aquí: si el grupo entra o no.",
+    "properties": {
+     "activo": {
+      "title": "Activo",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "activo"
+    ],
+    "title": "GrupoUpdate",
     "type": "object"
    },
    "HTTPValidationError": {
@@ -16058,6 +16125,80 @@
      }
     ],
     "summary": "Sincronizar Grupos",
+    "tags": [
+     "conexiones"
+    ]
+   }
+  },
+  "/api/v1/conexiones/grupos/{jid}": {
+   "patch": {
+    "description": "Prender o apagar un grupo DESDE AQUÍ.\n\nApagarlo no toca a Smart Supply: allá la orden se sigue procesando y entrando\nal Master. Lo que deja de hacer es ensuciar la bandeja del Facturador.",
+    "operationId": "actualizar_grupo_api_v1_conexiones_grupos__jid__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "jid",
+      "required": true,
+      "schema": {
+       "title": "Jid",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/GrupoUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GrupoOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Actualizar Grupo",
     "tags": [
      "conexiones"
     ]
