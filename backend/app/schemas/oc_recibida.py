@@ -12,7 +12,7 @@ Canal = Literal["WHATSAPP", "EMAIL", "MANUAL", "API"]
 EstadoOC = Literal["PENDIENTE", "ASIGNADA", "DESCARTADA"]
 
 
-class LineaOCIn(BaseModel):
+class LineaOCRecibidaIn(BaseModel):
     """Una partida tal como venía en el documento, sin cruzar todavía."""
     descripcion: str = Field(min_length=1, max_length=500)
     cantidad: Decimal = Field(gt=0)
@@ -48,7 +48,7 @@ class OCRecibidaIn(BaseModel):
     jid: Optional[str] = Field(default=None, max_length=120)
     perfil: Optional[str] = Field(default=None, max_length=40)
 
-    lineas: list[LineaOCIn] = Field(default_factory=list)
+    lineas: list[LineaOCRecibidaIn] = Field(default_factory=list)
 
 
 class OCRecibidaUpdate(BaseModel):
@@ -67,9 +67,14 @@ class CandidatoLineaOut(BaseModel):
     nombre: str
     score: int
     origen: str
+    # Necesarias para traducir la UNIDAD de la orden ("CAJA", "KG") a la
+    # presentación del producto. Sin esto toda partida entraría como KILO y una
+    # OC de 5 CAJA registraría 5 kg en vez de 100.
+    presentaciones: dict = Field(default_factory=dict)
+    presentacion_default: Optional[str] = None
 
 
-class LineaOCOut(BaseModel):
+class LineaOCRecibidaOut(BaseModel):
     numero: int
     descripcion: str
     cantidad: Decimal
@@ -105,7 +110,7 @@ class OCRecibidaOut(ORMModel):
 
 class OCRecibidaDetailOut(OCRecibidaOut):
     payload: dict = Field(default_factory=dict)
-    lineas: list[LineaOCOut] = Field(default_factory=list)
+    lineas: list[LineaOCRecibidaOut] = Field(default_factory=list)
 
 
 class LineaCrearIn(BaseModel):

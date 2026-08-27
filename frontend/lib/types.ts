@@ -540,6 +540,8 @@ export type CandidatoLinea = {
   nombre: string;
   score: number;
   origen: string;
+  presentaciones: Record<string, number>;
+  presentacion_default?: string | null;
 };
 
 export type LineaOC = {

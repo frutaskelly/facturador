@@ -16,8 +16,9 @@
  */
 import type { components } from "./api-types.gen";
 import type {
-  Almacen, Categoria, Cliente, Devolucion, EsquemaImpuesto, Factura, FacturaDetail,
-  LineaFactura, LineaOrdenCompra, LineaRemision, ListaPrecios, Membership,
+  Almacen, Categoria, Cliente, ClienteExterno, Devolucion, EsquemaImpuesto, Factura, FacturaDetail,
+  LineaFactura, LineaOC, LineaOrdenCompra, LineaRemision, ListaPrecios, Membership,
+  OCRecibida, OCRecibidaDetalle,
   OrdenCompra, OrdenCompraDetail, Precio, Producto, Proveedor, Remision,
   RemisionDetail, Role, Serie, Sucursal,
 } from "./types";
@@ -50,6 +51,10 @@ type _OrdenCompra = Ok<MissingIn<OrdenCompra, S["OrdenCompraOut"]>>;
 type _OrdenCompraDetail = Ok<MissingIn<OrdenCompraDetail, S["OrdenCompraDetailOut"]>>;
 type _LineaOrdenCompra = Ok<MissingIn<LineaOrdenCompra, S["LineaOCOut"]>>;
 type _Membership = Ok<MissingIn<Membership, S["MembershipOut"]>>;
+type _OCRecibida = Ok<MissingIn<OCRecibida, S["OCRecibidaOut"]>>;
+type _OCRecibidaDetalle = Ok<MissingIn<OCRecibidaDetalle, S["OCRecibidaDetailOut"]>>;
+type _LineaOC = Ok<MissingIn<LineaOC, S["LineaOCRecibidaOut"]>>;
+type _ClienteExterno = Ok<MissingIn<ClienteExterno, S["ClienteExternoOut"]>>;
 type _Role = Ok<MissingIn<Role, S["RoleOut"]>>;
 
 export {};

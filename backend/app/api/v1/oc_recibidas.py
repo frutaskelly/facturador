@@ -65,7 +65,12 @@ def _pistas_de(payload: dict) -> list[cliente_match.Pista]:
         valor = (payload.get(campo) or "").strip()
         if not valor:
             continue
-        if sistema in ("PROYECTO", "UBICACION") and perfil:
+        if sistema in ("PROYECTO", "UBICACION"):
+            # Sin perfil el prefijo no existe y la clave caería en un espacio
+            # global: 'HOSPITALES' significa cosas distintas en Pachuca y en
+            # Villahermosa, y una pisaría a la otra. Sin perfil, no hay pista.
+            if not perfil:
+                continue
             valor = f"{perfil}:{valor}"
         pistas.append(cliente_match.Pista(sistema=sistema, clave=valor))
     return pistas
@@ -74,7 +79,7 @@ def _pistas_de(payload: dict) -> list[cliente_match.Pista]:
 def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
     """(Re)resuelve cliente y sucursal de una OC desde su payload."""
     payload = oc.payload or {}
-    res = cliente_match.resolver(db, _pistas_de(payload))
+    res = cliente_match.resolver(db, oc.tenant_id, _pistas_de(payload))
 
     oc.ambiguo = res.ambiguo
     oc.resuelto_via = res.via
@@ -133,7 +138,11 @@ def ingesta(
         existente.archivo_nombre = payload.archivo_nombre
         existente.archivo_url = payload.archivo_url
         existente.updated_by = ctx.user_id
-        _resolver_y_aplicar(db, existente)
+        # Solo se re-resuelve lo que nadie ha tocado. Un reintento por timeout no
+        # puede borrar la asignación que un humano ya hizo en la bandeja; para
+        # forzar el recálculo está /reabrir, que es explícito.
+        if existente.resuelto_via != "MANUAL":
+            _resolver_y_aplicar(db, existente)
         db.flush()
         db.refresh(existente)
         return _detalle(db, existente)
@@ -233,7 +242,9 @@ def _detalle(db: Session, oc: OCRecibida) -> dict:
             "notas": ln.get("notas"),
             "candidatos": [
                 {"producto_id": c.producto_id, "sku": c.sku, "nombre": c.nombre,
-                 "score": c.score, "origen": c.origen}
+                 "score": c.score, "origen": c.origen,
+                 "presentaciones": c.presentaciones or {},
+                 "presentacion_default": c.presentacion_default}
                 for c in cands[:5]
             ],
         })
@@ -264,11 +275,17 @@ def asignar(
     CONFIRMADA para todas las pistas del documento: es el momento en que el
     sistema aprende, y por eso la próxima orden igual ya no pregunta.
     """
-    oc = get_or_404(db, OCRecibida, oc_id, soft=False)
+    oc = get_or_404(db, OCRecibida, oc_id, soft=False, for_update=True)
     if oc.remision_id is not None:
         raise HTTPException(
             status_code=409,
             detail="Esta orden ya generó su remisión; edítala desde la remisión",
+        )
+    if oc.estado == "DESCARTADA":
+        # Aprender de un documento descartado envenena el cruce: si se descartó
+        # es justamente porque no era de ese cliente. Se reabre primero.
+        raise HTTPException(
+            status_code=409, detail="Esta orden está descartada; reábrela antes de asignarla"
         )
     data = payload.model_dump(exclude_unset=True)
 
@@ -293,12 +310,18 @@ def asignar(
 
     if payload.aprender and oc.cliente_id is not None:
         for pista in _pistas_de(oc.payload or {}):
+            # El JID es la pista MÁS DÉBIL: un mismo grupo recibe órdenes de
+            # varias razones sociales (EHMO/MAFAN, Balles/Jubran). Aprenderlo
+            # como confirmado por una sola corrección lo volvería decisorio y
+            # asignaría en silencio las órdenes del otro cliente. Queda SUGERIDA:
+            # se ve en la bandeja y se confirma a mano si el grupo es de uno solo.
+            confianza = "SUGERIDA" if pista.sistema == "WHATSAPP" else "CONFIRMADA"
             # La ubicación es lo único que aporta sucursal; el resto (RFC,
             # proyecto, nombre) solo determina cliente.
             cliente_match.aprender(
                 db, ctx.tenant_id, pista.sistema, pista.clave, oc.cliente_id,
                 sucursal_id=oc.sucursal_id if pista.sistema == "UBICACION" else None,
-                origen="MANUAL", confianza="CONFIRMADA", user_id=ctx.user_id,
+                origen="MANUAL", confianza=confianza, user_id=ctx.user_id,
             )
 
     db.flush()
@@ -371,12 +394,16 @@ def crear_remision(
 
     # El cruce que acaba de confirmar el humano se aprende: la próxima orden que
     # diga "JITOMATE SALADET" ya sabe a qué producto va.
-    for ln in payload.lineas:
-        if ln.texto_original:
-            aprender_alias(
-                db, ctx.tenant_id, ln.texto_original, ln.producto_id,
-                origen="IMPORT", user_id=ctx.user_id,
-            )
+    # `producto_alias` es catálogo global del tenant: reapuntarlo afecta a TODO
+    # el que cruce productos, no solo a esta remisión. Por eso pide el permiso
+    # del catálogo y no basta con el de remisiones.
+    if ctx.has("producto:gestionar"):
+        for ln in payload.lineas:
+            if ln.texto_original:
+                aprender_alias(
+                    db, ctx.tenant_id, ln.texto_original, ln.producto_id,
+                    origen="IMPORT", user_id=ctx.user_id,
+                )
 
     oc.remision_id = rem.id
     oc.estado = "ASIGNADA"
@@ -403,7 +430,7 @@ def descartar(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
     motivo: Optional[str] = Query(default=None, max_length=500),
 ):
-    oc = get_or_404(db, OCRecibida, oc_id, soft=False)
+    oc = get_or_404(db, OCRecibida, oc_id, soft=False, for_update=True)
     if oc.remision_id is not None:
         raise HTTPException(
             status_code=409,
@@ -424,9 +451,12 @@ def reabrir(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     """Regresa una descartada a PENDIENTE y vuelve a intentar el cruce."""
-    oc = get_or_404(db, OCRecibida, oc_id, soft=False)
+    oc = get_or_404(db, OCRecibida, oc_id, soft=False, for_update=True)
     if oc.remision_id is not None:
         raise HTTPException(status_code=409, detail="Esta orden ya generó su remisión")
+    # Reabrir SÍ recalcula aunque la asignación fuera manual: es lo que se pide
+    # explícitamente al pulsar el botón.
+    oc.resuelto_via = None
     _resolver_y_aplicar(db, oc)
     oc.updated_by = ctx.user_id
     db.flush()

@@ -301,3 +301,83 @@ def test_tenant_b_no_ve_ni_resuelve_lo_de_a(client, env, auth_as):
     r = client.post("/api/v1/clientes/resolver", headers=h_b,
                     json={"pistas": [{"sistema": "RFC", "clave": "GOA180712SF5"}]})
     assert r.json()["cliente_id"] is None
+
+
+# ─── reglas que salieron de la revisión ─────────────────────────────────────
+
+def test_el_jid_se_aprende_solo_como_sugerido(client, env, auth_as):
+    """El grupo es la pista más débil: por él entran EHMO y MAFAN. Una corrección
+    no puede volverlo decisorio, o asignaría en silencio las del otro cliente."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(jid="grupo@g.us")).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "aprender": True})
+
+    externos = client.get("/api/v1/clientes/externos", headers=h).json()
+    wa = next(e for e in externos if e["sistema"] == "WHATSAPP")
+    assert wa["confianza"] == "SUGERIDA"
+    rfc = next(e for e in externos if e["sistema"] == "RFC")
+    assert rfc["confianza"] == "CONFIRMADA"
+
+    # Y por lo mismo, el JID solo no resuelve nada todavía.
+    sola = client.post("/api/v1/oc-recibidas", headers=h, json={
+        "canal": "WHATSAPP", "origen_externo": "WA:grupo@g.us:otra",
+        "jid": "grupo@g.us", "lineas": [{"descripcion": "X", "cantidad": "1"}]}).json()
+    assert sola["cliente_id"] is None
+
+
+def test_reintento_no_pisa_la_asignacion_manual(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    body = _oc(rfc=None, ubicacion=None)          # sin pistas registrables
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=body).json()
+    assert oc["cliente_id"] is None
+
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "aprender": False})
+    # El bot reintenta el mismo documento media hora después.
+    otra = client.post("/api/v1/oc-recibidas", headers=h, json=body).json()
+    assert otra["id"] == oc["id"]
+    assert otra["cliente_id"] == env["ehmo"]      # la decisión humana sobrevive
+
+
+def test_descartada_no_acepta_asignacion(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+    client.post(f"/api/v1/oc-recibidas/{oc['id']}/descartar", headers=h)
+    r = client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                     json={"cliente_id": env["ehmo"], "aprender": True})
+    assert r.status_code == 409
+    assert client.get("/api/v1/clientes/externos", headers=h).json() == []
+
+
+def test_cliente_borrado_no_resuelve(client, env, auth_as):
+    """Una equivalencia huérfana dejaría la orden marcada «lista» y reventaría
+    al crear la remisión; tiene que comportarse como inexistente."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    assert client.delete(f"/api/v1/clientes/{env['ehmo']}", headers=h).status_code == 204
+
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+    assert oc["cliente_id"] is None
+    assert oc["estado"] == "PENDIENTE"
+
+
+def test_proyecto_sin_perfil_no_es_pista(client, env, auth_as):
+    """Sin perfil la clave caería en un espacio global: 'HOSPITALES' significa
+    cosas distintas en Pachuca y en Villahermosa."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "PROYECTO", "ehmo:HOSPITALES", env["ehmo"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        rfc=None, ubicacion=None, perfil=None, proyecto="HOSPITALES")).json()
+    assert oc["cliente_id"] is None
+
+
+def test_sugerida_no_pisa_confirmada_y_avisa(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "NOMBRE", "BALLES", env["ehmo"])
+    r = _externo(client, h, "NOMBRE", "BALLES", env["mafan"],
+                 origen="BOT", confianza="SUGERIDA")
+    assert r.status_code == 409                    # no un 201 mentiroso
+    listado = client.get("/api/v1/clientes/externos", headers=h,
+                         params={"sistema": "NOMBRE"}).json()
+    assert listado[0]["cliente_id"] == env["ehmo"]

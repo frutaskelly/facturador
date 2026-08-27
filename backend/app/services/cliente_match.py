@@ -30,7 +30,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models import ClienteExterno, Sucursal
+from ..models import Cliente, ClienteExterno, Sucursal
 from .producto_match import normalizar
 
 # Mayor a menor especificidad. El resolutor recorre esta lista en orden.
@@ -70,22 +70,47 @@ class Resolucion:
     coincidencias: list[dict] = field(default_factory=list)
 
 
-def _buscar(db: Session, sistema: str, clave: str) -> Optional[ClienteExterno]:
+def buscar_equivalencia(
+    db: Session, tenant_id: UUID, sistema: str, clave: str, *, solo_confirmadas: bool = False
+) -> Optional[ClienteExterno]:
+    """La equivalencia registrada para esa clave, o None.
+
+    El filtro de `tenant_id` es explícito y NO se delega a la RLS: los scripts de
+    mantenimiento abren la sesión como owner (la RLS está ENABLE, no FORCE) y sin
+    él verían —y reapuntarían— las filas de otro inquilino.
+    """
     norm = normalizar_clave(sistema, clave)
     if not norm:
         return None
-    return (
-        db.query(ClienteExterno)
-        .filter(
-            ClienteExterno.sistema == sistema,
-            ClienteExterno.clave_normalizada == norm,
-            ClienteExterno.confianza == "CONFIRMADA",
-        )
-        .one_or_none()
+    q = db.query(ClienteExterno).filter(
+        ClienteExterno.tenant_id == tenant_id,
+        ClienteExterno.sistema == sistema,
+        ClienteExterno.clave_normalizada == norm,
     )
+    if solo_confirmadas:
+        q = q.filter(ClienteExterno.confianza == "CONFIRMADA")
+    return q.one_or_none()
 
 
-def resolver(db: Session, pistas: list[Pista]) -> Resolucion:
+def _buscar(db: Session, tenant_id: UUID, sistema: str, clave: str) -> Optional[ClienteExterno]:
+    """Equivalencia utilizable para resolver: confirmada y con cliente vivo.
+
+    Un cliente borrado deja su equivalencia huérfana; si se devolviera, la orden
+    quedaría marcada «lista» y reventaría al crear la remisión. Que se comporte
+    como inexistente la manda a PENDIENTE, que es lo correcto.
+    """
+    hit = buscar_equivalencia(db, tenant_id, sistema, clave, solo_confirmadas=True)
+    if hit is None:
+        return None
+    vivo = (
+        db.query(Cliente.id)
+        .filter(Cliente.id == hit.cliente_id, Cliente.deleted_at.is_(None))
+        .first()
+    )
+    return hit if vivo is not None else None
+
+
+def resolver(db: Session, tenant_id: UUID, pistas: list[Pista]) -> Resolucion:
     """Cruza las pistas de un documento contra `cliente_externos`.
 
     Devuelve el cliente solo si todas las pistas que cruzaron apuntan al MISMO
@@ -99,7 +124,7 @@ def resolver(db: Session, pistas: list[Pista]) -> Resolucion:
         for p in pistas:
             if p.sistema.upper() != sistema:
                 continue
-            hit = _buscar(db, sistema, p.clave)
+            hit = _buscar(db, tenant_id, sistema, p.clave)
             if hit is not None:
                 encontrados.append((sistema, hit))
                 res.coincidencias.append({
@@ -130,7 +155,14 @@ def resolver(db: Session, pistas: list[Pista]) -> Resolucion:
     # La sucursal la aporta la primera coincidencia que traiga una — típicamente
     # la de sistema UBICACION, que es la única que sabe a qué hospital va.
     for _, e in encontrados:
-        if e.sucursal_id is not None:
+        if e.sucursal_id is None:
+            continue
+        viva = (
+            db.query(Sucursal.id)
+            .filter(Sucursal.id == e.sucursal_id, Sucursal.deleted_at.is_(None))
+            .first()
+        )
+        if viva is not None:
             res.sucursal_id = e.sucursal_id
             break
     return res
@@ -189,6 +221,7 @@ def aprender(
         return (
             db.query(ClienteExterno)
             .filter(
+                ClienteExterno.tenant_id == tenant_id,
                 ClienteExterno.sistema == sistema,
                 ClienteExterno.clave_normalizada == norm,
             )

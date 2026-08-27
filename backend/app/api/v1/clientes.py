@@ -235,7 +235,8 @@ def resolver_cliente(
     adivinar aquí significaría facturarle a la empresa equivocada.
     """
     res = cliente_match.resolver(
-        db, [cliente_match.Pista(sistema=p.sistema, clave=p.clave) for p in payload.pistas]
+        db, ctx.tenant_id,
+        [cliente_match.Pista(sistema=p.sistema, clave=p.clave) for p in payload.pistas],
     )
     # Sin sucursal por equivalencia, se intenta contra el catálogo del cliente
     # (código de 3 letras y nombre) — es lo que resuelve una ubicación escrita
@@ -294,6 +295,20 @@ def crear_externo(
             raise HTTPException(
                 status_code=422, detail="La sucursal no pertenece al cliente de la equivalencia"
             )
+    # Una SUGERIDA no puede tocar una CONFIRMADA que ya puso una persona. Si se
+    # intenta, la respuesta tiene que decirlo: devolver 201 con el cliente ANTERIOR
+    # haría creer que quedó registrada una equivalencia que no se registró.
+    previa = cliente_match.buscar_equivalencia(db, ctx.tenant_id, payload.sistema, payload.clave)
+    if (
+        previa is not None
+        and payload.confianza == "SUGERIDA"
+        and previa.confianza == "CONFIRMADA"
+        and previa.cliente_id != payload.cliente_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Esa clave ya está confirmada para otro cliente; cámbiala como confirmada para reapuntarla",
+        )
     obj = cliente_match.aprender(
         db,
         ctx.tenant_id,

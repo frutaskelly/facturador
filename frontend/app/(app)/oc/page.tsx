@@ -19,6 +19,7 @@ import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
+import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { Page } from "@/lib/hooks";
@@ -55,10 +56,45 @@ type LineaEdit = {
   numero: number;
   texto: string;
   cantidad: string;
+  unidad: string;
   producto_id: string;
+  presentacion: string;
   precio: string;
+  notas: string | null;
   candidatos: LineaOC["candidatos"];
+  /** El operador pidió buscar fuera de los candidatos sugeridos. */
+  buscando: boolean;
 };
+
+// Abreviaturas con las que los clientes escriben la unidad en sus órdenes.
+const UNIDAD_ALIAS: Record<string, string> = {
+  KG: "KILO", KGS: "KILO", KILOS: "KILO", KGM: "KILO",
+  PZ: "PIEZA", PZA: "PIEZA", PZAS: "PIEZA", PIEZAS: "PIEZA", H87: "PIEZA",
+  CJ: "CAJA", CJA: "CAJA", CAJAS: "CAJA",
+  BTO: "BULTO", BULTOS: "BULTO", COSTALES: "COSTAL",
+  LT: "LITRO", LTS: "LITRO", LITROS: "LITRO",
+  MJO: "MANOJO", MANOJOS: "MANOJO", BOLSAS: "BOLSA",
+};
+
+/** La unidad de la orden traducida a una presentación que el producto tenga.
+ *  Sin coincidencia se usa la presentación default del producto — nunca se
+ *  asume KILO, porque 5 CAJA registradas como 5 KILO son 95 kg de menos. */
+function presentacionDe(unidad: string, cand?: LineaOC["candidatos"][number]): string {
+  const u = (unidad || "").trim().toUpperCase();
+  const norm = UNIDAD_ALIAS[u] ?? u;
+  const mapa = cand?.presentaciones ?? {};
+  const claves = Object.keys(mapa);
+  const hit = claves.find((k) => k.toUpperCase() === norm);
+  return hit ?? cand?.presentacion_default ?? claves[0] ?? "KILO";
+}
+
+/** Precio tecleado a la mexicana ("1,234.50" o "12,50") → decimal del backend. */
+function precioNormalizado(v: string): string {
+  const t = v.trim();
+  if (!t) return "";
+  if (t.includes(",") && !t.includes(".")) return t.replace(",", ".");
+  return t.replace(/,/g, "");
+}
 
 export default function Page() {
   const { me } = useAuth();
@@ -81,6 +117,7 @@ export default function Page() {
   const [aDescartar, setADescartar] = useState<OCRecibida | null>(null);
 
   const reload = useCallback(() => {
+    setError(false);          // un fallo transitorio no puede dejar la bandeja muerta
     const qs = estado ? `?estado=${estado}&limit=200` : "?limit=200";
     apiFetch<Page<OCRecibida>>(`/api/v1/oc-recibidas${qs}`)
       .then((p) => setRows(p.items))
@@ -108,16 +145,24 @@ export default function Page() {
       setSucursalSel(oc.sucursal_id ?? "");
       setAlmacenSel("");
       setLineas(
-        oc.lineas.map((l) => ({
-          numero: l.numero,
-          texto: l.descripcion,
-          cantidad: String(l.cantidad ?? ""),
+        oc.lineas.map((l) => {
           // Se preselecciona el mejor candidato solo si es un cruce fuerte
           // (exacto o alias ya confirmado). Un difuso al 76% lo revisa la persona.
-          producto_id: l.candidatos[0] && l.candidatos[0].score >= 96 ? l.candidatos[0].producto_id : "",
-          precio: l.precio != null ? String(l.precio) : "",
-          candidatos: l.candidatos,
-        }))
+          const fuerte = l.candidatos[0] && l.candidatos[0].score >= 96 ? l.candidatos[0] : undefined;
+          const unidad = l.unidad ?? "";
+          return {
+            numero: l.numero,
+            texto: l.descripcion,
+            cantidad: String(l.cantidad ?? ""),
+            unidad,
+            producto_id: fuerte ? fuerte.producto_id : "",
+            presentacion: presentacionDe(unidad, fuerte),
+            precio: l.precio != null ? String(l.precio) : "",
+            notas: l.notas ?? null,
+            candidatos: l.candidatos,
+            buscando: false,
+          };
+        })
       );
     } catch {
       toast.error("No se pudo abrir la orden");
@@ -135,12 +180,20 @@ export default function Page() {
       .catch(() => setSucursales([]));
   }, [clienteSel]);
 
-  async function asignar() {
+  /** ¿El operador cambió cliente/sucursal y todavía no se ha guardado? */
+  const sinGuardar = useMemo(
+    () =>
+      !!abierta &&
+      (clienteSel !== (abierta.cliente_id ?? "") || sucursalSel !== (abierta.sucursal_id ?? "")),
+    [abierta, clienteSel, sucursalSel]
+  );
+
+  /** Persiste cliente/sucursal. Devuelve la OC guardada, o null si falló. */
+  async function guardarAsignacion(): Promise<OCRecibidaDetalle | null> {
     if (!abierta || !clienteSel) {
       toast.error("Elige el cliente");
-      return;
+      return null;
     }
-    setGuardando(true);
     try {
       const oc = await apiFetch<OCRecibidaDetalle>(`/api/v1/oc-recibidas/${abierta.id}`, {
         method: "PATCH",
@@ -151,16 +204,26 @@ export default function Page() {
         }),
       });
       setAbierta(oc);
-      toast.success("Asignada — la próxima orden igual ya se resuelve sola");
-      reload();
+      return oc;
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo asignar");
-    } finally {
-      setGuardando(false);
+      return null;
+    }
+  }
+
+  async function asignar() {
+    setGuardando(true);
+    const oc = await guardarAsignacion();
+    setGuardando(false);
+    if (oc) {
+      toast.success("Asignada — la próxima orden igual ya se resuelve sola");
+      reload();
     }
   }
 
   const sinProducto = useMemo(() => lineas.filter((l) => !l.producto_id).length, [lineas]);
+  // Ya tiene remisión, o está descartada: nada se edita desde la bandeja.
+  const bloqueada = !!abierta && (!!abierta.remision_id || abierta.estado === "DESCARTADA");
 
   async function crearRemision() {
     if (!abierta) return;
@@ -174,6 +237,12 @@ export default function Page() {
     }
     setGuardando(true);
     try {
+      // La remisión se crea con el cliente y la sucursal PERSISTIDOS, no con los
+      // del Select. Si el operador los cambió y no guardó, se guarda aquí antes
+      // — si no, la remisión saldría a nombre del cliente anterior y con la serie
+      // equivocada, quemando un folio que no se recupera.
+      if (sinGuardar && !(await guardarAsignacion())) return;
+
       const oc = await apiFetch<OCRecibidaDetalle>(
         `/api/v1/oc-recibidas/${abierta.id}/crear-remision`,
         {
@@ -183,7 +252,9 @@ export default function Page() {
             lineas: lineas.map((l) => ({
               producto_id: l.producto_id,
               cantidad: l.cantidad,
-              precio_unitario: l.precio.trim() ? l.precio : null,
+              presentacion: l.presentacion,
+              precio_unitario: precioNormalizado(l.precio) || null,
+              notas: l.notas,
               texto_original: l.texto,
             })),
           }),
@@ -344,7 +415,12 @@ export default function Page() {
         footer={
           <>
             <Button variant="secondary" onClick={() => setAbierta(null)}>Cerrar</Button>
-            {canWrite && abierta && !abierta.remision_id ? (
+            {canWrite && abierta && !abierta.remision_id && abierta.estado === "DESCARTADA" ? (
+              <Button onClick={() => reabrir(abierta).then(() => abrir(abierta.id))}>
+                Reabrir
+              </Button>
+            ) : null}
+            {canWrite && abierta && !abierta.remision_id && abierta.estado !== "DESCARTADA" ? (
               <>
                 <Button variant="secondary" onClick={asignar} disabled={guardando || !clienteSel}>
                   Guardar asignación
@@ -359,6 +435,12 @@ export default function Page() {
       >
         {abierta ? (
           <div className="space-y-5">
+            {abierta.estado === "DESCARTADA" ? (
+              <Alert tone="warning">
+                Orden descartada. Reábrela para poder asignarla — asignar desde aquí
+                registraría equivalencias de un documento que ya se dio por bueno descartar.
+              </Alert>
+            ) : null}
             {abierta.ambiguo ? (
               <Alert tone="warning">
                 <span className="inline-flex items-center gap-1.5">
@@ -382,7 +464,7 @@ export default function Page() {
                     setClienteSel(e.target.value);
                     setSucursalSel("");
                   }}
-                  disabled={!canWrite || !!abierta.remision_id}
+                  disabled={!canWrite || bloqueada}
                 >
                   <option value="">— Elegir —</option>
                   {clientes.map((c) => (
@@ -400,7 +482,7 @@ export default function Page() {
                 <Select
                   value={sucursalSel}
                   onChange={(e) => setSucursalSel(e.target.value)}
-                  disabled={!canWrite || !clienteSel || !!abierta.remision_id}
+                  disabled={!canWrite || !clienteSel || bloqueada}
                 >
                   <option value="">— Sin sucursal —</option>
                   {sucursales.map((s) => (
@@ -414,7 +496,7 @@ export default function Page() {
                 <Select
                   value={almacenSel}
                   onChange={(e) => setAlmacenSel(e.target.value)}
-                  disabled={!canWrite || !!abierta.remision_id}
+                  disabled={!canWrite || bloqueada}
                 >
                   <option value="">— Sin almacén —</option>
                   {almacenes.map((a) => (
@@ -440,6 +522,7 @@ export default function Page() {
                       <th className="px-3 py-2 text-left">Como venía en la orden</th>
                       <th className="px-3 py-2 text-right">Cantidad</th>
                       <th className="px-3 py-2 text-left">Producto del catálogo</th>
+                      <th className="px-3 py-2 text-left">Presentación</th>
                       <th className="px-3 py-2 text-right">Precio</th>
                     </tr>
                   </thead>
@@ -447,16 +530,38 @@ export default function Page() {
                     {lineas.map((l, i) => (
                       <tr key={l.numero} className="border-t border-border">
                         <td className="px-3 py-2">{l.texto}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{l.cantidad}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {l.cantidad}
+                          {l.unidad ? <span className="ml-1 text-xs text-muted">{l.unidad}</span> : null}
+                        </td>
                         <td className="px-3 py-2">
-                          {l.candidatos.length ? (
+                          {l.candidatos.length && !l.buscando ? (
                             <Select
                               value={l.producto_id}
-                              disabled={!canWrite || !!abierta.remision_id}
+                              disabled={!canWrite || bloqueada}
                               onChange={(e) => {
                                 const v = e.target.value;
+                                if (v === "__buscar__") {
+                                  setLineas((prev) =>
+                                    prev.map((x, j) =>
+                                      j === i ? { ...x, buscando: true, producto_id: "" } : x
+                                    )
+                                  );
+                                  return;
+                                }
                                 setLineas((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, producto_id: v } : x))
+                                  prev.map((x, j) =>
+                                    j === i
+                                      ? {
+                                          ...x,
+                                          producto_id: v,
+                                          presentacion: presentacionDe(
+                                            x.unidad,
+                                            x.candidatos.find((c) => c.producto_id === v)
+                                          ),
+                                        }
+                                      : x
+                                  )
                                 );
                               }}
                             >
@@ -466,17 +571,48 @@ export default function Page() {
                                   {c.nombre} ({c.sku}) · {c.score}%
                                 </option>
                               ))}
+                              <option value="__buscar__">Buscar otro producto…</option>
                             </Select>
                           ) : (
-                            <span className="text-xs text-muted">
-                              Sin candidatos — da de alta el producto primero
-                            </span>
+                            // Sin candidatos, o el operador pidió buscar: el cruce
+                            // difuso deja fuera productos que sí existen, y sin esto
+                            // la orden se quedaba bloqueada para siempre.
+                            <ProductoCombobox
+                              label={l.texto}
+                              placeholder="Buscar en el catálogo…"
+                              onSelect={(prod) =>
+                                setLineas((prev) =>
+                                  prev.map((x, j) =>
+                                    j === i
+                                      ? {
+                                          ...x,
+                                          producto_id: prod ? prod.producto_id : "",
+                                          presentacion: prod
+                                            ? presentacionDe(x.unidad, {
+                                                producto_id: prod.producto_id,
+                                                sku: prod.sku,
+                                                nombre: prod.nombre,
+                                                score: 100,
+                                                origen: "manual",
+                                                presentaciones: prod.presentaciones,
+                                                presentacion_default: prod.presentacion_default,
+                                              })
+                                            : x.presentacion,
+                                        }
+                                      : x
+                                  )
+                                )
+                              }
+                            />
                           )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="text-xs text-muted">{l.presentacion}</span>
                         </td>
                         <td className="px-3 py-2 text-right">
                           <Input
                             value={l.precio}
-                            disabled={!canWrite || !!abierta.remision_id}
+                            disabled={!canWrite || bloqueada}
                             placeholder="lista"
                             className="text-right"
                             onChange={(e) => {
@@ -491,7 +627,7 @@ export default function Page() {
                     ))}
                     {!lineas.length ? (
                       <tr>
-                        <td colSpan={4} className="px-3 py-6 text-center text-sm text-muted">
+                        <td colSpan={5} className="px-3 py-6 text-center text-sm text-muted">
                           El documento no trae partidas legibles.
                         </td>
                       </tr>

@@ -133,6 +133,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clientes/externos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Externos */
+        get: operations["list_externos_api_v1_clientes_externos_get"];
+        put?: never;
+        /**
+         * Crear Externo
+         * @description Registra (o reapunta) una equivalencia. Idempotente por clave normalizada.
+         */
+        post: operations["crear_externo_api_v1_clientes_externos_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clientes/externos/{externo_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Borrar Externo */
+        delete: operations["borrar_externo_api_v1_clientes_externos__externo_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clientes/resolver": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolver Cliente
+         * @description Cruza las pistas de un documento (RFC, proyecto, nombre, ubicación, grupo)
+         *     contra las equivalencias registradas. No escribe nada.
+         *
+         *     Si las pistas se contradicen devuelve `ambiguo=true` y NO elige cliente:
+         *     adivinar aquí significaría facturarle a la empresa equivocada.
+         */
+        post: operations["resolver_cliente_api_v1_clientes_resolver_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clientes/validar-rfc": {
         parameters: {
             query?: never;
@@ -182,6 +244,41 @@ export interface paths {
         head?: never;
         /** Update Cliente */
         patch: operations["update_cliente_api_v1_clientes__cliente_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/clientes/{cliente_id}/catalogo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Catalogo Cliente */
+        get: operations["catalogo_cliente_api_v1_clientes__cliente_id__catalogo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clientes/{cliente_id}/catalogo/{producto_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Upsert Catalogo Cliente */
+        put: operations["upsert_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__put"];
+        post?: never;
+        /** Delete Catalogo Cliente */
+        delete: operations["delete_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/cobranza/estado-cuenta/{cliente_id}": {
@@ -343,6 +440,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/contacto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Contacto */
+        post: operations["contacto_api_v1_contacto_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conversiones": {
         parameters: {
             query?: never;
@@ -453,6 +567,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/empresa/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Checklist Inicio
+         * @description Primeros pasos para el Dashboard: guía tipo checklist de qué falta para
+         *     empezar a trabajar (fiscal + operativo), calculada de datos vivos.
+         */
+        get: operations["checklist_inicio_api_v1_empresa_checklist_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/empresa/csd": {
         parameters: {
             query?: never;
@@ -465,6 +600,28 @@ export interface paths {
         put?: never;
         /** Subir Csd */
         post: operations["subir_csd_api_v1_empresa_csd_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/empresa/csd/validar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validar Csd Endpoint
+         * @description Prueba LOCAL del CSD (sin tocar Facturama): certifica que el .cer es un
+         *     certificado real y vigente del RFC del emisor, que la contraseña abre el
+         *     .key y que la llave corresponde al certificado. La UI pinta ✓/✗ por campo.
+         */
+        post: operations["validar_csd_endpoint_api_v1_empresa_csd_validar_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -942,6 +1099,28 @@ export interface paths {
         patch: operations["update_lista_api_v1_listas_precios__lista_id__patch"];
         trace?: never;
     };
+    "/api/v1/listas-precios/{lista_id}/asignar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Asignar Lista
+         * @description Asignar la lista como DEFAULT del negocio (la usan los clientes sin lista
+         *     propia) y/o a clientes específicos — el último paso del wizard de
+         *     importación, también disponible desde la administración de listas.
+         */
+        post: operations["asignar_lista_api_v1_listas_precios__lista_id__asignar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/listas-precios/{lista_id}/copiar": {
         parameters: {
             query?: never;
@@ -1090,6 +1269,117 @@ export interface paths {
         put?: never;
         /** Cambiar Password */
         post: operations["cambiar_password_api_v1_memberships__membership_id__password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oc-recibidas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listar */
+        get: operations["listar_api_v1_oc_recibidas_get"];
+        put?: never;
+        /**
+         * Ingesta
+         * @description Recibe una OC ya parseada. IDEMPOTENTE por `origen_externo`.
+         *
+         *     Un reintento (timeout de red del bot a media madrugada) actualiza el payload
+         *     de la orden que ya existe y devuelve 200 en vez de crear una segunda. Si esa
+         *     orden ya generó su remisión, no se toca nada: el documento ya está capturado.
+         */
+        post: operations["ingesta_api_v1_oc_recibidas_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oc-recibidas/{oc_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detalle */
+        get: operations["detalle_api_v1_oc_recibidas__oc_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Asignar
+         * @description Corrige el cliente/sucursal de una OC desde la bandeja.
+         *
+         *     Con `aprender=true` (default) la corrección se guarda como equivalencia
+         *     CONFIRMADA para todas las pistas del documento: es el momento en que el
+         *     sistema aprende, y por eso la próxima orden igual ya no pregunta.
+         */
+        patch: operations["asignar_api_v1_oc_recibidas__oc_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/oc-recibidas/{oc_id}/crear-remision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Crear Remision
+         * @description Convierte la OC en una remisión BORRADOR y las deja ligadas.
+         *
+         *     La remisión se crea con el endpoint normal de remisiones (misma resolución
+         *     de serie, precios e impuestos): esto solo prepara el cuerpo y estampa
+         *     `origen_externo` para que la orden no pueda generar dos remisiones.
+         */
+        post: operations["crear_remision_api_v1_oc_recibidas__oc_id__crear_remision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oc-recibidas/{oc_id}/descartar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Descartar */
+        post: operations["descartar_api_v1_oc_recibidas__oc_id__descartar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oc-recibidas/{oc_id}/reabrir": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reabrir
+         * @description Regresa una descartada a PENDIENTE y vuelve a intentar el cruce.
+         */
+        post: operations["reabrir_api_v1_oc_recibidas__oc_id__reabrir_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1532,6 +1822,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/importar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Importar Productos
+         * @description Aplica el preview confirmado: crea productos nuevos (SKU automático),
+         *     vincula existentes y, si la lista es de UN cliente, guarda su código/nombre
+         *     en el catálogo del cliente (+ alias para el cruce) y opcionalmente sus
+         *     precios en la lista de precios del cliente.
+         */
+        post: operations["importar_productos_api_v1_productos_importar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/productos/importar-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Importar Preview
+         * @description Archivo → filas estructuradas + cruce contra el catálogo. NO crea nada.
+         *
+         *     Plantilla (trae columna NOMBRE/PRODUCTO) → parseo determinista. Cualquier
+         *     otro acomodo, PDF o foto → IA. Cada fila regresa candidatos del catálogo
+         *     (exacto → alias → difuso) para vincular en vez de duplicar; si se manda
+         *     `cliente_id`, también se marca lo que ese cliente ya tiene vinculado.
+         */
+        post: operations["importar_preview_api_v1_productos_importar_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/match": {
         parameters: {
             query?: never;
@@ -1576,6 +1914,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/plantilla-importacion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Plantilla Importacion
+         * @description Descarga la plantilla oficial .xlsx para el alta masiva de productos.
+         */
+        get: operations["plantilla_importacion_api_v1_productos_plantilla_importacion_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/similares": {
         parameters: {
             query?: never;
@@ -1592,6 +1950,29 @@ export interface paths {
         get: operations["productos_similares_api_v1_productos_similares_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/productos/sugerir-sat-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sugerir Sat Batch
+         * @description Pregunta 1/2 del wizard: claves y unidades SAT sugeridas para N productos
+         *     en una pasada. SOLO devuelve claves que existen en el catálogo SAT oficial
+         *     cargado en el sistema (la IA elige entre candidatos del catálogo; sin IA,
+         *     gana el mejor candidato por texto; sin candidatos, la genérica 01010101).
+         */
+        post: operations["sugerir_sat_batch_api_v1_productos_sugerir_sat_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1946,6 +2327,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sat/claves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Buscar Claves Sat
+         * @description Búsqueda en el catálogo SAT oficial (c_ClaveProdServ) cargado en la base:
+         *     por texto (FTS español + variantes) o por prefijo de clave. Alimenta el
+         *     autocompletar del formulario de producto y del wizard de importación.
+         */
+        get: operations["buscar_claves_sat_api_v1_sat_claves_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sat/sugerir": {
         parameters: {
             query?: never;
@@ -1957,6 +2360,26 @@ export interface paths {
         put?: never;
         /** Sugerir */
         post: operations["sugerir_api_v1_sat_sugerir_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sat/unidades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Buscar Unidades Sat
+         * @description Búsqueda en el catálogo SAT de unidades (c_ClaveUnidad).
+         */
+        get: operations["buscar_unidades_sat_api_v1_sat_unidades_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2208,6 +2631,26 @@ export interface components {
             /** Pesos */
             pesos?: components["schemas"]["PesoLineaIn"][] | null;
         };
+        /** Body_importar_preview_api_v1_productos_importar_preview_post */
+        Body_importar_preview_api_v1_productos_importar_preview_post: {
+            /**
+             * Archivo
+             * Format: binary
+             */
+            archivo: string;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /**
+             * Cliente Ids
+             * @default []
+             */
+            cliente_ids: string[];
+            /**
+             * Usar Ia
+             * @default true
+             */
+            usar_ia: boolean;
+        };
         /** Body_importar_preview_api_v1_remisiones_importar_preview_post */
         Body_importar_preview_api_v1_remisiones_importar_preview_post: {
             /**
@@ -2239,6 +2682,21 @@ export interface components {
              */
             logo: string;
         };
+        /** Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post */
+        Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post: {
+            /**
+             * Cer
+             * Format: binary
+             */
+            cer: string;
+            /**
+             * Key
+             * Format: binary
+             */
+            key: string;
+            /** Password */
+            password: string;
+        };
         /** CambiarPasswordIn */
         CambiarPasswordIn: {
             /** Password */
@@ -2269,6 +2727,26 @@ export interface components {
             motivo: string;
             /** Uuid Sustitucion */
             uuid_sustitucion?: string | null;
+        };
+        /** CandidatoLineaOut */
+        CandidatoLineaOut: {
+            /** Nombre */
+            nombre: string;
+            /** Origen */
+            origen: string;
+            /** Presentacion Default */
+            presentacion_default?: string | null;
+            /** Presentaciones */
+            presentaciones?: Record<string, never>;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Score */
+            score: number;
+            /** Sku */
+            sku: string;
         };
         /** CandidatoOut */
         CandidatoOut: {
@@ -2418,6 +2896,69 @@ export interface components {
             /** Uso Cfdi Default */
             uso_cfdi_default?: string | null;
         };
+        /** ClienteExternoCreate */
+        ClienteExternoCreate: {
+            /** Clave */
+            clave: string;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /**
+             * Confianza
+             * @default CONFIRMADA
+             * @enum {string}
+             */
+            confianza: "CONFIRMADA" | "SUGERIDA";
+            /** Notas */
+            notas?: string | null;
+            /**
+             * Origen
+             * @default MANUAL
+             * @enum {string}
+             */
+            origen: "MANUAL" | "BOT" | "IMPORT" | "IA";
+            /**
+             * Sistema
+             * @enum {string}
+             */
+            sistema: "RFC" | "SAE" | "PROYECTO" | "NOMBRE" | "UBICACION" | "WHATSAPP";
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+        };
+        /** ClienteExternoOut */
+        ClienteExternoOut: {
+            /** Clave */
+            clave: string;
+            /** Clave Normalizada */
+            clave_normalizada: string;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Confianza */
+            confianza: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Notas */
+            notas?: string | null;
+            /** Origen */
+            origen: string;
+            /** Sistema */
+            sistema: string;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+        };
         /** ClienteOut */
         ClienteOut: {
             /** Codigo */
@@ -2549,6 +3090,20 @@ export interface components {
             /** Pagos */
             pagos: components["schemas"]["PagoIn"][];
         };
+        /** CoincidenciaOut */
+        CoincidenciaOut: {
+            /** Clave */
+            clave: string;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Sistema */
+            sistema: string;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+        };
         /**
          * ConfirmarRemisionIn
          * @description Cuerpo opcional al confirmar: pesos reales por línea (peso variable).
@@ -2562,6 +3117,31 @@ export interface components {
             permitir_negativos: boolean;
             /** Pesos */
             pesos?: components["schemas"]["PesoLinea"][] | null;
+        };
+        /** ContactoIn */
+        ContactoIn: {
+            /** Correo */
+            correo?: string | null;
+            /** Empresa */
+            empresa?: string | null;
+            /** Mensaje */
+            mensaje: string;
+            /** Nombre */
+            nombre: string;
+            /** Telefono */
+            telefono?: string | null;
+            /** Turnstile Token */
+            turnstile_token?: string | null;
+            /** Website */
+            website?: string | null;
+        };
+        /** ContactoOut */
+        ContactoOut: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
         };
         /** ConversionCreate */
         ConversionCreate: {
@@ -2721,6 +3301,8 @@ export interface components {
         };
         /** CorreoConfigOut */
         CorreoConfigOut: {
+            /** Aviso */
+            aviso?: string | null;
             /**
              * Configured
              * @default false
@@ -2784,6 +3366,17 @@ export interface components {
              * Format: uuid
              */
             producto_id: string;
+        };
+        /** CrearRemisionIn */
+        CrearRemisionIn: {
+            /** Almacen Id */
+            almacen_id?: string | null;
+            /** Fecha Entrega */
+            fecha_entrega?: string | null;
+            /** Fecha Remision */
+            fecha_remision?: string | null;
+            /** Lineas */
+            lineas: components["schemas"]["LineaCrearIn"][];
         };
         /** CrearUsuarioIn */
         CrearUsuarioIn: {
@@ -3390,6 +3983,248 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImportErrorFila */
+        ImportErrorFila: {
+            /** Error */
+            error: string;
+            /** Fila */
+            fila: number;
+        };
+        /** ImportFilaIn */
+        ImportFilaIn: {
+            /** Accion */
+            accion: string;
+            /**
+             * Activo
+             * @default true
+             */
+            activo: boolean;
+            /** Categoria */
+            categoria?: string | null;
+            /** Categoria Id */
+            categoria_id?: string | null;
+            /** Clave Sat */
+            clave_sat?: string | null;
+            /** Codigo Barras */
+            codigo_barras?: string | null;
+            /** Codigo Cliente */
+            codigo_cliente?: string | null;
+            /** Descripcion */
+            descripcion?: string | null;
+            /** Esquema */
+            esquema?: string | null;
+            /** Esquema Impuesto Id */
+            esquema_impuesto_id?: string | null;
+            /** Nombre */
+            nombre: string;
+            /** Nombre Cliente */
+            nombre_cliente?: string | null;
+            /** Precio */
+            precio?: number | string | null;
+            /** Presentacion Factor */
+            presentacion_factor?: number | string | null;
+            /** Producto Id */
+            producto_id?: string | null;
+            /** Sku */
+            sku?: string | null;
+            /** Unidad Base */
+            unidad_base?: string | null;
+            /** Unidad Sat */
+            unidad_sat?: string | null;
+        };
+        /** ImportFilaPreview */
+        ImportFilaPreview: {
+            /**
+             * Baja
+             * @default false
+             */
+            baja: boolean;
+            /** Candidatos */
+            candidatos?: components["schemas"]["CandidatoOut"][];
+            /**
+             * Categoria
+             * @default
+             */
+            categoria: string;
+            /**
+             * Clave Sat
+             * @default
+             */
+            clave_sat: string;
+            /** Clave Sat Valida */
+            clave_sat_valida?: boolean | null;
+            /**
+             * Codigo
+             * @default
+             */
+            codigo: string;
+            /**
+             * Codigo Barras
+             * @default
+             */
+            codigo_barras: string;
+            /**
+             * Descripcion
+             * @default
+             */
+            descripcion: string;
+            /** Duplicada De */
+            duplicada_de?: number | null;
+            /**
+             * Esquema
+             * @default
+             */
+            esquema: string;
+            /** Fila */
+            fila: number;
+            /** Mismo Producto Que */
+            mismo_producto_que?: number | null;
+            /** Nombre */
+            nombre: string;
+            /**
+             * Nueva Presentacion
+             * @default false
+             */
+            nueva_presentacion: boolean;
+            /**
+             * Precio
+             * @default
+             */
+            precio: string;
+            /**
+             * Precio Distinto
+             * @default false
+             */
+            precio_distinto: boolean;
+            /** Producto Id */
+            producto_id?: string | null;
+            /**
+             * Unidad
+             * @default
+             */
+            unidad: string;
+            /**
+             * Unidad Sat
+             * @default
+             */
+            unidad_sat: string;
+            /** Unidad Sat Valida */
+            unidad_sat_valida?: boolean | null;
+            /**
+             * Ya Vinculado
+             * @default false
+             */
+            ya_vinculado: boolean;
+        };
+        /** ImportIn */
+        ImportIn: {
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Ids */
+            cliente_ids?: string[];
+            /**
+             * Crear Categorias
+             * @default false
+             */
+            crear_categorias: boolean;
+            /** Esquema Default Id */
+            esquema_default_id?: string | null;
+            /** Filas */
+            filas: components["schemas"]["ImportFilaIn"][];
+            /**
+             * Guardar Precios
+             * @default false
+             */
+            guardar_precios: boolean;
+            /** Lista Id */
+            lista_id?: string | null;
+            /** Lista Nombre */
+            lista_nombre?: string | null;
+        };
+        /** ImportPreviewOut */
+        ImportPreviewOut: {
+            /** Categorias Nuevas */
+            categorias_nuevas?: string[];
+            /** Esquemas No Encontrados */
+            esquemas_no_encontrados?: string[];
+            /**
+             * Faltan Clave Sat
+             * @default 0
+             */
+            faltan_clave_sat: number;
+            /**
+             * Faltan Unidad Sat
+             * @default 0
+             */
+            faltan_unidad_sat: number;
+            /** Filas */
+            filas: components["schemas"]["ImportFilaPreview"][];
+            /**
+             * Filas Sin Esquema
+             * @default 0
+             */
+            filas_sin_esquema: number;
+            /** Formato */
+            formato: string;
+            /**
+             * Tiene Precios
+             * @default false
+             */
+            tiene_precios: boolean;
+        };
+        /** ImportResultOut */
+        ImportResultOut: {
+            /** Alias Guardados */
+            alias_guardados: number;
+            /**
+             * Categorias Creadas
+             * @default 0
+             */
+            categorias_creadas: number;
+            /** Creados */
+            creados: number;
+            /** Errores */
+            errores?: components["schemas"]["ImportErrorFila"][];
+            /** Lista Id */
+            lista_id?: string | null;
+            /** Lista Nombre */
+            lista_nombre?: string | null;
+            /** Omitidos */
+            omitidos: number;
+            /** Precios Guardados */
+            precios_guardados: number;
+            /**
+             * Presentaciones Agregadas
+             * @default 0
+             */
+            presentaciones_agregadas: number;
+            /** Vinculados */
+            vinculados: number;
+        };
+        /**
+         * LineaCrearIn
+         * @description Una partida ya resuelta a producto, lista para volverse línea de remisión.
+         */
+        LineaCrearIn: {
+            /** Cantidad */
+            cantidad: number | string;
+            /** Notas */
+            notas?: string | null;
+            /** Precio Unitario */
+            precio_unitario?: number | string | null;
+            /**
+             * Presentacion
+             * @default KILO
+             */
+            presentacion: string;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Texto Original */
+            texto_original?: string | null;
+        };
         /** LineaDevolucionOut */
         LineaDevolucionOut: {
             /** Cantidad */
@@ -3504,6 +4339,43 @@ export interface components {
              */
             producto_id: string;
         };
+        /**
+         * LineaOCRecibidaIn
+         * @description Una partida tal como venía en el documento, sin cruzar todavía.
+         */
+        LineaOCRecibidaIn: {
+            /** Cantidad */
+            cantidad: number | string;
+            /** Clave */
+            clave?: string | null;
+            /** Descripcion */
+            descripcion: string;
+            /** Notas */
+            notas?: string | null;
+            /** Precio */
+            precio?: number | string | null;
+            /** Unidad */
+            unidad?: string | null;
+        };
+        /** LineaOCRecibidaOut */
+        LineaOCRecibidaOut: {
+            /** Candidatos */
+            candidatos?: components["schemas"]["CandidatoLineaOut"][];
+            /** Cantidad */
+            cantidad: string;
+            /** Clave */
+            clave?: string | null;
+            /** Descripcion */
+            descripcion: string;
+            /** Notas */
+            notas?: string | null;
+            /** Numero */
+            numero: number;
+            /** Precio */
+            precio?: string | null;
+            /** Unidad */
+            unidad?: string | null;
+        };
         /** LineaPegadaOut */
         LineaPegadaOut: {
             /** Candidatos */
@@ -3577,10 +4449,35 @@ export interface components {
             /** Producto Nombre */
             producto_nombre?: string | null;
         };
+        /**
+         * ListaAsignarIn
+         * @description Asignar la lista como default del negocio y/o a clientes específicos.
+         */
+        ListaAsignarIn: {
+            /** Cliente Ids */
+            cliente_ids?: string[];
+            /**
+             * Default
+             * @default false
+             */
+            default: boolean;
+        };
+        /** ListaAsignarOut */
+        ListaAsignarOut: {
+            /** Clientes Asignados */
+            clientes_asignados: number;
+            /** Default */
+            default: boolean;
+        };
         /** ListaPreciosCreate */
         ListaPreciosCreate: {
             /** Codigo */
             codigo: string;
+            /**
+             * Es Default
+             * @default false
+             */
+            es_default: boolean;
             /**
              * Moneda
              * @default MXN
@@ -3609,6 +4506,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Es Default
+             * @default false
+             */
+            es_default: boolean;
             /**
              * Id
              * Format: uuid
@@ -3647,6 +4549,8 @@ export interface components {
         ListaPreciosUpdate: {
             /** Codigo */
             codigo?: string | null;
+            /** Es Default */
+            es_default?: boolean | null;
             /** Moneda */
             moneda?: string | null;
             /** Nombre */
@@ -3869,6 +4773,192 @@ export interface components {
             tenant_id: string;
             /** Tipo */
             tipo: string;
+        };
+        /** OCRecibidaDetailOut */
+        OCRecibidaDetailOut: {
+            /**
+             * Ambiguo
+             * @default false
+             */
+            ambiguo: boolean;
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
+            /** Archivo Url */
+            archivo_url?: string | null;
+            /** Canal */
+            canal: string;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Estado */
+            estado: string;
+            /** Folio Externo */
+            folio_externo?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Lineas */
+            lineas?: components["schemas"]["LineaOCRecibidaOut"][];
+            /** Motivo */
+            motivo?: string | null;
+            /** Origen Externo */
+            origen_externo: string;
+            /** Payload */
+            payload?: Record<string, never>;
+            /**
+             * Recibida At
+             * Format: date-time
+             */
+            recibida_at: string;
+            /** Remision Folio */
+            remision_folio?: string | null;
+            /** Remision Id */
+            remision_id?: string | null;
+            /** Remitente */
+            remitente?: string | null;
+            /** Resuelto Via */
+            resuelto_via?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * OCRecibidaIn
+         * @description Ingesta desde el bot: la OC ya parseada + de dónde vino.
+         *
+         *     `origen_externo` es la llave de idempotencia — el bot manda siempre la misma
+         *     para la misma orden ('WA:<jid>:<folio>'), así un reintento actualiza en vez
+         *     de duplicar.
+         */
+        OCRecibidaIn: {
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
+            /** Archivo Url */
+            archivo_url?: string | null;
+            /**
+             * Canal
+             * @enum {string}
+             */
+            canal: "WHATSAPP" | "EMAIL" | "MANUAL" | "API";
+            /** Clave Sae */
+            clave_sae?: string | null;
+            /** Fecha */
+            fecha?: string | null;
+            /** Fecha Entrega */
+            fecha_entrega?: string | null;
+            /** Folio Externo */
+            folio_externo?: string | null;
+            /** Jid */
+            jid?: string | null;
+            /** Lineas */
+            lineas?: components["schemas"]["LineaOCRecibidaIn"][];
+            /** Nombre */
+            nombre?: string | null;
+            /** Observaciones */
+            observaciones?: string | null;
+            /** Origen Externo */
+            origen_externo: string;
+            /** Perfil */
+            perfil?: string | null;
+            /** Proyecto */
+            proyecto?: string | null;
+            /** Remitente */
+            remitente?: string | null;
+            /** Rfc */
+            rfc?: string | null;
+            /** Ubicacion */
+            ubicacion?: string | null;
+        };
+        /** OCRecibidaOut */
+        OCRecibidaOut: {
+            /**
+             * Ambiguo
+             * @default false
+             */
+            ambiguo: boolean;
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
+            /** Archivo Url */
+            archivo_url?: string | null;
+            /** Canal */
+            canal: string;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Estado */
+            estado: string;
+            /** Folio Externo */
+            folio_externo?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Motivo */
+            motivo?: string | null;
+            /** Origen Externo */
+            origen_externo: string;
+            /**
+             * Recibida At
+             * Format: date-time
+             */
+            recibida_at: string;
+            /** Remision Folio */
+            remision_folio?: string | null;
+            /** Remision Id */
+            remision_id?: string | null;
+            /** Remitente */
+            remitente?: string | null;
+            /** Resuelto Via */
+            resuelto_via?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * OCRecibidaUpdate
+         * @description Corrección manual desde la bandeja.
+         */
+        OCRecibidaUpdate: {
+            /**
+             * Aprender
+             * @default true
+             */
+            aprender: boolean;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Folio Externo */
+            folio_externo?: string | null;
+            /** Motivo */
+            motivo?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
         };
         /** OnboardingPaso */
         OnboardingPaso: {
@@ -4121,6 +5211,17 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** Page[OCRecibidaOut] */
+        Page_OCRecibidaOut_: {
+            /** Items */
+            items: components["schemas"]["OCRecibidaOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
         /** Page[OrdenCompraOut] */
         Page_OrdenCompraOut_: {
             /** Items */
@@ -4260,6 +5361,16 @@ export interface components {
              * Format: uuid
              */
             linea_id: string;
+        };
+        /** PistaIn */
+        PistaIn: {
+            /** Clave */
+            clave: string;
+            /**
+             * Sistema
+             * @enum {string}
+             */
+            sistema: "RFC" | "SAE" | "PROYECTO" | "NOMBRE" | "UBICACION" | "WHATSAPP";
         };
         /** PosConfigIn */
         PosConfigIn: {
@@ -4526,6 +5637,33 @@ export interface components {
             descuento: number | string;
             /** Lineas */
             lineas: components["schemas"]["PreviewLineaIn"][];
+        };
+        /** ProductoClienteOut */
+        ProductoClienteOut: {
+            /** Codigo Cliente */
+            codigo_cliente?: string | null;
+            /** Nombre Cliente */
+            nombre_cliente?: string | null;
+            /** Presentacion */
+            presentacion?: string | null;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Producto Nombre */
+            producto_nombre: string;
+            /** Producto Sku */
+            producto_sku: string;
+        };
+        /** ProductoClienteUpsert */
+        ProductoClienteUpsert: {
+            /** Codigo Cliente */
+            codigo_cliente?: string | null;
+            /** Nombre Cliente */
+            nombre_cliente?: string | null;
+            /** Presentacion */
+            presentacion?: string | null;
         };
         /** ProductoCreate */
         ProductoCreate: {
@@ -5193,6 +6331,38 @@ export interface components {
             /** Sucursal Id */
             sucursal_id?: string | null;
         };
+        /** ResolucionOut */
+        ResolucionOut: {
+            /**
+             * Ambiguo
+             * @default false
+             */
+            ambiguo: boolean;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /** Coincidencias */
+            coincidencias?: components["schemas"]["CoincidenciaOut"][];
+            /** Motivo */
+            motivo?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
+            /** Via */
+            via?: string | null;
+        };
+        /**
+         * ResolverIn
+         * @description Las pistas leídas de un documento. Todas opcionales: se manda lo que haya.
+         */
+        ResolverIn: {
+            /** Pistas */
+            pistas?: components["schemas"]["PistaIn"][];
+            /** Ubicacion Texto */
+            ubicacion_texto?: string | null;
+        };
         /**
          * ResumenProductoOut
          * @description Per-product inventory summary: current stock + qty pending on open POs.
@@ -5555,6 +6725,24 @@ export interface components {
             serie_remision_id?: string | null;
             /** Telefono */
             telefono?: string | null;
+        };
+        /** SugerenciaSatOut */
+        SugerenciaSatOut: {
+            /** Clave Sat */
+            clave_sat: string;
+            /** Descripcion Sat */
+            descripcion_sat: string;
+            /** Nombre */
+            nombre: string;
+            /** Unidad Sat */
+            unidad_sat: string;
+            /** Unidad Sat Generica */
+            unidad_sat_generica: string;
+        };
+        /** SugerirSatBatchIn */
+        SugerirSatBatchIn: {
+            /** Productos */
+            productos: Record<string, never>[];
         };
         /**
          * SustituirIn
@@ -6078,6 +7266,142 @@ export interface operations {
             };
         };
     };
+    list_externos_api_v1_clientes_externos_get: {
+        parameters: {
+            query?: {
+                cliente_id?: string | null;
+                sistema?: string | null;
+                confianza?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClienteExternoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    crear_externo_api_v1_clientes_externos_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClienteExternoCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClienteExternoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    borrar_externo_api_v1_clientes_externos__externo_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                externo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolver_cliente_api_v1_clientes_resolver_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolverIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolucionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     validar_rfc_api_v1_clientes_validar_rfc_get: {
         parameters: {
             query: {
@@ -6203,6 +7527,109 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ClienteOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    catalogo_cliente_api_v1_clientes__cliente_id__catalogo_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                cliente_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductoClienteOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                cliente_id: string;
+                producto_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductoClienteUpsert"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductoClienteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                cliente_id: string;
+                producto_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -6514,6 +7941,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    contacto_api_v1_contacto_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContactoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactoOut"];
                 };
             };
             /** @description Validation Error */
@@ -6900,6 +8360,37 @@ export interface operations {
             };
         };
     };
+    checklist_inicio_api_v1_empresa_checklist_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listar_csd_api_v1_empresa_csd_get: {
         parameters: {
             query?: never;
@@ -6943,6 +8434,41 @@ export interface operations {
         requestBody: {
             content: {
                 "multipart/form-data": components["schemas"]["Body_subir_csd_api_v1_empresa_csd_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validar_csd_endpoint_api_v1_empresa_csd_validar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post"];
             };
         };
         responses: {
@@ -8103,6 +9629,43 @@ export interface operations {
             };
         };
     };
+    asignar_lista_api_v1_listas_precios__lista_id__asignar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                lista_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListaAsignarIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListaAsignarOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     copiar_precios_api_v1_listas_precios__lista_id__copiar_post: {
         parameters: {
             query?: never;
@@ -8512,6 +10075,255 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MembershipOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listar_api_v1_oc_recibidas_get: {
+        parameters: {
+            query?: {
+                estado?: string | null;
+                canal?: string | null;
+                cliente_id?: string | null;
+                sin_cliente?: boolean;
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_OCRecibidaOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingesta_api_v1_oc_recibidas_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OCRecibidaIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    detalle_api_v1_oc_recibidas__oc_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    asignar_api_v1_oc_recibidas__oc_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OCRecibidaUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    crear_remision_api_v1_oc_recibidas__oc_id__crear_remision_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrearRemisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    descartar_api_v1_oc_recibidas__oc_id__descartar_post: {
+        parameters: {
+            query?: {
+                motivo?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reabrir_api_v1_oc_recibidas__oc_id__reabrir_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
                 };
             };
             /** @description Validation Error */
@@ -9433,6 +11245,76 @@ export interface operations {
             };
         };
     };
+    importar_productos_api_v1_productos_importar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResultOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    importar_preview_api_v1_productos_importar_preview_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_importar_preview_api_v1_productos_importar_preview_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportPreviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     match_productos_api_v1_productos_match_post: {
         parameters: {
             query?: never;
@@ -9503,6 +11385,37 @@ export interface operations {
             };
         };
     };
+    plantilla_importacion_api_v1_productos_plantilla_importacion_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     productos_similares_api_v1_productos_similares_get: {
         parameters: {
             query: {
@@ -9523,6 +11436,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sugerir_sat_batch_api_v1_productos_sugerir_sat_batch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SugerirSatBatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SugerenciaSatOut"][];
                 };
             };
             /** @description Validation Error */
@@ -10536,6 +12484,40 @@ export interface operations {
             };
         };
     };
+    buscar_claves_sat_api_v1_sat_claves_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     sugerir_api_v1_sat_sugerir_post: {
         parameters: {
             query?: never;
@@ -10558,6 +12540,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SatSugerenciaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    buscar_unidades_sat_api_v1_sat_unidades_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
