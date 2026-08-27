@@ -416,17 +416,6 @@
       "title": "Cliente Ids",
       "type": "array"
      },
-     "mapeo": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Mapeo"
-     },
      "usar_ia": {
       "default": true,
       "title": "Usar Ia",
@@ -478,31 +467,6 @@
     "title": "Body_subir_csd_api_v1_empresa_csd_post",
     "type": "object"
    },
-   "Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post": {
-    "properties": {
-     "cer": {
-      "format": "binary",
-      "title": "Cer",
-      "type": "string"
-     },
-     "key": {
-      "format": "binary",
-      "title": "Key",
-      "type": "string"
-     },
-     "password": {
-      "title": "Password",
-      "type": "string"
-     }
-    },
-    "required": [
-     "cer",
-     "key",
-     "password"
-    ],
-    "title": "Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post",
-    "type": "object"
-   },
    "Body_subir_logo_api_v1_empresa_logo_post": {
     "properties": {
      "logo": {
@@ -540,31 +504,6 @@
      "password"
     ],
     "title": "Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post",
-    "type": "object"
-   },
-   "Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post": {
-    "properties": {
-     "cer": {
-      "format": "binary",
-      "title": "Cer",
-      "type": "string"
-     },
-     "key": {
-      "format": "binary",
-      "title": "Key",
-      "type": "string"
-     },
-     "password": {
-      "title": "Password",
-      "type": "string"
-     }
-    },
-    "required": [
-     "cer",
-     "key",
-     "password"
-    ],
-    "title": "Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post",
     "type": "object"
    },
    "CambiarPasswordIn": {
@@ -637,6 +576,55 @@
      }
     },
     "title": "CancelarReciboIn",
+    "type": "object"
+   },
+   "CandidatoLineaOut": {
+    "properties": {
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "presentacion_default": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion Default"
+     },
+     "presentaciones": {
+      "title": "Presentaciones",
+      "type": "object"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     },
+     "score": {
+      "title": "Score",
+      "type": "integer"
+     },
+     "sku": {
+      "title": "Sku",
+      "type": "string"
+     }
+    },
+    "required": [
+     "producto_id",
+     "sku",
+     "nombre",
+     "score",
+     "origen"
+    ],
+    "title": "CandidatoLineaOut",
     "type": "object"
    },
    "CandidatoOut": {
@@ -1075,6 +1063,157 @@
      "rfc"
     ],
     "title": "ClienteCreate",
+    "type": "object"
+   },
+   "ClienteExternoCreate": {
+    "properties": {
+     "clave": {
+      "maxLength": 254,
+      "minLength": 1,
+      "title": "Clave",
+      "type": "string"
+     },
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "confianza": {
+      "default": "CONFIRMADA",
+      "enum": [
+       "CONFIRMADA",
+       "SUGERIDA"
+      ],
+      "title": "Confianza",
+      "type": "string"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "origen": {
+      "default": "MANUAL",
+      "enum": [
+       "MANUAL",
+       "BOT",
+       "IMPORT",
+       "IA"
+      ],
+      "title": "Origen",
+      "type": "string"
+     },
+     "sistema": {
+      "enum": [
+       "RFC",
+       "SAE",
+       "PROYECTO",
+       "NOMBRE",
+       "UBICACION",
+       "WHATSAPP"
+      ],
+      "title": "Sistema",
+      "type": "string"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     }
+    },
+    "required": [
+     "sistema",
+     "clave",
+     "cliente_id"
+    ],
+    "title": "ClienteExternoCreate",
+    "type": "object"
+   },
+   "ClienteExternoOut": {
+    "properties": {
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "clave_normalizada": {
+      "title": "Clave Normalizada",
+      "type": "string"
+     },
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "confianza": {
+      "title": "Confianza",
+      "type": "string"
+     },
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "sistema": {
+      "title": "Sistema",
+      "type": "string"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     }
+    },
+    "required": [
+     "id",
+     "sistema",
+     "clave",
+     "clave_normalizada",
+     "cliente_id",
+     "origen",
+     "confianza",
+     "created_at"
+    ],
+    "title": "ClienteExternoOut",
     "type": "object"
    },
    "ClienteOut": {
@@ -1567,6 +1706,42 @@
      "pagos"
     ],
     "title": "CobrarIn",
+    "type": "object"
+   },
+   "CoincidenciaOut": {
+    "properties": {
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "sistema": {
+      "title": "Sistema",
+      "type": "string"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     }
+    },
+    "required": [
+     "sistema",
+     "clave",
+     "cliente_id"
+    ],
+    "title": "CoincidenciaOut",
     "type": "object"
    },
    "ConfirmarRemisionIn": {
@@ -2243,6 +2418,59 @@
     "title": "CotizacionOut",
     "type": "object"
    },
+   "CrearRemisionIn": {
+    "properties": {
+     "almacen_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Almacen Id"
+     },
+     "fecha_entrega": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha Entrega"
+     },
+     "fecha_remision": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha Remision"
+     },
+     "lineas": {
+      "items": {
+       "$ref": "#/components/schemas/LineaCrearIn"
+      },
+      "minItems": 1,
+      "title": "Lineas",
+      "type": "array"
+     }
+    },
+    "required": [
+     "lineas"
+    ],
+    "title": "CrearRemisionIn",
+    "type": "object"
+   },
    "CrearUsuarioIn": {
     "properties": {
      "email": {
@@ -2377,183 +2605,6 @@
      "created_at"
     ],
     "title": "DevolucionOut",
-    "type": "object"
-   },
-   "EmpresaColorIn": {
-    "description": "`null` devuelve la empresa al color automático.",
-    "properties": {
-     "color": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Color"
-     }
-    },
-    "title": "EmpresaColorIn",
-    "type": "object"
-   },
-   "EmpresaColorOut": {
-    "properties": {
-     "color": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Color"
-     }
-    },
-    "title": "EmpresaColorOut",
-    "type": "object"
-   },
-   "EmpresaGrupoItem": {
-    "description": "Una empresa del usuario, con lo que le falta para poder facturar.",
-    "properties": {
-     "color": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Color"
-     },
-     "correo": {
-      "default": false,
-      "title": "Correo",
-      "type": "boolean"
-     },
-     "csd": {
-      "default": false,
-      "title": "Csd",
-      "type": "boolean"
-     },
-     "datos_fiscales": {
-      "default": false,
-      "title": "Datos Fiscales",
-      "type": "boolean"
-     },
-     "domicilio_fiscal": {
-      "title": "Domicilio Fiscal",
-      "type": "object"
-     },
-     "domicilio_fiscal_cp": {
-      "default": "",
-      "title": "Domicilio Fiscal Cp",
-      "type": "string"
-     },
-     "en_grupo": {
-      "default": true,
-      "title": "En Grupo",
-      "type": "boolean"
-     },
-     "es_actual": {
-      "default": false,
-      "title": "Es Actual",
-      "type": "boolean"
-     },
-     "es_principal": {
-      "default": false,
-      "title": "Es Principal",
-      "type": "boolean"
-     },
-     "legal_name": {
-      "default": "",
-      "title": "Legal Name",
-      "type": "string"
-     },
-     "listo_para_facturar": {
-      "default": false,
-      "title": "Listo Para Facturar",
-      "type": "boolean"
-     },
-     "logo": {
-      "default": false,
-      "title": "Logo",
-      "type": "boolean"
-     },
-     "puede_editar": {
-      "default": false,
-      "title": "Puede Editar",
-      "type": "boolean"
-     },
-     "regimen_fiscal_sat": {
-      "default": "",
-      "title": "Regimen Fiscal Sat",
-      "type": "string"
-     },
-     "rfc": {
-      "default": "",
-      "title": "Rfc",
-      "type": "string"
-     },
-     "rol": {
-      "default": "",
-      "title": "Rol",
-      "type": "string"
-     },
-     "series": {
-      "default": false,
-      "title": "Series",
-      "type": "boolean"
-     },
-     "slug": {
-      "title": "Slug",
-      "type": "string"
-     },
-     "tenant_id": {
-      "title": "Tenant Id",
-      "type": "string"
-     },
-     "trade_name": {
-      "default": "",
-      "title": "Trade Name",
-      "type": "string"
-     }
-    },
-    "required": [
-     "tenant_id",
-     "slug"
-    ],
-    "title": "EmpresaGrupoItem",
-    "type": "object"
-   },
-   "EmpresaGrupoOut": {
-    "properties": {
-     "empresas": {
-      "items": {
-       "$ref": "#/components/schemas/EmpresaGrupoItem"
-      },
-      "title": "Empresas",
-      "type": "array"
-     },
-     "grupo_max": {
-      "default": 0,
-      "title": "Grupo Max",
-      "type": "integer"
-     },
-     "grupo_total": {
-      "default": 0,
-      "title": "Grupo Total",
-      "type": "integer"
-     },
-     "puede_agregar": {
-      "default": false,
-      "title": "Puede Agregar",
-      "type": "boolean"
-     }
-    },
-    "title": "EmpresaGrupoOut",
     "type": "object"
    },
    "EmpresaHijaIn": {
@@ -4062,78 +4113,6 @@
     "title": "HTTPValidationError",
     "type": "object"
    },
-   "ImportCategoriaMatch": {
-    "description": "Una categoría del archivo y a cuál existente corresponde (o si es nueva).",
-    "properties": {
-     "categoria_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Categoria Id"
-     },
-     "categoria_nombre": {
-      "default": "",
-      "title": "Categoria Nombre",
-      "type": "string"
-     },
-     "es_nueva": {
-      "default": true,
-      "title": "Es Nueva",
-      "type": "boolean"
-     },
-     "nombre_archivo": {
-      "title": "Nombre Archivo",
-      "type": "string"
-     },
-     "score": {
-      "default": 0,
-      "title": "Score",
-      "type": "integer"
-     }
-    },
-    "required": [
-     "nombre_archivo"
-    ],
-    "title": "ImportCategoriaMatch",
-    "type": "object"
-   },
-   "ImportColumnaOut": {
-    "description": "Una columna del archivo y a qué campo del sistema se está leyendo.",
-    "properties": {
-     "campo": {
-      "default": "",
-      "title": "Campo",
-      "type": "string"
-     },
-     "encabezado": {
-      "title": "Encabezado",
-      "type": "string"
-     },
-     "indice": {
-      "title": "Indice",
-      "type": "integer"
-     },
-     "muestras": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Muestras",
-      "type": "array"
-     }
-    },
-    "required": [
-     "indice",
-     "encabezado"
-    ],
-    "title": "ImportColumnaOut",
-    "type": "object"
-   },
    "ImportErrorFila": {
     "properties": {
      "error": {
@@ -4383,18 +4362,6 @@
       "title": "Categoria",
       "type": "string"
      },
-     "categoria_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Categoria Id"
-     },
      "clave_sat": {
       "default": "",
       "title": "Clave Sat",
@@ -4440,23 +4407,6 @@
      "esquema": {
       "default": "",
       "title": "Esquema",
-      "type": "string"
-     },
-     "esquema_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Esquema Id"
-     },
-     "esquema_origen": {
-      "default": "",
-      "title": "Esquema Origen",
       "type": "string"
      },
      "fila": {
@@ -4626,32 +4576,11 @@
    },
    "ImportPreviewOut": {
     "properties": {
-     "campos_mapeables": {
-      "items": {
-       "type": "object"
-      },
-      "title": "Campos Mapeables",
-      "type": "array"
-     },
-     "categorias_match": {
-      "items": {
-       "$ref": "#/components/schemas/ImportCategoriaMatch"
-      },
-      "title": "Categorias Match",
-      "type": "array"
-     },
      "categorias_nuevas": {
       "items": {
        "type": "string"
       },
       "title": "Categorias Nuevas",
-      "type": "array"
-     },
-     "columnas": {
-      "items": {
-       "$ref": "#/components/schemas/ImportColumnaOut"
-      },
-      "title": "Columnas",
       "type": "array"
      },
      "esquemas_no_encontrados": {
@@ -4683,19 +4612,9 @@
       "title": "Filas Sin Esquema",
       "type": "integer"
      },
-     "filas_sin_nombre": {
-      "default": 0,
-      "title": "Filas Sin Nombre",
-      "type": "integer"
-     },
      "formato": {
       "title": "Formato",
       "type": "string"
-     },
-     "requiere_mapeo": {
-      "default": false,
-      "title": "Requiere Mapeo",
-      "type": "boolean"
      },
      "tiene_precios": {
       "default": false,
@@ -4781,6 +4700,78 @@
      "omitidos"
     ],
     "title": "ImportResultOut",
+    "type": "object"
+   },
+   "LineaCrearIn": {
+    "description": "Una partida ya resuelta a producto, lista para volverse línea de remisión.",
+    "properties": {
+     "cantidad": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Cantidad"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "precio_unitario": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Precio Unitario"
+     },
+     "presentacion": {
+      "default": "KILO",
+      "maxLength": 20,
+      "title": "Presentacion",
+      "type": "string"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     },
+     "texto_original": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Texto Original"
+     }
+    },
+    "required": [
+     "producto_id",
+     "cantidad"
+    ],
+    "title": "LineaCrearIn",
     "type": "object"
    },
    "LineaDevolucionOut": {
@@ -5093,6 +5084,159 @@
      "importe"
     ],
     "title": "LineaOCOut",
+    "type": "object"
+   },
+   "LineaOCRecibidaIn": {
+    "description": "Una partida tal como venía en el documento, sin cruzar todavía.",
+    "properties": {
+     "cantidad": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Cantidad"
+     },
+     "clave": {
+      "anyOf": [
+       {
+        "maxLength": 60,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave"
+     },
+     "descripcion": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Descripcion",
+      "type": "string"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "precio": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Precio"
+     },
+     "unidad": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad"
+     }
+    },
+    "required": [
+     "descripcion",
+     "cantidad"
+    ],
+    "title": "LineaOCRecibidaIn",
+    "type": "object"
+   },
+   "LineaOCRecibidaOut": {
+    "properties": {
+     "candidatos": {
+      "items": {
+       "$ref": "#/components/schemas/CandidatoLineaOut"
+      },
+      "title": "Candidatos",
+      "type": "array"
+     },
+     "cantidad": {
+      "title": "Cantidad",
+      "type": "string"
+     },
+     "clave": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave"
+     },
+     "descripcion": {
+      "title": "Descripcion",
+      "type": "string"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "numero": {
+      "title": "Numero",
+      "type": "integer"
+     },
+     "precio": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Precio"
+     },
+     "unidad": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad"
+     }
+    },
+    "required": [
+     "numero",
+     "descripcion",
+     "cantidad"
+    ],
+    "title": "LineaOCRecibidaOut",
     "type": "object"
    },
    "LineaPegadaOut": {
@@ -6168,6 +6312,650 @@
     "title": "MovimientoOut",
     "type": "object"
    },
+   "OCRecibidaDetailOut": {
+    "properties": {
+     "ambiguo": {
+      "default": false,
+      "title": "Ambiguo",
+      "type": "boolean"
+     },
+     "archivo_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Nombre"
+     },
+     "archivo_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Url"
+     },
+     "canal": {
+      "title": "Canal",
+      "type": "string"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "cliente_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nombre"
+     },
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "folio_externo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Folio Externo"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "lineas": {
+      "items": {
+       "$ref": "#/components/schemas/LineaOCRecibidaOut"
+      },
+      "title": "Lineas",
+      "type": "array"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     },
+     "origen_externo": {
+      "title": "Origen Externo",
+      "type": "string"
+     },
+     "payload": {
+      "title": "Payload",
+      "type": "object"
+     },
+     "recibida_at": {
+      "format": "date-time",
+      "title": "Recibida At",
+      "type": "string"
+     },
+     "remision_folio": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remision Folio"
+     },
+     "remision_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remision Id"
+     },
+     "remitente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remitente"
+     },
+     "resuelto_via": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resuelto Via"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     },
+     "sucursal_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Nombre"
+     },
+     "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "canal",
+     "origen_externo",
+     "recibida_at",
+     "estado",
+     "created_at",
+     "updated_at"
+    ],
+    "title": "OCRecibidaDetailOut",
+    "type": "object"
+   },
+   "OCRecibidaIn": {
+    "description": "Ingesta desde el bot: la OC ya parseada + de dónde vino.\n\n`origen_externo` es la llave de idempotencia — el bot manda siempre la misma\npara la misma orden ('WA:<jid>:<folio>'), así un reintento actualiza en vez\nde duplicar.",
+    "properties": {
+     "archivo_nombre": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Nombre"
+     },
+     "archivo_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Url"
+     },
+     "canal": {
+      "enum": [
+       "WHATSAPP",
+       "EMAIL",
+       "MANUAL",
+       "API"
+      ],
+      "title": "Canal",
+      "type": "string"
+     },
+     "clave_sae": {
+      "anyOf": [
+       {
+        "maxLength": 60,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sae"
+     },
+     "fecha": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha"
+     },
+     "fecha_entrega": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha Entrega"
+     },
+     "folio_externo": {
+      "anyOf": [
+       {
+        "maxLength": 60,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Folio Externo"
+     },
+     "jid": {
+      "anyOf": [
+       {
+        "maxLength": 120,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Jid"
+     },
+     "lineas": {
+      "items": {
+       "$ref": "#/components/schemas/LineaOCRecibidaIn"
+      },
+      "title": "Lineas",
+      "type": "array"
+     },
+     "nombre": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre"
+     },
+     "observaciones": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Observaciones"
+     },
+     "origen_externo": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Origen Externo",
+      "type": "string"
+     },
+     "perfil": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Perfil"
+     },
+     "proyecto": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto"
+     },
+     "remitente": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remitente"
+     },
+     "rfc": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rfc"
+     },
+     "ubicacion": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ubicacion"
+     }
+    },
+    "required": [
+     "canal",
+     "origen_externo"
+    ],
+    "title": "OCRecibidaIn",
+    "type": "object"
+   },
+   "OCRecibidaOut": {
+    "properties": {
+     "ambiguo": {
+      "default": false,
+      "title": "Ambiguo",
+      "type": "boolean"
+     },
+     "archivo_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Nombre"
+     },
+     "archivo_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Url"
+     },
+     "canal": {
+      "title": "Canal",
+      "type": "string"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "cliente_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nombre"
+     },
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "folio_externo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Folio Externo"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     },
+     "origen_externo": {
+      "title": "Origen Externo",
+      "type": "string"
+     },
+     "recibida_at": {
+      "format": "date-time",
+      "title": "Recibida At",
+      "type": "string"
+     },
+     "remision_folio": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remision Folio"
+     },
+     "remision_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remision Id"
+     },
+     "remitente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remitente"
+     },
+     "resuelto_via": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resuelto Via"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     },
+     "sucursal_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Nombre"
+     },
+     "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "canal",
+     "origen_externo",
+     "recibida_at",
+     "estado",
+     "created_at",
+     "updated_at"
+    ],
+    "title": "OCRecibidaOut",
+    "type": "object"
+   },
+   "OCRecibidaUpdate": {
+    "description": "Corrección manual desde la bandeja.",
+    "properties": {
+     "aprender": {
+      "default": true,
+      "title": "Aprender",
+      "type": "boolean"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "folio_externo": {
+      "anyOf": [
+       {
+        "maxLength": 60,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Folio Externo"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     }
+    },
+    "title": "OCRecibidaUpdate",
+    "type": "object"
+   },
    "OnboardingPaso": {
     "properties": {
      "completo": {
@@ -6848,6 +7636,37 @@
     "title": "Page[MovimientoOut]",
     "type": "object"
    },
+   "Page_OCRecibidaOut_": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/OCRecibidaOut"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "offset": {
+      "title": "Offset",
+      "type": "integer"
+     },
+     "total": {
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "items",
+     "total",
+     "limit",
+     "offset"
+    ],
+    "title": "Page[OCRecibidaOut]",
+    "type": "object"
+   },
    "Page_OrdenCompraOut_": {
     "properties": {
      "items": {
@@ -7252,6 +8071,34 @@
      "cantidad_base"
     ],
     "title": "PesoLineaIn",
+    "type": "object"
+   },
+   "PistaIn": {
+    "properties": {
+     "clave": {
+      "maxLength": 254,
+      "minLength": 1,
+      "title": "Clave",
+      "type": "string"
+     },
+     "sistema": {
+      "enum": [
+       "RFC",
+       "SAE",
+       "PROYECTO",
+       "NOMBRE",
+       "UBICACION",
+       "WHATSAPP"
+      ],
+      "title": "Sistema",
+      "type": "string"
+     }
+    },
+    "required": [
+     "sistema",
+     "clave"
+    ],
+    "title": "PistaIn",
     "type": "object"
    },
    "PosConfigIn": {
@@ -10174,6 +11021,117 @@
     "title": "RemisionUpdate",
     "type": "object"
    },
+   "ResolucionOut": {
+    "properties": {
+     "ambiguo": {
+      "default": false,
+      "title": "Ambiguo",
+      "type": "boolean"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "cliente_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nombre"
+     },
+     "coincidencias": {
+      "items": {
+       "$ref": "#/components/schemas/CoincidenciaOut"
+      },
+      "title": "Coincidencias",
+      "type": "array"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     },
+     "sucursal_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Nombre"
+     },
+     "via": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Via"
+     }
+    },
+    "title": "ResolucionOut",
+    "type": "object"
+   },
+   "ResolverIn": {
+    "description": "Las pistas leídas de un documento. Todas opcionales: se manda lo que haya.",
+    "properties": {
+     "pistas": {
+      "items": {
+       "$ref": "#/components/schemas/PistaIn"
+      },
+      "title": "Pistas",
+      "type": "array"
+     },
+     "ubicacion_texto": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ubicacion Texto"
+     }
+    },
+    "title": "ResolverIn",
+    "type": "object"
+   },
    "ResumenProductoOut": {
     "description": "Per-product inventory summary: current stock + qty pending on open POs.",
     "properties": {
@@ -11230,46 +12188,6 @@
     "title": "SucursalUpdate",
     "type": "object"
    },
-   "SugerenciaEsquemaOut": {
-    "properties": {
-     "esquema_codigo": {
-      "default": "",
-      "title": "Esquema Codigo",
-      "type": "string"
-     },
-     "esquema_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Esquema Id"
-     },
-     "motivo": {
-      "default": "",
-      "title": "Motivo",
-      "type": "string"
-     },
-     "nombre": {
-      "title": "Nombre",
-      "type": "string"
-     },
-     "origen": {
-      "default": "",
-      "title": "Origen",
-      "type": "string"
-     }
-    },
-    "required": [
-     "nombre"
-    ],
-    "title": "SugerenciaEsquemaOut",
-    "type": "object"
-   },
    "SugerenciaSatOut": {
     "properties": {
      "clave_sat": {
@@ -11301,29 +12219,6 @@
      "unidad_sat_generica"
     ],
     "title": "SugerenciaSatOut",
-    "type": "object"
-   },
-   "SugerirEsquemaBatchIn": {
-    "properties": {
-     "productos": {
-      "items": {
-       "type": "object"
-      },
-      "maxItems": 2000,
-      "minItems": 1,
-      "title": "Productos",
-      "type": "array"
-     },
-     "usar_ia": {
-      "default": true,
-      "title": "Usar Ia",
-      "type": "boolean"
-     }
-    },
-    "required": [
-     "productos"
-    ],
-    "title": "SugerirEsquemaBatchIn",
     "type": "object"
    },
    "SugerirSatBatchIn": {
@@ -12476,6 +13371,300 @@
      }
     ],
     "summary": "Create Cliente",
+    "tags": [
+     "clientes"
+    ]
+   }
+  },
+  "/api/v1/clientes/externos": {
+   "get": {
+    "operationId": "list_externos_api_v1_clientes_externos_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "sistema",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 16,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Sistema"
+      }
+     },
+     {
+      "in": "query",
+      "name": "confianza",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 10,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Confianza"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ClienteExternoOut"
+         },
+         "title": "Response List Externos Api V1 Clientes Externos Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "List Externos",
+    "tags": [
+     "clientes"
+    ]
+   },
+   "post": {
+    "description": "Registra (o reapunta) una equivalencia. Idempotente por clave normalizada.",
+    "operationId": "crear_externo_api_v1_clientes_externos_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ClienteExternoCreate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ClienteExternoOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Crear Externo",
+    "tags": [
+     "clientes"
+    ]
+   }
+  },
+  "/api/v1/clientes/externos/{externo_id}": {
+   "delete": {
+    "operationId": "borrar_externo_api_v1_clientes_externos__externo_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "externo_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Externo Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Borrar Externo",
+    "tags": [
+     "clientes"
+    ]
+   }
+  },
+  "/api/v1/clientes/resolver": {
+   "post": {
+    "description": "Cruza las pistas de un documento (RFC, proyecto, nombre, ubicación, grupo)\ncontra las equivalencias registradas. No escribe nada.\n\nSi las pistas se contradicen devuelve `ambiguo=true` y NO elige cliente:\nadivinar aquí significaría facturarle a la empresa equivocada.",
+    "operationId": "resolver_cliente_api_v1_clientes_resolver_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ResolverIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResolucionOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Resolver Cliente",
     "tags": [
      "clientes"
     ]
@@ -14648,64 +15837,9 @@
     ]
    }
   },
-  "/api/v1/empresa/grupo": {
-   "get": {
-    "description": "Las empresas del usuario, cada una con lo que le falta para facturar.\n\nNo exige permiso: devuelve exactamente el mismo conjunto que ya ve en el\nswitcher del Topbar (sus membresías activas), solo que enriquecido con el\nestado de configuración. La pantalla que lo consume sí está gateada en el menú.",
-    "operationId": "empresas_del_grupo_api_v1_empresa_grupo_get",
-    "parameters": [
-     {
-      "in": "header",
-      "name": "X-Tenant-Id",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Tenant-Id"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/EmpresaGrupoOut"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "security": [
-     {
-      "HTTPBearer": []
-     }
-    ],
-    "summary": "Empresas Del Grupo",
-    "tags": [
-     "empresa"
-    ]
-   }
-  },
   "/api/v1/empresa/hijas": {
    "post": {
-    "description": "Crea una empresa HIJA del grupo: otro RFC/razón social del mismo dueño,\ncomo tenant `SUB` colgado de la raíz del grupo (el switcher del Topbar la\nmuestra al instante).\n\nPueden crearla el dueño y los administradores (`membership:gestionar`), pero\nquién MANDA en la nueva lo decide `_asignar_membresias_de_la_hija`.\n\nUsa la sesión plana `get_db` a propósito: la política RLS de `tenants`\n(id = current_tenant_id) impide insertar OTRO tenant desde la sesión\nscopeada. La barrera aquí es el código: `parent` sale SIEMPRE de\nctx.tenant_id, jamás del payload.",
+    "description": "Crea una empresa HIJA del grupo: otro RFC/razón social del mismo dueño,\ncomo tenant `SUB` colgado de la raíz del grupo. El creador queda como OWNER\nde la nueva (el switcher del Topbar la muestra al instante).\n\nUsa la sesión plana `get_db` a propósito: la política RLS de `tenants`\n(id = current_tenant_id) impide insertar OTRO tenant desde la sesión\nscopeada. La única barrera aquí es el código: `parent` sale SIEMPRE de\nctx.tenant_id (jamás del payload) y se exige ser OWNER.",
     "operationId": "crear_empresa_hija_api_v1_empresa_hijas_post",
     "parameters": [
      {
@@ -14986,363 +16120,6 @@
      }
     ],
     "summary": "Onboarding Status",
-    "tags": [
-     "empresa"
-    ]
-   }
-  },
-  "/api/v1/empresa/{tenant_id}": {
-   "put": {
-    "description": "Edita los datos fiscales de CUALQUIER empresa del usuario sin cambiarse a\nella (Ajustes › Empresas › Editar).",
-    "operationId": "put_empresa_por_id_api_v1_empresa__tenant_id__put",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "tenant_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Tenant Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "X-Tenant-Id",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Tenant-Id"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/EmpresaUpdate"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/EmpresaOut"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "security": [
-     {
-      "HTTPBearer": []
-     }
-    ],
-    "summary": "Put Empresa Por Id",
-    "tags": [
-     "empresa"
-    ]
-   }
-  },
-  "/api/v1/empresa/{tenant_id}/color": {
-   "put": {
-    "description": "Elige el color de la empresa. `null` la devuelve al automático.\n\nVive en `tenants.config` (JSONB) en vez de una columna propia: es una\npreferencia de presentación, no un dato fiscal.",
-    "operationId": "put_color_empresa_api_v1_empresa__tenant_id__color_put",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "tenant_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Tenant Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "X-Tenant-Id",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Tenant-Id"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/EmpresaColorIn"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/EmpresaColorOut"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "security": [
-     {
-      "HTTPBearer": []
-     }
-    ],
-    "summary": "Put Color Empresa",
-    "tags": [
-     "empresa"
-    ]
-   }
-  },
-  "/api/v1/empresa/{tenant_id}/csd": {
-   "get": {
-    "description": "Sellos cargados de esa empresa (solo los de SU RFC).",
-    "operationId": "listar_csd_por_id_api_v1_empresa__tenant_id__csd_get",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "tenant_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Tenant Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "X-Tenant-Id",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Tenant-Id"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {}
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "security": [
-     {
-      "HTTPBearer": []
-     }
-    ],
-    "summary": "Listar Csd Por Id",
-    "tags": [
-     "empresa"
-    ]
-   },
-   "post": {
-    "description": "Sube el sello de CUALQUIER empresa del usuario desde la lista, sin\ncambiarse a ella (Ajustes › Empresas › Editar › Sello digital).",
-    "operationId": "subir_csd_por_id_api_v1_empresa__tenant_id__csd_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "tenant_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Tenant Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "X-Tenant-Id",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Tenant-Id"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "multipart/form-data": {
-       "schema": {
-        "$ref": "#/components/schemas/Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {}
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "security": [
-     {
-      "HTTPBearer": []
-     }
-    ],
-    "summary": "Subir Csd Por Id",
-    "tags": [
-     "empresa"
-    ]
-   }
-  },
-  "/api/v1/empresa/{tenant_id}/csd/validar": {
-   "post": {
-    "description": "Prueba LOCAL del CSD contra el RFC de esa empresa (no toca Facturama).",
-    "operationId": "validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "tenant_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Tenant Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "X-Tenant-Id",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Tenant-Id"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "multipart/form-data": {
-       "schema": {
-        "$ref": "#/components/schemas/Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {}
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "security": [
-     {
-      "HTTPBearer": []
-     }
-    ],
-    "summary": "Validar Csd Por Id",
     "tags": [
      "empresa"
     ]
@@ -18440,6 +19217,582 @@
     ]
    }
   },
+  "/api/v1/oc-recibidas": {
+   "get": {
+    "operationId": "listar_api_v1_oc_recibidas_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "estado",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 16,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Estado"
+      }
+     },
+     {
+      "in": "query",
+      "name": "canal",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 20,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Canal"
+      }
+     },
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "sin_cliente",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Sin Cliente",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 254,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Q"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "maximum": 200,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Page_OCRecibidaOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar",
+    "tags": [
+     "bandeja de OC"
+    ]
+   },
+   "post": {
+    "description": "Recibe una OC ya parseada. IDEMPOTENTE por `origen_externo`.\n\nUn reintento (timeout de red del bot a media madrugada) actualiza el payload\nde la orden que ya existe y devuelve 200 en vez de crear una segunda. Si esa\norden ya generó su remisión, no se toca nada: el documento ya está capturado.",
+    "operationId": "ingesta_api_v1_oc_recibidas_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/OCRecibidaIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OCRecibidaDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Ingesta",
+    "tags": [
+     "bandeja de OC"
+    ]
+   }
+  },
+  "/api/v1/oc-recibidas/{oc_id}": {
+   "get": {
+    "operationId": "detalle_api_v1_oc_recibidas__oc_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "oc_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Oc Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OCRecibidaDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Detalle",
+    "tags": [
+     "bandeja de OC"
+    ]
+   },
+   "patch": {
+    "description": "Corrige el cliente/sucursal de una OC desde la bandeja.\n\nCon `aprender=true` (default) la corrección se guarda como equivalencia\nCONFIRMADA para todas las pistas del documento: es el momento en que el\nsistema aprende, y por eso la próxima orden igual ya no pregunta.",
+    "operationId": "asignar_api_v1_oc_recibidas__oc_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "oc_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Oc Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/OCRecibidaUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OCRecibidaDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Asignar",
+    "tags": [
+     "bandeja de OC"
+    ]
+   }
+  },
+  "/api/v1/oc-recibidas/{oc_id}/crear-remision": {
+   "post": {
+    "description": "Convierte la OC en una remisión BORRADOR y las deja ligadas.\n\nLa remisión se crea con el endpoint normal de remisiones (misma resolución\nde serie, precios e impuestos): esto solo prepara el cuerpo y estampa\n`origen_externo` para que la orden no pueda generar dos remisiones.",
+    "operationId": "crear_remision_api_v1_oc_recibidas__oc_id__crear_remision_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "oc_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Oc Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CrearRemisionIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OCRecibidaDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Crear Remision",
+    "tags": [
+     "bandeja de OC"
+    ]
+   }
+  },
+  "/api/v1/oc-recibidas/{oc_id}/descartar": {
+   "post": {
+    "operationId": "descartar_api_v1_oc_recibidas__oc_id__descartar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "oc_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Oc Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "motivo",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Motivo"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OCRecibidaOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Descartar",
+    "tags": [
+     "bandeja de OC"
+    ]
+   }
+  },
+  "/api/v1/oc-recibidas/{oc_id}/reabrir": {
+   "post": {
+    "description": "Regresa una descartada a PENDIENTE y vuelve a intentar el cruce.",
+    "operationId": "reabrir_api_v1_oc_recibidas__oc_id__reabrir_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "oc_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Oc Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OCRecibidaDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Reabrir",
+    "tags": [
+     "bandeja de OC"
+    ]
+   }
+  },
   "/api/v1/ordenes-compra": {
    "get": {
     "operationId": "list_ordenes_api_v1_ordenes_compra_get",
@@ -20773,75 +22126,6 @@
      }
     ],
     "summary": "Productos Similares",
-    "tags": [
-     "productos"
-    ]
-   }
-  },
-  "/api/v1/productos/sugerir-esquema-batch": {
-   "post": {
-    "description": "Qué esquema de impuesto le toca a cada producto, entre los que YA tiene\nel negocio. Sin esquema el CFDI saldría sin IVA/IEPS, así que la\nimportación no debe dejar productos en blanco.\n\nPrimero reglas fiscales mexicanas por clave SAT/nombre (alimentos IVA 0%,\nlimpieza y plásticos 16%, refrescos y botanas con IEPS) y, para lo que no\nresuelvan, una sola llamada de IA que ELIGE entre los esquemas del tenant.",
-    "operationId": "sugerir_esquema_batch_api_v1_productos_sugerir_esquema_batch_post",
-    "parameters": [
-     {
-      "in": "header",
-      "name": "X-Tenant-Id",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Tenant-Id"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/SugerirEsquemaBatchIn"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "items": {
-          "$ref": "#/components/schemas/SugerenciaEsquemaOut"
-         },
-         "title": "Response Sugerir Esquema Batch Api V1 Productos Sugerir Esquema Batch Post",
-         "type": "array"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "security": [
-     {
-      "HTTPBearer": []
-     }
-    ],
-    "summary": "Sugerir Esquema Batch",
     "tags": [
      "productos"
     ]

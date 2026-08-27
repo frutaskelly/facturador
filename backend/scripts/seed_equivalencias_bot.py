@@ -27,7 +27,10 @@ import os
 import sys
 from pathlib import Path
 
+from sqlalchemy.exc import IntegrityError
+
 from app.core.db import SessionLocal
+from app.core.rbac import tenant_session
 from app.models import Cliente, Sucursal, Tenant
 from app.services import cliente_match
 from app.services.producto_match import normalizar
@@ -96,13 +99,23 @@ def main() -> None:
     args = ap.parse_args()
 
     cfg = _cargar(args.config)
-    db = SessionLocal()
+    # El slug se resuelve sin scope (la RLS de `tenants` es por id); de ahí en
+    # adelante todo corre DENTRO del tenant, igual que la app. Sin esto el script
+    # es owner, la RLS no aplica, y una clave repetida entre inquilinos —los JID,
+    # 'ehmo:HOSPITALES', un RFC compartido— se reapuntaría de un tenant al otro.
+    arranque = SessionLocal()
     try:
-        tenant = db.query(Tenant).filter(Tenant.slug == args.tenant).one_or_none()
-        if tenant is None:
+        t = arranque.query(Tenant).filter(Tenant.slug == args.tenant).one_or_none()
+        if t is None:
             sys.exit(f"No existe el tenant «{args.tenant}»")
+        tenant_id, tenant_slug = t.id, t.slug
+    finally:
+        arranque.close()
+
+    with tenant_session(tenant_id) as db:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).one()
         rows, por_rfc, por_nombre = _clientes_por_rfc_y_nombre(db, tenant.id)
-        print(f"Tenant {tenant.slug} · {len(rows)} clientes en el padrón\n")
+        print(f"Tenant {tenant_slug} · {len(rows)} clientes en el padrón\n")
 
         plan: list[tuple[str, str, Cliente, str | None, str]] = []
         saltados: list[str] = []
@@ -170,8 +183,19 @@ def main() -> None:
                     )
                     nuevas.append(f"{u['nombre']} ({u.get('codigo') or 's/c'}) en {cli_perfil.legal_name}")
                     if args.aplicar:
-                        db.add(suc)
-                        db.flush()
+                        try:
+                            # Savepoint: un código que choque con una sucursal
+                            # borrada lógicamente no puede tumbar toda la siembra.
+                            with db.begin_nested():
+                                db.add(suc)
+                                db.flush()
+                        except IntegrityError:
+                            nuevas.pop()
+                            saltados.append(
+                                f"{perfil_id}: no se pudo crear «{u.get('nombre')}» "
+                                f"({u.get('codigo')}) — ese código ya existe en el cliente"
+                            )
+                            suc = None
                     else:
                         suc = None      # en seco no hay id que registrar
                 if suc is None:
@@ -192,9 +216,16 @@ def main() -> None:
             j: g for j, g in (cfg.get("grupos") or {}).items()
             if isinstance(g, dict) and g.get("cliente")
         }
-        cuenta: dict[str, set[str]] = {}
-        for g in grupos.values():
-            cuenta.setdefault(str(g["cliente"]), set()).add(str(g.get("perfil") or "ehmo"))
+        # Un JID solo sirve como pista si ese grupo recibe órdenes de UN cliente.
+        # Hoy no es el caso general: por el grupo de Pachuca entran EHMO y MAFAN.
+        por_jid: dict[str, set[str]] = {}
+        for j, g in grupos.items():
+            por_jid.setdefault(j, set()).add(str(g["cliente"]))
+        # Cuántos receptores tiene el perfil del grupo: >1 ⇒ el grupo es compartido.
+        receptores_por_perfil = {
+            pid: len((pv.get("receptor") or (RECEPTOR_EHMO if pid == "ehmo" else {})))
+            for pid, pv in (cfg.get("perfiles") or {}).items() if isinstance(pv, dict)
+        }
         for jid, g in grupos.items():
             if g.get("activo") is False:
                 continue
@@ -205,7 +236,15 @@ def main() -> None:
             if cli is None:
                 saltados.append(f"grupo «{g.get('nombre')}» → {slug}: sin cliente en el padrón")
                 continue
-            plan.append(("WHATSAPP", jid, cli, None, f"{g.get('nombre')} · {via}"))
+            perfil_grupo = str(g.get("perfil") or "ehmo")
+            compartido = receptores_por_perfil.get(perfil_grupo, 1) > 1
+            if compartido:
+                saltados.append(
+                    f"grupo «{g.get('nombre')}»: el perfil {perfil_grupo} tiene varios "
+                    "receptores, así que el JID no identifica a un solo cliente — no se siembra"
+                )
+            else:
+                plan.append(("WHATSAPP", jid, cli, None, f"{g.get('nombre')} · {via}"))
             # El bot distingue BALLES de JUBRAN por el nombre IMPRESO en el PDF
             # (sheets_push.py:3607); esa palabra es la equivalencia NOMBRE.
             palabra = slug.split("-")[0]
@@ -220,8 +259,16 @@ def main() -> None:
             if llave in vistos:
                 continue
             vistos.add(llave)
+            # Una corrección hecha a mano en la bandeja MANDA sobre la config del
+            # bot: volver a correr el seed no puede deshacerla en silencio.
+            previa = cliente_match.buscar_equivalencia(db, tenant.id, sistema, clave)
+            if previa is not None and previa.origen == "MANUAL" and previa.cliente_id != cli.id:
+                saltados.append(
+                    f"{sistema} «{clave}» ya está asignada a mano a otro cliente — se respeta"
+                )
+                continue
             print(f"  {sistema:<9} {clave:<42} → {cli.legal_name}"
-                  + (f"  [sucursal]" if suc_id else "") + f"   ({nota})")
+                  + ("  [sucursal]" if suc_id else "") + f"   ({nota})")
             if args.aplicar:
                 cliente_match.aprender(
                     db, tenant.id, sistema, clave, cli.id,
@@ -245,8 +292,6 @@ def main() -> None:
             print(f"\n{escritas} equivalencias escritas.")
         else:
             print(f"\n{len(vistos)} equivalencias propuestas. Nada escrito — corre con --aplicar.")
-    finally:
-        db.close()
 
 
 def _sucursal(db, cliente_id, codigo, nombre):

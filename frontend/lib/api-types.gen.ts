@@ -133,6 +133,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clientes/externos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Externos */
+        get: operations["list_externos_api_v1_clientes_externos_get"];
+        put?: never;
+        /**
+         * Crear Externo
+         * @description Registra (o reapunta) una equivalencia. Idempotente por clave normalizada.
+         */
+        post: operations["crear_externo_api_v1_clientes_externos_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clientes/externos/{externo_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Borrar Externo */
+        delete: operations["borrar_externo_api_v1_clientes_externos__externo_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clientes/resolver": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolver Cliente
+         * @description Cruza las pistas de un documento (RFC, proyecto, nombre, ubicación, grupo)
+         *     contra las equivalencias registradas. No escribe nada.
+         *
+         *     Si las pistas se contradicen devuelve `ambiguo=true` y NO elige cliente:
+         *     adivinar aquí significaría facturarle a la empresa equivocada.
+         */
+        post: operations["resolver_cliente_api_v1_clientes_resolver_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clientes/validar-rfc": {
         parameters: {
             query?: never;
@@ -566,30 +628,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/empresa/grupo": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Empresas Del Grupo
-         * @description Las empresas del usuario, cada una con lo que le falta para facturar.
-         *
-         *     No exige permiso: devuelve exactamente el mismo conjunto que ya ve en el
-         *     switcher del Topbar (sus membresías activas), solo que enriquecido con el
-         *     estado de configuración. La pantalla que lo consume sí está gateada en el menú.
-         */
-        get: operations["empresas_del_grupo_api_v1_empresa_grupo_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/empresa/hijas": {
         parameters: {
             query?: never;
@@ -602,16 +640,13 @@ export interface paths {
         /**
          * Crear Empresa Hija
          * @description Crea una empresa HIJA del grupo: otro RFC/razón social del mismo dueño,
-         *     como tenant `SUB` colgado de la raíz del grupo (el switcher del Topbar la
-         *     muestra al instante).
-         *
-         *     Pueden crearla el dueño y los administradores (`membership:gestionar`), pero
-         *     quién MANDA en la nueva lo decide `_asignar_membresias_de_la_hija`.
+         *     como tenant `SUB` colgado de la raíz del grupo. El creador queda como OWNER
+         *     de la nueva (el switcher del Topbar la muestra al instante).
          *
          *     Usa la sesión plana `get_db` a propósito: la política RLS de `tenants`
          *     (id = current_tenant_id) impide insertar OTRO tenant desde la sesión
-         *     scopeada. La barrera aquí es el código: `parent` sale SIEMPRE de
-         *     ctx.tenant_id, jamás del payload.
+         *     scopeada. La única barrera aquí es el código: `parent` sale SIEMPRE de
+         *     ctx.tenant_id (jamás del payload) y se exige ser OWNER.
          */
         post: operations["crear_empresa_hija_api_v1_empresa_hijas_post"];
         delete?: never;
@@ -660,95 +695,6 @@ export interface paths {
         get: operations["onboarding_status_api_v1_empresa_onboarding_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/empresa/{tenant_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Put Empresa Por Id
-         * @description Edita los datos fiscales de CUALQUIER empresa del usuario sin cambiarse a
-         *     ella (Ajustes › Empresas › Editar).
-         */
-        put: operations["put_empresa_por_id_api_v1_empresa__tenant_id__put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/empresa/{tenant_id}/color": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Put Color Empresa
-         * @description Elige el color de la empresa. `null` la devuelve al automático.
-         *
-         *     Vive en `tenants.config` (JSONB) en vez de una columna propia: es una
-         *     preferencia de presentación, no un dato fiscal.
-         */
-        put: operations["put_color_empresa_api_v1_empresa__tenant_id__color_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/empresa/{tenant_id}/csd": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Listar Csd Por Id
-         * @description Sellos cargados de esa empresa (solo los de SU RFC).
-         */
-        get: operations["listar_csd_por_id_api_v1_empresa__tenant_id__csd_get"];
-        put?: never;
-        /**
-         * Subir Csd Por Id
-         * @description Sube el sello de CUALQUIER empresa del usuario desde la lista, sin
-         *     cambiarse a ella (Ajustes › Empresas › Editar › Sello digital).
-         */
-        post: operations["subir_csd_por_id_api_v1_empresa__tenant_id__csd_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/empresa/{tenant_id}/csd/validar": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Validar Csd Por Id
-         * @description Prueba LOCAL del CSD contra el RFC de esa empresa (no toca Facturama).
-         */
-        post: operations["validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1329,6 +1275,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oc-recibidas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listar */
+        get: operations["listar_api_v1_oc_recibidas_get"];
+        put?: never;
+        /**
+         * Ingesta
+         * @description Recibe una OC ya parseada. IDEMPOTENTE por `origen_externo`.
+         *
+         *     Un reintento (timeout de red del bot a media madrugada) actualiza el payload
+         *     de la orden que ya existe y devuelve 200 en vez de crear una segunda. Si esa
+         *     orden ya generó su remisión, no se toca nada: el documento ya está capturado.
+         */
+        post: operations["ingesta_api_v1_oc_recibidas_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oc-recibidas/{oc_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detalle */
+        get: operations["detalle_api_v1_oc_recibidas__oc_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Asignar
+         * @description Corrige el cliente/sucursal de una OC desde la bandeja.
+         *
+         *     Con `aprender=true` (default) la corrección se guarda como equivalencia
+         *     CONFIRMADA para todas las pistas del documento: es el momento en que el
+         *     sistema aprende, y por eso la próxima orden igual ya no pregunta.
+         */
+        patch: operations["asignar_api_v1_oc_recibidas__oc_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/oc-recibidas/{oc_id}/crear-remision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Crear Remision
+         * @description Convierte la OC en una remisión BORRADOR y las deja ligadas.
+         *
+         *     La remisión se crea con el endpoint normal de remisiones (misma resolución
+         *     de serie, precios e impuestos): esto solo prepara el cuerpo y estampa
+         *     `origen_externo` para que la orden no pueda generar dos remisiones.
+         */
+        post: operations["crear_remision_api_v1_oc_recibidas__oc_id__crear_remision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oc-recibidas/{oc_id}/descartar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Descartar */
+        post: operations["descartar_api_v1_oc_recibidas__oc_id__descartar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oc-recibidas/{oc_id}/reabrir": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reabrir
+         * @description Regresa una descartada a PENDIENTE y vuelve a intentar el cruce.
+         */
+        post: operations["reabrir_api_v1_oc_recibidas__oc_id__reabrir_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ordenes-compra": {
         parameters: {
             query?: never;
@@ -1893,32 +1950,6 @@ export interface paths {
         get: operations["productos_similares_api_v1_productos_similares_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/productos/sugerir-esquema-batch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Sugerir Esquema Batch
-         * @description Qué esquema de impuesto le toca a cada producto, entre los que YA tiene
-         *     el negocio. Sin esquema el CFDI saldría sin IVA/IEPS, así que la
-         *     importación no debe dejar productos en blanco.
-         *
-         *     Primero reglas fiscales mexicanas por clave SAT/nombre (alimentos IVA 0%,
-         *     limpieza y plásticos 16%, refrescos y botanas con IEPS) y, para lo que no
-         *     resuelvan, una sola llamada de IA que ELIGE entre los esquemas del tenant.
-         */
-        post: operations["sugerir_esquema_batch_api_v1_productos_sugerir_esquema_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2614,8 +2645,6 @@ export interface components {
              * @default []
              */
             cliente_ids: string[];
-            /** Mapeo */
-            mapeo?: string | null;
             /**
              * Usar Ia
              * @default true
@@ -2645,21 +2674,6 @@ export interface components {
             /** Password */
             password: string;
         };
-        /** Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post */
-        Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post: {
-            /**
-             * Cer
-             * Format: binary
-             */
-            cer: string;
-            /**
-             * Key
-             * Format: binary
-             */
-            key: string;
-            /** Password */
-            password: string;
-        };
         /** Body_subir_logo_api_v1_empresa_logo_post */
         Body_subir_logo_api_v1_empresa_logo_post: {
             /**
@@ -2670,21 +2684,6 @@ export interface components {
         };
         /** Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post */
         Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post: {
-            /**
-             * Cer
-             * Format: binary
-             */
-            cer: string;
-            /**
-             * Key
-             * Format: binary
-             */
-            key: string;
-            /** Password */
-            password: string;
-        };
-        /** Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post */
-        Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post: {
             /**
              * Cer
              * Format: binary
@@ -2728,6 +2727,26 @@ export interface components {
             motivo: string;
             /** Uuid Sustitucion */
             uuid_sustitucion?: string | null;
+        };
+        /** CandidatoLineaOut */
+        CandidatoLineaOut: {
+            /** Nombre */
+            nombre: string;
+            /** Origen */
+            origen: string;
+            /** Presentacion Default */
+            presentacion_default?: string | null;
+            /** Presentaciones */
+            presentaciones?: Record<string, never>;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Score */
+            score: number;
+            /** Sku */
+            sku: string;
         };
         /** CandidatoOut */
         CandidatoOut: {
@@ -2877,6 +2896,69 @@ export interface components {
             /** Uso Cfdi Default */
             uso_cfdi_default?: string | null;
         };
+        /** ClienteExternoCreate */
+        ClienteExternoCreate: {
+            /** Clave */
+            clave: string;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /**
+             * Confianza
+             * @default CONFIRMADA
+             * @enum {string}
+             */
+            confianza: "CONFIRMADA" | "SUGERIDA";
+            /** Notas */
+            notas?: string | null;
+            /**
+             * Origen
+             * @default MANUAL
+             * @enum {string}
+             */
+            origen: "MANUAL" | "BOT" | "IMPORT" | "IA";
+            /**
+             * Sistema
+             * @enum {string}
+             */
+            sistema: "RFC" | "SAE" | "PROYECTO" | "NOMBRE" | "UBICACION" | "WHATSAPP";
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+        };
+        /** ClienteExternoOut */
+        ClienteExternoOut: {
+            /** Clave */
+            clave: string;
+            /** Clave Normalizada */
+            clave_normalizada: string;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Confianza */
+            confianza: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Notas */
+            notas?: string | null;
+            /** Origen */
+            origen: string;
+            /** Sistema */
+            sistema: string;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+        };
         /** ClienteOut */
         ClienteOut: {
             /** Codigo */
@@ -3007,6 +3089,20 @@ export interface components {
         CobrarIn: {
             /** Pagos */
             pagos: components["schemas"]["PagoIn"][];
+        };
+        /** CoincidenciaOut */
+        CoincidenciaOut: {
+            /** Clave */
+            clave: string;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Sistema */
+            sistema: string;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
         };
         /**
          * ConfirmarRemisionIn
@@ -3271,6 +3367,17 @@ export interface components {
              */
             producto_id: string;
         };
+        /** CrearRemisionIn */
+        CrearRemisionIn: {
+            /** Almacen Id */
+            almacen_id?: string | null;
+            /** Fecha Entrega */
+            fecha_entrega?: string | null;
+            /** Fecha Remision */
+            fecha_remision?: string | null;
+            /** Lineas */
+            lineas: components["schemas"]["LineaCrearIn"][];
+        };
         /** CrearUsuarioIn */
         CrearUsuarioIn: {
             /** Email */
@@ -3321,133 +3428,6 @@ export interface components {
             lineas: components["schemas"]["LineaDevolucionOut"][];
             /** Motivo */
             motivo?: string | null;
-        };
-        /**
-         * EmpresaColorIn
-         * @description `null` devuelve la empresa al color automático.
-         */
-        EmpresaColorIn: {
-            /** Color */
-            color?: string | null;
-        };
-        /** EmpresaColorOut */
-        EmpresaColorOut: {
-            /** Color */
-            color?: string | null;
-        };
-        /**
-         * EmpresaGrupoItem
-         * @description Una empresa del usuario, con lo que le falta para poder facturar.
-         */
-        EmpresaGrupoItem: {
-            /** Color */
-            color?: string | null;
-            /**
-             * Correo
-             * @default false
-             */
-            correo: boolean;
-            /**
-             * Csd
-             * @default false
-             */
-            csd: boolean;
-            /**
-             * Datos Fiscales
-             * @default false
-             */
-            datos_fiscales: boolean;
-            /** Domicilio Fiscal */
-            domicilio_fiscal?: Record<string, never>;
-            /**
-             * Domicilio Fiscal Cp
-             * @default
-             */
-            domicilio_fiscal_cp: string;
-            /**
-             * En Grupo
-             * @default true
-             */
-            en_grupo: boolean;
-            /**
-             * Es Actual
-             * @default false
-             */
-            es_actual: boolean;
-            /**
-             * Es Principal
-             * @default false
-             */
-            es_principal: boolean;
-            /**
-             * Legal Name
-             * @default
-             */
-            legal_name: string;
-            /**
-             * Listo Para Facturar
-             * @default false
-             */
-            listo_para_facturar: boolean;
-            /**
-             * Logo
-             * @default false
-             */
-            logo: boolean;
-            /**
-             * Puede Editar
-             * @default false
-             */
-            puede_editar: boolean;
-            /**
-             * Regimen Fiscal Sat
-             * @default
-             */
-            regimen_fiscal_sat: string;
-            /**
-             * Rfc
-             * @default
-             */
-            rfc: string;
-            /**
-             * Rol
-             * @default
-             */
-            rol: string;
-            /**
-             * Series
-             * @default false
-             */
-            series: boolean;
-            /** Slug */
-            slug: string;
-            /** Tenant Id */
-            tenant_id: string;
-            /**
-             * Trade Name
-             * @default
-             */
-            trade_name: string;
-        };
-        /** EmpresaGrupoOut */
-        EmpresaGrupoOut: {
-            /** Empresas */
-            empresas?: components["schemas"]["EmpresaGrupoItem"][];
-            /**
-             * Grupo Max
-             * @default 0
-             */
-            grupo_max: number;
-            /**
-             * Grupo Total
-             * @default 0
-             */
-            grupo_total: number;
-            /**
-             * Puede Agregar
-             * @default false
-             */
-            puede_agregar: boolean;
         };
         /**
          * EmpresaHijaIn
@@ -4003,48 +3983,6 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
-        /**
-         * ImportCategoriaMatch
-         * @description Una categoría del archivo y a cuál existente corresponde (o si es nueva).
-         */
-        ImportCategoriaMatch: {
-            /** Categoria Id */
-            categoria_id?: string | null;
-            /**
-             * Categoria Nombre
-             * @default
-             */
-            categoria_nombre: string;
-            /**
-             * Es Nueva
-             * @default true
-             */
-            es_nueva: boolean;
-            /** Nombre Archivo */
-            nombre_archivo: string;
-            /**
-             * Score
-             * @default 0
-             */
-            score: number;
-        };
-        /**
-         * ImportColumnaOut
-         * @description Una columna del archivo y a qué campo del sistema se está leyendo.
-         */
-        ImportColumnaOut: {
-            /**
-             * Campo
-             * @default
-             */
-            campo: string;
-            /** Encabezado */
-            encabezado: string;
-            /** Indice */
-            indice: number;
-            /** Muestras */
-            muestras?: string[];
-        };
         /** ImportErrorFila */
         ImportErrorFila: {
             /** Error */
@@ -4108,8 +4046,6 @@ export interface components {
              * @default
              */
             categoria: string;
-            /** Categoria Id */
-            categoria_id?: string | null;
             /**
              * Clave Sat
              * @default
@@ -4139,13 +4075,6 @@ export interface components {
              * @default
              */
             esquema: string;
-            /** Esquema Id */
-            esquema_id?: string | null;
-            /**
-             * Esquema Origen
-             * @default
-             */
-            esquema_origen: string;
             /** Fila */
             fila: number;
             /** Mismo Producto Que */
@@ -4214,14 +4143,8 @@ export interface components {
         };
         /** ImportPreviewOut */
         ImportPreviewOut: {
-            /** Campos Mapeables */
-            campos_mapeables?: Record<string, never>[];
-            /** Categorias Match */
-            categorias_match?: components["schemas"]["ImportCategoriaMatch"][];
             /** Categorias Nuevas */
             categorias_nuevas?: string[];
-            /** Columnas */
-            columnas?: components["schemas"]["ImportColumnaOut"][];
             /** Esquemas No Encontrados */
             esquemas_no_encontrados?: string[];
             /**
@@ -4241,18 +4164,8 @@ export interface components {
              * @default 0
              */
             filas_sin_esquema: number;
-            /**
-             * Filas Sin Nombre
-             * @default 0
-             */
-            filas_sin_nombre: number;
             /** Formato */
             formato: string;
-            /**
-             * Requiere Mapeo
-             * @default false
-             */
-            requiere_mapeo: boolean;
             /**
              * Tiene Precios
              * @default false
@@ -4287,6 +4200,30 @@ export interface components {
             presentaciones_agregadas: number;
             /** Vinculados */
             vinculados: number;
+        };
+        /**
+         * LineaCrearIn
+         * @description Una partida ya resuelta a producto, lista para volverse línea de remisión.
+         */
+        LineaCrearIn: {
+            /** Cantidad */
+            cantidad: number | string;
+            /** Notas */
+            notas?: string | null;
+            /** Precio Unitario */
+            precio_unitario?: number | string | null;
+            /**
+             * Presentacion
+             * @default KILO
+             */
+            presentacion: string;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Texto Original */
+            texto_original?: string | null;
         };
         /** LineaDevolucionOut */
         LineaDevolucionOut: {
@@ -4401,6 +4338,43 @@ export interface components {
              * Format: uuid
              */
             producto_id: string;
+        };
+        /**
+         * LineaOCRecibidaIn
+         * @description Una partida tal como venía en el documento, sin cruzar todavía.
+         */
+        LineaOCRecibidaIn: {
+            /** Cantidad */
+            cantidad: number | string;
+            /** Clave */
+            clave?: string | null;
+            /** Descripcion */
+            descripcion: string;
+            /** Notas */
+            notas?: string | null;
+            /** Precio */
+            precio?: number | string | null;
+            /** Unidad */
+            unidad?: string | null;
+        };
+        /** LineaOCRecibidaOut */
+        LineaOCRecibidaOut: {
+            /** Candidatos */
+            candidatos?: components["schemas"]["CandidatoLineaOut"][];
+            /** Cantidad */
+            cantidad: string;
+            /** Clave */
+            clave?: string | null;
+            /** Descripcion */
+            descripcion: string;
+            /** Notas */
+            notas?: string | null;
+            /** Numero */
+            numero: number;
+            /** Precio */
+            precio?: string | null;
+            /** Unidad */
+            unidad?: string | null;
         };
         /** LineaPegadaOut */
         LineaPegadaOut: {
@@ -4800,6 +4774,192 @@ export interface components {
             /** Tipo */
             tipo: string;
         };
+        /** OCRecibidaDetailOut */
+        OCRecibidaDetailOut: {
+            /**
+             * Ambiguo
+             * @default false
+             */
+            ambiguo: boolean;
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
+            /** Archivo Url */
+            archivo_url?: string | null;
+            /** Canal */
+            canal: string;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Estado */
+            estado: string;
+            /** Folio Externo */
+            folio_externo?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Lineas */
+            lineas?: components["schemas"]["LineaOCRecibidaOut"][];
+            /** Motivo */
+            motivo?: string | null;
+            /** Origen Externo */
+            origen_externo: string;
+            /** Payload */
+            payload?: Record<string, never>;
+            /**
+             * Recibida At
+             * Format: date-time
+             */
+            recibida_at: string;
+            /** Remision Folio */
+            remision_folio?: string | null;
+            /** Remision Id */
+            remision_id?: string | null;
+            /** Remitente */
+            remitente?: string | null;
+            /** Resuelto Via */
+            resuelto_via?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * OCRecibidaIn
+         * @description Ingesta desde el bot: la OC ya parseada + de dónde vino.
+         *
+         *     `origen_externo` es la llave de idempotencia — el bot manda siempre la misma
+         *     para la misma orden ('WA:<jid>:<folio>'), así un reintento actualiza en vez
+         *     de duplicar.
+         */
+        OCRecibidaIn: {
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
+            /** Archivo Url */
+            archivo_url?: string | null;
+            /**
+             * Canal
+             * @enum {string}
+             */
+            canal: "WHATSAPP" | "EMAIL" | "MANUAL" | "API";
+            /** Clave Sae */
+            clave_sae?: string | null;
+            /** Fecha */
+            fecha?: string | null;
+            /** Fecha Entrega */
+            fecha_entrega?: string | null;
+            /** Folio Externo */
+            folio_externo?: string | null;
+            /** Jid */
+            jid?: string | null;
+            /** Lineas */
+            lineas?: components["schemas"]["LineaOCRecibidaIn"][];
+            /** Nombre */
+            nombre?: string | null;
+            /** Observaciones */
+            observaciones?: string | null;
+            /** Origen Externo */
+            origen_externo: string;
+            /** Perfil */
+            perfil?: string | null;
+            /** Proyecto */
+            proyecto?: string | null;
+            /** Remitente */
+            remitente?: string | null;
+            /** Rfc */
+            rfc?: string | null;
+            /** Ubicacion */
+            ubicacion?: string | null;
+        };
+        /** OCRecibidaOut */
+        OCRecibidaOut: {
+            /**
+             * Ambiguo
+             * @default false
+             */
+            ambiguo: boolean;
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
+            /** Archivo Url */
+            archivo_url?: string | null;
+            /** Canal */
+            canal: string;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Estado */
+            estado: string;
+            /** Folio Externo */
+            folio_externo?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Motivo */
+            motivo?: string | null;
+            /** Origen Externo */
+            origen_externo: string;
+            /**
+             * Recibida At
+             * Format: date-time
+             */
+            recibida_at: string;
+            /** Remision Folio */
+            remision_folio?: string | null;
+            /** Remision Id */
+            remision_id?: string | null;
+            /** Remitente */
+            remitente?: string | null;
+            /** Resuelto Via */
+            resuelto_via?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * OCRecibidaUpdate
+         * @description Corrección manual desde la bandeja.
+         */
+        OCRecibidaUpdate: {
+            /**
+             * Aprender
+             * @default true
+             */
+            aprender: boolean;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Folio Externo */
+            folio_externo?: string | null;
+            /** Motivo */
+            motivo?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+        };
         /** OnboardingPaso */
         OnboardingPaso: {
             /** Completo */
@@ -5051,6 +5211,17 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** Page[OCRecibidaOut] */
+        Page_OCRecibidaOut_: {
+            /** Items */
+            items: components["schemas"]["OCRecibidaOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
         /** Page[OrdenCompraOut] */
         Page_OrdenCompraOut_: {
             /** Items */
@@ -5190,6 +5361,16 @@ export interface components {
              * Format: uuid
              */
             linea_id: string;
+        };
+        /** PistaIn */
+        PistaIn: {
+            /** Clave */
+            clave: string;
+            /**
+             * Sistema
+             * @enum {string}
+             */
+            sistema: "RFC" | "SAE" | "PROYECTO" | "NOMBRE" | "UBICACION" | "WHATSAPP";
         };
         /** PosConfigIn */
         PosConfigIn: {
@@ -6150,6 +6331,38 @@ export interface components {
             /** Sucursal Id */
             sucursal_id?: string | null;
         };
+        /** ResolucionOut */
+        ResolucionOut: {
+            /**
+             * Ambiguo
+             * @default false
+             */
+            ambiguo: boolean;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /** Coincidencias */
+            coincidencias?: components["schemas"]["CoincidenciaOut"][];
+            /** Motivo */
+            motivo?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
+            /** Via */
+            via?: string | null;
+        };
+        /**
+         * ResolverIn
+         * @description Las pistas leídas de un documento. Todas opcionales: se manda lo que haya.
+         */
+        ResolverIn: {
+            /** Pistas */
+            pistas?: components["schemas"]["PistaIn"][];
+            /** Ubicacion Texto */
+            ubicacion_texto?: string | null;
+        };
         /**
          * ResumenProductoOut
          * @description Per-product inventory summary: current stock + qty pending on open POs.
@@ -6513,28 +6726,6 @@ export interface components {
             /** Telefono */
             telefono?: string | null;
         };
-        /** SugerenciaEsquemaOut */
-        SugerenciaEsquemaOut: {
-            /**
-             * Esquema Codigo
-             * @default
-             */
-            esquema_codigo: string;
-            /** Esquema Id */
-            esquema_id?: string | null;
-            /**
-             * Motivo
-             * @default
-             */
-            motivo: string;
-            /** Nombre */
-            nombre: string;
-            /**
-             * Origen
-             * @default
-             */
-            origen: string;
-        };
         /** SugerenciaSatOut */
         SugerenciaSatOut: {
             /** Clave Sat */
@@ -6547,16 +6738,6 @@ export interface components {
             unidad_sat: string;
             /** Unidad Sat Generica */
             unidad_sat_generica: string;
-        };
-        /** SugerirEsquemaBatchIn */
-        SugerirEsquemaBatchIn: {
-            /** Productos */
-            productos: Record<string, never>[];
-            /**
-             * Usar Ia
-             * @default true
-             */
-            usar_ia: boolean;
         };
         /** SugerirSatBatchIn */
         SugerirSatBatchIn: {
@@ -7072,6 +7253,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClienteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_externos_api_v1_clientes_externos_get: {
+        parameters: {
+            query?: {
+                cliente_id?: string | null;
+                sistema?: string | null;
+                confianza?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClienteExternoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    crear_externo_api_v1_clientes_externos_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClienteExternoCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClienteExternoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    borrar_externo_api_v1_clientes_externos__externo_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                externo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolver_cliente_api_v1_clientes_resolver_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolverIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolucionOut"];
                 };
             };
             /** @description Validation Error */
@@ -8175,37 +8492,6 @@ export interface operations {
             };
         };
     };
-    empresas_del_grupo_api_v1_empresa_grupo_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmpresaGrupoOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     crear_empresa_hija_api_v1_empresa_hijas_post: {
         parameters: {
             query?: never;
@@ -8356,187 +8642,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EmpresaOnboardingOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    put_empresa_por_id_api_v1_empresa__tenant_id__put: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path: {
-                tenant_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EmpresaUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmpresaOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    put_color_empresa_api_v1_empresa__tenant_id__color_put: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path: {
-                tenant_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EmpresaColorIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmpresaColorOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    listar_csd_por_id_api_v1_empresa__tenant_id__csd_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path: {
-                tenant_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    subir_csd_por_id_api_v1_empresa__tenant_id__csd_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path: {
-                tenant_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path: {
-                tenant_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -9983,6 +10088,255 @@ export interface operations {
             };
         };
     };
+    listar_api_v1_oc_recibidas_get: {
+        parameters: {
+            query?: {
+                estado?: string | null;
+                canal?: string | null;
+                cliente_id?: string | null;
+                sin_cliente?: boolean;
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_OCRecibidaOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingesta_api_v1_oc_recibidas_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OCRecibidaIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    detalle_api_v1_oc_recibidas__oc_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    asignar_api_v1_oc_recibidas__oc_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OCRecibidaUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    crear_remision_api_v1_oc_recibidas__oc_id__crear_remision_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrearRemisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    descartar_api_v1_oc_recibidas__oc_id__descartar_post: {
+        parameters: {
+            query?: {
+                motivo?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reabrir_api_v1_oc_recibidas__oc_id__reabrir_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_ordenes_api_v1_ordenes_compra_get: {
         parameters: {
             query?: {
@@ -11082,41 +11436,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductoOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    sugerir_esquema_batch_api_v1_productos_sugerir_esquema_batch_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SugerirEsquemaBatchIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SugerenciaEsquemaOut"][];
                 };
             };
             /** @description Validation Error */
