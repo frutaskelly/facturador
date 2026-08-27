@@ -327,8 +327,11 @@ export type ImportFilaPreview = {
   clave_sat: string;
   unidad_sat: string;
   codigo_barras: string;
-  categoria: string;
-  esquema: string;
+  categoria: string;                 // texto del archivo
+  categoria_id?: string | null;      // categoría del sistema resuelta
+  esquema: string;                   // texto del archivo
+  esquema_id?: string | null;        // esquema del sistema resuelto
+  esquema_origen?: string;           // "archivo" | "regla" | "ia" | ""
   baja: boolean;                   // ESTATUS BAJA en el archivo → omitir default
   clave_sat_valida?: boolean | null;   // validada contra el catálogo SAT oficial
   unidad_sat_valida?: boolean | null;
@@ -339,6 +342,23 @@ export type ImportFilaPreview = {
   duplicada_de?: number | null;    // el archivo repite este producto (fila original)
   precio_distinto?: boolean;       // la repetición trae OTRO precio (conflicto)
   mismo_producto_que?: number | null; // otra fila ya se vinculó al mismo producto
+};
+// Una categoría del archivo y a cuál existente corresponde (o si es nueva).
+export type ImportCategoriaMatch = {
+  nombre_archivo: string;
+  categoria_id?: string | null;
+  categoria_nombre: string;
+  score: number;
+  es_nueva: boolean;
+};
+export type SugerenciaEsquema = {
+  nombre: string;
+  esquema_id?: string | null;
+  esquema_codigo: string;
+  // "regla" | "ia" | "revisar" (la ley depende del envase/contenido) |
+  // "falta_esquema" (el negocio no tiene uno así) | ""
+  origen: string;
+  motivo?: string;
 };
 // Una columna del archivo y a qué campo del sistema se está leyendo.
 export type ImportColumna = {
@@ -352,6 +372,7 @@ export type ImportPreview = {
   filas: ImportFilaPreview[];
   columnas: ImportColumna[];
   campos_mapeables: { valor: string; etiqueta: string }[];
+  categorias_match: ImportCategoriaMatch[];   // categorías del archivo ↔ del sistema
   requiere_mapeo: boolean;      // no se reconoció la columna de descripción
   filas_sin_nombre: number;     // renglones con datos descartados por no traer nombre
   // Meta para las preguntas en lote:
