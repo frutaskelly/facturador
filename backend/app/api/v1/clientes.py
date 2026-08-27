@@ -11,6 +11,7 @@ they are read-only here, never accepted from the client payload.
 from __future__ import annotations
 
 from typing import Optional
+import logging
 import re
 from uuid import UUID
 
@@ -27,6 +28,8 @@ from ...services.cliente_codigo import generate_cliente_codigo
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.rfc import validar_rfc_local
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/clientes", tags=["clientes"])
 
@@ -140,6 +143,46 @@ def _validar_datos_fiscales(data: dict) -> None:
             )
 
 
+def _validar_contra_sat(rfc: str, nombre: str, cp: str, regimen: str) -> None:
+    """Confirma con el SAT (vía Facturama) que RFC + razón social + CP + régimen
+    corresponden entre sí. Un CP o un régimen que no casan con el RFC hacen que
+    el SAT rechace el CFDI al timbrar: se atrapa aquí, al dar de alta.
+
+    Si el PAC no responde, NO se bloquea el guardado (no dejar al usuario sin
+    poder trabajar por una caída externa): solo se registra.
+    """
+    if not (rfc and nombre and cp and regimen):
+        return  # datos incompletos: la validación completa no aplica
+    client = FacturamaClient.from_settings(settings)
+    if not client.configured:
+        return
+    try:
+        r = client.validar_completo(rfc, nombre, cp, regimen)
+    except (FacturamaError, Exception) as exc:  # noqa: BLE001 — degradar, no bloquear
+        log.warning("No se pudo validar el cliente contra el SAT: %s", exc)
+        return
+
+    problemas = []
+    if r.get("ExistRfc") is False:
+        problemas.append("el RFC no existe ante el SAT")
+    if r.get("MatchName") is False:
+        problemas.append("la razón social no coincide con la registrada")
+    if r.get("MatchZipCode") is False:
+        problemas.append(f"el código postal {cp} no corresponde a este RFC")
+    if r.get("MatchFiscalRegime") is False:
+        problemas.append("el régimen fiscal no coincide")
+    if problemas:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "El SAT no valida estos datos: "
+                + "; ".join(problemas)
+                + ". Corrígelos con la constancia de situación fiscal del cliente "
+                "(si no, el timbrado será rechazado)."
+            ),
+        )
+
+
 @router.post("", response_model=ClienteOut, status_code=status.HTTP_201_CREATED)
 def create_cliente(
     payload: ClienteCreate,
@@ -149,6 +192,12 @@ def create_cliente(
     ensure_fk(db, ListaPrecios, payload.lista_precios_id, "lista_precios_id")
     data = payload.model_dump()
     _validar_datos_fiscales(data)
+    _validar_contra_sat(
+        str(data.get("rfc") or ""),
+        str(data.get("legal_name") or ""),
+        str((data.get("domicilio_fiscal") or {}).get("cp") or ""),
+        str(data.get("regimen_fiscal") or ""),
+    )
     # El código se genera SIEMPRE en el servidor; se ignora cualquier valor enviado.
     data.pop("codigo", None)
     codigo = generate_cliente_codigo(db, ctx.tenant_id)
@@ -178,6 +227,16 @@ def update_cliente(
     obj = get_or_404(db, Cliente, cliente_id)
     data = payload.model_dump(exclude_unset=True)
     _validar_datos_fiscales(data)
+    # Solo si el cambio toca datos fiscales: no gastar un folio del PAC al
+    # editar el teléfono. Se valida el resultado FINAL (lo guardado + el cambio).
+    if {"rfc", "legal_name", "domicilio_fiscal", "regimen_fiscal"} & set(data):
+        dom_final = data.get("domicilio_fiscal", obj.domicilio_fiscal) or {}
+        _validar_contra_sat(
+            str(data.get("rfc", obj.rfc) or ""),
+            str(data.get("legal_name", obj.legal_name) or ""),
+            str(dom_final.get("cp") or ""),
+            str(data.get("regimen_fiscal", obj.regimen_fiscal) or ""),
+        )
     # El código no se regenera ni se acepta en update: queda fijo desde la creación.
     data.pop("codigo", None)
     if "lista_precios_id" in data:
