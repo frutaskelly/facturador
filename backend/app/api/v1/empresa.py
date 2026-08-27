@@ -16,6 +16,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel
 from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -457,11 +458,18 @@ def _csd_listar(tenant: Tenant):
     return csd_public_fields(propios)
 
 
+# Pasos que el usuario puede dar por buenos a mano: son de REVISIÓN (el sistema
+# ya los siembra), así que no hay un dato que se pueda contar como "hecho".
+PASOS_MARCABLES = {"esquemas", "categorias"}
+
+
 def armar_checklist(
-    *, fiscal: bool, logo: bool, correo: bool, productos: bool,
-    clientes: bool, listas: bool, series: bool, primera_factura: bool,
+    *, fiscal: bool, logo: bool, correo: bool, clientes: bool, series: bool,
+    esquemas: bool, categorias: bool, productos: bool, listas: bool,
+    remision: bool, primera_factura: bool, marcados: set[str] | None = None,
 ) -> dict:
     """Checklist de primeros pasos (puro, testeable): el orden ES la guía."""
+    marcados = marcados or set()
     pasos = [
         {"id": "fiscal", "titulo": "Configura tu empresa ante el SAT",
          "detalle": "Datos fiscales, RFC verificado y sello digital (CSD).",
@@ -472,26 +480,70 @@ def armar_checklist(
         {"id": "correo", "titulo": "Conecta tu correo de envío",
          "detalle": "Para mandar facturas y remisiones a tus clientes por email.",
          "completo": correo, "href": "/ajustes/correo", "cta": "Conectar"},
-        {"id": "productos", "titulo": "Da de alta tus productos",
-         "detalle": "Tu catálogo con claves SAT y unidades.",
-         "completo": productos, "href": "/productos", "cta": "Agregar"},
         {"id": "clientes", "titulo": "Registra tus clientes",
          "detalle": "Con su RFC y uso de CFDI para poder facturarles.",
          "completo": clientes, "href": "/clientes", "cta": "Registrar"},
+        {"id": "series", "titulo": "Registra tus series de folio",
+         "detalle": "Las series con las que se numeran facturas y remisiones.",
+         "completo": series, "href": "/ajustes/series", "cta": "Registrar"},
+        {"id": "esquemas", "titulo": "Revisa el esquema de impuesto",
+         "detalle": "Los 8 esquemas vienen listos: revisa que las tasas sean las tuyas.",
+         "completo": esquemas or "esquemas" in marcados,
+         "href": "/esquemas-impuesto", "cta": "Revisar"},
+        {"id": "categorias", "titulo": "Registra las categorías para tus productos",
+         "detalle": "Agrupan tu catálogo; hay una lista sugerida lista para usar.",
+         "completo": categorias or "categorias" in marcados,
+         "href": "/categorias", "cta": "Registrar"},
+        {"id": "productos", "titulo": "Da de alta tus productos",
+         "detalle": "Tu catálogo con claves SAT y unidades.",
+         "completo": productos, "href": "/productos", "cta": "Agregar"},
         {"id": "listas", "titulo": "Crea tu lista de precios",
          "detalle": "Precios por cliente o generales para cotizar y vender.",
          "completo": listas, "href": "/listas-precios", "cta": "Crear"},
-        {"id": "series", "titulo": "Revisa tus series de folios",
-         "detalle": "Las series con las que se numeran facturas y remisiones.",
-         "completo": series, "href": "/ajustes/series", "cta": "Revisar"},
+        {"id": "remision", "titulo": "Crea tu primera remisión",
+         "detalle": "La entrega que luego se convierte en factura.",
+         "completo": remision, "href": "/remisiones", "cta": "Crear"},
         {"id": "primera_factura", "titulo": "Timbra tu primera factura",
          "detalle": "El último paso: tu primer CFDI real desde el sistema.",
          "completo": primera_factura, "href": "/facturas", "cta": "Facturar"},
     ]
+    for p_ in pasos:
+        # La UI muestra el "marcar como listo" solo en estos, y solo mientras no
+        # se hayan cumplido por datos reales.
+        p_["marcable"] = p_["id"] in PASOS_MARCABLES
+        p_["marcado_manual"] = p_["id"] in marcados
     completos = sum(1 for p_ in pasos if p_["completo"])
     siguiente = next((p_["id"] for p_ in pasos if not p_["completo"]), None)
     return {"pasos": pasos, "completos": completos, "total": len(pasos),
             "todo_listo": completos == len(pasos), "siguiente": siguiente}
+
+
+class ChecklistMarcaIn(BaseModel):
+    paso: str
+    completo: bool = True
+
+
+@router.post("/checklist/marcar")
+def marcar_paso_checklist(
+    payload: ChecklistMarcaIn,
+    db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Marca (o desmarca) a mano un paso de revisión de la guía."""
+    if payload.paso not in PASOS_MARCABLES:
+        raise HTTPException(status_code=422, detail="Ese paso no se puede marcar a mano")
+    tenant = _load_tenant(db, ctx.tenant_id)
+    cfg = dict(tenant.config or {})
+    marcados = set(cfg.get("checklist_marcados") or [])
+    if payload.completo:
+        marcados.add(payload.paso)
+    else:
+        marcados.discard(payload.paso)
+    cfg["checklist_marcados"] = sorted(marcados)
+    tenant.config = cfg
+    flag_modified(tenant, "config")
+    db.flush()
+    return {"paso": payload.paso, "completo": payload.completo}
 
 
 @router.get("/checklist")
@@ -507,14 +559,20 @@ def checklist_inicio(
 
     def _n(tabla: str, extra: str = "", soft_delete: bool = True) -> int:
         # Whitelist dura: la tabla se interpola en el SQL — solo literales internos.
-        assert tabla in {"productos", "clientes", "listas_precios", "series", "facturas"}
+        assert tabla in {"productos", "clientes", "listas_precios", "series",
+                         "facturas", "esquemas_impuesto", "categorias_producto", "remisiones"}
         borrado = "and deleted_at is null" if soft_delete else ""
         return db.execute(
             sa_text(f"select count(*) from {tabla} where tenant_id = :t {borrado} {extra}"),
             {"t": tenant.id},
         ).scalar() or 0
 
+    marcados = set((tenant.config or {}).get("checklist_marcados") or [])
     return armar_checklist(
+        marcados=marcados,
+        esquemas=_n("esquemas_impuesto") > 0,
+        categorias=_n("categorias_producto") > 0,
+        remision=_n("remisiones") > 0,
         fiscal=bool(st.get("listo_para_facturar")),
         # exists en SQL: no cargar el blob del logo (hasta 2 MB) solo para saber si hay.
         logo=bool(db.execute(

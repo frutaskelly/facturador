@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Check, Loader2, PartyPopper } from "lucide-react";
+import { apiFetch as api } from "@/lib/api";
 
 import { Card } from "@/components/ui/Card";
 import { apiFetch } from "@/lib/api";
@@ -25,6 +26,9 @@ type Paso = {
   completo: boolean;
   href: string;
   cta: string;
+  /** Paso de revisión que el usuario puede dar por bueno a mano. */
+  marcable?: boolean;
+  marcado_manual?: boolean;
 };
 type Checklist = {
   pasos: Paso[];
@@ -78,6 +82,25 @@ export function PrimerosPasos() {
       .finally(() => setCargando(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Marca (o desmarca) a mano un paso de revisión y refresca el checklist.
+  async function marcar(pasoId: string, completo: boolean) {
+    try {
+      await api("/api/v1/empresa/checklist/marcar", {
+        method: "POST",
+        body: JSON.stringify({ paso: pasoId, completo }),
+      });
+      const d = await api<Checklist>("/api/v1/empresa/checklist");
+      setData(d);
+      try {
+        localStorage.setItem(cacheKey(), JSON.stringify(d));
+      } catch {
+        /* sin caché no pasa nada */
+      }
+    } catch {
+      /* el widget no es crítico: si falla, se queda como estaba */
+    }
+  }
 
   if (oculto) return null;
 
@@ -187,6 +210,25 @@ export function PrimerosPasos() {
                   <div className="truncate text-xs text-muted">{p.detalle}</div>
                 )}
               </div>
+              {!p.completo && p.marcable && (
+                <button
+                  type="button"
+                  onClick={() => marcar(p.id, true)}
+                  className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted transition hover:bg-surface-2 hover:text-foreground"
+                >
+                  Marcar como listo
+                </button>
+              )}
+              {p.completo && p.marcado_manual && (
+                <button
+                  type="button"
+                  onClick={() => marcar(p.id, false)}
+                  title="Quitar la marca manual"
+                  className="shrink-0 text-xs font-medium text-muted hover:underline"
+                >
+                  Desmarcar
+                </button>
+              )}
               {!p.completo && (
                 <Link
                   href={p.href}
