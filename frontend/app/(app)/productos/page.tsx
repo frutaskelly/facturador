@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { FileUp, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 
@@ -10,7 +11,6 @@ import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { ImportarProductosModal } from "@/components/ImportarProductosModal";
 import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { SatClaveCombobox } from "@/components/SatClaveCombobox";
 import { ApiError, apiFetch } from "@/lib/api";
@@ -136,7 +136,6 @@ export default function ProductosPage() {
   const [satOpciones, setSatOpciones] = useState<SatOpcion[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerText, setPickerText] = useState("");
-  const [importOpen, setImportOpen] = useState(false);
 
   async function suggestSat() {
     if (!form) return;
@@ -292,21 +291,18 @@ export default function ProductosPage() {
         actions={
           canWrite ? (
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => setImportOpen(true)}>
+              <Link
+                href="/productos/importar"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-3.5 py-2 text-sm font-medium transition hover:bg-surface-2"
+              >
                 <FileUp size={16} /> Importar
-              </Button>
+              </Link>
               <Button onClick={() => { setPickerText(""); setPickerOpen(true); }}>
                 <Plus size={16} /> Nuevo producto
               </Button>
             </div>
           ) : undefined
         }
-      />
-
-      <ImportarProductosModal
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
-        onDone={reload}
       />
 
       <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin productos" storageKey="productos" />

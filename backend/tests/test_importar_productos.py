@@ -1055,3 +1055,218 @@ def test_preview_muestras_ven_mas_alla_de_las_primeras_filas(client, env, auth_a
     assert r.status_code == 200, r.text
     cat = next(c for c in r.json()["columnas"] if c["encabezado"] == "CATEGORÍA")
     assert cat["muestras"] == ["ABARROTE"]
+
+
+# ─── Esquema de impuesto y match de categorías (preview con columnas propias) ─
+def _esquemas_base(tenant_id):
+    """IVA 0% alimentos + IVA 16% + refresco (IEPS cuota) + botana (IEPS tasa)."""
+    return [
+        EsquemaImpuesto(tenant_id=tenant_id, codigo="IVA0", nombre="IVA 0% alimentos",
+                        iva_tasa=Decimal("0")),
+        EsquemaImpuesto(tenant_id=tenant_id, codigo="IVA16", nombre="IVA 16%",
+                        iva_tasa=Decimal("0.16")),
+        EsquemaImpuesto(tenant_id=tenant_id, codigo="REFRESCO", nombre="IVA 16% + IEPS cuota",
+                        iva_tasa=Decimal("0.16"), tipo_ieps="CUOTA", ieps_cuota=Decimal("3.0818")),
+        # Botana: sigue siendo alimento → IVA 0% + IEPS 8% (LIVA 2-A-I-b no la
+        # excluye de la tasa cero; el 8% del IEPS va aparte).
+        EsquemaImpuesto(tenant_id=tenant_id, codigo="BOTANA", nombre="IVA 0% + IEPS 8%",
+                        iva_tasa=Decimal("0"), ieps_tasa=Decimal("0.08")),
+    ]
+
+
+def test_sugerir_esquema_batch_reglas_sat(client, env, auth_as):
+    """Sin esquema no se puede facturar: se asigna por reglas fiscales según la
+    clave SAT y el nombre, entre los esquemas QUE YA TIENE el negocio."""
+    db = SessionLocal()
+    try:
+        db.add_all(_esquemas_base(env["tenant_id"])); db.commit()
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/sugerir-esquema-batch", headers=h, json={
+        "usar_ia": False,
+        "productos": [
+            {"nombre": "JITOMATE SALADETT", "clave_sat": "50406500", "categoria": "FRUTA Y VERDURA"},
+            {"nombre": "JABON AXION PARA TRASTES", "clave_sat": "47131810", "categoria": "LIMPIEZA"},
+            {"nombre": "BOLSA NEGRA BASURA 60X90", "clave_sat": "24111503", "categoria": "PLASTICOS"},
+            {"nombre": "COCA COLA LATA ORIGINAL", "clave_sat": "50202306", "categoria": "ABARROTE"},
+            {"nombre": "CACAHUATE JAPONES 850 G", "clave_sat": "50101700", "categoria": "ABARROTE"},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    por_nombre = {s["nombre"]: s for s in r.json()}
+    assert por_nombre["JITOMATE SALADETT"]["esquema_codigo"] == "IVA0"
+    assert por_nombre["JABON AXION PARA TRASTES"]["esquema_codigo"] == "IVA16"
+    assert por_nombre["BOLSA NEGRA BASURA 60X90"]["esquema_codigo"] == "IVA16"
+    assert por_nombre["COCA COLA LATA ORIGINAL"]["esquema_codigo"] == "REFRESCO"
+    assert por_nombre["CACAHUATE JAPONES 850 G"]["esquema_codigo"] == "BOTANA"
+    assert all(s["origen"] == "regla" for s in r.json())
+
+
+def test_sugerir_esquema_sin_esquemas_da_mensaje_util(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/sugerir-esquema-batch", headers=h, json={
+        "usar_ia": False, "productos": [{"nombre": "X", "clave_sat": "", "categoria": ""}],
+    })
+    assert r.status_code == 422
+    assert "esquemas de impuesto" in r.json()["detail"].lower()
+
+
+def test_preview_match_categorias_reusa_existentes(client, env, auth_as):
+    """'ABARROTE' del archivo se liga a 'Abarrotes' del sistema en vez de crear
+    una segunda categoría; 'LACTEOS Y EMBUTIDOS' NO se funde con 'Lácteos'."""
+    db = SessionLocal()
+    try:
+        db.add_all([
+            CategoriaProducto(tenant_id=env["tenant_id"], codigo="ABARR", nombre="Abarrotes"),
+            CategoriaProducto(tenant_id=env["tenant_id"], codigo="LACTE", nombre="Lácteos"),
+        ])
+        db.commit()
+        cat_abarrotes = str(db.query(CategoriaProducto).filter(
+            CategoriaProducto.tenant_id == env["tenant_id"],
+            CategoriaProducto.nombre == "Abarrotes").one().id)
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["DESCRIPCIÓN", "CATEGORÍA"],
+        ["ACEITE CANOLA", "ABARROTE"],
+        ["QUESO OAXACA", "LACTEOS Y EMBUTIDOS"],
+        ["ESCOBA", "PLASTICOS"],
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("x.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    por_nombre = {m["nombre_archivo"]: m for m in body["categorias_match"]}
+    # Singular/plural = la misma categoría: se reusa.
+    assert por_nombre["ABARROTE"]["es_nueva"] is False
+    assert por_nombre["ABARROTE"]["categoria_id"] == cat_abarrotes
+    # Más amplia que la existente: NO se funde.
+    assert por_nombre["LACTEOS Y EMBUTIDOS"]["es_nueva"] is True
+    assert por_nombre["PLASTICOS"]["es_nueva"] is True
+    assert set(body["categorias_nuevas"]) == {"LACTEOS Y EMBUTIDOS", "PLASTICOS"}
+    # Y la fila trae resuelta su categoría del sistema.
+    f_aceite = next(f for f in body["filas"] if f["nombre"] == "ACEITE CANOLA")
+    assert f_aceite["categoria_id"] == cat_abarrotes
+
+
+def test_preview_resuelve_esquema_del_archivo(client, env, auth_as):
+    """La columna ESQUEMA del archivo se resuelve al esquema del sistema, y las
+    filas sin esquema se cuentan (son las que no se podrían facturar bien)."""
+    db = SessionLocal()
+    try:
+        db.add_all(_esquemas_base(env["tenant_id"])); db.commit()
+        esq_iva16 = str(db.query(EsquemaImpuesto).filter(
+            EsquemaImpuesto.tenant_id == env["tenant_id"],
+            EsquemaImpuesto.codigo == "IVA16").one().id)
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["DESCRIPCIÓN", "ESQUEMA_IMPUESTO"],
+        ["PRODUCTO CON ESQUEMA", "IVA16"],
+        ["PRODUCTO SIN ESQUEMA", ""],
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("x.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    f1, f2 = body["filas"]
+    assert f1["esquema_id"] == esq_iva16 and f1["esquema_origen"] == "archivo"
+    assert f2["esquema_id"] is None and f2["esquema_origen"] == ""
+    assert body["filas_sin_esquema"] == 1
+
+
+def test_esquema_excepciones_del_segmento_50_no_se_adivinan(client, env, auth_as):
+    """Dentro del SAT 50 hay alcohol, tabaco, agua, jugos y chicles que NO son
+    tasa 0% (LIVA 2-A-I-b). No se adivinan: van a revisión del usuario, porque
+    timbrarlos con IVA 0% sería un CFDI mal emitido."""
+    db = SessionLocal()
+    try:
+        db.add_all(_esquemas_base(env["tenant_id"])); db.commit()
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/sugerir-esquema-batch", headers=h, json={
+        "usar_ia": False,
+        "productos": [
+            {"nombre": "AGUA PURIFICADA MEMBERS 500 ML", "clave_sat": "50202301", "categoria": ""},
+            {"nombre": "VINO TINTO CALIFORNIA 946 ML", "clave_sat": "50202203", "categoria": ""},
+            {"nombre": "GOMA DE MASCAR TRIDENT 12 PZ", "clave_sat": "50161815", "categoria": ""},
+            {"nombre": "JUGO JUMEX PIÑA 1.89 LT", "clave_sat": "50202404", "categoria": ""},
+            {"nombre": "HIELO EN CUBOS 5 KG", "clave_sat": "50202302", "categoria": ""},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    por_nombre = {s["nombre"]: s for s in r.json()}
+    for nombre in ("AGUA PURIFICADA MEMBERS 500 ML", "VINO TINTO CALIFORNIA 946 ML",
+                   "GOMA DE MASCAR TRIDENT 12 PZ", "JUGO JUMEX PIÑA 1.89 LT"):
+        assert por_nombre[nombre]["origen"] == "revisar", nombre
+        assert por_nombre[nombre]["esquema_id"] is None, nombre
+        assert por_nombre[nombre]["motivo"]
+    # El hielo SÍ es tasa 0% (LIVA 2-A-I-c).
+    assert por_nombre["HIELO EN CUBOS 5 KG"]["esquema_codigo"] == "IVA0"
+
+
+def test_botana_es_iva_cero_mas_ieps(client, env, auth_as):
+    """Una botana sigue siendo alimento: IVA 0% + IEPS 8%, no 16%."""
+    db = SessionLocal()
+    try:
+        db.add_all([
+            EsquemaImpuesto(tenant_id=env["tenant_id"], codigo="IVA0", nombre="IVA 0%",
+                            iva_tasa=Decimal("0")),
+            EsquemaImpuesto(tenant_id=env["tenant_id"], codigo="IVA16", nombre="IVA 16%",
+                            iva_tasa=Decimal("0.16")),
+            # El correcto para botana: IVA 0% + IEPS 8%.
+            EsquemaImpuesto(tenant_id=env["tenant_id"], codigo="BOT0", nombre="IVA 0% + IEPS 8%",
+                            iva_tasa=Decimal("0"), ieps_tasa=Decimal("0.08")),
+            # Trampa: uno con IEPS pero IVA 16% — no debe elegirse para botana.
+            EsquemaImpuesto(tenant_id=env["tenant_id"], codigo="BOT16", nombre="IVA 16% + IEPS 8%",
+                            iva_tasa=Decimal("0.16"), ieps_tasa=Decimal("0.08")),
+        ])
+        db.commit()
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/sugerir-esquema-batch", headers=h, json={
+        "usar_ia": False,
+        "productos": [{"nombre": "SABRITAS PAPAS FRITAS 45 GR", "clave_sat": "50192100",
+                       "categoria": "ABARROTE"}],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()[0]["esquema_codigo"] == "BOT0"
+
+
+def test_falta_esquema_dice_cual_crear(client, env, auth_as):
+    """Si el negocio no tiene el esquema que pide la regla, se dice cuál falta
+    en vez de dejar el producto en blanco sin explicación."""
+    db = SessionLocal()
+    try:
+        db.add_all([
+            EsquemaImpuesto(tenant_id=env["tenant_id"], codigo="IVA0", nombre="IVA 0%",
+                            iva_tasa=Decimal("0")),
+            EsquemaImpuesto(tenant_id=env["tenant_id"], codigo="IVA16", nombre="IVA 16%",
+                            iva_tasa=Decimal("0.16")),
+        ])
+        db.commit()
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/sugerir-esquema-batch", headers=h, json={
+        "usar_ia": False,
+        "productos": [
+            {"nombre": "COCA COLA LATA ORIGINAL", "clave_sat": "50202306", "categoria": ""},
+            {"nombre": "SABRITAS PAPAS FRITAS", "clave_sat": "50192100", "categoria": ""},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    for s in r.json():
+        assert s["origen"] == "falta_esquema"
+        assert "IEPS" in s["motivo"]

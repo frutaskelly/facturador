@@ -134,8 +134,11 @@ class ImportFilaPreview(BaseModel):
     clave_sat: str = ""
     unidad_sat: str = ""
     codigo_barras: str = ""
-    categoria: str = ""
-    esquema: str = ""
+    categoria: str = ""                    # texto tal como viene en el archivo
+    categoria_id: Optional[uuid.UUID] = None   # categoría del sistema resuelta
+    esquema: str = ""                      # texto del archivo
+    esquema_id: Optional[uuid.UUID] = None     # esquema del sistema resuelto
+    esquema_origen: str = ""               # "archivo" | "regla" | "ia" | ""
     # ESTATUS BAJA del archivo (SAE): se omite por default, reversible en la UI.
     baja: bool = False
     # Validación contra el catálogo SAT oficial (None = campo vacío).
@@ -166,6 +169,15 @@ class ImportColumnaOut(BaseModel):
     muestras: list[str] = Field(default_factory=list)
 
 
+class ImportCategoriaMatch(BaseModel):
+    """Una categoría del archivo y a cuál existente corresponde (o si es nueva)."""
+    nombre_archivo: str
+    categoria_id: Optional[uuid.UUID] = None
+    categoria_nombre: str = ""
+    score: int = 0
+    es_nueva: bool = True
+
+
 class ImportPreviewOut(BaseModel):
     formato: str                  # "plantilla" (determinista) | "ia"
     filas: list[ImportFilaPreview]
@@ -173,6 +185,9 @@ class ImportPreviewOut(BaseModel):
     # corrige antes de aprobar. Vacío en la rama IA (no hay columnas fijas).
     columnas: list[ImportColumnaOut] = Field(default_factory=list)
     campos_mapeables: list[dict] = Field(default_factory=list)
+    # Categorías del archivo cruzadas contra las que YA tiene el tenant: se
+    # reusa la existente en vez de duplicarla ("ABARROTE" ↔ "Abarrotes").
+    categorias_match: list["ImportCategoriaMatch"] = Field(default_factory=list)
     # No se reconoció qué columna trae la descripción: el usuario debe mapear.
     requiere_mapeo: bool = False
     # Renglones con datos descartados por no traer nombre (se avisan, no se
@@ -252,6 +267,22 @@ class ImportResultOut(BaseModel):
 class SugerirSatBatchIn(BaseModel):
     productos: list[dict] = Field(min_length=1, max_length=2000)
     # cada item: {"nombre": str, "unidad": str}
+
+
+class SugerirEsquemaBatchIn(BaseModel):
+    productos: list[dict] = Field(min_length=1, max_length=2000)
+    # cada item: {"nombre": str, "clave_sat": str, "categoria": str}
+    usar_ia: bool = True
+
+
+class SugerenciaEsquemaOut(BaseModel):
+    nombre: str
+    esquema_id: Optional[uuid.UUID] = None
+    esquema_codigo: str = ""
+    # "regla" | "ia" | "revisar" (la ley depende del envase/contenido) |
+    # "falta_esquema" (el negocio no tiene uno así) | ""
+    origen: str = ""
+    motivo: str = ""
 
 
 class SugerenciaSatOut(BaseModel):

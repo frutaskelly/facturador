@@ -33,6 +33,7 @@ from ...models import (
 from ...schemas.producto import (
     AliasIn,
     CandidatoOut,
+    ImportCategoriaMatch,
     ImportColumnaOut,
     ImportErrorFila,
     ImportFilaPreview,
@@ -46,7 +47,9 @@ from ...schemas.producto import (
     ProductoCreate,
     ProductoOut,
     ProductoUpdate,
+    SugerenciaEsquemaOut,
     SugerenciaSatOut,
+    SugerirEsquemaBatchIn,
     SugerirSatBatchIn,
 )
 from ...schemas.common import Page
@@ -61,6 +64,7 @@ from ...services.importar_productos import (
     parsear_plantilla,
 )
 from ...services.sat_catalogo import sugerir_batch
+from ...services.sugerir_esquema import match_categorias, sugerir_esquemas
 from ...services.producto_match import (
     alias_del_tenant,
     aprender_alias,
@@ -452,15 +456,22 @@ def importar_preview(
         .filter(SatClaveUnidad.clave.in_(unidades_archivo)).all()
     } if unidades_archivo else set()
 
-    # Categorías y esquemas del tenant, por nombre/código normalizado.
-    cats_tenant = {
-        normalizar(c.nombre) for c in
-        db.query(CategoriaProducto).filter(CategoriaProducto.deleted_at.is_(None)).all()
-    }
-    esquemas_tenant = set()
-    for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.deleted_at.is_(None)).all():
-        esquemas_tenant.add(normalizar(e.codigo or ""))
-        esquemas_tenant.add(normalizar(e.nombre or ""))
+    # Categorías y esquemas del tenant (objetos: el preview resuelve el id de
+    # cada fila para que el usuario los vea y cambie en su propia columna).
+    cats_lista = db.query(CategoriaProducto).filter(CategoriaProducto.deleted_at.is_(None)).all()
+    cats_por_nombre = {normalizar(c.nombre): c for c in cats_lista}
+    cats_tenant = set(cats_por_nombre)
+    esquemas_lista = (
+        db.query(EsquemaImpuesto)
+        .filter(EsquemaImpuesto.deleted_at.is_(None), EsquemaImpuesto.activo.is_(True))
+        .all()
+    )
+    esquemas_por_clave: dict = {}
+    for e in esquemas_lista:
+        for k in (e.codigo, e.nombre):
+            if k:
+                esquemas_por_clave.setdefault(normalizar(k), e)
+    esquemas_tenant = set(esquemas_por_clave)
 
     # Lo que los clientes elegidos YA tienen vinculado. Con VARIOS clientes un
     # mismo código puede apuntar a productos distintos según el cliente: en ese
@@ -555,7 +566,12 @@ def importar_preview(
             unidad_sat=unidad_sat_f,
             codigo_barras=f.get("codigo_barras") or "",
             categoria=f.get("categoria") or "",
+            categoria_id=(cats_por_nombre.get(normalizar(f.get("categoria") or "")).id
+                          if normalizar(f.get("categoria") or "") in cats_por_nombre else None),
             esquema=f.get("esquema") or "",
+            esquema_id=(esquemas_por_clave.get(normalizar(f.get("esquema") or "")).id
+                        if normalizar(f.get("esquema") or "") in esquemas_por_clave else None),
+            esquema_origen=("archivo" if normalizar(f.get("esquema") or "") in esquemas_por_clave else ""),
             baja=(f.get("estatus") or "") in ("BAJA", "INACTIVO", "B"),
             clave_sat_valida=(clave_f in claves_ok) if clave_f else None,
             unidad_sat_valida=(unidad_sat_f in unidades_ok) if unidad_sat_f else None,
@@ -593,10 +609,17 @@ def importar_preview(
 
     # Meta para las preguntas en LOTE del wizard.
     activas = [f for f in out if f.duplicada_de is None and not f.baja]
-    cats_nuevas = sorted({
-        f.categoria for f in activas
-        if f.categoria and normalizar(f.categoria) not in cats_tenant
-    })
+    # Categorías del archivo cruzadas contra las del tenant: "ABARROTE" del
+    # archivo y "Abarrotes" del sistema son la misma — se reusa, no se duplica.
+    nombres_archivo = sorted({f.categoria for f in activas if f.categoria})
+    cat_matches = match_categorias(nombres_archivo, cats_lista)
+    for m in cat_matches:
+        if m["categoria_id"] is not None:
+            # La fila apunta a la categoría existente que le corresponde.
+            for f in out:
+                if f.categoria == m["nombre_archivo"] and f.categoria_id is None:
+                    f.categoria_id = m["categoria_id"]
+    cats_nuevas = sorted({m["nombre_archivo"] for m in cat_matches if m["es_nueva"]})
     esq_no_encontrados = sorted({
         f.esquema for f in activas
         if f.esquema and normalizar(f.esquema) not in esquemas_tenant
@@ -611,10 +634,54 @@ def importar_preview(
         faltan_clave_sat=sum(1 for f in activas if not f.clave_sat),
         faltan_unidad_sat=sum(1 for f in activas if not f.unidad_sat),
         categorias_nuevas=cats_nuevas,
+        categorias_match=[ImportCategoriaMatch(**m) for m in cat_matches],
         esquemas_no_encontrados=esq_no_encontrados,
-        filas_sin_esquema=sum(1 for f in activas if not f.esquema),
+        filas_sin_esquema=sum(1 for f in activas if f.esquema_id is None),
         tiene_precios=any(f.precio for f in activas),
     )
+
+
+@router.post("/sugerir-esquema-batch", response_model=list[SugerenciaEsquemaOut])
+def sugerir_esquema_batch(
+    payload: SugerirEsquemaBatchIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Qué esquema de impuesto le toca a cada producto, entre los que YA tiene
+    el negocio. Sin esquema el CFDI saldría sin IVA/IEPS, así que la
+    importación no debe dejar productos en blanco.
+
+    Primero reglas fiscales mexicanas por clave SAT/nombre (alimentos IVA 0%,
+    limpieza y plásticos 16%, refrescos y botanas con IEPS) y, para lo que no
+    resuelvan, una sola llamada de IA que ELIGE entre los esquemas del tenant."""
+    if payload.usar_ia:
+        enforce(f"producto-ia:{ctx.tenant_id}", 120, 3600)
+    esquemas = (
+        db.query(EsquemaImpuesto)
+        .filter(EsquemaImpuesto.deleted_at.is_(None), EsquemaImpuesto.activo.is_(True))
+        .all()
+    )
+    if not esquemas:
+        raise HTTPException(
+            status_code=422,
+            detail="No hay esquemas de impuesto dados de alta. Crea al menos uno "
+                   "(por ejemplo IVA 0% para alimentos e IVA 16%) en Esquemas de impuesto.",
+        )
+    productos = [
+        {
+            "nombre": str(p.get("nombre", "")).strip(),
+            "clave_sat": str(p.get("clave_sat", "")).strip(),
+            "categoria": str(p.get("categoria", "")).strip(),
+        }
+        for p in payload.productos
+        if str(p.get("nombre", "")).strip()
+    ]
+    if not productos:
+        raise HTTPException(status_code=422, detail="Sin productos que evaluar")
+    return [
+        SugerenciaEsquemaOut(**s)
+        for s in sugerir_esquemas(productos, esquemas, usar_ia=payload.usar_ia)
+    ]
 
 
 @router.post("/sugerir-sat-batch", response_model=list[SugerenciaSatOut])
