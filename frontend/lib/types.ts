@@ -566,6 +566,8 @@ export type EmpresasGrupo = {
   grupo_total: number;
   grupo_max: number;
   puede_agregar: boolean;
+};
+
 // ─── Bandeja de OC + equivalencias de cliente ────────────────────────────────
 // Una orden que llega por WhatsApp/correo aterriza en la bandeja antes de
 // volverse remisión: ahí se verifica a qué cliente se asignó y, si el sistema
