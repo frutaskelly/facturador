@@ -625,6 +625,7 @@ export type OCRecibida = {
   sucursal_id?: string | null;
   sucursal_nombre?: string | null;
   resuelto_via?: string | null;
+  punto_entrega?: string | null;
   ambiguo: boolean;
   remision_id?: string | null;
   remision_folio?: string | null;

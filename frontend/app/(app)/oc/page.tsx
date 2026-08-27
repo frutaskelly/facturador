@@ -112,6 +112,9 @@ export default function Page() {
   const [clienteSel, setClienteSel] = useState("");
   const [sucursalSel, setSucursalSel] = useState("");
   const [almacenSel, setAlmacenSel] = useState("");
+  // A dónde se descarga (hospital, plantel). NO es la sucursal: es un punto
+  // dentro de ella, y su texto sale impreso en la remisión y en la factura.
+  const [puntoEntrega, setPuntoEntrega] = useState("");
   const [lineas, setLineas] = useState<LineaEdit[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [aDescartar, setADescartar] = useState<OCRecibida | null>(null);
@@ -143,6 +146,7 @@ export default function Page() {
       setAbierta(oc);
       setClienteSel(oc.cliente_id ?? "");
       setSucursalSel(oc.sucursal_id ?? "");
+      setPuntoEntrega(oc.punto_entrega ?? "");
       setAlmacenSel("");
       setLineas(
         oc.lineas.map((l) => {
@@ -184,8 +188,10 @@ export default function Page() {
   const sinGuardar = useMemo(
     () =>
       !!abierta &&
-      (clienteSel !== (abierta.cliente_id ?? "") || sucursalSel !== (abierta.sucursal_id ?? "")),
-    [abierta, clienteSel, sucursalSel]
+      (clienteSel !== (abierta.cliente_id ?? "") ||
+        sucursalSel !== (abierta.sucursal_id ?? "") ||
+        puntoEntrega.trim() !== (abierta.punto_entrega ?? "")),
+    [abierta, clienteSel, sucursalSel, puntoEntrega]
   );
 
   /** Persiste cliente/sucursal. Devuelve la OC guardada, o null si falló. */
@@ -200,6 +206,7 @@ export default function Page() {
         body: JSON.stringify({
           cliente_id: clienteSel,
           sucursal_id: sucursalSel || null,
+          punto_entrega: puntoEntrega.trim() || null,
           aprender: true,
         }),
       });
@@ -456,8 +463,8 @@ export default function Page() {
               </Alert>
             ) : null}
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Field label="Cliente">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <Field label="Cliente" hint="A quién se le factura">
                 <Select
                   value={clienteSel}
                   onChange={(e) => {
@@ -472,13 +479,7 @@ export default function Page() {
                   ))}
                 </Select>
               </Field>
-              <Field
-                label="Sucursal / destino"
-                hint={
-                  (abierta.payload?.ubicacion as string) ??
-                  "El documento no trae ubicación"
-                }
-              >
+              <Field label="Sucursal" hint="De aquí salen la serie y la lista de precios">
                 <Select
                   value={sucursalSel}
                   onChange={(e) => setSucursalSel(e.target.value)}
@@ -491,6 +492,17 @@ export default function Page() {
                     </option>
                   ))}
                 </Select>
+              </Field>
+              <Field
+                label="Punto de entrega"
+                hint="A dónde se descarga. Sale impreso en la remisión y en la factura."
+              >
+                <Input
+                  value={puntoEntrega}
+                  onChange={(e) => setPuntoEntrega(e.target.value)}
+                  disabled={!canWrite || bloqueada}
+                  placeholder="HOSPITAL JUAN GRAHAM"
+                />
               </Field>
               <Field label="Almacén de salida">
                 <Select

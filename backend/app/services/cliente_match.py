@@ -20,6 +20,14 @@ El orden de prioridad es por especificidad: el RFC identifica a una persona
 moral sin lugar a dudas; el grupo de WhatsApp es el más débil (un mismo grupo
 puede recibir órdenes de varias razones sociales, que es exactamente lo que pasa
 hoy con EHMO/MAFAN y con Balles/Jubran).
+
+La UBICACIÓN queda FUERA de esa cascada a propósito (27-ago-2026). Un punto de
+descarga —un hospital, un plantel— dice DÓNDE se entrega, no A QUIÉN se le
+factura: Balles y Jubran son dos razones sociales que comparten los mismos
+puntos de entrega. Si la ubicación votara por un cliente, toda orden de Jubran
+saldría «ambigua» contra Balles. Se usa solo para el destino, ya sabiendo el
+cliente (`resolver_destino`), y el texto viaja siempre a las observaciones del
+documento — que es donde el negocio lo lee.
 """
 from __future__ import annotations
 
@@ -34,7 +42,8 @@ from ..models import Cliente, ClienteExterno, Sucursal
 from .producto_match import normalizar
 
 # Mayor a menor especificidad. El resolutor recorre esta lista en orden.
-PRIORIDAD = ("RFC", "SAE", "PROYECTO", "NOMBRE", "UBICACION", "WHATSAPP")
+# UBICACION NO está: no identifica al cliente (ver el docstring del módulo).
+PRIORIDAD = ("RFC", "SAE", "PROYECTO", "NOMBRE", "WHATSAPP")
 
 # El RFC no se normaliza como texto libre (los espacios y guiones sí estorban,
 # pero las mayúsculas son significativas para leerlo). Se sube a mayúsculas y se
@@ -151,21 +160,54 @@ def resolver(db: Session, tenant_id: UUID, pistas: list[Pista]) -> Resolucion:
     sistema_ganador, ganador = encontrados[0]
     res.cliente_id = ganador.cliente_id
     res.via = sistema_ganador
-
-    # La sucursal la aporta la primera coincidencia que traiga una — típicamente
-    # la de sistema UBICACION, que es la única que sabe a qué hospital va.
-    for _, e in encontrados:
-        if e.sucursal_id is None:
-            continue
-        viva = (
-            db.query(Sucursal.id)
-            .filter(Sucursal.id == e.sucursal_id, Sucursal.deleted_at.is_(None))
-            .first()
-        )
-        if viva is not None:
-            res.sucursal_id = e.sucursal_id
-            break
     return res
+
+
+def _sucursal_viva(db: Session, sucursal_id, cliente_id: UUID):
+    """La sucursal, solo si vive Y es de ese cliente.
+
+    Lo segundo importa: los puntos de entrega se comparten entre razones
+    sociales (Balles/Jubran), así que una equivalencia puede apuntar a la
+    sucursal de otro cliente si alguien la reapuntó. Mandar la remisión ahí
+    resolvería la serie y los precios con datos mezclados.
+    """
+    if sucursal_id is None:
+        return None
+    hit = (
+        db.query(Sucursal.id)
+        .filter(
+            Sucursal.id == sucursal_id,
+            Sucursal.cliente_id == cliente_id,
+            Sucursal.deleted_at.is_(None),
+        )
+        .first()
+    )
+    return hit[0] if hit else None
+
+
+def resolver_destino(
+    db: Session, tenant_id: UUID, cliente_id: UUID, texto: str, *, perfil: str = ""
+) -> Optional[UUID]:
+    """A qué SUCURSAL va una entrega, con el cliente ya decidido.
+
+    Dos caminos, en orden: la equivalencia UBICACION registrada para ese punto
+    de descarga, y el cruce directo contra el catálogo de sucursales del cliente
+    (por código de 3 letras o por nombre) para cuando el documento nombra la
+    sucursal misma («Tabasco») en vez de un punto dentro de ella.
+
+    Sin hit devuelve None: la remisión sale igual, y el punto de descarga viaja
+    en las observaciones — no es un error, es lo normal para un hospital nuevo.
+    """
+    texto = (texto or "").strip()
+    if not texto:
+        return None
+    clave = f"{perfil.strip().lower()}:{texto}" if perfil else texto
+    hit = _buscar(db, tenant_id, "UBICACION", clave)
+    if hit is not None and hit.cliente_id == cliente_id:
+        viva = _sucursal_viva(db, hit.sucursal_id, cliente_id)
+        if viva is not None:
+            return viva
+    return resolver_sucursal_por_texto(db, cliente_id, texto)
 
 
 def resolver_sucursal_por_texto(

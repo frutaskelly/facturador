@@ -4,6 +4,13 @@ Cubre lo que hace que la ingesta desatendida sea segura: idempotencia (un
 reintento del bot no duplica), la regla de ambigüedad (dos pistas que se
 contradicen NO eligen cliente), que una SUGERIDA no decida sola, el aprendizaje
 al corregir desde la bandeja, y el aislamiento entre tenants.
+
+El modelo del negocio, que estas pruebas dan por bueno: un CLIENTE es la razón
+social a la que se factura (EHMO, MAFAN, Balles, Jubran); una SUCURSAL es su
+operación regional (Pachuca, Tabasco) y es de donde salen serie y lista de
+precios; y un PUNTO DE ENTREGA (un hospital, un plantel) es a dónde se descarga
+dentro de esa sucursal. Balles y Jubran son dos razones sociales que comparten
+puntos de entrega, así que un punto de entrega NUNCA identifica al cliente.
 """
 import uuid
 
@@ -52,16 +59,28 @@ def env(db_engine):
                        rfc="GOA180712SF5")
         mafan = Cliente(tenant_id=tenant_a.id, codigo="MA", legal_name="MAFAN",
                         rfc="MCM170118UJ6")
-        db.add_all([ehmo, mafan]); db.flush()
-        suc = Sucursal(tenant_id=tenant_a.id, cliente_id=ehmo.id, codigo="JUA",
-                       nombre="JUAN GRAHAM")
+        # Dos razones sociales que comparten puntos de entrega, serie y precios.
+        balles = Cliente(tenant_id=tenant_a.id, codigo="BA", legal_name="OPERADORA BALLES",
+                         rfc="OBV191007BS1")
+        jubran = Cliente(tenant_id=tenant_a.id, codigo="JU", legal_name="DISTRIBUIDORA JUBRAN",
+                         rfc="DAP250922PY2")
+        db.add_all([ehmo, mafan, balles, jubran]); db.flush()
+        # La SUCURSAL es la operación regional; el hospital es un punto DENTRO.
+        suc = Sucursal(tenant_id=tenant_a.id, cliente_id=ehmo.id, codigo="TAB",
+                       nombre="Tabasco")
+        suc_balles = Sucursal(tenant_id=tenant_a.id, cliente_id=balles.id, codigo="HGO",
+                              nombre="Hidalgo")
+        suc_jubran = Sucursal(tenant_id=tenant_a.id, cliente_id=jubran.id, codigo="HGO",
+                              nombre="Hidalgo")
         prod = Producto(tenant_id=tenant_a.id, sku="OC-P", nombre="Jitomate Saladet",
                         clave_sat="01010101", unidad_sat="KGM")
         alm = Almacen(tenant_id=tenant_a.id, codigo="OC-BG", nombre="Bodega OC")
-        db.add_all([suc, prod, alm]); db.flush()
+        db.add_all([suc, suc_balles, suc_jubran, prod, alm]); db.flush()
         db.commit()
         yield {"admin_a": admin_a, "admin_b": admin_b,
                "ehmo": str(ehmo.id), "mafan": str(mafan.id), "suc": str(suc.id),
+               "balles": str(balles.id), "jubran": str(jubran.id),
+               "suc_balles": str(suc_balles.id), "suc_jubran": str(suc_jubran.id),
                "prod": str(prod.id), "alm": str(alm.id)}
     finally:
         for table in _PURGE:
@@ -113,20 +132,19 @@ def _externo(client, h, sistema, clave, cliente_id, **kw):
 
 # ─── equivalencias ───────────────────────────────────────────────────────────
 
-def test_resolver_por_rfc_y_sucursal_por_codigo(client, env, auth_as):
+def test_resolver_por_rfc_y_sucursal_por_nombre(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     assert _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"]).status_code == 201
 
     r = client.post("/api/v1/clientes/resolver", headers=h, json={
         "pistas": [{"sistema": "RFC", "clave": "goa 180712 sf5"}],   # sucio a propósito
-        "ubicacion_texto": "JUAN GRAHAM",
+        "ubicacion_texto": "Tabasco",       # el documento nombra la SUCURSAL
     })
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["cliente_id"] == env["ehmo"]
     assert body["via"] == "RFC"
     assert body["ambiguo"] is False
-    # La sucursal la resolvió el catálogo del cliente, sin equivalencia registrada.
     assert body["sucursal_id"] == env["suc"]
 
 
@@ -158,7 +176,7 @@ def test_sucursal_de_otro_cliente_rechazada(client, env, auth_as):
 
 # ─── ingesta ────────────────────────────────────────────────────────────────
 
-def test_ingesta_resuelve_cliente_y_sucursal(client, env, auth_as):
+def test_ingesta_resuelve_cliente_y_guarda_el_punto_de_entrega(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
 
@@ -166,7 +184,11 @@ def test_ingesta_resuelve_cliente_y_sucursal(client, env, auth_as):
     assert r.status_code == 201, r.text
     oc = r.json()
     assert oc["cliente_id"] == env["ehmo"]
-    assert oc["sucursal_id"] == env["suc"]
+    assert oc["punto_entrega"] == "JUAN GRAHAM"
+    # Un hospital NO es una sucursal: hasta que alguien diga a cuál pertenece,
+    # el destino queda abierto y la bandeja lo pide.
+    assert oc["sucursal_id"] is None
+    assert "JUAN GRAHAM" in oc["motivo"]
     assert oc["estado"] == "PENDIENTE"          # aún no existe su remisión
     assert oc["ambiguo"] is False
     # El cruce de productos se sugiere al vuelo, sin persistirse.
@@ -218,10 +240,12 @@ def test_asignar_manual_aprende_las_pistas(client, env, auth_as):
     assert r.json()["cliente_id"] == env["ehmo"]
     assert r.json()["resuelto_via"] == "MANUAL"
 
-    # La siguiente OC igual ya no pregunta: aprendió RFC y UBICACION.
+    # La siguiente OC igual ya no pregunta: aprendió el RFC (cliente) y que ese
+    # hospital se descarga en la sucursal de Tabasco (destino).
     otra = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
     assert otra["cliente_id"] == env["ehmo"]
     assert otra["sucursal_id"] == env["suc"]
+    assert otra["punto_entrega"] == "JUAN GRAHAM"
 
     externos = client.get("/api/v1/clientes/externos", headers=h,
                           params={"cliente_id": env["ehmo"]}).json()
@@ -236,6 +260,9 @@ def test_crear_remision_liga_y_no_se_puede_dos_veces(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
     oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+    # El hospital pertenece a la sucursal de Tabasco; eso lo dice una persona.
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
 
     body = {"almacen_id": env["alm"], "lineas": [{
         "producto_id": env["prod"], "cantidad": "25", "precio_unitario": "18.50",
@@ -250,7 +277,11 @@ def test_crear_remision_liga_y_no_se_puede_dos_veces(client, env, auth_as):
     assert rem["estado"] == "BORRADOR"
     assert rem["canal"] == "API"
     assert rem["sucursal_id"] == env["suc"]
+    # El punto de entrega ENCABEZA las observaciones: es lo que el equipo lee
+    # para saber a dónde llevarla, y de aquí pasa a las de la factura.
+    assert (rem["notas"] or "").startswith("JUAN GRAHAM")
     assert "OC 1188" in (rem["notas"] or "")
+    assert rem["nota_entrega"] == "JUAN GRAHAM"
     assert float(rem["subtotal"]) == 462.5
 
     # Segundo intento: la orden ya tiene remisión, no se generan dos folios.
@@ -381,3 +412,42 @@ def test_sugerida_no_pisa_confirmada_y_avisa(client, env, auth_as):
     listado = client.get("/api/v1/clientes/externos", headers=h,
                          params={"sistema": "NOMBRE"}).json()
     assert listado[0]["cliente_id"] == env["ehmo"]
+
+
+def test_punto_de_entrega_compartido_no_decide_el_cliente(client, env, auth_as):
+    """Balles y Jubran comparten puntos de entrega. Si el punto votara por el
+    cliente, toda orden de Jubran saldría «ambigua» contra Balles — o peor, se
+    le facturaría a la razón social equivocada."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "NOMBRE", "BALLES", env["balles"])
+    _externo(client, h, "NOMBRE", "JUBRAN", env["jubran"])
+    # El mismo punto de entrega, registrado para cada razón social.
+    _externo(client, h, "UBICACION", "PROCU", env["balles"], sucursal_id=env["suc_balles"])
+
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        rfc=None, perfil=None, nombre="JUBRAN", ubicacion="PROCU")).json()
+
+    assert oc["ambiguo"] is False                    # el punto no contradice a nadie
+    assert oc["cliente_id"] == env["jubran"]         # manda el nombre del documento
+    assert oc["punto_entrega"] == "PROCU"
+    # Y no se cuela la sucursal de Balles en una remisión de Jubran.
+    assert oc["sucursal_id"] != env["suc_balles"]
+
+
+def test_el_punto_de_entrega_se_puede_corregir_a_mano(client, env, auth_as):
+    """Lo que se corrige aquí es lo que sale impreso en la remisión y la factura."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+
+    r = client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h, json={
+        "cliente_id": env["ehmo"], "sucursal_id": env["suc"],
+        "punto_entrega": "HOSPITAL JUAN GRAHAM (URGENCIAS)", "aprender": False})
+    assert r.json()["punto_entrega"] == "HOSPITAL JUAN GRAHAM (URGENCIAS)"
+
+    hecho = client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision", headers=h, json={
+        "almacen_id": env["alm"],
+        "lineas": [{"producto_id": env["prod"], "cantidad": "1", "precio_unitario": "10"}],
+    }).json()
+    rem = client.get(f"/api/v1/remisiones/{hecho['remision_id']}", headers=h).json()
+    assert (rem["notas"] or "").startswith("HOSPITAL JUAN GRAHAM (URGENCIAS)")

@@ -56,6 +56,7 @@ class OCRecibidaUpdate(BaseModel):
     cliente_id: Optional[uuid.UUID] = None
     sucursal_id: Optional[uuid.UUID] = None
     folio_externo: Optional[str] = Field(default=None, max_length=60)
+    punto_entrega: Optional[str] = Field(default=None, max_length=254)
     motivo: Optional[str] = None
     # Guardar la corrección como equivalencia: la próxima OC igual ya no pregunta.
     aprender: bool = True
@@ -101,6 +102,7 @@ class OCRecibidaOut(ORMModel):
     sucursal_id: Optional[uuid.UUID] = None
     sucursal_nombre: Optional[str] = None
     resuelto_via: Optional[str] = None
+    punto_entrega: Optional[str] = None
     ambiguo: bool = False
     remision_id: Optional[uuid.UUID] = None
     remision_folio: Optional[str] = None

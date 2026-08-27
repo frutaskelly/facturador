@@ -51,12 +51,15 @@ _READ = "menu:remisiones"
 _WRITE = "remision:gestionar"
 
 # Sistema de equivalencia ← campo del payload de ingesta.
+# `ubicacion` NO está aquí: un punto de entrega dice DÓNDE se descarga, no a
+# quién se le factura (Balles y Jubran comparten los mismos puntos). Se usa solo
+# para el destino, ya con el cliente decidido, y su texto viaja siempre a las
+# observaciones del documento.
 _PISTAS = (
     ("RFC", "rfc"),
     ("SAE", "clave_sae"),
     ("PROYECTO", "proyecto"),
     ("NOMBRE", "nombre"),
-    ("UBICACION", "ubicacion"),
     ("WHATSAPP", "jid"),
 )
 
@@ -71,7 +74,7 @@ def _pistas_de(payload: dict) -> list[cliente_match.Pista]:
         valor = (payload.get(campo) or "").strip()
         if not valor:
             continue
-        if sistema in ("PROYECTO", "UBICACION"):
+        if sistema == "PROYECTO":
             # Sin perfil el prefijo no existe y la clave caería en un espacio
             # global: 'HOSPITALES' significa cosas distintas en Pachuca y en
             # Villahermosa, y una pisaría a la otra. Sin perfil, no hay pista.
@@ -83,18 +86,24 @@ def _pistas_de(payload: dict) -> list[cliente_match.Pista]:
 
 
 def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
-    """(Re)resuelve cliente y sucursal de una OC desde su payload."""
+    """(Re)resuelve cliente y destino de una OC desde su payload."""
     payload = oc.payload or {}
     res = cliente_match.resolver(db, oc.tenant_id, _pistas_de(payload))
 
     oc.ambiguo = res.ambiguo
     oc.resuelto_via = res.via
     oc.cliente_id = res.cliente_id
-    oc.sucursal_id = res.sucursal_id
+    oc.sucursal_id = None
 
-    if res.cliente_id and not res.sucursal_id and payload.get("ubicacion"):
-        oc.sucursal_id = cliente_match.resolver_sucursal_por_texto(
-            db, res.cliente_id, str(payload["ubicacion"])
+    # El punto de entrega (hospital, plantel) es texto del documento y va SIEMPRE
+    # a las observaciones, resuelva o no una sucursal. Es lo que el equipo lee
+    # para saber a dónde llevar la mercancía.
+    oc.punto_entrega = (payload.get("ubicacion") or "").strip() or None
+
+    if res.cliente_id is not None and oc.punto_entrega:
+        oc.sucursal_id = cliente_match.resolver_destino(
+            db, oc.tenant_id, res.cliente_id, oc.punto_entrega,
+            perfil=str(payload.get("perfil") or ""),
         )
 
     if res.cliente_id is None:
@@ -108,11 +117,9 @@ def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
         # cruce los productos. Se queda PENDIENTE hasta que exista la remisión —
         # ASIGNADA significa "ya nació su remisión", no "ya sé de quién es".
         oc.estado = "PENDIENTE"
-        faltante = []
-        if oc.sucursal_id is None and payload.get("ubicacion"):
-            faltante.append(f"ubicación «{payload['ubicacion']}» sin sucursal")
         oc.motivo = (
-            "Falta " + " y ".join(faltante) if faltante
+            f"Falta decir a qué sucursal pertenece «{oc.punto_entrega}»"
+            if oc.sucursal_id is None and oc.punto_entrega
             else "Lista para revisar y crear la remisión"
         )
 
@@ -318,11 +325,24 @@ def asignar(
         oc.sucursal_id = data["sucursal_id"]
     if "folio_externo" in data:
         oc.folio_externo = data["folio_externo"]
+    if "punto_entrega" in data:
+        oc.punto_entrega = (data["punto_entrega"] or "").strip() or None
     if "motivo" in data:
         oc.motivo = data["motivo"]
     oc.updated_by = ctx.user_id
 
     if payload.aprender and oc.cliente_id is not None:
+        # El punto de entrega se aprende como DESTINO: la próxima orden que diga
+        # «JUAN GRAHAM» ya sabe que se descarga en la sucursal de Tabasco. No
+        # vota por el cliente — Balles y Jubran comparten sus puntos de entrega.
+        if oc.punto_entrega and oc.sucursal_id is not None:
+            perfil = str((oc.payload or {}).get("perfil") or "").strip().lower()
+            cliente_match.aprender(
+                db, ctx.tenant_id, "UBICACION",
+                f"{perfil}:{oc.punto_entrega}" if perfil else oc.punto_entrega,
+                oc.cliente_id, sucursal_id=oc.sucursal_id,
+                origen="MANUAL", confianza="CONFIRMADA", user_id=ctx.user_id,
+            )
         for pista in _pistas_de(oc.payload or {}):
             # El JID es la pista MÁS DÉBIL: un mismo grupo recibe órdenes de
             # varias razones sociales (EHMO/MAFAN, Balles/Jubran). Aprenderlo
@@ -330,11 +350,8 @@ def asignar(
             # asignaría en silencio las órdenes del otro cliente. Queda SUGERIDA:
             # se ve en la bandeja y se confirma a mano si el grupo es de uno solo.
             confianza = "SUGERIDA" if pista.sistema == "WHATSAPP" else "CONFIRMADA"
-            # La ubicación es lo único que aporta sucursal; el resto (RFC,
-            # proyecto, nombre) solo determina cliente.
             cliente_match.aprender(
                 db, ctx.tenant_id, pista.sistema, pista.clave, oc.cliente_id,
-                sucursal_id=oc.sucursal_id if pista.sistema == "UBICACION" else None,
                 origen="MANUAL", confianza=confianza, user_id=ctx.user_id,
             )
 
@@ -377,9 +394,13 @@ def crear_remision(
     p = oc.payload or {}
     origen = f"OC:{oc.origen_externo}"[:120]
     folio = (oc.folio_externo or "").strip()
+    # Las observaciones de la remisión: se imprimen en su PDF y pasan tal cual a
+    # las de la factura al facturarla. El punto de entrega va primero porque es
+    # lo que el equipo busca ahí. «OC <folio>» se conserva con ese formato exacto
+    # porque es el ancla con la que ya se concilia contra SAE.
     notas = " · ".join(x for x in [
+        oc.punto_entrega,
         f"OC {folio}" if folio else None,
-        f"{oc.canal.title()} {oc.remitente}" if oc.remitente else None,
         (p.get("observaciones") or "").strip() or None,
     ] if x)
 
@@ -391,7 +412,7 @@ def crear_remision(
         fecha_entrega=payload.fecha_entrega or _fecha(p.get("fecha_entrega")),
         canal="API",
         notas=notas or None,
-        nota_entrega=(p.get("ubicacion") or None),
+        nota_entrega=oc.punto_entrega,
         lineas=[
             LineaRemisionCreate(
                 producto_id=ln.producto_id,

@@ -693,6 +693,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/empresa/checklist/marcar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Marcar Paso Checklist
+         * @description Marca (o desmarca) a mano un paso de revisión de la guía.
+         */
+        post: operations["marcar_paso_checklist_api_v1_empresa_checklist_marcar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/empresa/csd": {
         parameters: {
             query?: never;
@@ -733,6 +753,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/empresa/grupo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Empresas Del Grupo
+         * @description Las empresas del usuario, cada una con lo que le falta para facturar.
+         *
+         *     No exige permiso: devuelve exactamente el mismo conjunto que ya ve en el
+         *     switcher del Topbar (sus membresías activas), solo que enriquecido con el
+         *     estado de configuración. La pantalla que lo consume sí está gateada en el menú.
+         */
+        get: operations["empresas_del_grupo_api_v1_empresa_grupo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/empresa/hijas": {
         parameters: {
             query?: never;
@@ -745,13 +789,16 @@ export interface paths {
         /**
          * Crear Empresa Hija
          * @description Crea una empresa HIJA del grupo: otro RFC/razón social del mismo dueño,
-         *     como tenant `SUB` colgado de la raíz del grupo. El creador queda como OWNER
-         *     de la nueva (el switcher del Topbar la muestra al instante).
+         *     como tenant `SUB` colgado de la raíz del grupo (el switcher del Topbar la
+         *     muestra al instante).
+         *
+         *     Pueden crearla el dueño y los administradores (`membership:gestionar`), pero
+         *     quién MANDA en la nueva lo decide `_asignar_membresias_de_la_hija`.
          *
          *     Usa la sesión plana `get_db` a propósito: la política RLS de `tenants`
          *     (id = current_tenant_id) impide insertar OTRO tenant desde la sesión
-         *     scopeada. La única barrera aquí es el código: `parent` sale SIEMPRE de
-         *     ctx.tenant_id (jamás del payload) y se exige ser OWNER.
+         *     scopeada. La barrera aquí es el código: `parent` sale SIEMPRE de
+         *     ctx.tenant_id, jamás del payload.
          */
         post: operations["crear_empresa_hija_api_v1_empresa_hijas_post"];
         delete?: never;
@@ -800,6 +847,95 @@ export interface paths {
         get: operations["onboarding_status_api_v1_empresa_onboarding_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/empresa/{tenant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Empresa Por Id
+         * @description Edita los datos fiscales de CUALQUIER empresa del usuario sin cambiarse a
+         *     ella (Ajustes › Empresas › Editar).
+         */
+        put: operations["put_empresa_por_id_api_v1_empresa__tenant_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/empresa/{tenant_id}/color": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Color Empresa
+         * @description Elige el color de la empresa. `null` la devuelve al automático.
+         *
+         *     Vive en `tenants.config` (JSONB) en vez de una columna propia: es una
+         *     preferencia de presentación, no un dato fiscal.
+         */
+        put: operations["put_color_empresa_api_v1_empresa__tenant_id__color_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/empresa/{tenant_id}/csd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Listar Csd Por Id
+         * @description Sellos cargados de esa empresa (solo los de SU RFC).
+         */
+        get: operations["listar_csd_por_id_api_v1_empresa__tenant_id__csd_get"];
+        put?: never;
+        /**
+         * Subir Csd Por Id
+         * @description Sube el sello de CUALQUIER empresa del usuario desde la lista, sin
+         *     cambiarse a ella (Ajustes › Empresas › Editar › Sello digital).
+         */
+        post: operations["subir_csd_por_id_api_v1_empresa__tenant_id__csd_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/empresa/{tenant_id}/csd/validar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validar Csd Por Id
+         * @description Prueba LOCAL del CSD contra el RFC de esa empresa (no toca Facturama).
+         */
+        post: operations["validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2828,6 +2964,21 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post */
+        Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post: {
+            /**
+             * Cer
+             * Format: binary
+             */
+            cer: string;
+            /**
+             * Key
+             * Format: binary
+             */
+            key: string;
+            /** Password */
+            password: string;
+        };
         /** Body_subir_logo_api_v1_empresa_logo_post */
         Body_subir_logo_api_v1_empresa_logo_post: {
             /**
@@ -2838,6 +2989,21 @@ export interface components {
         };
         /** Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post */
         Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post: {
+            /**
+             * Cer
+             * Format: binary
+             */
+            cer: string;
+            /**
+             * Key
+             * Format: binary
+             */
+            key: string;
+            /** Password */
+            password: string;
+        };
+        /** Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post */
+        Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post: {
             /**
              * Cer
              * Format: binary
@@ -2992,6 +3158,16 @@ export interface components {
             efectivo_contado: number | string;
             /** Notas */
             notas?: string | null;
+        };
+        /** ChecklistMarcaIn */
+        ChecklistMarcaIn: {
+            /**
+             * Completo
+             * @default true
+             */
+            completo: boolean;
+            /** Paso */
+            paso: string;
         };
         /**
          * ClaveNuevaOut
@@ -3648,6 +3824,133 @@ export interface components {
             lineas: components["schemas"]["LineaDevolucionOut"][];
             /** Motivo */
             motivo?: string | null;
+        };
+        /**
+         * EmpresaColorIn
+         * @description `null` devuelve la empresa al color automático.
+         */
+        EmpresaColorIn: {
+            /** Color */
+            color?: string | null;
+        };
+        /** EmpresaColorOut */
+        EmpresaColorOut: {
+            /** Color */
+            color?: string | null;
+        };
+        /**
+         * EmpresaGrupoItem
+         * @description Una empresa del usuario, con lo que le falta para poder facturar.
+         */
+        EmpresaGrupoItem: {
+            /** Color */
+            color?: string | null;
+            /**
+             * Correo
+             * @default false
+             */
+            correo: boolean;
+            /**
+             * Csd
+             * @default false
+             */
+            csd: boolean;
+            /**
+             * Datos Fiscales
+             * @default false
+             */
+            datos_fiscales: boolean;
+            /** Domicilio Fiscal */
+            domicilio_fiscal?: Record<string, never>;
+            /**
+             * Domicilio Fiscal Cp
+             * @default
+             */
+            domicilio_fiscal_cp: string;
+            /**
+             * En Grupo
+             * @default true
+             */
+            en_grupo: boolean;
+            /**
+             * Es Actual
+             * @default false
+             */
+            es_actual: boolean;
+            /**
+             * Es Principal
+             * @default false
+             */
+            es_principal: boolean;
+            /**
+             * Legal Name
+             * @default
+             */
+            legal_name: string;
+            /**
+             * Listo Para Facturar
+             * @default false
+             */
+            listo_para_facturar: boolean;
+            /**
+             * Logo
+             * @default false
+             */
+            logo: boolean;
+            /**
+             * Puede Editar
+             * @default false
+             */
+            puede_editar: boolean;
+            /**
+             * Regimen Fiscal Sat
+             * @default
+             */
+            regimen_fiscal_sat: string;
+            /**
+             * Rfc
+             * @default
+             */
+            rfc: string;
+            /**
+             * Rol
+             * @default
+             */
+            rol: string;
+            /**
+             * Series
+             * @default false
+             */
+            series: boolean;
+            /** Slug */
+            slug: string;
+            /** Tenant Id */
+            tenant_id: string;
+            /**
+             * Trade Name
+             * @default
+             */
+            trade_name: string;
+        };
+        /** EmpresaGrupoOut */
+        EmpresaGrupoOut: {
+            /** Empresas */
+            empresas?: components["schemas"]["EmpresaGrupoItem"][];
+            /**
+             * Grupo Max
+             * @default 0
+             */
+            grupo_max: number;
+            /**
+             * Grupo Total
+             * @default 0
+             */
+            grupo_total: number;
+            /**
+             * Puede Agregar
+             * @default false
+             */
+            puede_agregar: boolean;
         };
         /**
          * EmpresaHijaIn
@@ -5100,6 +5403,8 @@ export interface components {
             origen_externo: string;
             /** Payload */
             payload?: Record<string, never>;
+            /** Punto Entrega */
+            punto_entrega?: string | null;
             /**
              * Recibida At
              * Format: date-time
@@ -5205,6 +5510,8 @@ export interface components {
             motivo?: string | null;
             /** Origen Externo */
             origen_externo: string;
+            /** Punto Entrega */
+            punto_entrega?: string | null;
             /**
              * Recibida At
              * Format: date-time
@@ -5244,6 +5551,8 @@ export interface components {
             folio_externo?: string | null;
             /** Motivo */
             motivo?: string | null;
+            /** Punto Entrega */
+            punto_entrega?: string | null;
             /** Sucursal Id */
             sucursal_id?: string | null;
         };
@@ -8882,6 +9191,41 @@ export interface operations {
             };
         };
     };
+    marcar_paso_checklist_api_v1_empresa_checklist_marcar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChecklistMarcaIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listar_csd_api_v1_empresa_csd_get: {
         parameters: {
             query?: never;
@@ -8970,6 +9314,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    empresas_del_grupo_api_v1_empresa_grupo_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmpresaGrupoOut"];
                 };
             };
             /** @description Validation Error */
@@ -9133,6 +9508,187 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EmpresaOnboardingOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_empresa_por_id_api_v1_empresa__tenant_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmpresaUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmpresaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_color_empresa_api_v1_empresa__tenant_id__color_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmpresaColorIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmpresaColorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listar_csd_por_id_api_v1_empresa__tenant_id__csd_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    subir_csd_por_id_api_v1_empresa__tenant_id__csd_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

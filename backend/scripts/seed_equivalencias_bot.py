@@ -9,15 +9,17 @@ Es idempotente y por default NO ESCRIBE: imprime el plan. Se aplica con
 `--aplicar`. Nunca crea CLIENTES — dar de alta un cliente es una decisión de
 negocio, no de un script; lo que no cruce se reporta y se salta.
 
-Las SUCURSALES (los hospitales/planteles del catálogo del perfil) sí se pueden
-crear con `--crear-sucursales`, porque salen de la config del propio dueño, no
-de un documento que llegó de fuera. Una ubicación que aparezca DESPUÉS, en una
-orden real, nunca se crea sola: eso se decide en la bandeja.
+Tampoco crea SUCURSALES. Los hospitales y planteles del catálogo del perfil NO
+son sucursales: son puntos de entrega dentro de una (las 24 de Tabasco cuelgan
+de la sucursal «Tabasco» de EHMO). Para registrarlos como destino hay que decir
+a qué sucursal pertenecen, con `--puntos <perfil>=<sucursal>`; sin eso se
+reportan y se saltan.
 
 Uso:
     DATABASE_URL=... python -m scripts.seed_equivalencias_bot --tenant <slug>
     DATABASE_URL=... python -m scripts.seed_equivalencias_bot --tenant <slug> --aplicar
-    DATABASE_URL=... python -m scripts.seed_equivalencias_bot --tenant <slug> --aplicar --crear-sucursales
+    DATABASE_URL=... python -m scripts.seed_equivalencias_bot --tenant <slug> \
+        --puntos villahermosa=Tabasco --aplicar
 """
 from __future__ import annotations
 
@@ -27,7 +29,6 @@ import os
 import sys
 from pathlib import Path
 
-from sqlalchemy.exc import IntegrityError
 
 from app.core.db import SessionLocal
 from app.core.rbac import tenant_session
@@ -94,9 +95,17 @@ def main() -> None:
     ap.add_argument("--tenant", required=True, help="slug del tenant destino")
     ap.add_argument("--config", type=Path, default=Path(os.environ.get("BOT_CONFIG", CONFIG_DEFAULT)))
     ap.add_argument("--aplicar", action="store_true", help="escribe (sin esto solo imprime el plan)")
-    ap.add_argument("--crear-sucursales", action="store_true",
-                    help="da de alta las ubicaciones del perfil que aún no existen como sucursal")
+    ap.add_argument("--puntos", action="append", default=[], metavar="PERFIL=SUCURSAL",
+                    help="a qué sucursal pertenecen los puntos de entrega de ese perfil "
+                         "(p. ej. villahermosa=Tabasco). Repetible.")
     args = ap.parse_args()
+
+    destinos = {}
+    for par in args.puntos:
+        if "=" not in par:
+            sys.exit(f"--puntos espera PERFIL=SUCURSAL, recibí «{par}»")
+        perfil, suc = par.split("=", 1)
+        destinos[perfil.strip().lower()] = suc.strip()
 
     cfg = _cargar(args.config)
     # El slug se resuelve sin scope (la RLS de `tenants` es por id); de ahí en
@@ -119,7 +128,6 @@ def main() -> None:
 
         plan: list[tuple[str, str, Cliente, str | None, str]] = []
         saltados: list[str] = []
-        nuevas: list[str] = []
 
         # ── 1. perfiles: receptor (RFC), proyectos y ubicaciones ─────────────
         for perfil_id, perfil in (cfg.get("perfiles") or {}).items():
@@ -166,50 +174,36 @@ def main() -> None:
                     continue
                 plan.append(("PROYECTO", f"{perfil_id}:{proyecto}", cli, None, perfil_id))
 
-            # ubicaciones → sucursal, cruzando por código de 3 letras o nombre
+            # Puntos de entrega → la SUCURSAL a la que pertenecen. El hospital
+            # no es una sucursal: es a dónde se descarga dentro de una.
             ubis = perfil.get("ubicaciones") or []
-            # La ubicación solo puede colgar de UN cliente: si el perfil tiene
-            # varios receptores no se adivina de cuál es el hospital.
+            # El punto solo puede colgar de UN cliente: si el perfil tiene varios
+            # receptores no se adivina de cuál es el hospital.
             cli_perfil = next(iter(del_perfil.values())) if len(del_perfil) == 1 else None
-            for u in ubis:
-                if not isinstance(u, dict) or cli_perfil is None:
-                    continue
-                suc = _sucursal(db, cli_perfil.id, u.get("codigo"), u.get("nombre"))
-                if suc is None and args.crear_sucursales and u.get("nombre"):
-                    suc = Sucursal(
-                        tenant_id=tenant.id, cliente_id=cli_perfil.id,
-                        codigo=(u.get("codigo") or None), nombre=u["nombre"],
-                        domicilio={"region": u.get("region")} if u.get("region") else {},
-                    )
-                    nuevas.append(f"{u['nombre']} ({u.get('codigo') or 's/c'}) en {cli_perfil.legal_name}")
-                    if args.aplicar:
-                        try:
-                            # Savepoint: un código que choque con una sucursal
-                            # borrada lógicamente no puede tumbar toda la siembra.
-                            with db.begin_nested():
-                                db.add(suc)
-                                db.flush()
-                        except IntegrityError:
-                            nuevas.pop()
-                            saltados.append(
-                                f"{perfil_id}: no se pudo crear «{u.get('nombre')}» "
-                                f"({u.get('codigo')}) — ese código ya existe en el cliente"
-                            )
-                            suc = None
-                    else:
-                        suc = None      # en seco no hay id que registrar
-                if suc is None:
+            suc_destino = None
+            if ubis and cli_perfil is not None:
+                nombre_suc = destinos.get(perfil_id)
+                if not nombre_suc:
                     saltados.append(
-                        f"{perfil_id}: ubicación «{u.get('nombre')}» ({u.get('codigo')}) "
-                        + ("se daría de alta como sucursal" if args.crear_sucursales
-                           else f"no tiene sucursal en {cli_perfil.legal_name}")
+                        f"{perfil_id}: {len(ubis)} puntos de entrega sin destino — di a qué "
+                        f"sucursal pertenecen con --puntos {perfil_id}=<sucursal>"
                     )
-                    continue
-                for texto in [u.get("nombre"), *(u.get("alias") or [])]:
-                    if texto:
-                        plan.append(
-                            ("UBICACION", f"{perfil_id}:{texto}", cli_perfil, str(suc.id), perfil_id)
+                else:
+                    suc_destino = _sucursal(db, cli_perfil.id, nombre_suc, nombre_suc)
+                    if suc_destino is None:
+                        saltados.append(
+                            f"{perfil_id}: {cli_perfil.legal_name} no tiene una sucursal "
+                            f"«{nombre_suc}» — créala primero"
                         )
+            if suc_destino is not None:
+                for u in ubis:
+                    if not isinstance(u, dict):
+                        continue
+                    for texto in [u.get("nombre"), *(u.get("alias") or [])]:
+                        if texto:
+                            plan.append(("UBICACION", f"{perfil_id}:{texto}", cli_perfil,
+                                         str(suc_destino.id),
+                                         f"{perfil_id} → sucursal {suc_destino.nombre}"))
 
         # ── 2. grupos mono-cliente → WHATSAPP ────────────────────────────────
         grupos = {
@@ -275,12 +269,6 @@ def main() -> None:
                     sucursal_id=suc_id, origen="IMPORT", confianza="CONFIRMADA",
                 )
                 escritas += 1
-
-        if nuevas:
-            print("\nSucursales nuevas"
-                  + (":" if args.aplicar else " (se crearían con --aplicar):"))
-            for n in dict.fromkeys(nuevas):
-                print(f"  + {n}")
 
         if saltados:
             print("\nSaltado (requiere decisión humana):")

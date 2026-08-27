@@ -535,6 +535,31 @@
     "title": "Body_subir_csd_api_v1_empresa_csd_post",
     "type": "object"
    },
+   "Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post": {
+    "properties": {
+     "cer": {
+      "format": "binary",
+      "title": "Cer",
+      "type": "string"
+     },
+     "key": {
+      "format": "binary",
+      "title": "Key",
+      "type": "string"
+     },
+     "password": {
+      "title": "Password",
+      "type": "string"
+     }
+    },
+    "required": [
+     "cer",
+     "key",
+     "password"
+    ],
+    "title": "Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post",
+    "type": "object"
+   },
    "Body_subir_logo_api_v1_empresa_logo_post": {
     "properties": {
      "logo": {
@@ -572,6 +597,31 @@
      "password"
     ],
     "title": "Body_validar_csd_endpoint_api_v1_empresa_csd_validar_post",
+    "type": "object"
+   },
+   "Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post": {
+    "properties": {
+     "cer": {
+      "format": "binary",
+      "title": "Cer",
+      "type": "string"
+     },
+     "key": {
+      "format": "binary",
+      "title": "Key",
+      "type": "string"
+     },
+     "password": {
+      "title": "Password",
+      "type": "string"
+     }
+    },
+    "required": [
+     "cer",
+     "key",
+     "password"
+    ],
+    "title": "Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post",
     "type": "object"
    },
    "CambiarPasswordIn": {
@@ -941,6 +991,24 @@
      "efectivo_contado"
     ],
     "title": "CerrarCorteIn",
+    "type": "object"
+   },
+   "ChecklistMarcaIn": {
+    "properties": {
+     "completo": {
+      "default": true,
+      "title": "Completo",
+      "type": "boolean"
+     },
+     "paso": {
+      "title": "Paso",
+      "type": "string"
+     }
+    },
+    "required": [
+     "paso"
+    ],
+    "title": "ChecklistMarcaIn",
     "type": "object"
    },
    "ClaveNuevaOut": {
@@ -2827,6 +2895,183 @@
      "created_at"
     ],
     "title": "DevolucionOut",
+    "type": "object"
+   },
+   "EmpresaColorIn": {
+    "description": "`null` devuelve la empresa al color automático.",
+    "properties": {
+     "color": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Color"
+     }
+    },
+    "title": "EmpresaColorIn",
+    "type": "object"
+   },
+   "EmpresaColorOut": {
+    "properties": {
+     "color": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Color"
+     }
+    },
+    "title": "EmpresaColorOut",
+    "type": "object"
+   },
+   "EmpresaGrupoItem": {
+    "description": "Una empresa del usuario, con lo que le falta para poder facturar.",
+    "properties": {
+     "color": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Color"
+     },
+     "correo": {
+      "default": false,
+      "title": "Correo",
+      "type": "boolean"
+     },
+     "csd": {
+      "default": false,
+      "title": "Csd",
+      "type": "boolean"
+     },
+     "datos_fiscales": {
+      "default": false,
+      "title": "Datos Fiscales",
+      "type": "boolean"
+     },
+     "domicilio_fiscal": {
+      "title": "Domicilio Fiscal",
+      "type": "object"
+     },
+     "domicilio_fiscal_cp": {
+      "default": "",
+      "title": "Domicilio Fiscal Cp",
+      "type": "string"
+     },
+     "en_grupo": {
+      "default": true,
+      "title": "En Grupo",
+      "type": "boolean"
+     },
+     "es_actual": {
+      "default": false,
+      "title": "Es Actual",
+      "type": "boolean"
+     },
+     "es_principal": {
+      "default": false,
+      "title": "Es Principal",
+      "type": "boolean"
+     },
+     "legal_name": {
+      "default": "",
+      "title": "Legal Name",
+      "type": "string"
+     },
+     "listo_para_facturar": {
+      "default": false,
+      "title": "Listo Para Facturar",
+      "type": "boolean"
+     },
+     "logo": {
+      "default": false,
+      "title": "Logo",
+      "type": "boolean"
+     },
+     "puede_editar": {
+      "default": false,
+      "title": "Puede Editar",
+      "type": "boolean"
+     },
+     "regimen_fiscal_sat": {
+      "default": "",
+      "title": "Regimen Fiscal Sat",
+      "type": "string"
+     },
+     "rfc": {
+      "default": "",
+      "title": "Rfc",
+      "type": "string"
+     },
+     "rol": {
+      "default": "",
+      "title": "Rol",
+      "type": "string"
+     },
+     "series": {
+      "default": false,
+      "title": "Series",
+      "type": "boolean"
+     },
+     "slug": {
+      "title": "Slug",
+      "type": "string"
+     },
+     "tenant_id": {
+      "title": "Tenant Id",
+      "type": "string"
+     },
+     "trade_name": {
+      "default": "",
+      "title": "Trade Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "tenant_id",
+     "slug"
+    ],
+    "title": "EmpresaGrupoItem",
+    "type": "object"
+   },
+   "EmpresaGrupoOut": {
+    "properties": {
+     "empresas": {
+      "items": {
+       "$ref": "#/components/schemas/EmpresaGrupoItem"
+      },
+      "title": "Empresas",
+      "type": "array"
+     },
+     "grupo_max": {
+      "default": 0,
+      "title": "Grupo Max",
+      "type": "integer"
+     },
+     "grupo_total": {
+      "default": 0,
+      "title": "Grupo Total",
+      "type": "integer"
+     },
+     "puede_agregar": {
+      "default": false,
+      "title": "Puede Agregar",
+      "type": "boolean"
+     }
+    },
+    "title": "EmpresaGrupoOut",
     "type": "object"
    },
    "EmpresaHijaIn": {
@@ -6773,6 +7018,17 @@
       "title": "Payload",
       "type": "object"
      },
+     "punto_entrega": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Punto Entrega"
+     },
      "recibida_at": {
       "format": "date-time",
       "title": "Recibida At",
@@ -7160,6 +7416,17 @@
       "title": "Origen Externo",
       "type": "string"
      },
+     "punto_entrega": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Punto Entrega"
+     },
      "recibida_at": {
       "format": "date-time",
       "title": "Recibida At",
@@ -7293,6 +7560,18 @@
        }
       ],
       "title": "Motivo"
+     },
+     "punto_entrega": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Punto Entrega"
      },
      "sucursal_id": {
       "anyOf": [
@@ -16425,6 +16704,69 @@
     ]
    }
   },
+  "/api/v1/empresa/checklist/marcar": {
+   "post": {
+    "description": "Marca (o desmarca) a mano un paso de revisión de la guía.",
+    "operationId": "marcar_paso_checklist_api_v1_empresa_checklist_marcar_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ChecklistMarcaIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Marcar Paso Checklist",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
   "/api/v1/empresa/csd": {
    "get": {
     "operationId": "listar_csd_api_v1_empresa_csd_get",
@@ -16600,9 +16942,64 @@
     ]
    }
   },
+  "/api/v1/empresa/grupo": {
+   "get": {
+    "description": "Las empresas del usuario, cada una con lo que le falta para facturar.\n\nNo exige permiso: devuelve exactamente el mismo conjunto que ya ve en el\nswitcher del Topbar (sus membresías activas), solo que enriquecido con el\nestado de configuración. La pantalla que lo consume sí está gateada en el menú.",
+    "operationId": "empresas_del_grupo_api_v1_empresa_grupo_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EmpresaGrupoOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Empresas Del Grupo",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
   "/api/v1/empresa/hijas": {
    "post": {
-    "description": "Crea una empresa HIJA del grupo: otro RFC/razón social del mismo dueño,\ncomo tenant `SUB` colgado de la raíz del grupo. El creador queda como OWNER\nde la nueva (el switcher del Topbar la muestra al instante).\n\nUsa la sesión plana `get_db` a propósito: la política RLS de `tenants`\n(id = current_tenant_id) impide insertar OTRO tenant desde la sesión\nscopeada. La única barrera aquí es el código: `parent` sale SIEMPRE de\nctx.tenant_id (jamás del payload) y se exige ser OWNER.",
+    "description": "Crea una empresa HIJA del grupo: otro RFC/razón social del mismo dueño,\ncomo tenant `SUB` colgado de la raíz del grupo (el switcher del Topbar la\nmuestra al instante).\n\nPueden crearla el dueño y los administradores (`membership:gestionar`), pero\nquién MANDA en la nueva lo decide `_asignar_membresias_de_la_hija`.\n\nUsa la sesión plana `get_db` a propósito: la política RLS de `tenants`\n(id = current_tenant_id) impide insertar OTRO tenant desde la sesión\nscopeada. La barrera aquí es el código: `parent` sale SIEMPRE de\nctx.tenant_id, jamás del payload.",
     "operationId": "crear_empresa_hija_api_v1_empresa_hijas_post",
     "parameters": [
      {
@@ -16883,6 +17280,363 @@
      }
     ],
     "summary": "Onboarding Status",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
+  "/api/v1/empresa/{tenant_id}": {
+   "put": {
+    "description": "Edita los datos fiscales de CUALQUIER empresa del usuario sin cambiarse a\nella (Ajustes › Empresas › Editar).",
+    "operationId": "put_empresa_por_id_api_v1_empresa__tenant_id__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tenant_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Tenant Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EmpresaUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EmpresaOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Put Empresa Por Id",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
+  "/api/v1/empresa/{tenant_id}/color": {
+   "put": {
+    "description": "Elige el color de la empresa. `null` la devuelve al automático.\n\nVive en `tenants.config` (JSONB) en vez de una columna propia: es una\npreferencia de presentación, no un dato fiscal.",
+    "operationId": "put_color_empresa_api_v1_empresa__tenant_id__color_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tenant_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Tenant Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EmpresaColorIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EmpresaColorOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Put Color Empresa",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
+  "/api/v1/empresa/{tenant_id}/csd": {
+   "get": {
+    "description": "Sellos cargados de esa empresa (solo los de SU RFC).",
+    "operationId": "listar_csd_por_id_api_v1_empresa__tenant_id__csd_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tenant_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Tenant Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar Csd Por Id",
+    "tags": [
+     "empresa"
+    ]
+   },
+   "post": {
+    "description": "Sube el sello de CUALQUIER empresa del usuario desde la lista, sin\ncambiarse a ella (Ajustes › Empresas › Editar › Sello digital).",
+    "operationId": "subir_csd_por_id_api_v1_empresa__tenant_id__csd_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tenant_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Tenant Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_subir_csd_por_id_api_v1_empresa__tenant_id__csd_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Subir Csd Por Id",
+    "tags": [
+     "empresa"
+    ]
+   }
+  },
+  "/api/v1/empresa/{tenant_id}/csd/validar": {
+   "post": {
+    "description": "Prueba LOCAL del CSD contra el RFC de esa empresa (no toca Facturama).",
+    "operationId": "validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tenant_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Tenant Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_validar_csd_por_id_api_v1_empresa__tenant_id__csd_validar_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Validar Csd Por Id",
     "tags": [
      "empresa"
     ]

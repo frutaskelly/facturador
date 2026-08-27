@@ -46,6 +46,10 @@ class OCRecibida(Base, TimestampMixin):
     cliente_id = Column(UUID(as_uuid=True), ForeignKey("clientes.id", ondelete="SET NULL"), index=True)
     sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id", ondelete="SET NULL"))
     resuelto_via = Column(String(16))
+    # A dónde se descarga: hospital, plantel, bodega. NO es una sucursal — es un
+    # punto DENTRO de una (Balles y Jubran comparten los suyos). Viaja a las
+    # observaciones de la remisión y de ahí a las de la factura.
+    punto_entrega = Column(String(254))
     ambiguo = Column(Boolean, nullable=False, server_default=text("false"))
     remision_id = Column(UUID(as_uuid=True), ForeignKey("remisiones.id", ondelete="SET NULL"))
     payload = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
