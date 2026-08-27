@@ -747,6 +747,40 @@
    },
    "CandidatoOut": {
     "properties": {
+     "categoria_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Categoria Id"
+     },
+     "categoria_nombre": {
+      "default": "",
+      "title": "Categoria Nombre",
+      "type": "string"
+     },
+     "esquema_codigo": {
+      "default": "",
+      "title": "Esquema Codigo",
+      "type": "string"
+     },
+     "esquema_impuesto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Esquema Impuesto Id"
+     },
      "nombre": {
       "title": "Nombre",
       "type": "string"
@@ -804,6 +838,59 @@
      "origen"
     ],
     "title": "CandidatoOut",
+    "type": "object"
+   },
+   "CatalogoClienteBatchIn": {
+    "description": "Guardar de golpe el código/nombre/presentación que usan uno o varios\nclientes para una lista de productos (el último paso de la importación).",
+    "properties": {
+     "cliente_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "maxItems": 200,
+      "minItems": 1,
+      "title": "Cliente Ids",
+      "type": "array"
+     },
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/ImportProductoResultado"
+      },
+      "maxItems": 2000,
+      "minItems": 1,
+      "title": "Items",
+      "type": "array"
+     }
+    },
+    "required": [
+     "cliente_ids",
+     "items"
+    ],
+    "title": "CatalogoClienteBatchIn",
+    "type": "object"
+   },
+   "CatalogoClienteBatchOut": {
+    "properties": {
+     "clientes": {
+      "title": "Clientes",
+      "type": "integer"
+     },
+     "guardados": {
+      "title": "Guardados",
+      "type": "integer"
+     },
+     "productos": {
+      "title": "Productos",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "clientes",
+     "productos",
+     "guardados"
+    ],
+    "title": "CatalogoClienteBatchOut",
     "type": "object"
    },
    "CategoriaCreate": {
@@ -5638,6 +5725,41 @@
     "title": "ImportPreviewOut",
     "type": "object"
    },
+   "ImportProductoResultado": {
+    "description": "Qué producto quedó en cada fila: lo necesita el último paso para\nguardar el catálogo del cliente sin volver a subir el archivo.",
+    "properties": {
+     "codigo": {
+      "default": "",
+      "title": "Codigo",
+      "type": "string"
+     },
+     "fila": {
+      "title": "Fila",
+      "type": "integer"
+     },
+     "nombre": {
+      "default": "",
+      "title": "Nombre",
+      "type": "string"
+     },
+     "presentacion": {
+      "default": "",
+      "title": "Presentacion",
+      "type": "string"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "fila",
+     "producto_id"
+    ],
+    "title": "ImportProductoResultado",
+    "type": "object"
+   },
    "ImportResultOut": {
     "properties": {
      "alias_guardados": {
@@ -5695,6 +5817,13 @@
       "default": 0,
       "title": "Presentaciones Agregadas",
       "type": "integer"
+     },
+     "productos": {
+      "items": {
+       "$ref": "#/components/schemas/ImportProductoResultado"
+      },
+      "title": "Productos",
+      "type": "array"
      },
      "vinculados": {
       "title": "Vinculados",
@@ -13351,6 +13480,41 @@
     "title": "SucursalUpdate",
     "type": "object"
    },
+   "SugerenciaCategoriaOut": {
+    "properties": {
+     "categoria_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Categoria Id"
+     },
+     "categoria_nombre": {
+      "default": "",
+      "title": "Categoria Nombre",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "origen": {
+      "default": "",
+      "title": "Origen",
+      "type": "string"
+     }
+    },
+    "required": [
+     "nombre"
+    ],
+    "title": "SugerenciaCategoriaOut",
+    "type": "object"
+   },
    "SugerenciaEsquemaOut": {
     "properties": {
      "esquema_codigo": {
@@ -13422,6 +13586,29 @@
      "unidad_sat_generica"
     ],
     "title": "SugerenciaSatOut",
+    "type": "object"
+   },
+   "SugerirCategoriaBatchIn": {
+    "properties": {
+     "productos": {
+      "items": {
+       "type": "object"
+      },
+      "maxItems": 2000,
+      "minItems": 1,
+      "title": "Productos",
+      "type": "array"
+     },
+     "usar_ia": {
+      "default": true,
+      "title": "Usar Ia",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "productos"
+    ],
+    "title": "SugerirCategoriaBatchIn",
     "type": "object"
    },
    "SugerirEsquemaBatchIn": {
@@ -23948,6 +24135,71 @@
     ]
    }
   },
+  "/api/v1/productos/catalogo-cliente-batch": {
+   "post": {
+    "description": "Guarda de golpe el código/nombre/presentación que usan uno o varios\nclientes para una lista de productos — el último paso de la importación,\ncuando el usuario ya decidió de quién era la lista.\n\nEscribe por lotes (una consulta para leer lo existente, un flush al final):\ncon 500 productos × 2 clientes, hacerlo uno por uno serían miles de viajes.",
+    "operationId": "catalogo_cliente_batch_api_v1_productos_catalogo_cliente_batch_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CatalogoClienteBatchIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CatalogoClienteBatchOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Catalogo Cliente Batch",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
   "/api/v1/productos/importar": {
    "post": {
     "description": "Aplica el preview confirmado. Ver `_ejecutar_import`.\n\nSe intenta en modo LOTE (un flush para todo: con 500 productos es la\ndiferencia entre 2 segundos y varios minutos contra una base en la nube).\nSi el lote choca contra una restricción, se rehace fila por fila —dentro de\nun savepoint, para no perder el scope de RLS de la transacción— y así se\npuede señalar CUÁL fila falló conservando las demás.",
@@ -24334,6 +24586,75 @@
      }
     ],
     "summary": "Productos Similares",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/sugerir-categoria-batch": {
+   "post": {
+    "description": "Qué categoría le toca a cada producto NUEVO, entre las que ya usa el\nnegocio (las de /categorias). Una sola llamada de IA para todo el lote;\nnunca inventa categorías nuevas.",
+    "operationId": "sugerir_categoria_batch_api_v1_productos_sugerir_categoria_batch_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SugerirCategoriaBatchIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/SugerenciaCategoriaOut"
+         },
+         "title": "Response Sugerir Categoria Batch Api V1 Productos Sugerir Categoria Batch Post",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Sugerir Categoria Batch",
     "tags": [
      "productos"
     ]

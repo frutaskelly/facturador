@@ -2116,6 +2116,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/catalogo-cliente-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Catalogo Cliente Batch
+         * @description Guarda de golpe el código/nombre/presentación que usan uno o varios
+         *     clientes para una lista de productos — el último paso de la importación,
+         *     cuando el usuario ya decidió de quién era la lista.
+         *
+         *     Escribe por lotes (una consulta para leer lo existente, un flush al final):
+         *     con 500 productos × 2 clientes, hacerlo uno por uno serían miles de viajes.
+         */
+        post: operations["catalogo_cliente_batch_api_v1_productos_catalogo_cliente_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/importar": {
         parameters: {
             query?: never;
@@ -2247,6 +2272,28 @@ export interface paths {
         get: operations["productos_similares_api_v1_productos_similares_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/productos/sugerir-categoria-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sugerir Categoria Batch
+         * @description Qué categoría le toca a cada producto NUEVO, entre las que ya usa el
+         *     negocio (las de /categorias). Una sola llamada de IA para todo el lote;
+         *     nunca inventa categorías nuevas.
+         */
+        post: operations["sugerir_categoria_batch_api_v1_productos_sugerir_categoria_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3126,6 +3173,20 @@ export interface components {
         };
         /** CandidatoOut */
         CandidatoOut: {
+            /** Categoria Id */
+            categoria_id?: string | null;
+            /**
+             * Categoria Nombre
+             * @default
+             */
+            categoria_nombre: string;
+            /**
+             * Esquema Codigo
+             * @default
+             */
+            esquema_codigo: string;
+            /** Esquema Impuesto Id */
+            esquema_impuesto_id?: string | null;
             /** Nombre */
             nombre: string;
             /** Origen */
@@ -3148,6 +3209,26 @@ export interface components {
             sku: string;
             /** Unidad Base */
             unidad_base?: string | null;
+        };
+        /**
+         * CatalogoClienteBatchIn
+         * @description Guardar de golpe el código/nombre/presentación que usan uno o varios
+         *     clientes para una lista de productos (el último paso de la importación).
+         */
+        CatalogoClienteBatchIn: {
+            /** Cliente Ids */
+            cliente_ids: string[];
+            /** Items */
+            items: components["schemas"]["ImportProductoResultado"][];
+        };
+        /** CatalogoClienteBatchOut */
+        CatalogoClienteBatchOut: {
+            /** Clientes */
+            clientes: number;
+            /** Guardados */
+            guardados: number;
+            /** Productos */
+            productos: number;
         };
         /** CategoriaCreate */
         CategoriaCreate: {
@@ -4943,6 +5024,35 @@ export interface components {
              */
             tiene_precios: boolean;
         };
+        /**
+         * ImportProductoResultado
+         * @description Qué producto quedó en cada fila: lo necesita el último paso para
+         *     guardar el catálogo del cliente sin volver a subir el archivo.
+         */
+        ImportProductoResultado: {
+            /**
+             * Codigo
+             * @default
+             */
+            codigo: string;
+            /** Fila */
+            fila: number;
+            /**
+             * Nombre
+             * @default
+             */
+            nombre: string;
+            /**
+             * Presentacion
+             * @default
+             */
+            presentacion: string;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+        };
         /** ImportResultOut */
         ImportResultOut: {
             /** Alias Guardados */
@@ -4969,6 +5079,8 @@ export interface components {
              * @default 0
              */
             presentaciones_agregadas: number;
+            /** Productos */
+            productos?: components["schemas"]["ImportProductoResultado"][];
             /** Vinculados */
             vinculados: number;
         };
@@ -7539,6 +7651,23 @@ export interface components {
             /** Telefono */
             telefono?: string | null;
         };
+        /** SugerenciaCategoriaOut */
+        SugerenciaCategoriaOut: {
+            /** Categoria Id */
+            categoria_id?: string | null;
+            /**
+             * Categoria Nombre
+             * @default
+             */
+            categoria_nombre: string;
+            /** Nombre */
+            nombre: string;
+            /**
+             * Origen
+             * @default
+             */
+            origen: string;
+        };
         /** SugerenciaEsquemaOut */
         SugerenciaEsquemaOut: {
             /**
@@ -7573,6 +7702,16 @@ export interface components {
             unidad_sat: string;
             /** Unidad Sat Generica */
             unidad_sat_generica: string;
+        };
+        /** SugerirCategoriaBatchIn */
+        SugerirCategoriaBatchIn: {
+            /** Productos */
+            productos: Record<string, never>[];
+            /**
+             * Usar Ia
+             * @default true
+             */
+            usar_ia: boolean;
         };
         /** SugerirEsquemaBatchIn */
         SugerirEsquemaBatchIn: {
@@ -12601,6 +12740,41 @@ export interface operations {
             };
         };
     };
+    catalogo_cliente_batch_api_v1_productos_catalogo_cliente_batch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogoClienteBatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogoClienteBatchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     importar_productos_api_v1_productos_importar_post: {
         parameters: {
             query?: never;
@@ -12792,6 +12966,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sugerir_categoria_batch_api_v1_productos_sugerir_categoria_batch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SugerirCategoriaBatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SugerenciaCategoriaOut"][];
                 };
             };
             /** @description Validation Error */
