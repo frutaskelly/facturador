@@ -391,28 +391,39 @@ def test_cliente_codigo_autogenerado(client, env, auth_as):
     assert ca and cb and ca != cb  # auto-generados y únicos
 
 
-def test_cliente_with_valid_and_invalid_lista_fk(client, env, auth_as):
+def test_asignacion_de_lista_a_cliente(client, env, auth_as):
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
 
     lista = client.post(
         "/api/v1/listas-precios", headers=h, json={"codigo": "LP", "nombre": "Lista P"}
     ).json()
+    cli = client.post(
+        "/api/v1/clientes", headers=h,
+        json={"legal_name": "Con lista", "rfc": "XAXX010101000"},
+    ).json()
 
-    # Valid in-tenant FK → 201.
+    # La lista se le asigna al cliente por su renglón de asignación, no por una
+    # columna del cliente: FK válida dentro del inquilino → 201.
     r = client.post(
-        "/api/v1/clientes",
-        headers=h,
-        json={"legal_name": "Con lista", "rfc": "XAXX010101000", "lista_precios_id": lista["id"]},
+        "/api/v1/asignaciones-precios", headers=h,
+        json={"lista_id": lista["id"], "cliente_id": cli["id"]},
     )
     assert r.status_code == 201, r.text
-    assert r.json()["lista_precios_id"] == lista["id"]
+    assert r.json()["especificidad"] == 1        # sólo cliente = global del cliente
+    assert r.json()["cliente_nombre"] == "Con lista"
 
-    # Bogus FK → 422.
+    # FK inventada → 422.
     r = client.post(
-        "/api/v1/clientes",
-        headers=h,
-        json={"legal_name": "Sin lista", "rfc": "XEXX010101000", "lista_precios_id": str(uuid.uuid4())},
+        "/api/v1/asignaciones-precios", headers=h,
+        json={"lista_id": str(uuid.uuid4()), "cliente_id": cli["id"]},
+    )
+    assert r.status_code == 422
+
+    # Sin ninguna dimensión → 422: eso sería "la lista base", que tiene su
+    # propio lugar (es_default) y no se dice de dos maneras.
+    r = client.post(
+        "/api/v1/asignaciones-precios", headers=h, json={"lista_id": lista["id"]},
     )
     assert r.status_code == 422
 

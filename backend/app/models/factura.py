@@ -41,6 +41,9 @@ class Factura(Base, TimestampMixin, SoftDeleteMixin):
     # Solo facturas DIRECTAS (sin remisión): almacén del que descuentan inventario
     # al timbrar y al que regresan al cancelar. Null en facturas desde remisiones.
     almacen_id = Column(UUID(as_uuid=True), ForeignKey("almacenes.id", ondelete="RESTRICT"), nullable=True, index=True)
+    # La negociación bajo la que se vendió; se hereda de las remisiones que
+    # cruza. Sirve para leer la facturación por proyecto sin rearmarla a mano.
+    proyecto_id = Column(UUID(as_uuid=True), ForeignKey("proyectos.id", ondelete="SET NULL"))
 
     # ── CFDI 4.0 header ──
     uso_cfdi = Column(String(5), nullable=False, server_default="G03")

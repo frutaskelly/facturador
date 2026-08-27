@@ -15,7 +15,7 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
-import type { Almacen, Cliente, ListaPrecios, PrecioOverride, Producto, Serie, Sucursal } from "@/lib/types";
+import type { Almacen, Cliente, ListaAsignacion, PrecioOverride, Producto, Serie, Sucursal } from "@/lib/types";
 
 // Permisos de escritura (igual que la versión previa de esta página):
 //  - alta/baja de sucursales -> cliente:gestionar
@@ -41,7 +41,10 @@ export default function SucursalesPage() {
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=500");
   const sucursalesRes = useResource<Page<Sucursal>>("/api/v1/sucursales?limit=1000");
   const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=1000");
-  const listasRes = useResource<Page<ListaPrecios>>("/api/v1/listas-precios?limit=200");
+  // Qué lista le toca a cada quien ya no es una columna del cliente ni de la
+  // sucursal: son renglones de asignación. Se leen aquí solo para MOSTRARLOS
+  // (se editan en Asignación de precios).
+  const asignacionesRes = useResource<Page<ListaAsignacion>>("/api/v1/asignaciones-precios?limit=1000");
   const almacenesRes = useResource<Page<Almacen>>("/api/v1/almacenes?limit=200");
   const seriesFacRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
   const seriesRemRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=REMISION&activa=true&limit=200");
@@ -52,14 +55,24 @@ export default function SucursalesPage() {
     : todosLosClientes;
   const allSucursales = sucursalesRes.data?.items ?? [];
   const productos = productosRes.data?.items ?? [];
-  const listas = listasRes.data?.items ?? [];
+  const asignaciones = asignacionesRes.data?.items ?? [];
   const almacenes = almacenesRes.data?.items ?? [];
   const seriesFac = seriesFacRes.data?.items ?? [];
   const seriesRem = seriesRemRes.data?.items ?? [];
 
   const prodName = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p.nombre])), [productos]);
   const prodById = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p])), [productos]);
-  const listaName = useMemo(() => Object.fromEntries(listas.map((l) => [l.id, l.nombre])), [listas]);
+  // Lista asignada a UNA sucursal (sin serie ni proyecto de por medio): es lo
+  // único que esta pantalla puede afirmar sin simular la resolución completa.
+  const listaDeSucursal = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const a of asignaciones) {
+      if (a.sucursal_id && !a.serie_id && !a.proyecto_id && a.lista_nombre) {
+        m[a.sucursal_id] = a.lista_nombre;
+      }
+    }
+    return m;
+  }, [asignaciones]);
   // serie_factura_id -> codigo (para la columna "Serie" del cliente)
   const serieCodigo = useMemo(
     () => Object.fromEntries([...seriesFac, ...seriesRem].map((s) => [s.id, s.codigo])),
@@ -97,7 +110,7 @@ export default function SucursalesPage() {
   }
 
   // ── modales de alta ──
-  const emptySuc = { nombre: "", contacto: "", telefono: "", lista_precios_id: "", serie_factura_id: "", serie_remision_id: "", almacen_id: "" };
+  const emptySuc = { nombre: "", contacto: "", telefono: "", serie_factura_id: "", serie_remision_id: "", almacen_id: "" };
   const [sucModal, setSucModal] = useState<{ clienteId: string } | null>(null);
   const [nuevaSuc, setNuevaSuc] = useState(emptySuc);
 
@@ -132,7 +145,6 @@ export default function SucursalesPage() {
         nombre: nuevaSuc.nombre.trim(),
         contacto: nuevaSuc.contacto.trim() || null,
         telefono: nuevaSuc.telefono.trim() || null,
-        lista_precios_id: nuevaSuc.lista_precios_id || null,
         serie_factura_id: nuevaSuc.serie_factura_id || null,
         serie_remision_id: nuevaSuc.serie_remision_id || null,
         almacen_id: nuevaSuc.almacen_id || null,
@@ -214,7 +226,7 @@ export default function SucursalesPage() {
       { header: "Código", cell: (s) => s.codigo ?? "—" },
       { header: "Contacto", cell: (s) => s.contacto ?? "—" },
       { header: "Teléfono", cell: (s) => s.telefono ?? "—" },
-      { header: "Lista propia", cell: (s) => (s.lista_precios_id ? listaName[s.lista_precios_id] ?? "—" : "(hereda del cliente)") },
+      { header: "Lista propia", cell: (s) => listaDeSucursal[s.id] ?? "(hereda del cliente)" },
       ...(canSuc
         ? [{
             header: "", className: "text-right w-1",
@@ -323,12 +335,10 @@ export default function SucursalesPage() {
               <Input value={nuevaSuc.telefono} onChange={(e) => setNuevaSuc({ ...nuevaSuc, telefono: e.target.value })} />
             </Field>
           </div>
-          <Field label="Lista de precios propia" hint="Si se deja vacío, hereda la del cliente.">
-            <Select value={nuevaSuc.lista_precios_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, lista_precios_id: e.target.value })}>
-              <option value="">(hereda del cliente)</option>
-              {listas.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-            </Select>
-          </Field>
+          <p className="text-xs text-muted">
+            La lista de precios de esta sucursal se asigna en{" "}
+            <b>Listas de precios › Asignación de precios</b>, junto con las de serie y proyecto.
+          </p>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Serie de factura" hint="Gana sobre la del cliente.">
               <Select value={nuevaSuc.serie_factura_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, serie_factura_id: e.target.value })}>

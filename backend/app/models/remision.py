@@ -47,7 +47,14 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     )
     almacen_id = Column(UUID(as_uuid=True), ForeignKey("almacenes.id", ondelete="SET NULL"))
     sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id", ondelete="SET NULL"))
+    # Lista FORZADA a mano para este documento: le gana a toda la resolución por
+    # cliente/sucursal/serie/proyecto. NULL = que resuelva el sistema.
     lista_precios_id = Column(UUID(as_uuid=True), ForeignKey("listas_precios.id", ondelete="SET NULL"))
+    # La negociación bajo la que se vendió (viene de la orden de compra).
+    proyecto_id = Column(UUID(as_uuid=True), ForeignKey("proyectos.id", ondelete="SET NULL"))
+    # La serie con la que se folió. Se guarda porque además de dar el folio,
+    # decide qué lista de precios aplica: al reeditar hay que usar la misma.
+    serie_id = Column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"))
     fecha_remision = Column(Date, nullable=False, server_default=text("CURRENT_DATE"))
     fecha_entrega = Column(Date)
     estado = Column(REMISION_ESTADO, nullable=False, server_default="BORRADOR")

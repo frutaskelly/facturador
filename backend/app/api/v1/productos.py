@@ -24,6 +24,7 @@ from ...models import (
     CategoriaProducto,
     Cliente,
     EsquemaImpuesto,
+    ListaAsignacion,
     ListaPrecios,
     Precio,
     Producto,
@@ -830,6 +831,23 @@ def importar_productos(
         return _ejecutar_import(db, ctx, payload, aislar_filas=True)
 
 
+def _lista_global_de(db: Session, cliente_id):
+    """La lista asignada al cliente «para todo el país»: sin sucursal, sin serie
+    y sin proyecto. Es la que el wizard de importación considera «su lista»."""
+    fila = (
+        db.query(ListaAsignacion.lista_id)
+        .filter(
+            ListaAsignacion.cliente_id == cliente_id,
+            ListaAsignacion.sucursal_id.is_(None),
+            ListaAsignacion.serie_id.is_(None),
+            ListaAsignacion.proyecto_id.is_(None),
+        )
+        .order_by(ListaAsignacion.created_at.desc())
+        .first()
+    )
+    return fila[0] if fila else None
+
+
 def _ejecutar_import(
     db: Session, ctx: AuthContext, payload: ImportIn, *, aislar_filas: bool
 ) -> ImportResultOut:
@@ -848,9 +866,10 @@ def _ejecutar_import(
     lista_nombre_out = None
     if payload.guardar_precios:
         lista_id = payload.lista_id
-        # Un solo cliente CON lista → la suya (comportamiento de siempre).
-        if lista_id is None and len(clientes) == 1 and clientes[0].lista_precios_id:
-            lista_id = clientes[0].lista_precios_id
+        # Un solo cliente CON lista → la suya (comportamiento de siempre). Se
+        # lee de su asignación GLOBAL, que es donde vive desde la 0050.
+        if lista_id is None and len(clientes) == 1:
+            lista_id = _lista_global_de(db, clientes[0].id)
         if lista_id is None and (payload.lista_nombre or "").strip():
             # Crear la lista aquí mismo (menos pasos): código único desde el
             # nombre. Se asigna a los clientes elegidos que NO tengan lista
@@ -868,8 +887,10 @@ def _ejecutar_import(
             db.flush()
             lista_id = lista.id
             for cli in clientes:
-                if cli.lista_precios_id is None:
-                    cli.lista_precios_id = lista.id
+                if _lista_global_de(db, cli.id) is None:
+                    db.add(ListaAsignacion(
+                        tenant_id=ctx.tenant_id, lista_id=lista.id, cliente_id=cli.id
+                    ))
         if lista_id is None:
             raise HTTPException(
                 status_code=422,

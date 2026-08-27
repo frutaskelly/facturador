@@ -29,6 +29,7 @@ import type {
   LineaOC,
   OCRecibida,
   OCRecibidaDetalle,
+  Proyecto,
   Sucursal,
 } from "@/lib/types";
 
@@ -106,6 +107,7 @@ export default function Page() {
   const [estado, setEstado] = useState("PENDIENTE");
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
+  const [proyectos, setProyectos] = useState<Proyecto[]>([]);
 
   const [abierta, setAbierta] = useState<OCRecibidaDetalle | null>(null);
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
@@ -115,6 +117,10 @@ export default function Page() {
   // A dónde se descarga (hospital, plantel). NO es la sucursal: es un punto
   // dentro de ella, y su texto sale impreso en la remisión y en la factura.
   const [puntoEntrega, setPuntoEntrega] = useState("");
+  // Bajo qué negociación entra la orden. Sale de la equivalencia PROYECTO
+  // ("ehmo:HOSPITALES"); corregirlo aquí la enseña y, sobre todo, decide qué
+  // lista de precios se le cobra a la remisión.
+  const [proyectoSel, setProyectoSel] = useState("");
   const [lineas, setLineas] = useState<LineaEdit[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [aDescartar, setADescartar] = useState<OCRecibida | null>(null);
@@ -141,6 +147,9 @@ export default function Page() {
     apiFetch<Page<Almacen>>("/api/v1/almacenes?limit=200")
       .then((p) => setAlmacenes(p.items))
       .catch(() => undefined);
+    apiFetch<Page<Proyecto>>("/api/v1/proyectos?activo=true&limit=500")
+      .then((p) => setProyectos(p.items))
+      .catch(() => undefined);
   }, []);
 
   const abrir = useCallback(async (id: string) => {
@@ -150,6 +159,7 @@ export default function Page() {
       setClienteSel(oc.cliente_id ?? "");
       setSucursalSel(oc.sucursal_id ?? "");
       setPuntoEntrega(oc.punto_entrega ?? "");
+      setProyectoSel(oc.proyecto_id ?? "");
       setVerTodos(!oc.candidatos?.length);
       setAlmacenSel("");
       setLineas(
@@ -194,8 +204,9 @@ export default function Page() {
       !!abierta &&
       (clienteSel !== (abierta.cliente_id ?? "") ||
         sucursalSel !== (abierta.sucursal_id ?? "") ||
-        puntoEntrega.trim() !== (abierta.punto_entrega ?? "")),
-    [abierta, clienteSel, sucursalSel, puntoEntrega]
+        puntoEntrega.trim() !== (abierta.punto_entrega ?? "") ||
+        proyectoSel !== (abierta.proyecto_id ?? "")),
+    [abierta, clienteSel, sucursalSel, puntoEntrega, proyectoSel]
   );
 
   /** Persiste cliente/sucursal. Devuelve la OC guardada, o null si falló. */
@@ -211,6 +222,7 @@ export default function Page() {
           cliente_id: clienteSel,
           sucursal_id: sucursalSel || null,
           punto_entrega: puntoEntrega.trim() || null,
+          proyecto_id: proyectoSel || null,
           aprender: true,
         }),
       });
@@ -502,7 +514,7 @@ export default function Page() {
                   ) : null}
                 </Select>
               </Field>
-              <Field label="Sucursal" hint="De aquí salen la serie y la lista de precios">
+              <Field label="Sucursal" hint="De aquí salen la serie y el almacén">
                 <Select
                   value={sucursalSel}
                   onChange={(e) => setSucursalSel(e.target.value)}
@@ -526,6 +538,23 @@ export default function Page() {
                   disabled={!canWrite || bloqueada}
                   placeholder="HOSPITAL JUAN GRAHAM"
                 />
+              </Field>
+              <Field
+                label="Proyecto"
+                hint="La negociación bajo la que entra: decide qué lista de precios se cobra."
+              >
+                <Select
+                  value={proyectoSel}
+                  onChange={(e) => setProyectoSel(e.target.value)}
+                  disabled={!canWrite || bloqueada}
+                >
+                  <option value="">— Sin proyecto —</option>
+                  {proyectos
+                    .filter((p) => !p.cliente_id || !clienteSel || p.cliente_id === clienteSel)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>{p.nombre}</option>
+                    ))}
+                </Select>
               </Field>
               <Field label="Almacén de salida">
                 <Select

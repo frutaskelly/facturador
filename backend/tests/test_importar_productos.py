@@ -17,16 +17,32 @@ from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
 from app.models import (
-    Almacen, CategoriaProducto, Cliente, EsquemaImpuesto, ListaPrecios,
-    Membership, Precio, Producto, ProductoAlias, ProductoCliente, Role,
-    Tenant, User,
+    Almacen, CategoriaProducto, Cliente, EsquemaImpuesto, ListaAsignacion,
+    ListaPrecios, Membership, Precio, Producto, ProductoAlias, ProductoCliente,
+    Role, Tenant, User,
 )
 
 _PURGE = (
     "movimientos_inventario", "lineas_factura", "facturas", "lotes_inventario",
-    "producto_clientes", "producto_alias", "precios", "listas_precios",
-    "productos", "categorias_producto", "esquemas_impuesto", "clientes", "almacenes",
+    "producto_clientes", "producto_alias", "precios", "lista_asignaciones",
+    "listas_precios", "productos", "categorias_producto", "esquemas_impuesto",
+    "clientes", "almacenes",
 )
+
+
+def _lista_global(db, cliente_id):
+    """La lista asignada al cliente «en todo el país»: sin sucursal/serie/proyecto."""
+    fila = (
+        db.query(ListaAsignacion.lista_id)
+        .filter(
+            ListaAsignacion.cliente_id == uuid.UUID(str(cliente_id)),
+            ListaAsignacion.sucursal_id.is_(None),
+            ListaAsignacion.serie_id.is_(None),
+            ListaAsignacion.proyecto_id.is_(None),
+        )
+        .first()
+    )
+    return fila[0] if fila else None
 
 
 @pytest.fixture
@@ -56,11 +72,15 @@ def env(db_engine):
         db.add(lista); db.flush()
         cli = Cliente(tenant_id=tenant.id, codigo="CIMP", legal_name="Cliente Imp SA",
                       rfc="OBV191007BS1", regimen_fiscal="601", uso_cfdi_default="G01",
-                      lista_precios_id=lista.id, domicilio_fiscal={"cp": "42110"})
+                      domicilio_fiscal={"cp": "42110"})
         prod = Producto(tenant_id=tenant.id, sku="00000010", nombre="JITOMATE SALADETT",
                         clave_sat="50421800", unidad_sat="KGM")
         alm = Almacen(tenant_id=tenant.id, codigo="IMP-BG", nombre="Bodega Imp")
         db.add_all([cli, prod, alm]); db.flush()
+        # La lista del cliente vive en su asignación global (sin sucursal, sin
+        # serie, sin proyecto) desde la migración 0049.
+        db.add(ListaAsignacion(tenant_id=tenant.id, lista_id=lista.id, cliente_id=cli.id))
+        db.flush()
         db.commit()
         yield {"admin": admin, "tomador": tomador, "tenant_id": tenant.id,
                "cli_id": str(cli.id), "prod_id": str(prod.id),
@@ -669,8 +689,7 @@ def test_importar_crea_lista_y_se_asigna(client, env, auth_as):
     try:
         lista = db.query(ListaPrecios).filter(ListaPrecios.id == uuid.UUID(lista_id)).one()
         assert lista.es_default is True
-        cli = db.query(Cliente).filter(Cliente.id == uuid.UUID(env["cli_id"])).one()
-        assert str(cli.lista_precios_id) == lista_id
+        assert str(_lista_global(db, env["cli_id"])) == lista_id
         # La resolución de precios la toma como lista base.
         from app.services.precios import _lista_default
         # (sesión owner ve todos los tenants; filtra por el nuestro)
@@ -743,10 +762,8 @@ def test_importar_varios_clientes(client, env, auth_as):
         assert {str(p.cliente_id) for p in pcs} == {env["cli_id"], c2_id}
         assert all(p.codigo_cliente == "GRP-001" for p in pcs)
         # cli del fixture YA tenía lista → no se pisa; c2 sin lista → se asigna.
-        cli1 = db.query(Cliente).filter(Cliente.id == uuid.UUID(env["cli_id"])).one()
-        assert str(cli1.lista_precios_id) == env["lista_id"]
-        cli2 = db.query(Cliente).filter(Cliente.id == uuid.UUID(c2_id)).one()
-        assert str(cli2.lista_precios_id) == str(res["lista_id"])
+        assert str(_lista_global(db, env["cli_id"])) == env["lista_id"]
+        assert str(_lista_global(db, c2_id)) == str(res["lista_id"])
     finally:
         db.close()
 

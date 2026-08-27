@@ -1221,18 +1221,6 @@
       "default": "0",
       "title": "Limite Credito"
      },
-     "lista_precios_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Lista Precios Id"
-     },
      "metodo_pago_default": {
       "anyOf": [
        {
@@ -1764,18 +1752,6 @@
       "title": "Limite Credito",
       "type": "string"
      },
-     "lista_precios_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Lista Precios Id"
-     },
      "metodo_pago_default": {
       "anyOf": [
        {
@@ -2051,18 +2027,6 @@
        }
       ],
       "title": "Limite Credito"
-     },
-     "lista_precios_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Lista Precios Id"
      },
      "metodo_pago_default": {
       "anyOf": [
@@ -6572,6 +6536,337 @@
     "title": "LineaRemisionOut",
     "type": "object"
    },
+   "ListaAsignacionCreate": {
+    "properties": {
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "lista_id": {
+      "format": "uuid",
+      "title": "Lista Id",
+      "type": "string"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
+     },
+     "serie_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Id"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     },
+     "vigencia_desde": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vigencia Desde"
+     },
+     "vigencia_hasta": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vigencia Hasta"
+     }
+    },
+    "required": [
+     "lista_id"
+    ],
+    "title": "ListaAsignacionCreate",
+    "type": "object"
+   },
+   "ListaAsignacionOut": {
+    "properties": {
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "cliente_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nombre"
+     },
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "especificidad": {
+      "title": "Especificidad",
+      "type": "integer"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "lista_id": {
+      "format": "uuid",
+      "title": "Lista Id",
+      "type": "string"
+     },
+     "lista_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Nombre"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
+     },
+     "proyecto_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Nombre"
+     },
+     "serie_codigo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Codigo"
+     },
+     "serie_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Id"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     },
+     "sucursal_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Nombre"
+     },
+     "tenant_id": {
+      "format": "uuid",
+      "title": "Tenant Id",
+      "type": "string"
+     },
+     "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+     },
+     "vigencia_desde": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vigencia Desde"
+     },
+     "vigencia_hasta": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vigencia Hasta"
+     }
+    },
+    "required": [
+     "lista_id",
+     "id",
+     "tenant_id",
+     "especificidad",
+     "created_at",
+     "updated_at"
+    ],
+    "title": "ListaAsignacionOut",
+    "type": "object"
+   },
+   "ListaAsignacionUpdate": {
+    "properties": {
+     "lista_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Id"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "vigencia_desde": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vigencia Desde"
+     },
+     "vigencia_hasta": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vigencia Hasta"
+     }
+    },
+    "title": "ListaAsignacionUpdate",
+    "type": "object"
+   },
    "ListaAsignarIn": {
     "description": "Asignar la lista como default del negocio y/o a clientes específicos.",
     "properties": {
@@ -7565,6 +7860,29 @@
       "title": "Payload",
       "type": "object"
      },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
+     },
+     "proyecto_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Nombre"
+     },
      "punto_entrega": {
       "anyOf": [
        {
@@ -7971,6 +8289,29 @@
       "title": "Origen Externo",
       "type": "string"
      },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
+     },
+     "proyecto_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Nombre"
+     },
      "punto_entrega": {
       "anyOf": [
        {
@@ -8115,6 +8456,18 @@
        }
       ],
       "title": "Motivo"
+     },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
      },
      "punto_entrega": {
       "anyOf": [
@@ -8731,6 +9084,37 @@
     "title": "Page[FacturaOut]",
     "type": "object"
    },
+   "Page_ListaAsignacionOut_": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/ListaAsignacionOut"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "offset": {
+      "title": "Offset",
+      "type": "integer"
+     },
+     "total": {
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "items",
+     "total",
+     "limit",
+     "offset"
+    ],
+    "title": "Page[ListaAsignacionOut]",
+    "type": "object"
+   },
    "Page_ListaPreciosOut_": {
     "properties": {
      "items": {
@@ -9008,6 +9392,37 @@
      "offset"
     ],
     "title": "Page[ProveedorOut]",
+    "type": "object"
+   },
+   "Page_ProyectoOut_": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/ProyectoOut"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "offset": {
+      "title": "Offset",
+      "type": "integer"
+     },
+     "total": {
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "items",
+     "total",
+     "limit",
+     "offset"
+    ],
+    "title": "Page[ProyectoOut]",
     "type": "object"
    },
    "Page_RemisionOut_": {
@@ -11204,6 +11619,181 @@
     "title": "ProveedorUpdate",
     "type": "object"
    },
+   "ProyectoCreate": {
+    "properties": {
+     "activo": {
+      "default": true,
+      "title": "Activo",
+      "type": "boolean"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "nombre": {
+      "maxLength": 254,
+      "title": "Nombre",
+      "type": "string"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     }
+    },
+    "required": [
+     "nombre"
+    ],
+    "title": "ProyectoCreate",
+    "type": "object"
+   },
+   "ProyectoOut": {
+    "properties": {
+     "activo": {
+      "title": "Activo",
+      "type": "boolean"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "cliente_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nombre"
+     },
+     "codigo": {
+      "title": "Codigo",
+      "type": "string"
+     },
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "tenant_id": {
+      "format": "uuid",
+      "title": "Tenant Id",
+      "type": "string"
+     },
+     "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "tenant_id",
+     "codigo",
+     "nombre",
+     "activo",
+     "created_at",
+     "updated_at"
+    ],
+    "title": "ProyectoOut",
+    "type": "object"
+   },
+   "ProyectoUpdate": {
+    "properties": {
+     "activo": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Activo"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "nombre": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     }
+    },
+    "title": "ProyectoUpdate",
+    "type": "object"
+   },
    "PruebaOut": {
     "properties": {
      "mensaje": {
@@ -11655,6 +12245,18 @@
       ],
       "title": "Notas"
      },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
+     },
      "serie_id": {
       "anyOf": [
        {
@@ -11856,6 +12458,30 @@
        }
       ],
       "title": "Pos Etapa"
+     },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
+     },
+     "serie_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Id"
      },
      "subtotal": {
       "title": "Subtotal",
@@ -12061,6 +12687,30 @@
       ],
       "title": "Pos Etapa"
      },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
+     },
+     "serie_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Id"
+     },
      "subtotal": {
       "title": "Subtotal",
       "type": "string"
@@ -12228,6 +12878,18 @@
       "default": false,
       "title": "Permitir Negativos",
       "type": "boolean"
+     },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
      },
      "sucursal_id": {
       "anyOf": [
@@ -13158,18 +13820,6 @@
       "title": "Domicilio",
       "type": "object"
      },
-     "lista_precios_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Lista Precios Id"
-     },
      "nombre": {
       "maxLength": 254,
       "title": "Nombre",
@@ -13280,18 +13930,6 @@
       "format": "uuid",
       "title": "Id",
       "type": "string"
-     },
-     "lista_precios_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Lista Precios Id"
      },
      "nombre": {
       "maxLength": 254,
@@ -13415,18 +14053,6 @@
        }
       ],
       "title": "Domicilio"
-     },
-     "lista_precios_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Lista Precios Id"
      },
      "nombre": {
       "anyOf": [
@@ -14177,6 +14803,457 @@
     "summary": "Update Almacen",
     "tags": [
      "almacenes"
+    ]
+   }
+  },
+  "/api/v1/asignaciones-precios": {
+   "get": {
+    "operationId": "list_asignaciones_api_v1_asignaciones_precios_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "lista_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Lista Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 200,
+       "maximum": 1000,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Page_ListaAsignacionOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "List Asignaciones",
+    "tags": [
+     "listas de precios"
+    ]
+   },
+   "post": {
+    "operationId": "create_asignacion_api_v1_asignaciones_precios_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ListaAsignacionCreate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ListaAsignacionOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Create Asignacion",
+    "tags": [
+     "listas de precios"
+    ]
+   }
+  },
+  "/api/v1/asignaciones-precios/simular": {
+   "get": {
+    "description": "Qué asignación ganaría para esa combinación — o null si ninguna.\n\nEs la misma función que usa el resolutor de precios, expuesta para que se\npueda comprobar ANTES de emitir un documento en vez de descubrirlo en el PDF.",
+    "operationId": "simular_asignacion_api_v1_asignaciones_precios_simular_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "sucursal_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Sucursal Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "serie_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Serie Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "proyecto_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Proyecto Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "fecha",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Fecha"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "anyOf": [
+          {
+           "$ref": "#/components/schemas/ListaAsignacionOut"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "title": "Response Simular Asignacion Api V1 Asignaciones Precios Simular Get"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Simular Asignacion",
+    "tags": [
+     "listas de precios"
+    ]
+   }
+  },
+  "/api/v1/asignaciones-precios/{asignacion_id}": {
+   "delete": {
+    "operationId": "delete_asignacion_api_v1_asignaciones_precios__asignacion_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "asignacion_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Asignacion Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Delete Asignacion",
+    "tags": [
+     "listas de precios"
+    ]
+   },
+   "patch": {
+    "description": "Cambia la lista o la vigencia. Las DIMENSIONES no se editan: cambiarlas\nes otra negociación, y reusar el renglón borraría el rastro de la anterior.",
+    "operationId": "update_asignacion_api_v1_asignaciones_precios__asignacion_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "asignacion_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Asignacion Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ListaAsignacionUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ListaAsignacionOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Update Asignacion",
+    "tags": [
+     "listas de precios"
     ]
    }
   },
@@ -23571,6 +24648,40 @@
      },
      {
       "in": "query",
+      "name": "serie_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Serie Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "proyecto_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Proyecto Id"
+      }
+     },
+     {
+      "in": "query",
       "name": "fecha",
       "required": false,
       "schema": {
@@ -25349,6 +26460,386 @@
     "summary": "Update Proveedor",
     "tags": [
      "proveedores"
+    ]
+   }
+  },
+  "/api/v1/proyectos": {
+   "get": {
+    "operationId": "list_proyectos_api_v1_proyectos_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "activo",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Activo"
+      }
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 100,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Q"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 100,
+       "maximum": 1000,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Page_ProyectoOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "List Proyectos",
+    "tags": [
+     "proyectos"
+    ]
+   },
+   "post": {
+    "operationId": "create_proyecto_api_v1_proyectos_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ProyectoCreate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProyectoOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Create Proyecto",
+    "tags": [
+     "proyectos"
+    ]
+   }
+  },
+  "/api/v1/proyectos/{proyecto_id}": {
+   "delete": {
+    "operationId": "delete_proyecto_api_v1_proyectos__proyecto_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "proyecto_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Proyecto Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Delete Proyecto",
+    "tags": [
+     "proyectos"
+    ]
+   },
+   "get": {
+    "operationId": "get_proyecto_api_v1_proyectos__proyecto_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "proyecto_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Proyecto Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProyectoOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Get Proyecto",
+    "tags": [
+     "proyectos"
+    ]
+   },
+   "patch": {
+    "operationId": "update_proyecto_api_v1_proyectos__proyecto_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "proyecto_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Proyecto Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ProyectoUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProyectoOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Update Proyecto",
+    "tags": [
+     "proyectos"
     ]
    }
   },

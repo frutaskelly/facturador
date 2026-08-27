@@ -1,7 +1,7 @@
 "use client";
 
 
-import { BookOpen, Link2, Receipt, Store } from "lucide-react";
+import { BookOpen, Link2, Receipt, Store, Tag } from "lucide-react";
 
 import { CrudPage, type CrudConfig } from "@/components/crud/CrudPage";
 import { Badge } from "@/components/ui/Badge";
@@ -143,21 +143,6 @@ const config: CrudConfig<Cliente> = {
     { name: "pais", label: "País" },
     { name: "telefono", label: "Teléfono" },
     { name: "email", label: "Correos", hint: "Uno o varios, separados por coma o espacio; se usan al enviar remisiones y facturas", colSpan: 2 },
-    { name: "lista_precios_id", label: "Lista de precios", type: "select",
-      createInline: {
-        label: "Nueva lista",
-        perm: "lista_precios:gestionar",
-        title: "Nueva lista de precios",
-        fields: [{ name: "nombre", label: "Nombre", placeholder: "Lista mayoreo", required: true }],
-        run: async (v) => {
-          const creada = await apiFetch<{ id: string }>("/api/v1/listas-precios", {
-            method: "POST",
-            body: JSON.stringify({ nombre: v.nombre.trim() }),
-          });
-          return { id: String(creada.id) };
-        },
-      },
-    },
     { name: "limite_credito", label: "Límite de crédito", type: "number", step: "0.01" },
     { name: "dias_credito", label: "Condiciones de pago (días)", type: "number" },
     {
@@ -230,16 +215,12 @@ const config: CrudConfig<Cliente> = {
   // Accesos rápidos por fila, como iconos junto a editar/eliminar.
   rowLinks: (c) => [
     { href: `/sucursales?cliente=${c.id}`, title: "Sucursales", icon: <Store size={16} /> },
+    { href: `/asignaciones-precios?cliente=${c.id}`, title: "Precios asignados", icon: <Tag size={16} /> },
     { href: `/clientes/${c.id}/catalogo`, title: "Catálogo", icon: <BookOpen size={16} /> },
     { href: `/clientes/${c.id}/estado-cuenta`, title: "Estado de cuenta", icon: <Receipt size={16} /> },
     { href: `/clientes/${c.id}/equivalencias`, title: "Equivalencias", icon: <Link2 size={16} /> },
   ],
   lookups: {
-    lista_precios_id: {
-      path: "/api/v1/listas-precios?limit=200",
-      value: (r) => String(r.id),
-      label: (r) => String(r.nombre),
-    },
     serie_factura_id: {
       path: "/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200",
       value: (r) => String(r.id),
@@ -272,7 +253,6 @@ const config: CrudConfig<Cliente> = {
     pais: "México",
     telefono: "",
     email: "",
-    lista_precios_id: "",
     limite_credito: "0",
     dias_credito: "0",
     status: "ACTIVO",
@@ -300,7 +280,6 @@ const config: CrudConfig<Cliente> = {
       email: Array.isArray(dom.correos)
         ? (dom.correos as string[]).join(", ")
         : (dom.email as string) ?? "",
-      lista_precios_id: c.lista_precios_id ?? "",
       limite_credito: c.limite_credito,
       dias_credito: String(c.dias_credito),
       status: c.status,
@@ -331,7 +310,6 @@ const config: CrudConfig<Cliente> = {
       metodo_pago_default: (v.metodo_pago_default as string) || null,
       // `tipo` no se captura en el formulario; el backend usa su default "PRIVADO".
       domicilio_fiscal,
-      lista_precios_id: (v.lista_precios_id as string) || null,
       limite_credito: Number(v.limite_credito) || 0,
       dias_credito: Number(v.dias_credito) || 0,
       status: v.status,

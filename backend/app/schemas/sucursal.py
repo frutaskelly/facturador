@@ -11,10 +11,11 @@ from .common import ORMModel
 
 # ── Sucursal ──
 class SucursalBase(BaseModel):
+    # La lista de precios NO se elige aquí: se asigna en Listas de precios ›
+    # Asignaciones, que además sabe de serie y proyecto (migración 0050).
     cliente_id: uuid.UUID
     codigo: Optional[str] = Field(default=None, max_length=20)
     nombre: str = Field(max_length=254)
-    lista_precios_id: Optional[uuid.UUID] = None
     domicilio: dict = Field(default_factory=dict)
     contacto: Optional[str] = Field(default=None, max_length=254)
     telefono: Optional[str] = Field(default=None, max_length=20)
@@ -32,7 +33,6 @@ class SucursalCreate(SucursalBase):
 class SucursalUpdate(BaseModel):
     codigo: Optional[str] = Field(default=None, max_length=20)
     nombre: Optional[str] = Field(default=None, max_length=254)
-    lista_precios_id: Optional[uuid.UUID] = None
     domicilio: Optional[dict] = None
     contacto: Optional[str] = Field(default=None, max_length=254)
     telefono: Optional[str] = Field(default=None, max_length=20)

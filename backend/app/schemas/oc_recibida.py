@@ -55,6 +55,7 @@ class OCRecibidaUpdate(BaseModel):
     """Corrección manual desde la bandeja."""
     cliente_id: Optional[uuid.UUID] = None
     sucursal_id: Optional[uuid.UUID] = None
+    proyecto_id: Optional[uuid.UUID] = None
     folio_externo: Optional[str] = Field(default=None, max_length=60)
     punto_entrega: Optional[str] = Field(default=None, max_length=254)
     motivo: Optional[str] = None
@@ -103,6 +104,8 @@ class OCRecibidaOut(ORMModel):
     sucursal_nombre: Optional[str] = None
     resuelto_via: Optional[str] = None
     punto_entrega: Optional[str] = None
+    proyecto_id: Optional[uuid.UUID] = None
+    proyecto_nombre: Optional[str] = None
     # Clientes posibles según el grupo del que llegó, cuando el documento no
     # alcanza a decidir. Vacío = no hay pista de grupo o ya se resolvió.
     candidatos: list[uuid.UUID] = Field(default_factory=list)

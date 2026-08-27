@@ -1,14 +1,21 @@
-"""Listas de precios y sus precios — CRUD.
+"""Listas de precios, sus precios y a QUIÉN se le aplican — CRUD.
 
-A price list is a named, tenant-scoped collection; each `Precio` is one price
-for a (producto, presentación, cantidad_minima) tier inside a list. Both reads
-are gated by `menu:listas_precios`; both writes by `lista_precios:gestionar`.
+Tres routers en un módulo porque son la misma pantalla:
 
-Price lists are soft-deleted (they may be referenced by clients); individual
-prices are hard-deleted (they're cheap line items, recreated freely).
+  · `/listas-precios`        — la lista y sus renglones de precio.
+  · `/asignaciones-precios`  — a qué cliente/sucursal/serie/proyecto aplica cada
+    lista. Vive en su propio prefijo, y no bajo `/listas-precios/…`, para que
+    "asignaciones" no compita con `/{lista_id}` al enrutar.
+
+Reads gated por `menu:listas_precios`; writes por `lista_precios:gestionar`.
+
+Las listas se borran en suave (las referencian asignaciones y documentos); los
+precios y las asignaciones se borran de verdad: son configuración barata que se
+vuelve a capturar.
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional
 from uuid import UUID
 
@@ -17,8 +24,20 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Cliente, ListaPrecios, Precio, Producto
+from ...models import (
+    Cliente,
+    ListaAsignacion,
+    ListaPrecios,
+    Precio,
+    Producto,
+    Proyecto,
+    Serie,
+    Sucursal,
+)
 from ...schemas.lista_precios import (
+    ListaAsignacionCreate,
+    ListaAsignacionOut,
+    ListaAsignacionUpdate,
     ListaAsignarIn,
     ListaAsignarOut,
     ListaPreciosCreate,
@@ -32,6 +51,7 @@ from ...schemas.lista_precios import (
     PrecioUpdate,
 )
 from ...schemas.common import Page
+from ...services.precios import resolver_asignacion
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 router = APIRouter(prefix="/listas-precios", tags=["listas de precios"])
@@ -326,8 +346,189 @@ def asignar_lista(
             .filter(Cliente.id == cid, Cliente.deleted_at.is_(None))
             .one_or_none()
         )
-        if cli is not None:
-            cli.lista_precios_id = lista.id
-            asignados += 1
+        if cli is None:
+            continue
+        # Asignación GLOBAL del cliente: sin sucursal, serie ni proyecto, o sea
+        # "estos precios en todo el país". Si ya tenía una, se reapunta en vez
+        # de duplicarla — el wizard se corre varias veces y no debe multiplicar.
+        actual = (
+            db.query(ListaAsignacion)
+            .filter(
+                ListaAsignacion.cliente_id == cid,
+                ListaAsignacion.sucursal_id.is_(None),
+                ListaAsignacion.serie_id.is_(None),
+                ListaAsignacion.proyecto_id.is_(None),
+                ListaAsignacion.vigencia_desde.is_(None),
+            )
+            .one_or_none()
+        )
+        if actual is None:
+            db.add(ListaAsignacion(tenant_id=ctx.tenant_id, lista_id=lista.id, cliente_id=cid))
+        else:
+            actual.lista_id = lista.id
+        asignados += 1
     db.flush()
     return ListaAsignarOut(default=lista.es_default, clientes_asignados=asignados)
+
+
+# ─── a QUIÉN se le aplica cada lista ─────────────────────────────────────────
+router_asignaciones = APIRouter(prefix="/asignaciones-precios", tags=["listas de precios"])
+
+_DUP_ASIGNACION = (
+    "Ya existe una asignación para esa combinación (mismo cliente, sucursal, "
+    "serie, proyecto y fecha de inicio)"
+)
+
+
+def _validar_coherencia(db: Session, cliente_id, sucursal_id, proyecto_id) -> None:
+    """Impide asignaciones que no pueden aplicar nunca.
+
+    Una sucursal de otro cliente, o un proyecto de otro cliente, forman un
+    renglón que jamás coincide con ningún documento: se guarda, se ve en la
+    tabla y no cobra nada. Es peor que un error, porque parece configurado.
+    """
+    if cliente_id and sucursal_id:
+        suc = db.query(Sucursal.cliente_id).filter(Sucursal.id == sucursal_id).first()
+        if suc and suc[0] != cliente_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Esa sucursal no es del cliente elegido",
+            )
+    if cliente_id and proyecto_id:
+        pro = db.query(Proyecto.cliente_id).filter(Proyecto.id == proyecto_id).first()
+        if pro and pro[0] is not None and pro[0] != cliente_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Ese proyecto no es del cliente elegido",
+            )
+
+
+def _con_nombres(db: Session, filas: list[ListaAsignacion]) -> list[ListaAsignacionOut]:
+    """Resuelve los nombres de las cuatro dimensiones en 5 consultas, no en 5×N.
+
+    La tabla de asignaciones se lee de un vistazo o no sirve: "EHMO · Pachuca ·
+    ZEHMOHOS · HOSPITALES" dice algo; cuatro UUID no dicen nada.
+    """
+    def _mapa(model, campo, ids):
+        ids = {i for i in ids if i}
+        if not ids:
+            return {}
+        return {
+            row[0]: row[1]
+            for row in db.query(model.id, campo).filter(model.id.in_(ids)).all()
+        }
+
+    listas = _mapa(ListaPrecios, ListaPrecios.nombre, [f.lista_id for f in filas])
+    clientes = _mapa(Cliente, Cliente.legal_name, [f.cliente_id for f in filas])
+    sucursales = _mapa(Sucursal, Sucursal.nombre, [f.sucursal_id for f in filas])
+    series = _mapa(Serie, Serie.codigo, [f.serie_id for f in filas])
+    proyectos = _mapa(Proyecto, Proyecto.nombre, [f.proyecto_id for f in filas])
+
+    salida = []
+    for f in filas:
+        out = ListaAsignacionOut.model_validate(f)
+        out.lista_nombre = listas.get(f.lista_id)
+        out.cliente_nombre = clientes.get(f.cliente_id)
+        out.sucursal_nombre = sucursales.get(f.sucursal_id)
+        out.serie_codigo = series.get(f.serie_id)
+        out.proyecto_nombre = proyectos.get(f.proyecto_id)
+        salida.append(out)
+    return salida
+
+
+@router_asignaciones.get("", response_model=Page[ListaAsignacionOut])
+def list_asignaciones(
+    lista_id: Optional[UUID] = Query(default=None),
+    cliente_id: Optional[UUID] = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    query = db.query(ListaAsignacion)
+    if lista_id is not None:
+        query = query.filter(ListaAsignacion.lista_id == lista_id)
+    if cliente_id is not None:
+        query = query.filter(ListaAsignacion.cliente_id == cliente_id)
+    # De la más específica a la más general: es el orden en que se aplican.
+    query = query.order_by(
+        ListaAsignacion.especificidad.desc(), ListaAsignacion.created_at.desc()
+    )
+    total = query.order_by(None).count()
+    filas = query.offset(offset).limit(limit).all()
+    return Page[ListaAsignacionOut](
+        items=_con_nombres(db, filas), total=total, limit=limit, offset=offset
+    )
+
+
+@router_asignaciones.get("/simular", response_model=Optional[ListaAsignacionOut])
+def simular_asignacion(
+    cliente_id: Optional[UUID] = Query(default=None),
+    sucursal_id: Optional[UUID] = Query(default=None),
+    serie_id: Optional[UUID] = Query(default=None),
+    proyecto_id: Optional[UUID] = Query(default=None),
+    fecha: Optional[date] = Query(default=None),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Qué asignación ganaría para esa combinación — o null si ninguna.
+
+    Es la misma función que usa el resolutor de precios, expuesta para que se
+    pueda comprobar ANTES de emitir un documento en vez de descubrirlo en el PDF.
+    """
+    ganadora = resolver_asignacion(
+        db, cliente_id=cliente_id, sucursal_id=sucursal_id,
+        serie_id=serie_id, proyecto_id=proyecto_id, fecha=fecha,
+    )
+    return _con_nombres(db, [ganadora])[0] if ganadora is not None else None
+
+
+@router_asignaciones.post("", response_model=ListaAsignacionOut, status_code=status.HTTP_201_CREATED)
+def create_asignacion(
+    payload: ListaAsignacionCreate,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    ensure_fk(db, ListaPrecios, payload.lista_id, "lista_id")
+    ensure_fk(db, Cliente, payload.cliente_id, "cliente_id")
+    ensure_fk(db, Sucursal, payload.sucursal_id, "sucursal_id")
+    ensure_fk(db, Serie, payload.serie_id, "serie_id")
+    ensure_fk(db, Proyecto, payload.proyecto_id, "proyecto_id")
+    _validar_coherencia(db, payload.cliente_id, payload.sucursal_id, payload.proyecto_id)
+    obj = ListaAsignacion(**payload.model_dump(), tenant_id=ctx.tenant_id)
+    db.add(obj)
+    flush_or_conflict(db, detail=_DUP_ASIGNACION)
+    db.refresh(obj)
+    return _con_nombres(db, [obj])[0]
+
+
+@router_asignaciones.patch("/{asignacion_id}", response_model=ListaAsignacionOut)
+def update_asignacion(
+    asignacion_id: UUID,
+    payload: ListaAsignacionUpdate,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Cambia la lista o la vigencia. Las DIMENSIONES no se editan: cambiarlas
+    es otra negociación, y reusar el renglón borraría el rastro de la anterior."""
+    obj = get_or_404(db, ListaAsignacion, asignacion_id, soft=False)
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("lista_id") is not None:
+        ensure_fk(db, ListaPrecios, data["lista_id"], "lista_id")
+    for key, value in data.items():
+        setattr(obj, key, value)
+    flush_or_conflict(db, detail=_DUP_ASIGNACION)
+    db.refresh(obj)
+    return _con_nombres(db, [obj])[0]
+
+
+@router_asignaciones.delete("/{asignacion_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_asignacion(
+    asignacion_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    obj = get_or_404(db, ListaAsignacion, asignacion_id, soft=False)
+    db.delete(obj)
+    db.flush()
+    return None

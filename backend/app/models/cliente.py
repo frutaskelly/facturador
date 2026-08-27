@@ -2,7 +2,7 @@
 
 Tenant-scoped. Holds the fiscal identity used to stamp CFDIs (RFC, régimen,
 uso CFDI, formas/métodos de pago, domicilio fiscal) plus commercial terms
-(price list, credit) and running accumulators.
+(credit) and running accumulators.
 
 Series predeterminadas (`serie_factura_id` / `serie_remision_id`) FK a `series`;
 fijan la serie del cliente al emitir, salvo que la sucursal o una elección manual
@@ -19,7 +19,6 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import relationship
 
 from ..core.db import Base
 from .base import SoftDeleteMixin, TimestampMixin, tenant_fk, uuid_pk
@@ -49,11 +48,8 @@ class Cliente(Base, TimestampMixin, SoftDeleteMixin):
     domicilio_fiscal = Column(JSONB, nullable=False, server_default="{}")
 
     # ── commercial ──
-    lista_precios_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("listas_precios.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    # La lista de precios NO se cuelga de aquí: vive en `lista_asignaciones`,
+    # que también sabe de sucursal, serie y proyecto (migración 0050).
     condiciones_pago = Column(String(50))
     limite_credito = Column(Numeric(18, 4), nullable=False, server_default="0")
     dias_credito = Column(Integer, nullable=False, server_default="0")
@@ -79,4 +75,3 @@ class Cliente(Base, TimestampMixin, SoftDeleteMixin):
         UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"), nullable=True
     )
 
-    lista_precios = relationship("ListaPrecios")
