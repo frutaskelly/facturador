@@ -62,6 +62,7 @@ from ...services.producto_match import (
     aprender_alias,
     buscar,
     normalizar,
+    normalizar_catalogo,
     parsear_pegado,
     productos_activos,
     sugerir_con_ia,
@@ -163,10 +164,11 @@ def match_productos(
         enforce(f"producto-ia:{ctx.tenant_id}", 120, 3600)
     catalogo = productos_activos(db)   # una sola carga para todos los textos
     aliases = alias_del_tenant(db)     # idem: sin esto era un SELECT por texto
+    norms = normalizar_catalogo(catalogo)   # y sin esto, O(textos × productos)
     resultados: list[dict] = []
     sin_match: list[str] = []
     for texto in payload.textos:
-        cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit, prods=catalogo, aliases=aliases)
+        cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit, prods=catalogo, aliases=aliases, norms=norms)
         resultados.append({"texto": texto, "candidatos": [
             CandidatoOut(
                 producto_id=c.producto_id, sku=c.sku, nombre=c.nombre, score=c.score, origen=c.origen,
@@ -212,11 +214,12 @@ def parse_pegado(
 
     catalogo = productos_activos(db)   # una sola carga para todas las filas
     aliases = alias_del_tenant(db)     # idem: sin esto era un SELECT por fila
+    norms = normalizar_catalogo(catalogo)   # y sin esto, O(filas × productos)
     resultados: list[dict] = []
     sin_match: list[str] = []
     for f in filas:
         # Varios candidatos para poblar el desplegable Match IA (el front muestra ≥80%).
-        cands = buscar(db, ctx.tenant_id, f["producto"], limit=8, prods=catalogo, aliases=aliases)
+        cands = buscar(db, ctx.tenant_id, f["producto"], limit=8, prods=catalogo, aliases=aliases, norms=norms)
         resultados.append({
             "texto": f["producto"],
             "cantidad": f["cantidad"],
@@ -382,6 +385,7 @@ def importar_preview(
     # Cruce contra el catálogo, una sola carga para todas las filas.
     catalogo = productos_activos(db)
     aliases = alias_del_tenant(db)     # una sola carga: sin esto, un SELECT por fila
+    norms = normalizar_catalogo(catalogo)   # y sin esto, O(filas × productos)
     por_sku = {p.sku.strip().upper(): p for p in catalogo if p.sku}
     por_id = {p.id: p for p in catalogo}
 
@@ -468,7 +472,7 @@ def importar_preview(
 
         # 3) Cruce por nombre (exacto → alias → difuso). Los difusos solo se
         #    auto-sugieren si el cruce es confiable en la dirección de importar.
-        cands = buscar(db, ctx.tenant_id, f["nombre"], limit=5, prods=catalogo, aliases=aliases)
+        cands = buscar(db, ctx.tenant_id, f["nombre"], limit=5, prods=catalogo, aliases=aliases, norms=norms)
         if sugerido is None and cands and cands[0].score >= 80:
             top = cands[0]
             if top.origen in ("exacto", "alias") or _cruce_confiable(f["nombre"], top.nombre):

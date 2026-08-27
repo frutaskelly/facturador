@@ -77,6 +77,25 @@ def alias_del_tenant(db: Session) -> dict[str, UUID]:
     }
 
 
+def normalizar_catalogo(prods: list[Producto]) -> dict[UUID, tuple[str, str, list[str]]]:
+    """{producto_id: (nombre_norm, sku_norm, [textos_norm])} para el catálogo.
+
+    `buscar` normaliza el nombre y los sinónimos de CADA producto para CADA
+    texto que cruza: 500 filas × 1,900 productos ≈ 1M normalizaciones por
+    preview. Precalculado una vez, el cruce masivo pasa de decenas de segundos
+    a menos de uno.
+    """
+    out: dict[UUID, tuple[str, str, list[str]]] = {}
+    for p in prods:
+        nombre = normalizar(p.nombre)
+        out[p.id] = (
+            nombre,
+            normalizar(p.sku),
+            [nombre] + [normalizar(s) for s in (p.sinonimos or [])],
+        )
+    return out
+
+
 def buscar(
     db: Session,
     tenant_id: UUID,
@@ -85,6 +104,7 @@ def buscar(
     limit: int = 5,
     prods: Optional[list[Producto]] = None,
     aliases: Optional[dict[str, UUID]] = None,
+    norms: Optional[dict[UUID, tuple[str, str, list[str]]]] = None,
 ) -> list[Candidato]:
     """Devuelve candidatos ordenados por confianza para un texto libre.
 
@@ -106,7 +126,9 @@ def buscar(
     #    Clave para evitar duplicados: si ya existen "SANDIA", "Sandía", "Sandia"
     #    (todas normalizan igual), deben aparecer las tres para que el usuario las vea.
     for p in prods:
-        if normalizar(p.nombre) == norm or normalizar(p.sku) == norm:
+        nombre_n, sku_n, _ = (norms or {}).get(p.id) or (
+            normalizar(p.nombre), normalizar(p.sku), [])
+        if nombre_n == norm or sku_n == norm:
             out.append(_cand(p, 100, "exacto"))
             seen.add(p.id)
 
@@ -136,7 +158,9 @@ def buscar(
     for p in prods:
         if p.id in seen:
             continue
-        textos = [normalizar(p.nombre)] + [normalizar(s) for s in (p.sinonimos or [])]
+        cacheado = (norms or {}).get(p.id)
+        textos = cacheado[2] if cacheado else (
+            [normalizar(p.nombre)] + [normalizar(s) for s in (p.sinonimos or [])])
         score = 0
         for h in textos:
             if not h:

@@ -832,3 +832,43 @@ def test_cruce_masivo_no_hace_un_select_por_fila(client, env, auth_as):
     assert r.status_code == 200 and len(r.json()["filas"]) == 60
     alias_queries = [q for q in consultas if "producto_alias" in q]
     assert len(alias_queries) <= 1, f"{len(alias_queries)} consultas a producto_alias (debe ser 1)"
+
+
+def test_cruce_masivo_no_renormaliza_el_catalogo_por_fila(client, env, auth_as):
+    """El catálogo se normaliza UNA vez, no por cada fila del archivo: antes
+    eran O(filas × productos) normalizaciones (508 × 1869 ≈ 1M) y el preview
+    tardaba decenas de segundos con un catálogo grande."""
+    import app.services.producto_match as pm
+
+    db = SessionLocal()
+    try:
+        db.add_all([
+            Producto(tenant_id=env["tenant_id"], sku=f"1000{i:04d}",
+                     nombre=f"PRODUCTO CATALOGO {i}", clave_sat="01010101", unidad_sat="KGM")
+            for i in range(120)
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([["NOMBRE", "UNIDAD"]] + [[f"FILA ARCHIVO {i}", "KILO"] for i in range(40)])
+
+    original = pm.normalizar
+    llamadas = {"n": 0}
+    def contando(texto):
+        llamadas["n"] += 1
+        return original(texto)
+    pm.normalizar = contando
+    try:
+        r = client.post(
+            "/api/v1/productos/importar-preview", headers=h,
+            files={"archivo": ("masivo.xlsx", data, "application/octet-stream")},
+            data={"usar_ia": "false"},
+        )
+    finally:
+        pm.normalizar = original
+    assert r.status_code == 200 and len(r.json()["filas"]) == 40
+    # Sin memoizar serían ~40 × 121 × 2 ≈ 9,700. Con el catálogo precalculado
+    # es del orden de (productos + filas), no su producto.
+    assert llamadas["n"] < 1000, f"{llamadas['n']} normalizaciones (esperado O(productos+filas))"
