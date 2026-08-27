@@ -57,6 +57,17 @@ def _precio_lista(db, lista_id, producto_id, presentacion, cantidad, fecha):
 
 
 def _lista_default(db):
+    # 1) la marcada explícitamente como default (wizard de importación /
+    # administración de listas); 2) la convención histórica codigo='UNICO';
+    # 3) la más vieja activa.
+    marcada = (
+        db.query(ListaPrecios)
+        .filter(ListaPrecios.es_default.is_(True), ListaPrecios.deleted_at.is_(None))
+        .order_by(ListaPrecios.created_at.asc())
+        .first()
+    )
+    if marcada is not None:
+        return marcada
     base = (
         db.query(ListaPrecios)
         .filter(ListaPrecios.codigo == "UNICO", ListaPrecios.deleted_at.is_(None))

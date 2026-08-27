@@ -315,6 +315,70 @@ export type Candidato = {
   unidad_base?: string | null;
 };
 export type MatchResult = { texto: string; candidatos: Candidato[] };
+
+// ─── Importación masiva de productos (plantilla o lista de precios con IA) ───
+export type ImportFilaPreview = {
+  fila: number;
+  nombre: string;
+  codigo: string;
+  descripcion: string;
+  unidad: string;
+  precio: string;
+  clave_sat: string;
+  unidad_sat: string;
+  codigo_barras: string;
+  categoria: string;
+  esquema: string;
+  baja: boolean;                   // ESTATUS BAJA en el archivo → omitir default
+  clave_sat_valida?: boolean | null;   // validada contra el catálogo SAT oficial
+  unidad_sat_valida?: boolean | null;
+  nueva_presentacion: boolean;     // cruza a un producto con OTRA unidad → variante
+  producto_id?: string | null;     // sugerencia: vincular a este existente
+  candidatos: Candidato[];
+  ya_vinculado: boolean;           // el cliente ya tiene código/nombre para él
+  duplicada_de?: number | null;    // el archivo repite este producto (fila original)
+  precio_distinto?: boolean;       // la repetición trae OTRO precio (conflicto)
+  mismo_producto_que?: number | null; // otra fila ya se vinculó al mismo producto
+};
+export type ImportPreview = {
+  formato: "plantilla" | "ia";
+  filas: ImportFilaPreview[];
+  // Meta para las preguntas en lote:
+  faltan_clave_sat: number;
+  faltan_unidad_sat: number;
+  categorias_nuevas: string[];
+  esquemas_no_encontrados: string[];
+  filas_sin_esquema: number;
+  tiene_precios: boolean;
+};
+export type ImportResult = {
+  creados: number;
+  vinculados: number;
+  alias_guardados: number;
+  precios_guardados: number;
+  omitidos: number;
+  categorias_creadas: number;
+  presentaciones_agregadas: number;
+  lista_id?: string | null;
+  lista_nombre?: string | null;
+  errores: { fila: number; error: string }[];
+};
+export type SugerenciaSat = {
+  nombre: string;
+  clave_sat: string;
+  descripcion_sat: string;
+  unidad_sat: string;
+  unidad_sat_generica: string;
+};
+// Catálogo del cliente: su código (NoIdentificacion) y su nombre (Descripcion CFDI).
+export type ProductoClienteRow = {
+  producto_id: string;
+  producto_sku: string;
+  producto_nombre: string;
+  codigo_cliente?: string | null;
+  nombre_cliente?: string | null;
+  presentacion?: string | null;    // la unidad con la que ese cliente compra
+};
 // Línea parseada desde un pegado de Excel (backend detecta columnas + cruza).
 export type LineaPegada = {
   texto: string;

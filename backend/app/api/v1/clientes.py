@@ -21,10 +21,12 @@ from sqlalchemy.orm import Session
 
 from ...core.config import settings
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Cliente, ListaPrecios
+from ...models import Cliente, ListaPrecios, Producto, ProductoCliente
 from ...schemas.cliente import ClienteCreate, ClienteOut, ClienteUpdate
 from ...schemas.common import Page
+from ...schemas.producto import ProductoClienteOut, ProductoClienteUpsert
 from ...services.cliente_codigo import generate_cliente_codigo
+from ...services.producto_match import aprender_alias
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.rfc import validar_rfc_local
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
@@ -256,5 +258,109 @@ def delete_cliente(
 ):
     obj = get_or_404(db, Cliente, cliente_id)
     obj.deleted_at = func.now()
+    db.flush()
+    return None
+
+
+# ─── Catálogo del cliente (cómo llama ESTE cliente a cada producto) ──────────
+# codigo_cliente → NoIdentificacion y nombre_cliente → Descripcion del CFDI al
+# timbrar (services/cfdi.py). Un producto interno, muchos nombres de cara al
+# cliente — sin duplicar productos.
+
+
+@router.get("/{cliente_id}/catalogo", response_model=list[ProductoClienteOut])
+def catalogo_cliente(
+    cliente_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    get_or_404(db, Cliente, cliente_id)
+    rows = (
+        db.query(ProductoCliente, Producto)
+        .join(Producto, Producto.id == ProductoCliente.producto_id)
+        .filter(
+            ProductoCliente.cliente_id == cliente_id,
+            Producto.deleted_at.is_(None),
+        )
+        .order_by(Producto.nombre.asc())
+        .all()
+    )
+    return [
+        ProductoClienteOut(
+            producto_id=pc.producto_id,
+            producto_sku=p.sku,
+            producto_nombre=p.nombre,
+            codigo_cliente=pc.codigo_cliente,
+            nombre_cliente=pc.nombre_cliente,
+            presentacion=pc.presentacion,
+        )
+        for pc, p in rows
+    ]
+
+
+@router.put("/{cliente_id}/catalogo/{producto_id}", response_model=ProductoClienteOut)
+def upsert_catalogo_cliente(
+    cliente_id: UUID,
+    producto_id: UUID,
+    payload: ProductoClienteUpsert,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    get_or_404(db, Cliente, cliente_id)
+    prod = get_or_404(db, Producto, producto_id)
+    codigo = (payload.codigo_cliente or "").strip() or None
+    nombre = (payload.nombre_cliente or "").strip() or None
+    if not codigo and not nombre:
+        raise HTTPException(
+            status_code=422,
+            detail="Captura el código y/o el nombre que usa el cliente",
+        )
+    pc = (
+        db.query(ProductoCliente)
+        .filter(
+            ProductoCliente.cliente_id == cliente_id,
+            ProductoCliente.producto_id == producto_id,
+        )
+        .one_or_none()
+    )
+    if pc is None:
+        pc = ProductoCliente(
+            tenant_id=ctx.tenant_id, cliente_id=cliente_id, producto_id=producto_id
+        )
+        db.add(pc)
+    pc.codigo_cliente = codigo
+    pc.nombre_cliente = nombre
+    if payload.presentacion is not None:
+        pc.presentacion = payload.presentacion.strip().upper() or None
+    db.flush()
+    # El cruce de productos también aprende el nombre del cliente.
+    if nombre:
+        aprender_alias(db, ctx.tenant_id, nombre, producto_id, origen="MANUAL", user_id=ctx.user_id)
+    return ProductoClienteOut(
+        producto_id=producto_id,
+        producto_sku=prod.sku,
+        producto_nombre=prod.nombre,
+        codigo_cliente=pc.codigo_cliente,
+        nombre_cliente=pc.nombre_cliente,
+        presentacion=pc.presentacion,
+    )
+
+
+@router.delete("/{cliente_id}/catalogo/{producto_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_catalogo_cliente(
+    cliente_id: UUID,
+    producto_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    get_or_404(db, Cliente, cliente_id)
+    (
+        db.query(ProductoCliente)
+        .filter(
+            ProductoCliente.cliente_id == cliente_id,
+            ProductoCliente.producto_id == producto_id,
+        )
+        .delete()
+    )
     db.flush()
     return None

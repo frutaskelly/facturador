@@ -79,6 +79,26 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
     if (almacenes.length === 1 && !almacenId) setAlmacenId(almacenes[0].id);
   }, [almacenes, almacenId]);
 
+  // Catálogo del cliente: producto → SU presentación (con la que compra). Al
+  // elegir un producto se preselecciona su unidad ("Cilantro" → MANOJO) y la
+  // cotización sale con SU precio de esa presentación.
+  const [presCliente, setPresCliente] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!clienteId) { setPresCliente({}); return; }
+    let active = true;
+    apiFetch<{ producto_id: string; presentacion?: string | null }[]>(
+      `/api/v1/clientes/${clienteId}/catalogo`
+    )
+      .then((rows) => {
+        if (!active) return;
+        setPresCliente(Object.fromEntries(
+          rows.filter((r) => r.presentacion).map((r) => [r.producto_id, r.presentacion as string])
+        ));
+      })
+      .catch(() => { if (active) setPresCliente({}); });
+    return () => { active = false; };
+  }, [clienteId]);
+
   // Preview de la serie/folio que aplicaría (override → cliente → default).
   const [serieResuelta, setSerieResuelta] = useState<Serie | null>(null);
   useEffect(() => {
@@ -222,7 +242,11 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
     }
     const pres = Object.keys(pick.presentaciones ?? {});
     const def = pick.presentacion_default ?? pick.unidad_base ?? pres[0] ?? "PIEZA";
-    const presentacion = pres.includes(def) ? def : pres[0] ?? def;
+    // La presentación del CLIENTE (su catálogo) gana sobre la default del producto.
+    const presCli = presCliente[pick.producto_id];
+    const presentacion = presCli && pres.includes(presCli)
+      ? presCli
+      : pres.includes(def) ? def : pres[0] ?? def;
     setLinea(key, { producto_id: pick.producto_id, label: pick.nombre, texto, presentaciones: pres, presentacion });
     const ln = lineas.find((l) => l.key === key);
     cotizar(key, pick.producto_id, presentacion, ln?.cantidad ?? "1");

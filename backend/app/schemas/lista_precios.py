@@ -18,6 +18,7 @@ class ListaPreciosBase(BaseModel):
     vigencia_hasta: Optional[date] = None
     moneda: str = Field(default="MXN", max_length=3)
     notas: Optional[str] = None
+    es_default: bool = False
 
 
 class ListaPreciosCreate(ListaPreciosBase):
@@ -32,6 +33,7 @@ class ListaPreciosUpdate(BaseModel):
     vigencia_hasta: Optional[date] = None
     moneda: Optional[str] = Field(default=None, max_length=3)
     notas: Optional[str] = None
+    es_default: Optional[bool] = None
 
 
 class ListaPreciosOut(ORMModel, ListaPreciosBase):
@@ -89,3 +91,15 @@ class PrecioBulkResult(BaseModel):
     created: int
     updated: int
     skipped: int
+
+
+# ─── Asignación de la lista (wizard de importación / administración) ─────────
+class ListaAsignarIn(BaseModel):
+    """Asignar la lista como default del negocio y/o a clientes específicos."""
+    default: bool = False
+    cliente_ids: list[uuid.UUID] = Field(default_factory=list, max_length=2000)
+
+
+class ListaAsignarOut(BaseModel):
+    default: bool
+    clientes_asignados: int
