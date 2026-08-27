@@ -12,6 +12,7 @@ import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ImportarProductosModal } from "@/components/ImportarProductosModal";
 import { ProductoCombobox } from "@/components/ProductoCombobox";
+import { SatClaveCombobox } from "@/components/SatClaveCombobox";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
@@ -441,7 +442,10 @@ export default function ProductosPage() {
               )}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Clave SAT (producto/servicio)">
-                  <Input value={form.clave_sat} onChange={(e) => setForm({ ...form, clave_sat: e.target.value })} />
+                  <SatClaveCombobox
+                    value={form.clave_sat}
+                    onChange={(v) => setForm((f) => (f ? { ...f, clave_sat: v } : f))}
+                  />
                 </Field>
                 <Field label="Unidad SAT">
                   <Select value={form.unidad_sat} onChange={(e) => setForm({ ...form, unidad_sat: e.target.value })}>
