@@ -1,7 +1,8 @@
 """Precios v2: cotización (precio resuelto) y overrides por cliente/sucursal.
 
-- GET /precios/cotizar — resuelve el precio para (cliente, sucursal, producto,
-  presentación, cantidad); read gated por `menu:productos` (lo usan ventas/POS).
+- GET /precios/cotizar — resuelve el precio para (cliente, sucursal, serie,
+  proyecto, producto, presentación, cantidad); read gated por `menu:productos`
+  (lo usan ventas/POS).
 - Overrides CRUD — precios especiales negociados; read `menu:listas_precios`,
   write `lista_precios:gestionar`.
 """
@@ -36,13 +37,19 @@ def cotizar(
     cantidad: Decimal = Query(default=Decimal("1"), gt=0),
     cliente_id: Optional[UUID] = Query(default=None),
     sucursal_id: Optional[UUID] = Query(default=None),
+    # Las otras dos dimensiones de la negociación. Se piden aquí porque el
+    # documento las conoce (la serie con la que se folia, el proyecto de la
+    # orden) y sin ellas la cotización no puede ser la que se va a cobrar.
+    serie_id: Optional[UUID] = Query(default=None),
+    proyecto_id: Optional[UUID] = Query(default=None),
     fecha: Optional[date] = Query(default=None),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ_COTIZAR)),
 ):
     res = resolver_precio(
         db, producto_id=producto_id, presentacion=presentacion, cantidad=cantidad,
-        cliente_id=cliente_id, sucursal_id=sucursal_id, fecha=fecha,
+        cliente_id=cliente_id, sucursal_id=sucursal_id,
+        serie_id=serie_id, proyecto_id=proyecto_id, fecha=fecha,
     )
     return CotizacionOut(
         producto_id=producto_id, presentacion=presentacion, cantidad=cantidad,

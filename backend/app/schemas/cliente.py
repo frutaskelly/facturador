@@ -24,7 +24,6 @@ class ClienteBase(BaseModel):
     metodo_pago_default: Optional[str] = Field(default=None, max_length=5)
     domicilio_fiscal: dict = Field(default_factory=dict)
     # commercial
-    lista_precios_id: Optional[uuid.UUID] = None
     condiciones_pago: Optional[str] = Field(default=None, max_length=50)
     limite_credito: Decimal = Field(default=Decimal("0"), ge=0)
     dias_credito: int = Field(default=0, ge=0)
@@ -52,7 +51,6 @@ class ClienteUpdate(BaseModel):
     forma_pago_default: Optional[str] = Field(default=None, max_length=5)
     metodo_pago_default: Optional[str] = Field(default=None, max_length=5)
     domicilio_fiscal: Optional[dict] = None
-    lista_precios_id: Optional[uuid.UUID] = None
     condiciones_pago: Optional[str] = Field(default=None, max_length=50)
     limite_credito: Optional[Decimal] = Field(default=None, ge=0)
     dias_credito: Optional[int] = Field(default=None, ge=0)

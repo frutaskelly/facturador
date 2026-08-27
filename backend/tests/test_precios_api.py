@@ -14,13 +14,13 @@ from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
 from app.models import (
-    Cliente, ListaPrecios, Membership, Precio, PrecioOverride, Producto,
-    Role, Sucursal, Tenant, User,
+    Cliente, ListaAsignacion, ListaPrecios, Membership, Precio, PrecioOverride,
+    Producto, Proyecto, Role, Serie, Sucursal, Tenant, User,
 )
 
 _PURGE = (
-    "precio_overrides", "precios", "sucursales", "listas_precios",
-    "productos", "clientes",
+    "lista_asignaciones", "precio_overrides", "precios", "listas_precios",
+    "proyectos", "sucursales", "series", "productos", "clientes",
 )
 
 
@@ -65,7 +65,8 @@ def env(db_engine):
         cli1 = Cliente(tenant_id=tid, codigo="C1", legal_name="Cliente 1 SA", rfc="XAXX010101000")
         cli3 = Cliente(tenant_id=tid, codigo="C3", legal_name="Cliente 3 SA", rfc="XEXX010101000")
         db.add_all([cli1, cli3]); db.flush()
-        cli3.lista_precios_id = menudeo.id  # nivel = menudeo
+        db.add(ListaAsignacion(tenant_id=tid, lista_id=menudeo.id, cliente_id=cli3.id))
+        db.flush()  # nivel del cliente 3 = menudeo
 
         slp = Sucursal(tenant_id=tid, cliente_id=cli1.id, nombre="SLP")
         qro = Sucursal(tenant_id=tid, cliente_id=cli1.id, nombre="QRO")
@@ -226,3 +227,140 @@ def test_rbac(client, env, auth_as):
                        json={"cliente_id": env["cli1"], "nombre": "X"}).status_code == 403
     assert client.post("/api/v1/precios/overrides", headers=h, json={
         "cliente_id": env["cli1"], "producto_id": env["aguacate"], "precio_unitario": "1"}).status_code == 403
+
+
+# ─── Asignación de listas: cliente · sucursal · serie · proyecto ─────────────
+# El caso real: por el grupo de Pachuca entran EHMO y MAFAN, cada uno con su
+# serie y sus proyectos, y cada combinación se negoció a un precio distinto.
+def _crear_escenario(client, h, env):
+    """Un cliente limpio, cuatro listas a cuatro precios, su serie y su proyecto.
+
+    Cliente propio a propósito: los del fixture ya traen overrides por producto
+    o una lista asignada, y taparían justo lo que se quiere medir.
+    """
+    cliente = client.post("/api/v1/clientes", headers=h, json={
+        "legal_name": "EHMO SA de CV", "rfc": "XAXX010101000"}).json()["id"]
+    listas = {}
+    for codigo, precio in (("GLOBAL", "30"), ("PLAZA", "28"), ("SERIE", "26"), ("PROY", "24")):
+        lid = client.post("/api/v1/listas-precios", headers=h,
+                          json={"codigo": codigo, "nombre": f"Lista {codigo}"}).json()["id"]
+        client.post(f"/api/v1/listas-precios/{lid}/precios", headers=h, json={
+            "producto_id": env["aguacate"], "presentacion": "KILO",
+            "precio_unitario": precio, "cantidad_minima": 1})
+        listas[codigo] = lid
+    serie = client.post("/api/v1/series", headers=h, json={
+        "codigo": "ZEHMOHOS", "tipo": "FISCAL", "tipo_documento": "FACTURA"}).json()
+    proyecto = client.post("/api/v1/proyectos", headers=h, json={
+        "nombre": "Hospitales e IMSS Bienestar", "cliente_id": cliente}).json()
+    return cliente, listas, serie, proyecto
+
+
+def test_asignacion_gana_la_mas_especifica(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"]); pid = env["aguacate"]
+    ehmo, listas, serie, proyecto = _crear_escenario(client, h, env)
+    suc = client.post("/api/v1/sucursales", headers=h,
+                      json={"cliente_id": ehmo, "nombre": "Pachuca"}).json()["id"]
+
+    def asignar(lista, **dims):
+        r = client.post("/api/v1/asignaciones-precios", headers=h,
+                        json={"lista_id": listas[lista], **dims})
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    asignar("GLOBAL", cliente_id=ehmo)
+    # El cliente solo: mismos precios en todo el país.
+    assert float(_cot(client, h, pid, cliente_id=ehmo)["precio"]) == 30.0
+    assert _cot(client, h, pid, cliente_id=ehmo)["origen"] == "lista_cliente"
+
+    asignar("PLAZA", cliente_id=ehmo, sucursal_id=suc)
+    plaza = _cot(client, h, pid, sucursal_id=suc)
+    assert float(plaza["precio"]) == 28.0 and plaza["origen"] == "lista_sucursal"
+    # …y un documento SIN sucursal sigue en la del cliente: el renglón de plaza
+    # tiene la dimensión llena, así que no aplica a lo que no la trae.
+    assert float(_cot(client, h, pid, cliente_id=ehmo)["precio"]) == 30.0
+
+    asignar("SERIE", cliente_id=ehmo, serie_id=serie["id"])
+    con_serie = _cot(client, h, pid, sucursal_id=suc, serie_id=serie["id"])
+    assert float(con_serie["precio"]) == 26.0 and con_serie["origen"] == "lista_serie"
+
+    asignar("PROY", cliente_id=ehmo, proyecto_id=proyecto["id"])
+    con_proy = _cot(client, h, pid, sucursal_id=suc, serie_id=serie["id"],
+                    proyecto_id=proyecto["id"])
+    assert float(con_proy["precio"]) == 24.0 and con_proy["origen"] == "lista_proyecto"
+
+
+def test_simular_dice_que_asignacion_ganaria(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    ehmo, listas, serie, proyecto = _crear_escenario(client, h, env)
+    client.post("/api/v1/asignaciones-precios", headers=h,
+                json={"lista_id": listas["GLOBAL"], "cliente_id": ehmo})
+    client.post("/api/v1/asignaciones-precios", headers=h,
+                json={"lista_id": listas["PROY"], "cliente_id": ehmo,
+                      "proyecto_id": proyecto["id"]})
+
+    solo_cliente = client.get("/api/v1/asignaciones-precios/simular", headers=h,
+                              params={"cliente_id": ehmo}).json()
+    assert solo_cliente["lista_id"] == listas["GLOBAL"] and solo_cliente["especificidad"] == 1
+
+    con_proyecto = client.get("/api/v1/asignaciones-precios/simular", headers=h,
+                              params={"cliente_id": ehmo, "proyecto_id": proyecto["id"]}).json()
+    assert con_proyecto["lista_id"] == listas["PROY"]
+    assert con_proyecto["especificidad"] == 9          # proyecto 8 + cliente 1
+    assert con_proyecto["proyecto_nombre"] == "Hospitales e IMSS Bienestar"
+
+    # Un cliente sin ninguna asignación: null, no un renglón inventado.
+    assert client.get("/api/v1/asignaciones-precios/simular", headers=h,
+                      params={"cliente_id": env["cli1"]}).json() is None
+
+
+def test_asignacion_incoherente_se_rechaza(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    ehmo, listas, _serie, proyecto = _crear_escenario(client, h, env)
+    # `slp` es sucursal de cli1; el proyecto es de EHMO. Cruzarlos daría un
+    # renglón que no puede aplicar nunca — y que en la tabla parecería activo.
+    r = client.post("/api/v1/asignaciones-precios", headers=h, json={
+        "lista_id": listas["PLAZA"], "cliente_id": ehmo, "sucursal_id": env["slp"]})
+    assert r.status_code == 422 and "sucursal" in r.json()["detail"]
+    r = client.post("/api/v1/asignaciones-precios", headers=h, json={
+        "lista_id": listas["PROY"], "cliente_id": env["cli1"], "proyecto_id": proyecto["id"]})
+    assert r.status_code == 422 and "proyecto" in r.json()["detail"]
+
+
+def test_asignacion_duplicada_da_409(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    ehmo, listas, _serie, _proyecto = _crear_escenario(client, h, env)
+    body = {"lista_id": listas["GLOBAL"], "cliente_id": ehmo}
+    assert client.post("/api/v1/asignaciones-precios", headers=h, json=body).status_code == 201
+    assert client.post("/api/v1/asignaciones-precios", headers=h, json=body).status_code == 409
+    # Renovar la MISMA combinación con otra vigencia sí se puede.
+    assert client.post("/api/v1/asignaciones-precios", headers=h, json={
+        **body, "lista_id": listas["PLAZA"], "vigencia_desde": "2027-01-01"}).status_code == 201
+
+
+def test_borrar_proyecto_se_lleva_sus_asignaciones(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"]); pid = env["aguacate"]
+    ehmo, listas, _serie, proyecto = _crear_escenario(client, h, env)
+    client.post("/api/v1/asignaciones-precios", headers=h,
+                json={"lista_id": listas["GLOBAL"], "cliente_id": ehmo})
+    client.post("/api/v1/asignaciones-precios", headers=h,
+                json={"lista_id": listas["PROY"], "cliente_id": ehmo,
+                      "proyecto_id": proyecto["id"]})
+    assert float(_cot(client, h, pid, cliente_id=ehmo,
+                      proyecto_id=proyecto["id"])["precio"]) == 24.0
+
+    assert client.delete(f"/api/v1/proyectos/{proyecto['id']}", headers=h).status_code == 204
+    # El proyecto archivado ya no fija precios: se cae a la del cliente.
+    assert float(_cot(client, h, pid, cliente_id=ehmo,
+                      proyecto_id=proyecto["id"])["precio"]) == 30.0
+
+
+def test_proyecto_codigo_se_autogenera(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/proyectos", headers=h,
+                    json={"nombre": "Ceresos y Seguridad Pública"})
+    assert r.status_code == 201, r.text
+    assert r.json()["codigo"] == "CERESOSYSE"
+    # Mismo nombre otra vez → sufijo, no choque contra el índice único.
+    otro = client.post("/api/v1/proyectos", headers=h,
+                       json={"nombre": "Ceresos y Seguridad Pública"})
+    assert otro.status_code == 201 and otro.json()["codigo"] == "CERESOSYSE2"

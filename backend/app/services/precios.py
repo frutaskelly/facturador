@@ -1,14 +1,21 @@
 """Resolutor de precios (precios v2).
 
-Devuelve el precio unitario para (cliente, sucursal, producto, presentación,
-cantidad, fecha) aplicando prioridad MÁS-ESPECÍFICO-GANA (estándar wholesale,
-no "precio más bajo"):
+Devuelve el precio unitario para (cliente, sucursal, serie, proyecto, producto,
+presentación, cantidad, fecha) aplicando prioridad MÁS-ESPECÍFICO-GANA (estándar
+wholesale, no "precio más bajo"):
 
   1. Override de la sucursal + producto
   2. Override del cliente + producto
-  3. Lista de precios de la sucursal (tier por cantidad)
-  4. Lista de precios del cliente (tier por cantidad)
-  5. Lista base/default del tenant (código UNICO, o la primera activa)
+  3. Lista FORZADA a mano en el documento (`remisiones.lista_precios_id`)
+  4. Lista asignada — el renglón de `lista_asignaciones` que coincide en las
+     dimensiones más específicas (proyecto 8 · serie 4 · sucursal 2 · cliente 1)
+  5. Lista base/default del tenant (`es_default`, o código UNICO, o la 1ª activa)
+
+El paso 4 es el que sustituyó a "lista de la sucursal / lista del cliente": el
+negocio también pacta por SERIE y por PROYECTO, y esas cuatro dimensiones se
+combinan (EHMO en Pachuca bajo HOSPITALES es una negociación distinta de EHMO en
+Pachuca a secas). Los pesos NO viven aquí: son la columna generada
+`lista_asignaciones.especificidad`, para declararlos una sola vez.
 
 Dentro de una lista se toma el tier cuyo `cantidad_minima` ≤ cantidad más alto
 (así "compra más → mejor precio"). Todo filtrado por vigencia.
@@ -23,7 +30,14 @@ from uuid import UUID
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ..models import Cliente, ListaPrecios, Precio, PrecioOverride, Producto, Sucursal
+from ..models import (
+    ListaAsignacion,
+    ListaPrecios,
+    Precio,
+    PrecioOverride,
+    Producto,
+    Sucursal,
+)
 
 
 def _vigente(query, model, fecha):
@@ -54,6 +68,47 @@ def _precio_lista(db, lista_id, producto_id, presentacion, cantidad, fecha):
     q = _vigente(q, Precio, fecha).order_by(Precio.cantidad_minima.desc())
     row = q.first()
     return row[0] if row else None
+
+
+def resolver_asignacion(
+    db: Session,
+    *,
+    cliente_id: Optional[UUID] = None,
+    sucursal_id: Optional[UUID] = None,
+    serie_id: Optional[UUID] = None,
+    proyecto_id: Optional[UUID] = None,
+    fecha: Optional[date] = None,
+) -> Optional[ListaAsignacion]:
+    """El renglón de `lista_asignaciones` que aplica, o None.
+
+    Una dimensión en NULL es comodín: coincide con lo que sea. Una dimensión
+    llena sólo coincide con ese valor exacto — por eso un renglón de sucursal
+    NO aplica a un documento sin sucursal, que es justo lo que se quiere.
+    """
+    fecha = fecha or date.today()
+    q = db.query(ListaAsignacion).filter(
+        or_(ListaAsignacion.cliente_id.is_(None), ListaAsignacion.cliente_id == cliente_id),
+        or_(ListaAsignacion.sucursal_id.is_(None), ListaAsignacion.sucursal_id == sucursal_id),
+        or_(ListaAsignacion.serie_id.is_(None), ListaAsignacion.serie_id == serie_id),
+        or_(ListaAsignacion.proyecto_id.is_(None), ListaAsignacion.proyecto_id == proyecto_id),
+    )
+    q = _vigente(q, ListaAsignacion, fecha)
+    # A igual especificidad gana la más reciente: es la última negociación.
+    return q.order_by(
+        ListaAsignacion.especificidad.desc(), ListaAsignacion.created_at.desc()
+    ).first()
+
+
+def origen_de(a: ListaAsignacion) -> str:
+    """Cómo se le llama en pantalla al renglón que ganó: por su dimensión más
+    específica, que es la que el vendedor reconoce ("es el precio del proyecto")."""
+    if a.proyecto_id is not None:
+        return "lista_proyecto"
+    if a.serie_id is not None:
+        return "lista_serie"
+    if a.sucursal_id is not None:
+        return "lista_sucursal"
+    return "lista_cliente"
 
 
 def _lista_default(db):
@@ -98,6 +153,9 @@ def resolver_precio(
     cantidad: Decimal = Decimal("1"),
     cliente_id: Optional[UUID] = None,
     sucursal_id: Optional[UUID] = None,
+    serie_id: Optional[UUID] = None,
+    proyecto_id: Optional[UUID] = None,
+    lista_id: Optional[UUID] = None,
     fecha: Optional[date] = None,
 ) -> Optional[dict]:
     """Precio resuelto + origen, o None si no hay ninguna regla aplicable.
@@ -114,7 +172,6 @@ def resolver_precio(
         suc = db.query(Sucursal).filter(Sucursal.id == sucursal_id, Sucursal.deleted_at.is_(None)).one_or_none()
         if suc and cliente_id is None:
             cliente_id = suc.cliente_id
-    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).one_or_none() if cliente_id else None
 
     # Intentos de presentación: exacta primero; si falla, la unidad base × factor.
     # Cada intento es (presentacion, multiplicador_del_precio, cantidad_para_el_tramo).
@@ -150,16 +207,25 @@ def resolver_precio(
         p = _resolver(lambda pr, _c: _override(db, cliente_id=cliente_id, producto_id=producto_id, presentacion=pr, fecha=fecha))
         if p is not None:
             return {"precio": p, "origen": "override_cliente"}
-    # 3. lista de la sucursal
-    if suc and suc.lista_precios_id:
-        p = _resolver(lambda pr, cant: _precio_lista(db, suc.lista_precios_id, producto_id, pr, cant, fecha))
+    # 3. lista forzada a mano en el documento
+    if lista_id:
+        p = _resolver(lambda pr, cant: _precio_lista(db, lista_id, producto_id, pr, cant, fecha))
         if p is not None:
-            return {"precio": p, "origen": "lista_sucursal", "lista_id": str(suc.lista_precios_id)}
-    # 4. lista del cliente
-    if cliente and cliente.lista_precios_id:
-        p = _resolver(lambda pr, cant: _precio_lista(db, cliente.lista_precios_id, producto_id, pr, cant, fecha))
+            return {"precio": p, "origen": "lista_forzada", "lista_id": str(lista_id)}
+    # 4. la asignación que coincide en las dimensiones más específicas
+    asignacion = resolver_asignacion(
+        db, cliente_id=cliente_id, sucursal_id=sucursal_id,
+        serie_id=serie_id, proyecto_id=proyecto_id, fecha=fecha,
+    )
+    if asignacion is not None:
+        p = _resolver(lambda pr, cant: _precio_lista(db, asignacion.lista_id, producto_id, pr, cant, fecha))
         if p is not None:
-            return {"precio": p, "origen": "lista_cliente", "lista_id": str(cliente.lista_precios_id)}
+            return {
+                "precio": p,
+                "origen": origen_de(asignacion),
+                "lista_id": str(asignacion.lista_id),
+                "asignacion_id": str(asignacion.id),
+            }
     # 5. lista base/default
     base_lp = _lista_default(db)
     if base_lp is not None:

@@ -26,7 +26,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Almacen, Cliente, GrupoWhatsapp, OCRecibida, Producto, Remision, Sucursal
+from ...models import (
+    Almacen,
+    Cliente,
+    GrupoWhatsapp,
+    OCRecibida,
+    Producto,
+    Proyecto,
+    Remision,
+    Sucursal,
+)
 from ...schemas.common import Page
 from ...schemas.oc_recibida import (
     CrearRemisionIn,
@@ -86,6 +95,24 @@ def _pistas_de(payload: dict) -> list[cliente_match.Pista]:
     return pistas
 
 
+def _proyecto_de(db: Session, tenant_id, payload: dict):
+    """El proyecto del catálogo al que apunta la clave PROYECTO del documento.
+
+    Es lo que hace que una orden que dice "HOSPITALES" entre ya etiquetada con
+    la negociación —y por lo tanto con sus precios— sin que nadie capture nada.
+    Devuelve None si la clave no está dada de alta o no tiene proyecto enlazado;
+    entonces el operador lo elige en la bandeja y ahí se aprende.
+    """
+    perfil = (payload.get("perfil") or "").strip().lower()
+    proyecto = (payload.get("proyecto") or "").strip()
+    if not perfil or not proyecto:
+        return None
+    fila = cliente_match.buscar_equivalencia(
+        db, tenant_id, "PROYECTO", f"{perfil}:{proyecto}", solo_confirmadas=True
+    )
+    return fila.proyecto_id if fila is not None else None
+
+
 def _grupo_apagado(db: Session, jid: str) -> bool:
     """¿El dueño apagó este grupo desde la pantalla de Conexiones?"""
     if not jid:
@@ -125,6 +152,7 @@ def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
     # a las observaciones, resuelva o no una sucursal. Es lo que el equipo lee
     # para saber a dónde llevar la mercancía.
     oc.punto_entrega = (payload.get("ubicacion") or "").strip() or None
+    oc.proyecto_id = _proyecto_de(db, oc.tenant_id, payload)
 
     if res.cliente_id is not None:
         if oc.punto_entrega:
@@ -357,6 +385,9 @@ def asignar(
                     status_code=422, detail="La sucursal no pertenece al cliente de la orden"
                 )
         oc.sucursal_id = data["sucursal_id"]
+    if "proyecto_id" in data:
+        ensure_fk(db, Proyecto, data["proyecto_id"], "proyecto_id")
+        oc.proyecto_id = data["proyecto_id"]
     if "folio_externo" in data:
         oc.folio_externo = data["folio_externo"]
     if "punto_entrega" in data:
@@ -377,6 +408,20 @@ def asignar(
                 oc.cliente_id, sucursal_id=oc.sucursal_id,
                 origen="MANUAL", confianza="CONFIRMADA", user_id=ctx.user_id,
             )
+        # El proyecto que acaba de elegir el humano se guarda EN la equivalencia
+        # PROYECTO: la próxima orden que diga "HOSPITALES" ya entra etiquetada.
+        if oc.proyecto_id is not None:
+            perfil = str((oc.payload or {}).get("perfil") or "").strip().lower()
+            nombre_proy = str((oc.payload or {}).get("proyecto") or "").strip()
+            if perfil and nombre_proy:
+                fila = cliente_match.aprender(
+                    db, ctx.tenant_id, "PROYECTO", f"{perfil}:{nombre_proy}",
+                    oc.cliente_id, origen="MANUAL", confianza="CONFIRMADA",
+                    user_id=ctx.user_id,
+                )
+                if fila is not None:
+                    fila.proyecto_id = oc.proyecto_id
+
         for pista in _pistas_de(oc.payload or {}):
             # El JID es la pista MÁS DÉBIL: un mismo grupo recibe órdenes de
             # varias razones sociales (EHMO/MAFAN, Balles/Jubran). Aprenderlo
@@ -464,6 +509,7 @@ def crear_remision(
         cliente_facturacion_id=oc.cliente_id,
         sucursal_id=oc.sucursal_id,
         serie_id=serie_id,
+        proyecto_id=oc.proyecto_id,
         almacen_id=almacen_id,
         fecha_remision=payload.fecha_remision,
         fecha_entrega=payload.fecha_entrega or _fecha(p.get("fecha_entrega")),

@@ -13,7 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Cliente, ListaPrecios, Sucursal
+from ...models import Cliente, Sucursal
 from ...schemas.common import Page
 from ...schemas.sucursal import SucursalCreate, SucursalOut, SucursalUpdate
 from ._helpers import ensure_fk, get_or_404, paginate
@@ -70,7 +70,6 @@ def create_sucursal(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     ensure_fk(db, Cliente, payload.cliente_id, "cliente_id")
-    ensure_fk(db, ListaPrecios, payload.lista_precios_id, "lista_precios_id")
     data = payload.model_dump()
     # El código se autogenera por cliente si no viene dado.
     if not data.get("codigo"):
@@ -91,8 +90,6 @@ def update_sucursal(
 ):
     obj = get_or_404(db, Sucursal, sucursal_id)
     data = payload.model_dump(exclude_unset=True)
-    if "lista_precios_id" in data:
-        ensure_fk(db, ListaPrecios, data["lista_precios_id"], "lista_precios_id")
     for key, value in data.items():
         setattr(obj, key, value)
     db.flush()

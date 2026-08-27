@@ -7,7 +7,8 @@ que adivinar. Único por (tenant, sistema, clave_normalizada).
 `sistema` dice de dónde viene la clave:
   RFC       — el RFC impreso en la orden de compra
   SAE       — '<empresa>:<cliente>' de ASPEL SAE (p. ej. '02:5')
-  PROYECTO  — '<perfil>:<PROYECTO>' del bot (p. ej. 'ehmo:HOSPITALES')
+  PROYECTO  — '<perfil>:<PROYECTO>' del bot (p. ej. 'ehmo:HOSPITALES'); si la
+              fila trae `proyecto_id`, además etiqueta el documento con él
   NOMBRE    — la razón social tal como aparece dentro del documento
   UBICACION — '<perfil>:<ubicación>' (hospital/plantel) → cliente + SUCURSAL
   WHATSAPP  — el JID del grupo, solo para grupos de un solo cliente
@@ -52,6 +53,11 @@ class ClienteExterno(Base):
     # operación por la que entre el pedido (EHMO: ZEHMOHOS y ZEHMOFAC).
     serie_factura_id = Column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"))
     serie_remision_id = Column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"))
+    # Sólo en las filas de sistema PROYECTO: a qué proyecto del catálogo
+    # corresponde esa clave. Es lo que hace que una orden que dice
+    # "ehmo:HOSPITALES" se etiquete sola y le toquen los precios de esa
+    # negociación, sin que nadie capture nada.
+    proyecto_id = Column(UUID(as_uuid=True), ForeignKey("proyectos.id", ondelete="SET NULL"))
     origen = Column(String(12), nullable=False, server_default="MANUAL")        # MANUAL | BOT | IMPORT | IA
     confianza = Column(String(10), nullable=False, server_default="CONFIRMADA")  # CONFIRMADA | SUGERIDA
     notas = Column(Text)

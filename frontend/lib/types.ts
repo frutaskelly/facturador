@@ -73,6 +73,8 @@ export type ListaPrecios = {
   vigencia_hasta?: string | null;
   moneda: string;
   notas?: string | null;
+  /** La lista base del negocio: la que se cobra cuando ninguna asignación aplica. */
+  es_default: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -89,13 +91,52 @@ export type Precio = {
   vigencia_hasta?: string | null;
 };
 
+/** La negociación con nombre propio: "HOSPITALES E IMSS BIENESTAR". */
+export type Proyecto = {
+  id: string;
+  tenant_id: string;
+  codigo: string;
+  nombre: string;
+  cliente_id?: string | null;
+  cliente_nombre?: string | null;
+  activo: boolean;
+  notas?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * A QUÉ aplica una lista de precios. Cada dimensión en null es un COMODÍN
+ * ("aplica a cualquiera"); gana el renglón con mayor `especificidad`
+ * (proyecto 8 · serie 4 · sucursal 2 · cliente 1), que calcula la base.
+ */
+export type ListaAsignacion = {
+  id: string;
+  tenant_id: string;
+  lista_id: string;
+  cliente_id?: string | null;
+  sucursal_id?: string | null;
+  serie_id?: string | null;
+  proyecto_id?: string | null;
+  vigencia_desde?: string | null;
+  vigencia_hasta?: string | null;
+  notas?: string | null;
+  especificidad: number;
+  lista_nombre?: string | null;
+  cliente_nombre?: string | null;
+  sucursal_nombre?: string | null;
+  serie_codigo?: string | null;
+  proyecto_nombre?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Sucursal = {
   id: string;
   tenant_id: string;
   cliente_id: string;
   codigo?: string | null;
   nombre: string;
-  lista_precios_id?: string | null;
   domicilio: Record<string, unknown>;
   contacto?: string | null;
   telefono?: string | null;
@@ -163,7 +204,6 @@ export type Cliente = {
   forma_pago_default?: string | null;
   metodo_pago_default?: string | null;
   domicilio_fiscal: Record<string, unknown>;
-  lista_precios_id?: string | null;
   condiciones_pago?: string | null;
   limite_credito: string;
   dias_credito: number;
@@ -217,6 +257,8 @@ export type Remision = {
   almacen_id?: string | null;
   sucursal_id?: string | null;
   lista_precios_id?: string | null;
+  proyecto_id?: string | null;
+  serie_id?: string | null;
   fecha_remision: string;
   fecha_entrega?: string | null;
   estado: "BORRADOR" | "CONFIRMADA" | "FACTURADA" | "CANCELADA";
@@ -651,6 +693,8 @@ export type OCRecibida = {
   sucursal_nombre?: string | null;
   resuelto_via?: string | null;
   punto_entrega?: string | null;
+  proyecto_id?: string | null;
+  proyecto_nombre?: string | null;
   candidatos: string[];        // clientes posibles según el grupo del que llegó
   ambiguo: boolean;
   remision_id?: string | null;

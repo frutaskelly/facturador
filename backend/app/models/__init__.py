@@ -18,10 +18,11 @@ from .inventario import LoteInventario, Merma, MovimientoInventario
 from .oc_recibida import OCRecibida
 from .orden_compra import LineaOrdenCompra, OrdenCompra
 from .permission import Permission
-from .precio import ListaPrecios, Precio
+from .precio import ListaAsignacion, ListaPrecios, Precio
 from .producto import Producto
 from .producto_alias import ProductoAlias
 from .producto_cliente import ProductoCliente
+from .proyecto import Proyecto
 from .sat_catalogo import SatClaveProdServ, SatClaveUnidad
 from .proveedor import Proveedor
 from .remision import LineaRemision, Remision
@@ -47,7 +48,9 @@ __all__ = [
     "SatClaveProdServ",
     "SatClaveUnidad",
     "ListaPrecios",
+    "ListaAsignacion",
     "Precio",
+    "Proyecto",
     "Cliente",
     "ClienteExterno",
     "Conexion",

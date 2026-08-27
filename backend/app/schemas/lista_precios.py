@@ -1,10 +1,10 @@
-"""Price-list and price schemas."""
+"""Listas de precios, sus renglones y a qué aplican."""
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .common import ORMModel
 
@@ -103,3 +103,55 @@ class ListaAsignarIn(BaseModel):
 class ListaAsignarOut(BaseModel):
     default: bool
     clientes_asignados: int
+
+
+# ─── A qué aplica una lista: cliente, sucursal, serie y/o proyecto ──────────
+class ListaAsignacionBase(BaseModel):
+    """Cada campo en None es un COMODÍN: "aplica a cualquiera".
+
+    Sólo cliente → el mismo precio en todo el país. Cliente + sucursal → la
+    plaza. + serie o + proyecto → la negociación concreta.
+    """
+    lista_id: uuid.UUID
+    cliente_id: Optional[uuid.UUID] = None
+    sucursal_id: Optional[uuid.UUID] = None
+    serie_id: Optional[uuid.UUID] = None
+    proyecto_id: Optional[uuid.UUID] = None
+    vigencia_desde: Optional[date] = None
+    vigencia_hasta: Optional[date] = None
+    notas: Optional[str] = None
+
+
+class ListaAsignacionCreate(ListaAsignacionBase):
+    @model_validator(mode="after")
+    def _alguna_dimension(self):
+        if not any((self.cliente_id, self.sucursal_id, self.serie_id, self.proyecto_id)):
+            raise ValueError(
+                "Elige al menos cliente, sucursal, serie o proyecto. "
+                "Para la lista base del negocio usa «lista predeterminada»."
+            )
+        return self
+
+
+class ListaAsignacionUpdate(BaseModel):
+    lista_id: Optional[uuid.UUID] = None
+    vigencia_desde: Optional[date] = None
+    vigencia_hasta: Optional[date] = None
+    notas: Optional[str] = None
+
+
+class ListaAsignacionOut(ORMModel, ListaAsignacionBase):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    # Suma de pesos de las dimensiones llenas (la calcula Postgres). Es
+    # literalmente el orden de prioridad, y por eso se muestra en pantalla.
+    especificidad: int
+    created_at: datetime
+    updated_at: datetime
+    # Nombres ya resueltos: la tabla se lee sin que el navegador cruce cinco
+    # catálogos para pintar un renglón.
+    lista_nombre: Optional[str] = None
+    cliente_nombre: Optional[str] = None
+    sucursal_nombre: Optional[str] = None
+    serie_codigo: Optional[str] = None
+    proyecto_nombre: Optional[str] = None

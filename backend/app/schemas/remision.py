@@ -41,7 +41,10 @@ class RemisionCreate(BaseModel):
     cliente_facturacion_id: uuid.UUID
     almacen_id: Optional[uuid.UUID] = None
     sucursal_id: Optional[uuid.UUID] = None
+    # Lista forzada a mano: gana sobre la resolución por cliente/sucursal/serie/proyecto.
     lista_precios_id: Optional[uuid.UUID] = None
+    # La negociación bajo la que se vende; también decide qué lista aplica.
+    proyecto_id: Optional[uuid.UUID] = None
     # Override manual de serie; si es None se resuelve por sucursal/cliente/default.
     serie_id: Optional[uuid.UUID] = None
     fecha_remision: Optional[date] = None
@@ -61,6 +64,7 @@ class RemisionUpdate(BaseModel):
     sucursal_id: Optional[uuid.UUID] = None
     almacen_id: Optional[uuid.UUID] = None
     lista_precios_id: Optional[uuid.UUID] = None
+    proyecto_id: Optional[uuid.UUID] = None
     fecha_remision: Optional[date] = None
     fecha_entrega: Optional[date] = None
     descuento: Optional[Decimal] = Field(default=None, ge=0)
@@ -83,6 +87,8 @@ class RemisionOut(ORMModel):
     almacen_id: Optional[uuid.UUID] = None
     sucursal_id: Optional[uuid.UUID] = None
     lista_precios_id: Optional[uuid.UUID] = None
+    proyecto_id: Optional[uuid.UUID] = None
+    serie_id: Optional[uuid.UUID] = None
     fecha_remision: date
     fecha_entrega: Optional[date] = None
     estado: str

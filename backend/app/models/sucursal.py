@@ -1,9 +1,9 @@
 """Sucursales (ship-to) y overrides de precio — precios v2.
 
-Una `Sucursal` pertenece a un cliente y puede tener su propia lista de precios;
-si no, hereda la del cliente. Un `PrecioOverride` fija el precio de un producto
-para un cliente o una sucursal específica (lo más específico gana en el
-resolutor de precios).
+Una `Sucursal` pertenece a un cliente. Qué lista de precios le toca ya no se
+guarda aquí: vive en `ListaAsignacion` (modelo `precio.py`), junto con las demás
+dimensiones de la negociación. Un `PrecioOverride` fija el precio de UN producto
+para un cliente o una sucursal, y le gana a cualquier lista.
 """
 from sqlalchemy import (
     Boolean,
@@ -15,7 +15,6 @@ from sqlalchemy import (
     String,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import relationship
 
 from ..core.db import Base
 from .base import SoftDeleteMixin, TimestampMixin, tenant_fk, uuid_pk
@@ -29,8 +28,6 @@ class Sucursal(Base, TimestampMixin, SoftDeleteMixin):
     cliente_id = Column(UUID(as_uuid=True), ForeignKey("clientes.id", ondelete="CASCADE"), nullable=False, index=True)
     codigo = Column(String(20))
     nombre = Column(String(254), nullable=False)
-    # Lista propia de la sucursal (override de nivel); si NULL hereda la del cliente.
-    lista_precios_id = Column(UUID(as_uuid=True), ForeignKey("listas_precios.id", ondelete="SET NULL"))
     domicilio = Column(JSONB, nullable=False, server_default="{}")
     contacto = Column(String(254))
     telefono = Column(String(20))
@@ -43,8 +40,6 @@ class Sucursal(Base, TimestampMixin, SoftDeleteMixin):
     # ── series de folios de la sucursal (ganan sobre las del cliente) ──
     serie_factura_id = Column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"), nullable=True)
     serie_remision_id = Column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"), nullable=True)
-
-    lista_precios = relationship("ListaPrecios")
 
 
 class PrecioOverride(Base, TimestampMixin):

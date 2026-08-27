@@ -58,6 +58,69 @@ export interface paths {
         patch: operations["update_almacen_api_v1_almacenes__almacen_id__patch"];
         trace?: never;
     };
+    "/api/v1/asignaciones-precios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Asignaciones */
+        get: operations["list_asignaciones_api_v1_asignaciones_precios_get"];
+        put?: never;
+        /** Create Asignacion */
+        post: operations["create_asignacion_api_v1_asignaciones_precios_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/asignaciones-precios/simular": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Simular Asignacion
+         * @description Qué asignación ganaría para esa combinación — o null si ninguna.
+         *
+         *     Es la misma función que usa el resolutor de precios, expuesta para que se
+         *     pueda comprobar ANTES de emitir un documento en vez de descubrirlo en el PDF.
+         */
+        get: operations["simular_asignacion_api_v1_asignaciones_precios_simular_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/asignaciones-precios/{asignacion_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Asignacion */
+        delete: operations["delete_asignacion_api_v1_asignaciones_precios__asignacion_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Asignacion
+         * @description Cambia la lista o la vigencia. Las DIMENSIONES no se editan: cambiarlas
+         *     es otra negociación, y reusar el renglón borraría el rastro de la anterior.
+         */
+        patch: operations["update_asignacion_api_v1_asignaciones_precios__asignacion_id__patch"];
+        trace?: never;
+    };
     "/api/v1/auth/me": {
         parameters: {
             query?: never;
@@ -2405,6 +2468,43 @@ export interface paths {
         patch: operations["update_proveedor_api_v1_proveedores__proveedor_id__patch"];
         trace?: never;
     };
+    "/api/v1/proyectos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Proyectos */
+        get: operations["list_proyectos_api_v1_proyectos_get"];
+        put?: never;
+        /** Create Proyecto */
+        post: operations["create_proyecto_api_v1_proyectos_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/proyectos/{proyecto_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Proyecto */
+        get: operations["get_proyecto_api_v1_proyectos__proyecto_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Proyecto */
+        delete: operations["delete_proyecto_api_v1_proyectos__proyecto_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Proyecto */
+        patch: operations["update_proyecto_api_v1_proyectos__proyecto_id__patch"];
+        trace?: never;
+    };
     "/api/v1/registro": {
         parameters: {
             query?: never;
@@ -3350,8 +3450,6 @@ export interface components {
              * @default 0
              */
             limite_credito: number | string;
-            /** Lista Precios Id */
-            lista_precios_id?: string | null;
             /** Metodo Pago Default */
             metodo_pago_default?: string | null;
             /** Regimen Fiscal */
@@ -3530,8 +3628,6 @@ export interface components {
              * @default 0
              */
             limite_credito: string;
-            /** Lista Precios Id */
-            lista_precios_id?: string | null;
             /** Metodo Pago Default */
             metodo_pago_default?: string | null;
             /** Regimen Fiscal */
@@ -3598,8 +3694,6 @@ export interface components {
             legal_name?: string | null;
             /** Limite Credito */
             limite_credito?: number | string | null;
-            /** Lista Precios Id */
-            lista_precios_id?: string | null;
             /** Metodo Pago Default */
             metodo_pago_default?: string | null;
             /** Regimen Fiscal */
@@ -5332,6 +5426,93 @@ export interface components {
             /** Producto Nombre */
             producto_nombre?: string | null;
         };
+        /** ListaAsignacionCreate */
+        ListaAsignacionCreate: {
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /**
+             * Lista Id
+             * Format: uuid
+             */
+            lista_id: string;
+            /** Notas */
+            notas?: string | null;
+            /** Proyecto Id */
+            proyecto_id?: string | null;
+            /** Serie Id */
+            serie_id?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Vigencia Desde */
+            vigencia_desde?: string | null;
+            /** Vigencia Hasta */
+            vigencia_hasta?: string | null;
+        };
+        /** ListaAsignacionOut */
+        ListaAsignacionOut: {
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Especificidad */
+            especificidad: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Lista Id
+             * Format: uuid
+             */
+            lista_id: string;
+            /** Lista Nombre */
+            lista_nombre?: string | null;
+            /** Notas */
+            notas?: string | null;
+            /** Proyecto Id */
+            proyecto_id?: string | null;
+            /** Proyecto Nombre */
+            proyecto_nombre?: string | null;
+            /** Serie Codigo */
+            serie_codigo?: string | null;
+            /** Serie Id */
+            serie_id?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Vigencia Desde */
+            vigencia_desde?: string | null;
+            /** Vigencia Hasta */
+            vigencia_hasta?: string | null;
+        };
+        /** ListaAsignacionUpdate */
+        ListaAsignacionUpdate: {
+            /** Lista Id */
+            lista_id?: string | null;
+            /** Notas */
+            notas?: string | null;
+            /** Vigencia Desde */
+            vigencia_desde?: string | null;
+            /** Vigencia Hasta */
+            vigencia_hasta?: string | null;
+        };
         /**
          * ListaAsignarIn
          * @description Asignar la lista como default del negocio y/o a clientes específicos.
@@ -5698,6 +5879,10 @@ export interface components {
             origen_externo: string;
             /** Payload */
             payload?: Record<string, never>;
+            /** Proyecto Id */
+            proyecto_id?: string | null;
+            /** Proyecto Nombre */
+            proyecto_nombre?: string | null;
             /** Punto Entrega */
             punto_entrega?: string | null;
             /**
@@ -5807,6 +5992,10 @@ export interface components {
             motivo?: string | null;
             /** Origen Externo */
             origen_externo: string;
+            /** Proyecto Id */
+            proyecto_id?: string | null;
+            /** Proyecto Nombre */
+            proyecto_nombre?: string | null;
             /** Punto Entrega */
             punto_entrega?: string | null;
             /**
@@ -5848,6 +6037,8 @@ export interface components {
             folio_externo?: string | null;
             /** Motivo */
             motivo?: string | null;
+            /** Proyecto Id */
+            proyecto_id?: string | null;
             /** Punto Entrega */
             punto_entrega?: string | null;
             /** Sucursal Id */
@@ -6071,6 +6262,17 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** Page[ListaAsignacionOut] */
+        Page_ListaAsignacionOut_: {
+            /** Items */
+            items: components["schemas"]["ListaAsignacionOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
         /** Page[ListaPreciosOut] */
         Page_ListaPreciosOut_: {
             /** Items */
@@ -6163,6 +6365,17 @@ export interface components {
         Page_ProveedorOut_: {
             /** Items */
             items: components["schemas"]["ProveedorOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** Page[ProyectoOut] */
+        Page_ProyectoOut_: {
+            /** Items */
+            items: components["schemas"]["ProyectoOut"][];
             /** Limit */
             limit: number;
             /** Offset */
@@ -6904,6 +7117,66 @@ export interface components {
             /** Telefono */
             telefono?: string | null;
         };
+        /** ProyectoCreate */
+        ProyectoCreate: {
+            /**
+             * Activo
+             * @default true
+             */
+            activo: boolean;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Nombre */
+            nombre: string;
+            /** Notas */
+            notas?: string | null;
+        };
+        /** ProyectoOut */
+        ProyectoOut: {
+            /** Activo */
+            activo: boolean;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /** Codigo */
+            codigo: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+            /** Notas */
+            notas?: string | null;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** ProyectoUpdate */
+        ProyectoUpdate: {
+            /** Activo */
+            activo?: boolean | null;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Nombre */
+            nombre?: string | null;
+            /** Notas */
+            notas?: string | null;
+        };
         /** PruebaOut */
         PruebaOut: {
             /** Mensaje */
@@ -7044,6 +7317,8 @@ export interface components {
             nota_entrega?: string | null;
             /** Notas */
             notas?: string | null;
+            /** Proyecto Id */
+            proyecto_id?: string | null;
             /** Serie Id */
             serie_id?: string | null;
             /** Sucursal Id */
@@ -7116,6 +7391,10 @@ export interface components {
             pos_asignaciones: Record<string, never>;
             /** Pos Etapa */
             pos_etapa?: string | null;
+            /** Proyecto Id */
+            proyecto_id?: string | null;
+            /** Serie Id */
+            serie_id?: string | null;
             /** Subtotal */
             subtotal: string;
             /** Sucursal Id */
@@ -7190,6 +7469,10 @@ export interface components {
             pos_asignaciones: Record<string, never>;
             /** Pos Etapa */
             pos_etapa?: string | null;
+            /** Proyecto Id */
+            proyecto_id?: string | null;
+            /** Serie Id */
+            serie_id?: string | null;
             /** Subtotal */
             subtotal: string;
             /** Sucursal Id */
@@ -7232,6 +7515,8 @@ export interface components {
              * @default false
              */
             permitir_negativos: boolean;
+            /** Proyecto Id */
+            proyecto_id?: string | null;
             /** Sucursal Id */
             sucursal_id?: string | null;
         };
@@ -7566,8 +7851,6 @@ export interface components {
             contacto?: string | null;
             /** Domicilio */
             domicilio?: Record<string, never>;
-            /** Lista Precios Id */
-            lista_precios_id?: string | null;
             /** Nombre */
             nombre: string;
             /** Serie Factura Id */
@@ -7607,8 +7890,6 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /** Lista Precios Id */
-            lista_precios_id?: string | null;
             /** Nombre */
             nombre: string;
             /** Serie Factura Id */
@@ -7640,8 +7921,6 @@ export interface components {
             contacto?: string | null;
             /** Domicilio */
             domicilio?: Record<string, never> | null;
-            /** Lista Precios Id */
-            lista_precios_id?: string | null;
             /** Nombre */
             nombre?: string | null;
             /** Serie Factura Id */
@@ -7962,6 +8241,182 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AlmacenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_asignaciones_api_v1_asignaciones_precios_get: {
+        parameters: {
+            query?: {
+                lista_id?: string | null;
+                cliente_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ListaAsignacionOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_asignacion_api_v1_asignaciones_precios_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListaAsignacionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListaAsignacionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    simular_asignacion_api_v1_asignaciones_precios_simular_get: {
+        parameters: {
+            query?: {
+                cliente_id?: string | null;
+                sucursal_id?: string | null;
+                serie_id?: string | null;
+                proyecto_id?: string | null;
+                fecha?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListaAsignacionOut"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_asignacion_api_v1_asignaciones_precios__asignacion_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                asignacion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_asignacion_api_v1_asignaciones_precios__asignacion_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                asignacion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListaAsignacionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListaAsignacionOut"];
                 };
             };
             /** @description Validation Error */
@@ -12500,6 +12955,8 @@ export interface operations {
                 cantidad?: number | string;
                 cliente_id?: string | null;
                 sucursal_id?: string | null;
+                serie_id?: string | null;
+                proyecto_id?: string | null;
                 fecha?: string | null;
             };
             header?: {
@@ -13344,6 +13801,179 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProveedorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_proyectos_api_v1_proyectos_get: {
+        parameters: {
+            query?: {
+                cliente_id?: string | null;
+                activo?: boolean | null;
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ProyectoOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_proyecto_api_v1_proyectos_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProyectoCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProyectoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_proyecto_api_v1_proyectos__proyecto_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                proyecto_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProyectoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_proyecto_api_v1_proyectos__proyecto_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                proyecto_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_proyecto_api_v1_proyectos__proyecto_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                proyecto_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProyectoUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProyectoOut"];
                 };
             };
             /** @description Validation Error */

@@ -52,6 +52,9 @@ class OCRecibida(Base, TimestampMixin):
     punto_entrega = Column(String(254))
     # Clientes POSIBLES cuando el grupo no alcanza a decidir (por el de Pachuca
     # entran EHMO y MAFAN). Es la lista corta que se le ofrece al operador.
+    # La negociación bajo la que entra la orden ("HOSPITALES E IMSS BIENESTAR").
+    # Se hereda de la equivalencia PROYECTO y decide qué lista de precios aplica.
+    proyecto_id = Column(UUID(as_uuid=True), ForeignKey("proyectos.id", ondelete="SET NULL"))
     candidatos = Column(JSONB)
     ambiguo = Column(Boolean, nullable=False, server_default=text("false"))
     remision_id = Column(UUID(as_uuid=True), ForeignKey("remisiones.id", ondelete="SET NULL"))
@@ -60,12 +63,17 @@ class OCRecibida(Base, TimestampMixin):
     updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
 
     cliente = relationship("Cliente", foreign_keys=[cliente_id])
+    proyecto = relationship("Proyecto", foreign_keys=[proyecto_id])
     sucursal = relationship("Sucursal", foreign_keys=[sucursal_id])
     remision = relationship("Remision", foreign_keys=[remision_id])
 
     @property
     def cliente_nombre(self):
         return self.cliente.legal_name if self.cliente else None
+
+    @property
+    def proyecto_nombre(self):
+        return self.proyecto.nombre if self.proyecto else None
 
     @property
     def sucursal_nombre(self):

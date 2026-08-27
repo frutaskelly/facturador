@@ -11,13 +11,19 @@ import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { fmtMoney } from "@/lib/format";
 import { useResource, type Page } from "@/lib/hooks";
-import type { Cliente, Cotizacion, Sucursal } from "@/lib/types";
+import type { Cliente, Cotizacion, Proyecto, Serie, Sucursal } from "@/lib/types";
 
+// Espejo de los orígenes que devuelve el resolutor (services/precios.py). Los
+// tres de lista dicen POR QUÉ dimensión ganó la asignación, que es lo que el
+// vendedor necesita saber para defender el precio por teléfono.
 const ORIGEN_LABEL: Record<string, string> = {
   override_sucursal: "Precio especial de la sucursal",
   override_cliente: "Precio especial del cliente",
-  lista_sucursal: "Lista de la sucursal",
-  lista_cliente: "Lista del cliente",
+  lista_forzada: "Lista forzada en el documento",
+  lista_proyecto: "Lista asignada al proyecto",
+  lista_serie: "Lista asignada a la serie",
+  lista_sucursal: "Lista asignada a la sucursal",
+  lista_cliente: "Lista del cliente (global)",
   lista_base: "Lista base (público)",
 };
 
@@ -30,6 +36,16 @@ export default function CotizadorPage() {
   const [clienteId, setClienteId] = useState("");
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
   const [sucursalId, setSucursalId] = useState("");
+
+  const seriesRes = useResource<Page<Serie>>("/api/v1/series?limit=200");
+  const proyectosRes = useResource<Page<Proyecto>>("/api/v1/proyectos?activo=true&limit=500");
+  const series = seriesRes.data?.items ?? [];
+  // Los del cliente elegido + los del grupo (sin dueño), que aplican a todos.
+  const proyectos = (proyectosRes.data?.items ?? []).filter(
+    (p) => !p.cliente_id || !clienteId || p.cliente_id === clienteId,
+  );
+  const [serieId, setSerieId] = useState("");
+  const [proyectoId, setProyectoId] = useState("");
 
   const [prod, setProd] = useState<ProductoPick | null>(null);
   const [presentacion, setPresentacion] = useState("");
@@ -52,6 +68,7 @@ export default function CotizadorPage() {
     if (!clienteId) {
       setSucursales([]);
       setSucursalId("");
+      setProyectoId("");
       return;
     }
     let active = true;
@@ -87,9 +104,12 @@ export default function CotizadorPage() {
       presentacion: presentacion || "KILO",
       cantidad: cantidad || "1",
     });
-    // La sucursal gana sobre el cliente; sin ninguno, resuelve la lista base.
+    // Se mandan TODAS las dimensiones que se hayan elegido: el resolutor las
+    // combina (no son excluyentes) y gana la asignación más específica.
+    if (clienteId) p.set("cliente_id", clienteId);
     if (sucursalId) p.set("sucursal_id", sucursalId);
-    else if (clienteId) p.set("cliente_id", clienteId);
+    if (serieId) p.set("serie_id", serieId);
+    if (proyectoId) p.set("proyecto_id", proyectoId);
     try {
       setCotRes(await apiFetch<Cotizacion>(`/api/v1/precios/cotizar?${p.toString()}`));
     } catch (e) {
@@ -99,7 +119,10 @@ export default function CotizadorPage() {
 
   return (
     <div>
-      <PageHeader title="Cotizador" subtitle="Precio resuelto por cliente / sucursal / lista." />
+      <PageHeader
+        title="Cotizador"
+        subtitle="El precio que se cobraría, con las cuatro dimensiones de la negociación: cliente, sucursal, serie y proyecto."
+      />
 
       <section className="max-w-3xl rounded-xl border border-border p-4">
         <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
@@ -137,6 +160,40 @@ export default function CotizadorPage() {
               {sucursales.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.nombre}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Serie">
+            <Select
+              value={serieId}
+              onChange={(e) => {
+                setSerieId(e.target.value);
+                setCotRes(null);
+              }}
+            >
+              <option value="">(cualquiera)</option>
+              {series.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.codigo} · {s.tipo_documento}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Proyecto">
+            <Select
+              value={proyectoId}
+              onChange={(e) => {
+                setProyectoId(e.target.value);
+                setCotRes(null);
+              }}
+            >
+              <option value="">(cualquiera)</option>
+              {proyectos.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nombre}
                 </option>
               ))}
             </Select>

@@ -1,8 +1,11 @@
 """Clientes / CRM — CRUD.
 
 Reads gated by `menu:clientes` (a TOMADOR/CAJERO can look a customer up at the
-POS); writes by `cliente:gestionar`. The optional `lista_precios_id` FK is
-re-validated under the tenant scope before persisting.
+POS); writes by `cliente:gestionar`.
+
+Qué lista de precios le toca a un cliente NO se guarda aquí: vive en
+`lista_asignaciones` (ver `api/v1/listas_precios.py`), que además sabe de
+sucursal, serie y proyecto.
 
 The running accumulators (saldo_actual, ventas_ytd, ultima_venta_at,
 ultimo_pago_at) are maintained by the operations/POS flows in later phases —
@@ -21,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from ...core.config import settings
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Cliente, ClienteExterno, ListaPrecios, Producto, ProductoCliente, Sucursal
+from ...models import Cliente, ClienteExterno, Producto, ProductoCliente, Sucursal
 from ...schemas.cliente import ClienteCreate, ClienteOut, ClienteUpdate
 from ...schemas.cliente_externo import (
     ClienteExternoCreate,
@@ -198,7 +201,6 @@ def create_cliente(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
-    ensure_fk(db, ListaPrecios, payload.lista_precios_id, "lista_precios_id")
     data = payload.model_dump()
     _validar_datos_fiscales(data)
     _validar_contra_sat(
@@ -373,8 +375,6 @@ def update_cliente(
         )
     # El código no se regenera ni se acepta en update: queda fijo desde la creación.
     data.pop("codigo", None)
-    if "lista_precios_id" in data:
-        ensure_fk(db, ListaPrecios, data["lista_precios_id"], "lista_precios_id")
     for key, value in data.items():
         setattr(obj, key, value)
     flush_or_conflict(db, detail=_DUP)

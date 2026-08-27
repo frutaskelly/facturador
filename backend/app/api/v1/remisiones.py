@@ -37,6 +37,7 @@ from ...models import (
     ListaPrecios,
     LoteInventario,
     Producto,
+    Proyecto,
     Remision,
     Sucursal,
     Tenant,
@@ -144,6 +145,7 @@ def create_remision(
     ensure_fk(db, Cliente, payload.cliente_facturacion_id, "cliente_facturacion_id")
     ensure_fk(db, Almacen, payload.almacen_id, "almacen_id")
     ensure_fk(db, ListaPrecios, payload.lista_precios_id, "lista_precios_id")
+    ensure_fk(db, Proyecto, payload.proyecto_id, "proyecto_id")
     if payload.sucursal_id is not None:
         suc = get_or_404(db, Sucursal, payload.sucursal_id)
         if suc.cliente_id != payload.cliente_facturacion_id:
@@ -151,18 +153,31 @@ def create_remision(
     for ln in payload.lineas:
         ensure_fk(db, Producto, ln.producto_id, "producto_id")
 
+    # La serie se resuelve ANTES de precificar, no al foliar: además del folio,
+    # decide qué lista de precios aplica (el negocio pacta por serie). Se
+    # resuelve una vez y se guarda; `_next_folio` recibe ya la decidida, así
+    # nadie puede foliar con una serie distinta de la que fijó los precios.
+    serie = resolver_serie(
+        db, ctx.tenant_id, "REMISION",
+        serie_id=payload.serie_id,
+        sucursal_id=payload.sucursal_id,
+        cliente_id=payload.cliente_facturacion_id,
+    )
+
     rem = Remision(
         tenant_id=ctx.tenant_id,
         folio_interno=_next_folio(
             db, ctx.tenant_id,
             sucursal_id=payload.sucursal_id,
             cliente_id=payload.cliente_facturacion_id,
-            serie_id=payload.serie_id,
+            serie_id=serie.id if serie is not None else payload.serie_id,
         ),
         cliente_facturacion_id=payload.cliente_facturacion_id,
         almacen_id=payload.almacen_id,
         sucursal_id=payload.sucursal_id,
         lista_precios_id=payload.lista_precios_id,
+        proyecto_id=payload.proyecto_id,
+        serie_id=serie.id if serie is not None else None,
         fecha_remision=payload.fecha_remision or date.today(),
         fecha_entrega=payload.fecha_entrega,
         canal=payload.canal,
@@ -188,6 +203,8 @@ def create_remision(
                 db, producto_id=ln.producto_id, presentacion=ln.presentacion,
                 cantidad=ln.cantidad_solicitada,
                 cliente_id=payload.cliente_facturacion_id, sucursal_id=payload.sucursal_id,
+                serie_id=rem.serie_id, proyecto_id=rem.proyecto_id,
+                lista_id=rem.lista_precios_id,
             )
             if not res or res.get("precio") is None:
                 raise HTTPException(
@@ -343,6 +360,8 @@ def update_remision(
         ensure_fk(db, Almacen, data["almacen_id"], "almacen_id")
     if data.get("lista_precios_id") is not None:
         ensure_fk(db, ListaPrecios, data["lista_precios_id"], "lista_precios_id")
+    if data.get("proyecto_id") is not None:
+        ensure_fk(db, Proyecto, data["proyecto_id"], "proyecto_id")
     if data.get("cliente_facturacion_id") is not None:
         ensure_fk(db, Cliente, data["cliente_facturacion_id"], "cliente_facturacion_id")
 
@@ -420,6 +439,8 @@ def update_remision(
                     db, producto_id=ln["producto_id"], presentacion=ln["presentacion"],
                     cantidad=ln["cantidad_solicitada"],
                     cliente_id=rem.cliente_facturacion_id, sucursal_id=rem.sucursal_id,
+                    serie_id=rem.serie_id, proyecto_id=rem.proyecto_id,
+                    lista_id=rem.lista_precios_id,
                 )
                 if not res or res.get("precio") is None:
                     raise HTTPException(
