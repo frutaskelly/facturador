@@ -21,11 +21,18 @@ from sqlalchemy.orm import Session
 
 from ...core.config import settings
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Cliente, ListaPrecios, Producto, ProductoCliente
+from ...models import Cliente, ClienteExterno, ListaPrecios, Producto, ProductoCliente, Sucursal
 from ...schemas.cliente import ClienteCreate, ClienteOut, ClienteUpdate
+from ...schemas.cliente_externo import (
+    ClienteExternoCreate,
+    ClienteExternoOut,
+    ResolucionOut,
+    ResolverIn,
+)
 from ...schemas.common import Page
 from ...schemas.producto import ProductoClienteOut, ProductoClienteUpsert
 from ...services.cliente_codigo import generate_cliente_codigo
+from ...services import cliente_match
 from ...services.producto_match import aprender_alias
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.rfc import validar_rfc_local
@@ -208,6 +215,114 @@ def create_cliente(
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)
     return obj
+
+
+# ─── Equivalencias: cómo se llama este cliente en los otros sistemas ──────────
+# Declaradas ANTES de /{cliente_id} para que las rutas estáticas ganen: si no,
+# FastAPI intentaría parsear "externos" como UUID y devolvería 422.
+
+
+@router.post("/resolver", response_model=ResolucionOut)
+def resolver_cliente(
+    payload: ResolverIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Cruza las pistas de un documento (RFC, proyecto, nombre, ubicación, grupo)
+    contra las equivalencias registradas. No escribe nada.
+
+    Si las pistas se contradicen devuelve `ambiguo=true` y NO elige cliente:
+    adivinar aquí significaría facturarle a la empresa equivocada.
+    """
+    res = cliente_match.resolver(
+        db, [cliente_match.Pista(sistema=p.sistema, clave=p.clave) for p in payload.pistas]
+    )
+    # Sin sucursal por equivalencia, se intenta contra el catálogo del cliente
+    # (código de 3 letras y nombre) — es lo que resuelve una ubicación escrita
+    # de otra forma sin tener que registrarla antes.
+    if res.cliente_id and not res.sucursal_id and payload.ubicacion_texto:
+        res.sucursal_id = cliente_match.resolver_sucursal_por_texto(
+            db, res.cliente_id, payload.ubicacion_texto
+        )
+
+    out = ResolucionOut(
+        cliente_id=res.cliente_id,
+        sucursal_id=res.sucursal_id,
+        via=res.via,
+        ambiguo=res.ambiguo,
+        motivo=res.motivo,
+        coincidencias=res.coincidencias,
+    )
+    if res.cliente_id:
+        cli = db.query(Cliente).filter(Cliente.id == res.cliente_id).one_or_none()
+        out.cliente_nombre = cli.legal_name if cli else None
+    if res.sucursal_id:
+        suc = db.query(Sucursal).filter(Sucursal.id == res.sucursal_id).one_or_none()
+        out.sucursal_nombre = suc.nombre if suc else None
+    return out
+
+
+@router.get("/externos", response_model=list[ClienteExternoOut])
+def list_externos(
+    cliente_id: Optional[UUID] = Query(default=None),
+    sistema: Optional[str] = Query(default=None, max_length=16),
+    confianza: Optional[str] = Query(default=None, max_length=10),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    q = db.query(ClienteExterno)
+    if cliente_id:
+        q = q.filter(ClienteExterno.cliente_id == cliente_id)
+    if sistema:
+        q = q.filter(ClienteExterno.sistema == sistema.upper())
+    if confianza:
+        q = q.filter(ClienteExterno.confianza == confianza.upper())
+    return q.order_by(ClienteExterno.sistema, ClienteExterno.clave).all()
+
+
+@router.post("/externos", response_model=ClienteExternoOut, status_code=status.HTTP_201_CREATED)
+def crear_externo(
+    payload: ClienteExternoCreate,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Registra (o reapunta) una equivalencia. Idempotente por clave normalizada."""
+    ensure_fk(db, Cliente, payload.cliente_id, "cliente_id")
+    if payload.sucursal_id is not None:
+        suc = get_or_404(db, Sucursal, payload.sucursal_id)
+        if suc.cliente_id != payload.cliente_id:
+            raise HTTPException(
+                status_code=422, detail="La sucursal no pertenece al cliente de la equivalencia"
+            )
+    obj = cliente_match.aprender(
+        db,
+        ctx.tenant_id,
+        payload.sistema,
+        payload.clave,
+        payload.cliente_id,
+        sucursal_id=payload.sucursal_id,
+        origen=payload.origen,
+        confianza=payload.confianza,
+        user_id=ctx.user_id,
+    )
+    if obj is None:
+        raise HTTPException(status_code=422, detail="La clave queda vacía al normalizarla")
+    if payload.notas is not None:
+        obj.notas = payload.notas
+    db.flush()
+    db.refresh(obj)
+    return obj
+
+
+@router.delete("/externos/{externo_id}", status_code=status.HTTP_204_NO_CONTENT)
+def borrar_externo(
+    externo_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    obj = get_or_404(db, ClienteExterno, externo_id)
+    db.delete(obj)
+    db.flush()
 
 
 @router.get("/{cliente_id}", response_model=ClienteOut)

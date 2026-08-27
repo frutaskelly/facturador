@@ -566,4 +566,69 @@ export type EmpresasGrupo = {
   grupo_total: number;
   grupo_max: number;
   puede_agregar: boolean;
+// ─── Bandeja de OC + equivalencias de cliente ────────────────────────────────
+// Una orden que llega por WhatsApp/correo aterriza en la bandeja antes de
+// volverse remisión: ahí se verifica a qué cliente se asignó y, si el sistema
+// no pudo, se resuelve a mano (y lo aprende para la próxima).
+
+export type SistemaExterno = "RFC" | "SAE" | "PROYECTO" | "NOMBRE" | "UBICACION" | "WHATSAPP";
+
+export type ClienteExterno = {
+  id: string;
+  sistema: SistemaExterno;
+  clave: string;
+  clave_normalizada: string;
+  cliente_id: string;
+  sucursal_id?: string | null;
+  origen: "MANUAL" | "BOT" | "IMPORT" | "IA";
+  confianza: "CONFIRMADA" | "SUGERIDA";
+  notas?: string | null;
+  created_at: string;
+};
+
+export type CandidatoLinea = {
+  producto_id: string;
+  sku: string;
+  nombre: string;
+  score: number;
+  origen: string;
+};
+
+export type LineaOC = {
+  numero: number;
+  descripcion: string;
+  cantidad: string;
+  unidad?: string | null;
+  clave?: string | null;
+  precio?: string | null;
+  notas?: string | null;
+  candidatos: CandidatoLinea[];
+};
+
+export type OCRecibida = {
+  id: string;
+  canal: "WHATSAPP" | "EMAIL" | "MANUAL" | "API";
+  origen_externo: string;
+  folio_externo?: string | null;
+  remitente?: string | null;
+  archivo_nombre?: string | null;
+  archivo_url?: string | null;
+  recibida_at: string;
+  estado: "PENDIENTE" | "ASIGNADA" | "DESCARTADA";
+  motivo?: string | null;
+  cliente_id?: string | null;
+  cliente_nombre?: string | null;
+  sucursal_id?: string | null;
+  sucursal_nombre?: string | null;
+  resuelto_via?: string | null;
+  ambiguo: boolean;
+  remision_id?: string | null;
+  remision_folio?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OCRecibidaDetalle = OCRecibida & {
+  payload: Record<string, unknown>;
+  lineas: LineaOC[];
 };
