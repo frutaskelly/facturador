@@ -67,6 +67,9 @@ class TenantMembershipView:
     role_name: str
     # Color elegido en Ajustes › Empresas (None = automático).
     color: Optional[str] = None
+    # RFC del emisor: lo nombra la confirmación al timbrar, y timbrar lo puede
+    # hacer un rol sin acceso a Ajustes › Empresa.
+    rfc: Optional[str] = None
 
 
 @dataclass
@@ -194,6 +197,7 @@ def _membership_views(db: Session, memberships: list[Membership]) -> list[Tenant
                 role_id=r.id,
                 role_name=r.nombre,
                 color=((t.config or {}).get("color") or None),
+                rfc=(t.rfc or None),
             )
         )
     return views

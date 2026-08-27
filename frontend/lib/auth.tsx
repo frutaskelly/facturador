@@ -18,7 +18,14 @@ export type Me = {
   user_id: string;
   email: string | null;
   active_tenant: { tenant_id: string; role: string; is_owner: boolean };
-  tenants: { tenant_id: string; slug: string; name: string; role: string; color: string | null }[];
+  tenants: {
+    tenant_id: string;
+    slug: string;
+    name: string;
+    role: string;
+    color: string | null;
+    rfc: string | null;
+  }[];
   permissions: string[];
 };
 

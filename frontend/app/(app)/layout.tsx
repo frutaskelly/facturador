@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 import { OnboardingBanner } from "@/components/OnboardingBanner";
+import { EmpresaIdentidad } from "@/components/EmpresaIdentidad";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { session, me, loading, accessError, signOut } = useAuth();
@@ -45,16 +46,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen">
-      <Sidebar me={me} />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar me={me} onSignOut={signOut} />
-        <main className="flex-1 overflow-auto bg-surface p-6">
-          <div className="mb-4">
-            <OnboardingBanner pathname={pathname} />
-          </div>
-          {children}
-        </main>
+    // La franja de color de la empresa cruza TODO el ancho, menú incluido: es lo
+    // primero que ve el ojo al cambiar de pestaña.
+    <div className="flex h-screen flex-col">
+      <EmpresaIdentidad me={me} />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar me={me} />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <Topbar me={me} onSignOut={signOut} />
+          <main className="flex-1 overflow-auto bg-surface p-6">
+            <div className="mb-4">
+              <OnboardingBanner pathname={pathname} />
+            </div>
+            {children}
+          </main>
+        </div>
       </div>
     </div>
   );

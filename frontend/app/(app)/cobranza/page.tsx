@@ -19,6 +19,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiDownload, apiFetch, apiOpenInTab } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { useResource, type Page } from "@/lib/hooks";
 import { FORMA_PAGO_SAT, type FacturaSaldo, type Recibo } from "@/lib/cobranza";
@@ -48,6 +49,11 @@ export default function Page() {
 
   const [nuevo, setNuevo] = useState(false);
   const [timbrando, setTimbrando] = useState<string | null>(null);
+  const [aTimbrar, setATimbrar] = useState<Recibo | null>(null);
+  const emisor = (() => {
+    const t = me?.tenants.find((x) => x.tenant_id === me.active_tenant.tenant_id);
+    return t ? ` Emisor: ${t.name}${t.rfc ? ` — RFC ${t.rfc}` : ""}.` : "";
+  })();
   const [enviar, setEnviar] = useState<Recibo | null>(null);
   const [cancelar, setCancelar] = useState<Recibo | null>(null);
 
@@ -56,6 +62,7 @@ export default function Page() {
     try {
       await apiFetch(`/api/v1/cobranza/recibos-pago/${r.id}/timbrar`, { method: "POST" });
       toast.success(`REP ${r.serie}${r.folio} timbrado`);
+      setATimbrar(null);
       recibos.reload();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo timbrar");
@@ -89,7 +96,7 @@ export default function Page() {
 
   const rowActions: RowAction<Recibo>[] = [
     { id: "timbrar", label: timbrando ? "Timbrando…" : "Timbrar", icon: <Stamp size={15} />,
-      onClick: (r) => void timbrar(r),
+      onClick: (r) => setATimbrar(r),
       hidden: (r) => !(canWrite && r.estado === "BORRADOR") },
     { id: "pdf", label: "Descargar PDF", icon: <FileText size={15} />,
       onClick: (r) => descargar(r, "pdf"), hidden: (r) => r.estado !== "TIMBRADO" },
@@ -130,6 +137,19 @@ export default function Page() {
           onClose={() => setCancelar(null)}
           onDone={() => { setCancelar(null); recibos.reload(); }} />
       )}
+
+      {/* Un REP timbrado con el emisor equivocado se cancela y se rehace igual
+          que una factura: antes de mandarlo al PAC, decimos quién emite. */}
+      <ConfirmDialog
+        open={aTimbrar !== null}
+        title="Timbrar REP"
+        message={`¿Timbrar el recibo ${aTimbrar?.serie}${aTimbrar?.folio} por ${fmtMoney(aTimbrar?.monto ?? "0")}? Se enviará al PAC.${emisor}`}
+        confirmLabel="Timbrar"
+        confirmVariant="success"
+        onConfirm={() => { if (aTimbrar) void timbrar(aTimbrar); }}
+        onClose={() => setATimbrar(null)}
+        loading={timbrando !== null}
+      />
     </div>
   );
 }

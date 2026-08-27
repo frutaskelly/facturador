@@ -46,6 +46,13 @@ export default function FacturasPage() {
   }, []);
   const { status: onboardingStatus } = useOnboarding();
   const ambiente = onboardingStatus?.ambiente ?? "sandbox";
+  // Con varias empresas abiertas a la vez, un CFDI timbrado desde la equivocada
+  // se cancela y se refactura: el diálogo dice con todas sus letras quién emite.
+  const emisor = (() => {
+    const t = me?.tenants.find((x) => x.tenant_id === me.active_tenant.tenant_id);
+    if (!t) return "";
+    return ` Emisor: ${t.name}${t.rfc ? ` — RFC ${t.rfc}` : ""}.`;
+  })();
   // Sufijo para los toasts de timbrado/cancelación: "(sandbox)" solo cuando el
   // ambiente ya cargó y de verdad es sandbox — en producción (o mientras carga)
   // afirmarlo haría creer que el CFDI no fue real.
@@ -661,15 +668,15 @@ export default function FacturasPage() {
       <ConfirmDialog open={toTimbrar !== null} title={ambiente === "producción" ? "Timbrar factura" : "Timbrar factura (sandbox)"}
         message={
           ambiente === "producción"
-            ? `¿Timbrar ${toTimbrar?.serie}${toTimbrar?.folio}? Se enviará al PAC en producción — el CFDI será real ante el SAT.`
-            : `¿Timbrar ${toTimbrar?.serie}${toTimbrar?.folio}? Se enviará al PAC en modo sandbox (prueba).`
+            ? `¿Timbrar ${toTimbrar?.serie}${toTimbrar?.folio}? Se enviará al PAC en producción — el CFDI será real ante el SAT.${emisor}`
+            : `¿Timbrar ${toTimbrar?.serie}${toTimbrar?.folio}? Se enviará al PAC en modo sandbox (prueba).${emisor}`
         }
         confirmLabel="Facturar" confirmVariant="success"
         onConfirm={() => void timbrar()} onClose={() => setToTimbrar(null)} loading={actBusy} />
 
       {/* Sobregiro: la directa no tiene existencia suficiente para timbrar */}
       <ConfirmDialog open={timbrarSobregiro !== null} title="Existencia insuficiente"
-        message={`No hay existencia suficiente para timbrar ${timbrarSobregiro?.serie}${timbrarSobregiro?.folio}. ¿Timbrar de todas formas? El inventario quedará en negativo (sobregiro).`}
+        message={`No hay existencia suficiente para timbrar ${timbrarSobregiro?.serie}${timbrarSobregiro?.folio}. ¿Timbrar de todas formas? El inventario quedará en negativo (sobregiro).${emisor}`}
         confirmLabel="Timbrar con sobregiro" confirmVariant="danger"
         onConfirm={() => void timbrar(timbrarSobregiro ?? undefined, true)}
         onClose={() => setTimbrarSobregiro(null)} loading={actBusy} />
@@ -679,8 +686,8 @@ export default function FacturasPage() {
         title={ambiente === "producción" ? "Timbrar facturas" : "Timbrar facturas (sandbox)"}
         message={
           ambiente === "producción"
-            ? `¿Timbrar ${borradoresSel.length} factura(s) en borrador? Se enviarán al PAC en producción — los CFDI serán reales ante el SAT.`
-            : `¿Timbrar ${borradoresSel.length} factura(s) en borrador? Se enviarán al PAC en modo sandbox (prueba).`
+            ? `¿Timbrar ${borradoresSel.length} factura(s) en borrador? Se enviarán al PAC en producción — los CFDI serán reales ante el SAT.${emisor}`
+            : `¿Timbrar ${borradoresSel.length} factura(s) en borrador? Se enviarán al PAC en modo sandbox (prueba).${emisor}`
         }
         confirmLabel={`Timbrar ${borradoresSel.length}`} confirmVariant="success"
         onConfirm={() => void bulkTimbrar(borradoresSel)}
