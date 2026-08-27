@@ -28,7 +28,10 @@ const config: CrudConfig<Cliente> = {
         : <span className="text-muted">—</span> },
     { header: "Estado", cell: (c) => <Badge tone={c.status === "ACTIVO" ? "success" : "muted"}>{c.status}</Badge> },
     { header: "", cell: (c) => (
-      <div className="flex gap-3">
+      <div className="flex gap-3 whitespace-nowrap">
+        {/* Atajo a las sucursales DE ESTE cliente (llega filtrado, sin buscarlo). */}
+        <Link href={`/sucursales?cliente=${c.id}`} onClick={(e) => e.stopPropagation()}
+          className="text-sm text-accent hover:underline">Sucursales</Link>
         <Link href={`/clientes/${c.id}/catalogo`} onClick={(e) => e.stopPropagation()}
           className="text-sm text-accent hover:underline">Catálogo</Link>
         <Link href={`/clientes/${c.id}/estado-cuenta`} onClick={(e) => e.stopPropagation()}
@@ -150,7 +153,21 @@ const config: CrudConfig<Cliente> = {
     { name: "pais", label: "País" },
     { name: "telefono", label: "Teléfono" },
     { name: "email", label: "Correos", hint: "Uno o varios, separados por coma o espacio; se usan al enviar remisiones y facturas", colSpan: 2 },
-    { name: "lista_precios_id", label: "Lista de precios", type: "select" },
+    { name: "lista_precios_id", label: "Lista de precios", type: "select",
+      createInline: {
+        label: "Nueva lista",
+        perm: "lista_precios:gestionar",
+        title: "Nueva lista de precios",
+        fields: [{ name: "nombre", label: "Nombre", placeholder: "Lista mayoreo", required: true }],
+        run: async (v) => {
+          const creada = await apiFetch<{ id: string }>("/api/v1/listas-precios", {
+            method: "POST",
+            body: JSON.stringify({ nombre: v.nombre.trim() }),
+          });
+          return { id: String(creada.id) };
+        },
+      },
+    },
     { name: "limite_credito", label: "Límite de crédito", type: "number", step: "0.01" },
     { name: "dias_credito", label: "Condiciones de pago (días)", type: "number" },
     {
@@ -168,6 +185,44 @@ const config: CrudConfig<Cliente> = {
       label: "Serie de factura",
       type: "select",
       hint: "La sucursal puede sobreescribirla; en blanco usa la predeterminada",
+      // Crear las DOS series de un golpe desde aquí: dar de alta un cliente ya
+      // no obliga a ir antes a Ajustes → Series y folios.
+      createInline: {
+        label: "Crear series",
+        perm: "serie:gestionar",
+        title: "Nuevas series para este cliente",
+        fields: [
+          {
+            name: "codigo",
+            label: "Código base",
+            placeholder: "EHMO",
+            required: true,
+            hint: "Se crean dos: facturas con ese código (EHMO1, EHMO2…) y remisiones con R adelante (REHMO1…)",
+          },
+          { name: "nombre", label: "Nombre (opcional)", placeholder: "Grupo Operador EHMO" },
+        ],
+        run: async (v) => {
+          const codigo = v.codigo.trim().toUpperCase();
+          const creadas = await apiFetch<{ id: string; tipo_documento: string }[]>(
+            "/api/v1/series/par",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                codigo_factura: codigo,
+                codigo_remision: `R${codigo}`,
+                nombre: v.nombre.trim() || null,
+              }),
+            },
+          );
+          const fac = creadas.find((x) => x.tipo_documento === "FACTURA");
+          const rem = creadas.find((x) => x.tipo_documento === "REMISION");
+          return {
+            id: String(fac?.id ?? ""),
+            extra: rem ? { serie_remision_id: String(rem.id) } : undefined,
+          };
+        },
+        refreshes: ["serie_factura_id", "serie_remision_id"],
+      },
     },
     {
       name: "serie_remision_id",

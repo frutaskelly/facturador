@@ -24,6 +24,13 @@ const WRITE_SUC = "cliente:gestionar";
 const WRITE_OVR = "lista_precios:gestionar";
 
 export default function SucursalesPage() {
+  // ?cliente=<id> — se llega aquí desde la lista de Clientes ("Sucursales"):
+  // se muestra solo ese cliente para agregarle sucursales sin buscarlo.
+  const clienteParam =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("cliente")
+      : null;
+
   const { me } = useAuth();
   const toast = useToast();
   const canSuc = can(me, WRITE_SUC);
@@ -38,7 +45,10 @@ export default function SucursalesPage() {
   const seriesFacRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
   const seriesRemRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=REMISION&activa=true&limit=200");
 
-  const clientes = clientesRes.data?.items ?? [];
+  const todosLosClientes = clientesRes.data?.items ?? [];
+  const clientes = clienteParam
+    ? todosLosClientes.filter((c) => c.id === clienteParam)
+    : todosLosClientes;
   const allSucursales = sucursalesRes.data?.items ?? [];
   const productos = productosRes.data?.items ?? [];
   const listas = listasRes.data?.items ?? [];

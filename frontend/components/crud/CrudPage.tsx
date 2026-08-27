@@ -52,6 +52,24 @@ export type CrudField = {
    * no pasa el dígito verificador) nunca llega a la base ni al timbrado.
    */
   validate?: (value: string, form: FormValues) => string | null;
+  /**
+   * Permite CREAR el catálogo desde el propio select, sin salir del formulario
+   * (menos pasos: dar de alta un cliente ya no obliga a ir antes a Series o a
+   * Listas de precios). `run` recibe lo capturado en el mini-formulario y
+   * devuelve el id a seleccionar; `refreshes` son los campos cuyos lookups hay
+   * que recargar después (p. ej. crear el par de series refresca los dos).
+   */
+  createInline?: {
+    label: string;
+    /** Permiso del catálogo que se crea (es OTRO recurso, con otro permiso que
+     *  el de la pantalla). Sin él, el botón no se muestra: evita ofrecer una
+     *  acción que el backend va a rechazar con 403. */
+    perm?: string;
+    title: string;
+    fields: { name: string; label: string; placeholder?: string; hint?: string; required?: boolean }[];
+    run: (values: Record<string, string>) => Promise<{ id: string; extra?: Record<string, string> }>;
+    refreshes?: string[];
+  };
 };
 
 /** A select whose options come from another list endpoint. */
@@ -121,6 +139,11 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
   const [lookupOpts, setLookupOpts] = useState<Record<string, { value: string; label: string }[]>>({});
   const lookupsLoaded = useRef(false);
 
+  // Campo cuyo catálogo se está creando desde el propio formulario (mini-modal).
+  const [inlineFor, setInlineFor] = useState<CrudField | null>(null);
+  const puedeCrearInline = (f: CrudField) =>
+    !f.createInline?.perm || can(me, f.createInline.perm);
+
   const [deleteWarn, setDeleteWarn] = useState<string | null>(null);
   function askDelete(row: T) {
     setDeleteWarn(null);
@@ -148,12 +171,32 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
           out[field] = [];
         }
       }
-      if (active) setLookupOpts(out);
+      // Merge conservando lo ya presente: si una creación inline refrescó un
+      // lookup mientras esta carga inicial seguía en vuelo, no se pisa con la
+      // foto vieja (el id recién creado quedaría seleccionado pero invisible).
+      if (active) setLookupOpts((prev) => ({ ...out, ...prev }));
     })();
     return () => {
       active = false;
     };
   }, [config.lookups, form]);
+
+  // Recarga los lookups indicados (tras crear un catálogo desde el formulario).
+  async function refrescarLookups(campos: string[]) {
+    if (!config.lookups) return;
+    const out: Record<string, { value: string; label: string }[]> = {};
+    for (const campo of campos) {
+      const lk = config.lookups[campo];
+      if (!lk) continue;
+      try {
+        const pageData = await apiFetch<Page<Record<string, unknown>>>(lk.path);
+        out[campo] = pageData.items.map((r) => ({ value: lk.value(r), label: lk.label(r) }));
+      } catch {
+        /* se conserva lo que ya había */
+      }
+    }
+    setLookupOpts((prev) => ({ ...prev, ...out }));
+  }
 
   function openCreate() {
     setEditingId(null);
@@ -365,12 +408,46 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                   {errorCampo && (
                     <span className="mt-1 block text-xs text-danger">{errorCampo}</span>
                   )}
+                  {f.createInline && puedeCrearInline(f) && (
+                    <button
+                      type="button"
+                      onClick={() => setInlineFor(f)}
+                      className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+                    >
+                      <Plus size={13} aria-hidden="true" /> {f.createInline.label}
+                    </button>
+                  )}
                 </div>
               );
             })}
           </div>
         )}
       </Modal>
+
+      {inlineFor?.createInline && (
+        <CrearInlineModal
+          key={inlineFor.name}
+          field={inlineFor}
+          onClose={() => setInlineFor(null)}
+          onCreated={async (id, extra) => {
+            // Un id vacío significa que la respuesta del backend no trajo lo
+            // esperado: no se limpia el campo en silencio.
+            if (!id) {
+              toast.error("Se creó, pero no se pudo seleccionar automáticamente. Elígelo en la lista.");
+              await refrescarLookups(inlineFor.createInline?.refreshes ?? [inlineFor.name]);
+              setInlineFor(null);
+              return;
+            }
+            setField(inlineFor.name, id);
+            // Campos extra que el catálogo nuevo también rellena (p. ej. el par
+            // de series devuelve la de factura y la de remisión).
+            for (const [campo, valor] of Object.entries(extra ?? {})) setField(campo, valor);
+            const refrescar = inlineFor.createInline?.refreshes ?? [inlineFor.name];
+            await refrescarLookups(refrescar);
+            setInlineFor(null);
+          }}
+        />
+      )}
 
       <ConfirmDialog
         open={toDelete !== null}
@@ -471,5 +548,82 @@ function FieldActionButton({
         action.label
       )}
     </Button>
+  );
+}
+
+/** Mini-formulario para crear un catálogo (serie, lista de precios…) sin salir
+ *  del alta que se está capturando. */
+function CrearInlineModal({
+  field,
+  onClose,
+  onCreated,
+}: {
+  field: CrudField;
+  onClose: () => void;
+  onCreated: (id: string, extra?: Record<string, string>) => void | Promise<void>;
+}) {
+  const spec = field.createInline!;
+  const toast = useToast();
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(spec.fields.map((f) => [f.name, ""])),
+  );
+  const [busy, setBusy] = useState(false);
+
+  async function crear() {
+    for (const f of spec.fields) {
+      if (f.required && !values[f.name]?.trim()) {
+        toast.error(`${f.label} es obligatorio`);
+        return;
+      }
+    }
+    setBusy(true);
+    let creado: { id: string; extra?: Record<string, string> };
+    try {
+      creado = await spec.run(values);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo crear");
+      setBusy(false);
+      return;
+    }
+    // Ya está creado en el servidor: el post-proceso (seleccionarlo, refrescar
+    // el catálogo) no debe reportarse como si la creación hubiera fallado, ni
+    // dejar el mini-modal abierto invitando a crearlo dos veces.
+    toast.success(`${spec.title} creada`);
+    try {
+      await onCreated(creado.id, creado.extra);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={spec.title}
+      resizable={false}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
+            Cancelar
+          </Button>
+          <Button onClick={crear} disabled={busy}>
+            {busy ? "Creando…" : "Crear"}
+          </Button>
+        </>
+      }
+    >
+      <div className="grid grid-cols-1 gap-4">
+        {spec.fields.map((f) => (
+          <Field key={f.name} label={f.label} required={f.required} hint={f.hint}>
+            <Input
+              placeholder={f.placeholder}
+              value={values[f.name] ?? ""}
+              onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+            />
+          </Field>
+        ))}
+      </div>
+    </Modal>
   );
 }
