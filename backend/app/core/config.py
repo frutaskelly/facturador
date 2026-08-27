@@ -19,6 +19,13 @@ class Settings(BaseSettings):
 
     # ─── Database ─────────────────────────────────────────────────────────────
     DATABASE_URL: str
+    # Tamaño del pool. Configurable porque el pooler de Supabase en modo sesión
+    # admite 15 clientes en total, y un solo backend con los valores de antes
+    # (10 + 20) podía quedarse con todos: el deploy fallaba al migrar con
+    # «max clients reached» y hasta un script quedaba fuera. En prod se deja el
+    # default; un backend de desarrollo contra la misma BD debe bajarlo.
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
     DATABASE_URL_ASYNC: str = ""
     # Cloud (Supabase) connection for applying migrations / seeding.
     SUPABASE_DB_URL: str = ""
