@@ -20,6 +20,63 @@
     "title": "AbrirCorteIn",
     "type": "object"
    },
+   "ActividadConexionOut": {
+    "properties": {
+     "cliente_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nombre"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "folio_externo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Folio Externo"
+     },
+     "partidas": {
+      "default": 0,
+      "title": "Partidas",
+      "type": "integer"
+     },
+     "recibida_at": {
+      "format": "date-time",
+      "title": "Recibida At",
+      "type": "string"
+     },
+     "remitente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remitente"
+     }
+    },
+    "required": [
+     "recibida_at",
+     "estado"
+    ],
+    "title": "ActividadConexionOut",
+    "type": "object"
+   },
    "AliasIn": {
     "properties": {
      "producto_id": {
@@ -884,6 +941,29 @@
      "efectivo_contado"
     ],
     "title": "CerrarCorteIn",
+    "type": "object"
+   },
+   "ClaveNuevaOut": {
+    "description": "La clave en claro. Se devuelve UNA vez y no se vuelve a poder leer.",
+    "properties": {
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "conexion": {
+      "$ref": "#/components/schemas/ConexionOut"
+     },
+     "instruccion_whatsapp": {
+      "title": "Instruccion Whatsapp",
+      "type": "string"
+     }
+    },
+    "required": [
+     "clave",
+     "conexion",
+     "instruccion_whatsapp"
+    ],
+    "title": "ClaveNuevaOut",
     "type": "object"
    },
    "ClienteCreate": {
@@ -1753,6 +1833,137 @@
      "cliente_id"
     ],
     "title": "CoincidenciaOut",
+    "type": "object"
+   },
+   "ConexionEstadoOut": {
+    "description": "Lo que la pantalla necesita para responder «¿está entrando lo que debe?».",
+    "properties": {
+     "conexion": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/ConexionOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "conviene_rotar": {
+      "default": false,
+      "title": "Conviene Rotar",
+      "type": "boolean"
+     },
+     "dias_desde_creacion": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Dias Desde Creacion"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "ordenes_hoy": {
+      "default": 0,
+      "title": "Ordenes Hoy",
+      "type": "integer"
+     },
+     "ordenes_sin_resolver": {
+      "default": 0,
+      "title": "Ordenes Sin Resolver",
+      "type": "integer"
+     },
+     "tipo": {
+      "title": "Tipo",
+      "type": "string"
+     },
+     "ultima_orden_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ultima Orden At"
+     }
+    },
+    "required": [
+     "tipo",
+     "nombre"
+    ],
+    "title": "ConexionEstadoOut",
+    "type": "object"
+   },
+   "ConexionOut": {
+    "properties": {
+     "activada_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Activada At"
+     },
+     "clave_pista": {
+      "title": "Clave Pista",
+      "type": "string"
+     },
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "tipo": {
+      "title": "Tipo",
+      "type": "string"
+     },
+     "ultimo_uso_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ultimo Uso At"
+     }
+    },
+    "required": [
+     "id",
+     "tipo",
+     "nombre",
+     "clave_pista",
+     "estado",
+     "created_at"
+    ],
+    "title": "ConexionOut",
     "type": "object"
    },
    "ConfirmarRemisionIn": {
@@ -10082,6 +10293,42 @@
     "title": "ProveedorUpdate",
     "type": "object"
    },
+   "PruebaOut": {
+    "properties": {
+     "mensaje": {
+      "title": "Mensaje",
+      "type": "string"
+     },
+     "ok": {
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "permisos": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Permisos",
+      "type": "array"
+     },
+     "tenant": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tenant"
+     }
+    },
+    "required": [
+     "ok",
+     "mensaje"
+    ],
+    "title": "PruebaOut",
+    "type": "object"
+   },
    "RecepcionLinea": {
     "properties": {
      "cantidad": {
@@ -14888,6 +15135,316 @@
     "summary": "Recibo Xml",
     "tags": [
      "cobranza"
+    ]
+   }
+  },
+  "/api/v1/conexiones": {
+   "get": {
+    "description": "Todo lo conectable, conectado o no. La pantalla no necesita otra llamada.",
+    "operationId": "listar_api_v1_conexiones_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ConexionEstadoOut"
+         },
+         "title": "Response Listar Api V1 Conexiones Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar",
+    "tags": [
+     "conexiones"
+    ]
+   }
+  },
+  "/api/v1/conexiones/probar": {
+   "get": {
+    "description": "Confirma que una clave sirve, sin escribir nada.\n\nLo llama el bot al conectarse (para poder responder «listo» en el chat) y la\npantalla con el botón «Probar conexión». Pide un permiso que TODA conexión\ntiene, así que sirve para ambas identidades.",
+    "operationId": "probar_api_v1_conexiones_probar_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PruebaOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Probar",
+    "tags": [
+     "conexiones"
+    ]
+   }
+  },
+  "/api/v1/conexiones/{conexion_id}/revocar": {
+   "post": {
+    "operationId": "revocar_api_v1_conexiones__conexion_id__revocar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "conexion_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Conexion Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ConexionOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Revocar",
+    "tags": [
+     "conexiones"
+    ]
+   }
+  },
+  "/api/v1/conexiones/{tipo}/actividad": {
+   "get": {
+    "description": "Las últimas órdenes que entraron. Es la prueba de que sirve, no un log.",
+    "operationId": "actividad_api_v1_conexiones__tipo__actividad_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tipo",
+      "required": true,
+      "schema": {
+       "title": "Tipo",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ActividadConexionOut"
+         },
+         "title": "Response Actividad Api V1 Conexiones  Tipo  Actividad Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Actividad",
+    "tags": [
+     "conexiones"
+    ]
+   }
+  },
+  "/api/v1/conexiones/{tipo}/clave": {
+   "post": {
+    "description": "Genera la clave. Se devuelve en claro UNA vez y ya no se puede volver a leer.\n\nSi ya había una viva se revoca en el acto: «generar otra» y «la anterior deja\nde servir» tienen que ser el mismo gesto, o quedarían dos claves buenas y\nnadie sabría cuál está usando el bot.",
+    "operationId": "generar_api_v1_conexiones__tipo__clave_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tipo",
+      "required": true,
+      "schema": {
+       "title": "Tipo",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ClaveNuevaOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Generar",
+    "tags": [
+     "conexiones"
     ]
    }
   },

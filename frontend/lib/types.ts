@@ -603,3 +603,44 @@ export type OCRecibidaDetalle = OCRecibida & {
   payload: Record<string, unknown>;
   lineas: LineaOC[];
 };
+
+// ─── Conexiones ──────────────────────────────────────────────────────────────
+// Una clave con la que un sistema externo (Smart Supply) deja órdenes en la
+// bandeja, sin que nadie tenga que repartir la contraseña de una persona.
+
+export type Conexion = {
+  id: string;
+  tipo: string;
+  nombre: string;
+  clave_pista: string;          // últimos 4 caracteres, para nombrarla
+  estado: "PENDIENTE" | "ACTIVA" | "REVOCADA";
+  created_at: string;
+  activada_at?: string | null;
+  ultimo_uso_at?: string | null;
+};
+
+export type ConexionEstado = {
+  tipo: string;
+  nombre: string;
+  conexion?: Conexion | null;
+  ordenes_hoy: number;
+  ordenes_sin_resolver: number;
+  ultima_orden_at?: string | null;
+  conviene_rotar: boolean;
+  dias_desde_creacion?: number | null;
+};
+
+export type ClaveNueva = {
+  clave: string;                // en claro; solo existe en memoria, una vez
+  conexion: Conexion;
+  instruccion_whatsapp: string;
+};
+
+export type ActividadConexion = {
+  recibida_at: string;
+  folio_externo?: string | null;
+  remitente?: string | null;
+  cliente_nombre?: string | null;
+  estado: string;
+  partidas: number;
+};

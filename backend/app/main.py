@@ -15,6 +15,7 @@ from .api.v1 import (
     clientes,
     cobranza,
     contacto,
+    conexiones,
     conversiones,
     correo,
     empresa,
@@ -114,6 +115,7 @@ app.include_router(ordenes_compra.router, prefix="/api/v1")
 app.include_router(conversiones.router, prefix="/api/v1")
 app.include_router(remisiones.router, prefix="/api/v1")
 app.include_router(oc_recibidas.router, prefix="/api/v1")
+app.include_router(conexiones.router, prefix="/api/v1")
 app.include_router(facturas.router, prefix="/api/v1")
 app.include_router(sat.router, prefix="/api/v1")
 # IAM admin — roles, permission catalog, memberships

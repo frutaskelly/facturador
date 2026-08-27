@@ -83,6 +83,12 @@ def verify_token(token: str) -> dict:
         raise HTTPException(status_code=500, detail="Backend mal configurado (JWKS)")
 
 
+# Prefijo de las claves de conexión (ver models/conexion.py). Se reconoce aquí
+# para NO intentar verificarlas contra el JWKS: no son JWT y el error sería
+# «token inválido», que no le dice nada a quien pegó una clave vencida.
+CLAVE_CONEXION_PREFIJO = "fi_ss_"
+
+
 def get_principal(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
 ) -> Principal:
@@ -93,7 +99,22 @@ def get_principal(
             detail="Authorization: Bearer <jwt> requerido",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    claims = verify_token(credentials.credentials)
+    token = credentials.credentials.strip()
+    if token.startswith(CLAVE_CONEXION_PREFIJO):
+        # Clave de un sistema externo. La identidad NO se resuelve aquí: rbac la
+        # busca en `conexiones` y de ahí saca el inquilino y su alcance. El
+        # identificador es el hash, nunca el texto — así la clave no termina en
+        # una llave de caché ni en un log.
+        import hashlib
+
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        return Principal(
+            auth_user_id=f"conexion:{digest}",
+            email=None,
+            role="conexion",
+            claims={"conexion_hash": digest},
+        )
+    claims = verify_token(token)
     return Principal(
         auth_user_id=claims["sub"],
         email=claims.get("email"),
