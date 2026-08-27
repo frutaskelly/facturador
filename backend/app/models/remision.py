@@ -1,6 +1,9 @@
 """Remisiones — delivery notes (Phase 4e, lean core).
 
 A remisión is a non-fiscal dispatch document: BORRADOR → CONFIRMADA → CANCELADA.
+Una remisión con folio de factura de SAE (`factura_sae`) queda en RESERVADO:
+mercancía comprometida con un comprobante que vive fuera del facturador. No
+mueve inventario — la salida sigue siendo el confirmar.
 Confirming reserves stock (disponible → reservada via a SALIDA_REMISION
 movement); cancelling a confirmed one releases it. Folios are a per-tenant
 `R-N` sequence for now — real fiscal series arrive in Phase 6.
@@ -30,7 +33,9 @@ from sqlalchemy.orm import relationship
 from ..core.db import Base
 from .base import SoftDeleteMixin, TimestampMixin, tenant_fk, uuid_pk
 
-REMISION_ESTADO = Enum("BORRADOR", "CONFIRMADA", "FACTURADA", "CANCELADA", name="remision_estado")
+REMISION_ESTADO = Enum(
+    "BORRADOR", "RESERVADO", "CONFIRMADA", "FACTURADA", "CANCELADA", name="remision_estado"
+)
 
 
 class Remision(Base, TimestampMixin, SoftDeleteMixin):
@@ -73,6 +78,12 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     nota_entrega = Column(Text)
     # Fase 6: una factura cruza una o varias remisiones (NULL = sin facturar).
     factura_id = Column(UUID(as_uuid=True), ForeignKey("facturas.id", ondelete="SET NULL"))
+    # Folio de la factura que ampara esta remisión en SAE ("ZHGO 233"). Es de
+    # OTRO sistema: texto libre, sin FK. Tenerlo pone la remisión en RESERVADO.
+    factura_sae = Column(String(30))
+    # "Su pedido": la ORDEN DE COMPRA del cliente ("24478"), con la que él
+    # reconoce el documento. Texto libre: es un folio de su sistema, no del nuestro.
+    su_pedido = Column(String(30))
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
 

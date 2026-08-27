@@ -6,6 +6,7 @@ import {
   isValidElement,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -147,7 +148,9 @@ export function Select({
   const [open, setOpen] = useState(false);
   const [hi, setHi] = useState(0);
   const [q, setQ] = useState("");
-  const [rect, setRect] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
+  const [rect, setRect] = useState<
+    { left: number; top: number; width: number; maxWidth: number; maxHeight: number } | null
+  >(null);
   const [mounted, setMounted] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -177,8 +180,26 @@ export function Select({
     // salirse de la pantalla y dejar opciones inalcanzables.
     const maxHeight = Math.max(120, Math.min(desired, Math.floor(up ? spaceAbove : spaceBelow)));
     const top = up ? r.top - gap - Math.min(desired, maxHeight) : r.bottom + gap;
-    setRect({ left: r.left, top, width: r.width, maxHeight });
+    // El panel arranca del ancho del trigger pero puede CRECER con el
+    // contenido: los nombres largos (razones sociales) salían cortados en un
+    // filtro angosto. Tope: lo que quepa en pantalla.
+    setRect({
+      left: r.left,
+      top,
+      width: r.width,
+      maxWidth: Math.min(560, window.innerWidth - 16),
+      maxHeight,
+    });
   }, [options.length, filterable]);
+
+  // Si el panel creció más allá del borde derecho, se recorre a la izquierda.
+  // Corre una sola vez por apertura: al mover `left` el desbordamiento se anula.
+  useLayoutEffect(() => {
+    if (!open || !rect || !panelRef.current) return;
+    const ancho = panelRef.current.offsetWidth;
+    const sobra = rect.left + ancho - (window.innerWidth - 8);
+    if (sobra > 0) setRect((r) => (r ? { ...r, left: Math.max(8, r.left - sobra) } : r));
+  }, [open, rect]);
 
   const openMenu = useCallback(() => {
     if (disabled) return;
@@ -324,7 +345,9 @@ export function Select({
               position: "fixed",
               left: rect.left,
               top: rect.top,
-              width: rect.width,
+              width: "max-content",
+              minWidth: rect.width,
+              maxWidth: rect.maxWidth,
               maxHeight: rect.maxHeight,
               zIndex: 50,
             }}

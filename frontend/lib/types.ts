@@ -261,9 +261,13 @@ export type Remision = {
   serie_id?: string | null;
   fecha_remision: string;
   fecha_entrega?: string | null;
-  estado: "BORRADOR" | "CONFIRMADA" | "FACTURADA" | "CANCELADA";
+  estado: "BORRADOR" | "RESERVADO" | "CONFIRMADA" | "FACTURADA" | "CANCELADA";
   canal: string;
   factura_folio?: string | null;
+  // Folio de la factura de SAE que ampara la remisión (relación con el legado).
+  factura_sae?: string | null;
+  // Orden de compra del cliente ("su pedido").
+  su_pedido?: string | null;
   factura_estado?: "BORRADOR" | "TIMBRADA" | "CANCELADA" | null;
   factura_id?: string | null;
   subtotal: string;
@@ -362,6 +366,9 @@ export type Candidato = {
   categoria_nombre?: string;
   esquema_impuesto_id?: string | null;
   esquema_codigo?: string;
+  // Lo fiscal del producto existente: al vincular es lo que se usa.
+  clave_sat?: string | null;
+  unidad_sat?: string | null;
 };
 export type MatchResult = { texto: string; candidatos: Candidato[] };
 

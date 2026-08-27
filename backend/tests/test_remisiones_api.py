@@ -301,3 +301,105 @@ def test_importar_preview_rechaza_formato_invalido(client, env, auth_as):
     r = client.post("/api/v1/remisiones/importar-preview", headers=h,
                     files={"archivo": ("nota.txt", b"esto no es excel", "text/plain")})
     assert r.status_code == 422
+
+
+# ── Importación del Master Ordenes (hoja "Master" del concentrado de OC) ─────
+def _xlsx_master(rows):
+    """Construye un .xlsx con el layout del Master Ordenes: la hoja de renglones
+    se llama "Master" y el libro arrastra además "Summary"/"Totales"."""
+    import io
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Master"
+    ws.append([
+        "Archivo", "Tipo Documento", "RFC Cliente", "Nombre Cliente", "RFC Proveedor",
+        "Nombre Proveedor", "Folio", "Requisicion Folio", "Referencia", "Fecha",
+        "Cantidad", "Unidad", "Clave", "Descripcion", "Costo unitario", "DESC",
+        "Subtotal", "Observacion del documento", "Entregar Bodega",
+    ])
+    for r in rows:
+        ws.append(r)
+    wb.create_sheet("Summary").append(["Folio", "Cliente", "Total"])
+    wb.create_sheet("Totales").append(["Documentos", len(rows)])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_importar_master_ordenes_cruza_por_rfc_y_nombre(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    sku = client.get("/api/v1/productos", headers=h, params={"limit": 1}).json()["items"][0]
+    fila = lambda folio, rfc, nombre, clave, cant: [  # noqa: E731
+        "OCO 458.pdf", "ORDEN DE COMPRA", rfc, nombre, "ZAOC830517RF9",
+        "CRISTIAN GERARDO ZARATE OROZCO", folio, "0000000271", "CEUHM VERDURA",
+        "46209",  # serial de Excel = 2026-07-06
+        cant, "KILOGRAMO", clave, "AJO MORADO", "90", "0", "45",
+        "ENTREGAR EN COMEDOR EL JUEVES", "16 DE JUL",
+    ]
+    data = _xlsx_master([
+        fila("0000000458", "XAXX010101000", "Cliente 1", sku["sku"], "2"),
+        fila("0000000458", "XAXX010101000", "Cliente 1", "AJO -FRUT-017", "0.5"),
+        # RFC desconocido: el cruce cae al nombre, sin la razón social.
+        fila("0000024460", "AAA010101AAA", "Cliente 1 S.A. de C.V.", sku["sku"], "3"),
+    ])
+    r = client.post("/api/v1/remisiones/importar-preview", headers=h,
+                    files={"archivo": ("Master Ordenes.xlsx", data,
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert r.status_code == 200, r.text
+    p = r.json()
+    assert len(p["grupos"]) == 2
+    g1 = next(g for g in p["grupos"] if g["folio_ref"] == "458")     # sin ceros
+    assert g1["cliente_id"] == env["cli_a"]                          # cruzó por RFC
+    assert g1["fecha"] == "2026-07-06"                               # serial de Excel
+    assert g1["su_pedido"] == "CEUHM VERDURA"                        # Referencia
+    assert g1["observaciones"] == "ENTREGAR EN COMEDOR EL JUEVES"
+    assert g1["requisicion"] == "271"                                # sin ceros
+    assert g1["entregar_bodega"] == "16 DE JUL"
+    cruzada = next(l for l in g1["lineas"] if l["clave"] == sku["sku"])
+    assert cruzada["producto_id"] == sku["id"] and float(cruzada["precio"]) == 90
+    sin_cruce = next(l for l in g1["lineas"] if l["clave"] == "AJO -FRUT-017")
+    assert sin_cruce["producto_id"] is None
+    assert sin_cruce["descripcion"] == "AJO MORADO" and sin_cruce["unidad"] == "KILOGRAMO"
+    g2 = next(g for g in p["grupos"] if g["folio_ref"] == "24460")
+    assert g2["cliente_id"] == env["cli_a"]                          # cruzó por nombre
+    assert p["clientes_sin_cruce"] == 0
+
+
+# ── Factura de SAE → estado RESERVADO ─────────────────────────────────────────
+def test_factura_sae_reserva_y_al_quitarla_vuelve_a_borrador(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    base = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+            "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "2", "precio_unitario": "10"}]}
+
+    # Nace RESERVADA si el alta trae el folio de SAE.
+    r = client.post("/api/v1/remisiones", headers=h,
+                    json={**base, "factura_sae": "ZHGO 233", "su_pedido": "0000024478"})
+    assert r.status_code == 201, r.text
+    assert r.json()["estado"] == "RESERVADO"
+    assert r.json()["factura_sae"] == "ZHGO 233"
+    # "Su pedido" es la OC del cliente y va en su propia columna, no en las notas.
+    assert r.json()["su_pedido"] == "0000024478"
+
+    # Sin folio nace BORRADOR; ponérselo después la reserva.
+    rem = client.post("/api/v1/remisiones", headers=h, json=base).json()
+    assert rem["estado"] == "BORRADOR" and rem["factura_sae"] is None
+    up = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"factura_sae": "ZHGO 234"})
+    assert up.status_code == 200, up.text
+    assert up.json()["estado"] == "RESERVADO"
+
+    # Quitarlo la regresa a BORRADOR.
+    up = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"factura_sae": ""})
+    assert up.json()["estado"] == "BORRADOR" and up.json()["factura_sae"] is None
+
+    # Una RESERVADA se confirma igual que un borrador (la salida es el confirmar).
+    client.post("/api/v1/inventario/movimientos", headers=h, json={
+        "tipo": "ENTRADA_COMPRA", "producto_id": env["prod_a"], "almacen_id": env["alm_a"],
+        "cantidad": "10", "costo_unitario": "4"})
+    client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"factura_sae": "ZHGO 235"})
+    conf = client.post(f"/api/v1/remisiones/{rem['id']}/confirmar", headers=h, json={})
+    assert conf.status_code == 200, conf.text
+    assert conf.json()["estado"] == "CONFIRMADA"
+    # Ya confirmada, el folio de SAE es un dato más: no la regresa a borrador.
+    up = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"factura_sae": ""})
+    assert up.json()["estado"] == "CONFIRMADA"

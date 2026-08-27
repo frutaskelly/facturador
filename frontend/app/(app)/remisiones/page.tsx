@@ -38,8 +38,10 @@ const WRITE = "remision:gestionar";
 // selectedRows/onSelectionChange).
 const EMPTY_REMISIONES: Remision[] = [];
 
-const ESTADO_TONE: Record<string, "success" | "warning" | "muted" | "danger" | "accent"> = {
+const ESTADO_TONE: Record<string, "default" | "success" | "warning" | "muted" | "danger" | "accent"> = {
   BORRADOR: "warning",
+  // Reservada: la ampara una factura de SAE, pero la mercancía no ha salido.
+  RESERVADO: "default",
   CONFIRMADA: "success",
   FACTURADA: "accent",
   CANCELADA: "danger",
@@ -123,6 +125,8 @@ export default function RemisionesPage() {
   const [fecha, setFecha] = useState("");
   const [serieOverride, setSerieOverride] = useState("");
   const [notas, setNotas] = useState("");
+  const [facturaSae, setFacturaSae] = useState("");
+  const [suPedido, setSuPedido] = useState("");
   const [lineas, setLineas] = useState<LineaForm[]>([nuevaLinea()]);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
@@ -225,7 +229,7 @@ export default function RemisionesPage() {
   // Lo usa "Borrar" y también openCreate al entrar.
   function resetForm() {
     setClienteId(""); setSucursalId(""); setAlmacenId(""); setSerieOverride("");
-    setSucursales([]); setNotas(""); setLineas([nuevaLinea()]);
+    setSucursales([]); setNotas(""); setFacturaSae(""); setSuPedido(""); setLineas([nuevaLinea()]);
     setFecha(today());            // fecha de hoy por defecto (el flujo la salta)
     setStep("cliente");           // arranca con el cliente abierto
   }
@@ -241,7 +245,7 @@ export default function RemisionesPage() {
   // Abre esta misma pantalla para EDITAR una remisión en BORRADOR: carga sus
   // datos y líneas. Solo BORRADOR es editable (el backend lo exige).
   async function openEdit(r: Remision) {
-    if (r.estado !== "BORRADOR" && r.estado !== "CONFIRMADA") {
+    if (r.estado !== "BORRADOR" && r.estado !== "RESERVADO" && r.estado !== "CONFIRMADA") {
       toast.error("Solo se puede editar una remisión en borrador o confirmada");
       return;
     }
@@ -257,6 +261,8 @@ export default function RemisionesPage() {
       setSerieOverride("");                       // el folio ya está fijo; no se re-serie al editar
       setFecha(det.fecha_remision ?? today());
       setNotas(det.notas ?? "");
+      setFacturaSae(det.factura_sae ?? "");
+      setSuPedido(det.su_pedido ?? "");
       setLineas((det.lineas ?? []).map((ln) => {
         const presKeys = Object.keys(prodById[ln.producto_id]?.presentaciones ?? {});
         return nuevaLinea({
@@ -540,6 +546,10 @@ export default function RemisionesPage() {
       // en el PATCH provoca un 500); el backend conserva/asigna la suya.
       ...(fecha ? { fecha_remision: fecha } : {}),
       notas: notas || null,
+      // Vacío se manda como cadena vacía (no null): así el backend distingue
+      // "quítalo" —y regresa la remisión a BORRADOR— de "no lo toques".
+      factura_sae: facturaSae.trim(),
+      su_pedido: suPedido.trim(),
       lineas: lns.map((l) => ({
         producto_id: l.producto_id,
         presentacion: l.presentacion,
@@ -820,14 +830,18 @@ export default function RemisionesPage() {
   // Carga el detalle de una remisión (usa caché `detalles` si está disponible).
   // ── Importación masiva estilo SAE (Excel → varias remisiones) ──
   type ImportLinea = {
-    clave: string; cantidad: string; precio: string | null;
+    clave: string; cruce: "sku" | "cliente" | "descripcion" | null;
+    descripcion: string | null; unidad: string | null;
+    cantidad: string; precio: string | null;
     producto_id: string | null; producto_nombre: string | null; presentacion: string | null;
-    candidatos: { producto_id: string; sku: string; nombre: string; score: number }[];
+    candidatos: { producto_id: string; sku: string; nombre: string; score: number; origen: string; parecido: number }[];
     omitir?: boolean;
   };
   type ImportGrupo = {
     folio_ref: string; fecha: string | null; su_pedido: string | null; observaciones: string | null;
-    cliente_codigo: string; cliente_id: string | null; cliente_nombre: string | null;
+    cliente_codigo: string; cliente_rfc: string | null;
+    requisicion: string | null; entregar_bodega: string | null;
+    cliente_id: string | null; cliente_nombre: string | null;
     lineas: ImportLinea[];
   };
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -871,13 +885,15 @@ export default function RemisionesPage() {
         }));
         if (!g.cliente_id || lineas.length === 0) { fail += 1; continue; }
         const notas = [
-          `Ref SAE ${g.folio_ref}`,
+          g.requisicion ? `Req ${g.requisicion}` : null,
           g.su_pedido ? `Su pedido: ${g.su_pedido}` : null,
+          g.entregar_bodega ? `Entregar en bodega: ${g.entregar_bodega}` : null,
           g.observaciones,
         ].filter(Boolean).join(" · ");
         try {
           await post("/api/v1/remisiones", {
             cliente_facturacion_id: g.cliente_id,
+            su_pedido: g.folio_ref,
             ...(importAlmacen ? { almacen_id: importAlmacen } : {}),
             ...(g.fecha ? { fecha_remision: g.fecha } : {}),
             notas,
@@ -1058,7 +1074,7 @@ export default function RemisionesPage() {
   // Confirmar en lote las remisiones en BORRADOR seleccionadas (reserva stock).
   // Si alguna no tiene existencia, se ofrece confirmarla con sobregiro.
   async function bulkConfirmar() {
-    const elegibles = selected.filter((r) => r.estado === "BORRADOR");
+    const elegibles = selected.filter((r) => r.estado === "BORRADOR" || r.estado === "RESERVADO");
     if (elegibles.length === 0) {
       toast.error("No hay remisiones en borrador en la selección");
       setConfirmarBulkOpen(false);
@@ -1364,6 +1380,22 @@ export default function RemisionesPage() {
           <span className="text-muted">—</span>
         ),
     },
+    {
+      header: "Su pedido",
+      sortable: true,
+      sortValue: (r) => r.su_pedido ?? "",
+      cell: (r) => r.su_pedido
+        ? <span className="tabular-nums">{r.su_pedido}</span>
+        : <span className="text-muted">—</span>,
+    },
+    {
+      header: "Factura SAE",
+      sortable: true,
+      sortValue: (r) => r.factura_sae ?? "",
+      cell: (r) => r.factura_sae
+        ? <span className="font-medium tabular-nums">{r.factura_sae}</span>
+        : <span className="text-muted">—</span>,
+    },
     { header: "Cliente", sortable: true, sortValue: (r) => cliName[r.cliente_facturacion_id] ?? "", cell: (r) => cliName[r.cliente_facturacion_id] ?? "—" },
     { header: "Fecha", sortable: true, sortValue: (r) => r.fecha_remision, cell: (r) => fmtDate(r.fecha_remision) },
     { header: "Estado", sortable: true, sortValue: (r) => r.estado, cell: (r) => <Badge tone={ESTADO_TONE[r.estado] ?? "muted"}>{r.estado}</Badge> },
@@ -1376,10 +1408,11 @@ export default function RemisionesPage() {
 
   const rowActions: RowAction<Remision>[] = [
     { id: "editar", label: "Editar", icon: <Pencil size={15} />, onClick: (r) => { void openEdit(r); },
-      hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "CONFIRMADA")
+      hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "RESERVADO" || r.estado === "CONFIRMADA")
         && (!r.factura_id || r.factura_estado === "CANCELADA")) },
     { id: "confirmar", label: "Confirmar", icon: <Check size={15} />, tone: "success",
-      onClick: (r) => setToConfirm(r), hidden: (r) => !(canWrite && r.estado === "BORRADOR") },
+      onClick: (r) => setToConfirm(r),
+      hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "RESERVADO")) },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
       onClick: (r) => setToCancel(r), hidden: (r) => !(canWrite && r.estado !== "CANCELADA" && r.estado !== "FACTURADA") },
     { id: "devolucion", label: "Devolución", icon: <Undo2 size={15} />,
@@ -1561,9 +1594,19 @@ export default function RemisionesPage() {
             })}
           </div>
 
-          <Field label="Notas">
-            <Textarea rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} />
-          </Field>
+          <div className="grid gap-3 sm:grid-cols-[1fr_14rem_14rem]">
+            <Field label="Notas">
+              <Textarea rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} />
+            </Field>
+            <Field label="Su pedido" hint="Orden de compra del cliente">
+              <Input value={suPedido} onChange={(e) => setSuPedido(e.target.value)}
+                placeholder="24478" maxLength={30} />
+            </Field>
+            <Field label="Factura SAE" hint="Folio en SAE; al ponerlo la remisión queda RESERVADA">
+              <Input value={facturaSae} onChange={(e) => setFacturaSae(e.target.value)}
+                placeholder="ZHGO 233" maxLength={30} />
+            </Field>
+          </div>
 
           <div className="mt-4 flex items-start justify-between border-t border-border pt-4">
             <div />
@@ -1626,7 +1669,7 @@ export default function RemisionesPage() {
   const clientesElegibles = [...new Set(facturarElegibles.map((r) => r.cliente_facturacion_id))];
   const multiCliente = clientesElegibles.length > 1;
   // Borradores (confirmables) y no-canceladas (cancelables) dentro de la selección.
-  const borradoresSel = selected.filter((r) => r.estado === "BORRADOR");
+  const borradoresSel = selected.filter((r) => r.estado === "BORRADOR" || r.estado === "RESERVADO");
   const cancelablesSel = selected.filter((r) => r.estado !== "CANCELADA" && r.estado !== "FACTURADA");
 
   return (
@@ -1653,7 +1696,7 @@ export default function RemisionesPage() {
           <Input type="date" value={fHasta} onChange={(e) => setFHasta(e.target.value)} />
         </Field>
         <Field label="Cliente">
-          <Select value={fCliente} onChange={(e) => setFCliente(e.target.value)} aria-label="Filtrar por cliente">
+          <Select className="min-w-64" value={fCliente} onChange={(e) => setFCliente(e.target.value)} aria-label="Filtrar por cliente">
             <option value="">Todos</option>
             {clientes.map((c) => (
               <option key={c.id} value={c.id}>{c.legal_name}</option>
@@ -1770,18 +1813,29 @@ export default function RemisionesPage() {
           {(importGrupos ?? []).map((g, gi) => {
             const cruzadas = g.lineas.filter((l) => l.producto_id && !l.omitir).length;
             const pendientes = g.lineas.filter((l) => !l.producto_id && !l.omitir);
+            const importe = g.lineas
+              .filter((l) => !l.omitir)
+              .reduce((s, l) => s + Number(l.cantidad || 0) * Number(l.precio || 0), 0);
             return (
               <div key={g.folio_ref} className="rounded-xl border border-border p-3">
                 <div className="flex flex-wrap items-center gap-3 text-sm">
-                  <span className="font-medium">Ref SAE {g.folio_ref}</span>
+                  <span className="font-medium">Ref {g.folio_ref}</span>
+                  {g.requisicion && <span className="text-muted">Req {g.requisicion}</span>}
                   {g.fecha && <span className="text-muted">{fmtDate(g.fecha)}</span>}
                   {g.su_pedido && <span className="text-muted">Su pedido: {g.su_pedido}</span>}
-                  <span className="text-muted">· {cruzadas} línea(s) cruzada(s)</span>
+                  {g.entregar_bodega && (
+                    <span className="text-muted">Bodega: {g.entregar_bodega}</span>
+                  )}
+                  <span className="text-muted">
+                    · {g.lineas.length} línea(s), {cruzadas} cruzada(s)
+                    {pendientes.length > 0 ? `, ${pendientes.length} por resolver` : ""}
+                    {" · "}{fmtMoney(importe)}
+                  </span>
                   {g.cliente_id ? (
                     <Badge tone="success">{g.cliente_nombre}</Badge>
                   ) : (
                     <span className="flex items-center gap-2">
-                      <Badge tone="warning">Cliente {g.cliente_codigo} sin cruce</Badge>
+                      <Badge tone="warning">Cliente {g.cliente_rfc ?? g.cliente_codigo} sin cruce</Badge>
                       <Select
                         value=""
                         onChange={(e) => {
@@ -1796,12 +1850,36 @@ export default function RemisionesPage() {
                     </span>
                   )}
                 </div>
-                {pendientes.length > 0 && (
+                {g.observaciones && (
+                  <p className="mt-1 text-xs text-muted">{g.observaciones}</p>
+                )}
+                {(
                   <div className="mt-2 space-y-1">
-                    {g.lineas.map((l, li) => (!l.producto_id && !l.omitir) ? (
+                    {g.lineas.map((l, li) => l.omitir ? (
+                      <div key={`${g.folio_ref}-${li}`} className="flex flex-wrap items-center gap-2 text-sm opacity-50">
+                        <Badge>{l.clave}</Badge>
+                        <span className="text-muted line-through">{l.descripcion ?? "—"}</span>
+                        <span className="text-muted">omitida</span>
+                      </div>
+                    ) : l.producto_id ? (
+                      <div key={`${g.folio_ref}-${li}`} className="flex flex-wrap items-center gap-2 text-sm">
+                        <Badge tone="success">{l.clave}</Badge>
+                        <span>{l.producto_nombre}</span>
+                        {l.cruce === "descripcion" && l.descripcion && (
+                          <span className="text-muted">← {l.descripcion}</span>
+                        )}
+                        <span className="text-muted">
+                          {fmtNumber(l.cantidad)}{l.unidad ? ` ${l.unidad.toLowerCase()}` : ""}
+                          {l.precio ? ` × ${fmtMoney(Number(l.precio))}` : ""}
+                        </span>
+                      </div>
+                    ) : (
                       <div key={`${g.folio_ref}-${li}`} className="flex flex-wrap items-center gap-2 text-sm">
                         <Badge tone="warning">{l.clave}</Badge>
-                        <span className="text-muted">x{fmtNumber(l.cantidad)}</span>
+                        {l.descripcion && <span className="text-muted">{l.descripcion}</span>}
+                        <span className="text-muted">
+                          x{fmtNumber(l.cantidad)}{l.unidad ? ` ${l.unidad.toLowerCase()}` : ""}
+                        </span>
                         <Select
                           value=""
                           onChange={(e) => {
@@ -1826,7 +1904,7 @@ export default function RemisionesPage() {
                           <option value="__omitir__">Omitir esta línea</option>
                         </Select>
                       </div>
-                    ) : null)}
+                    ))}
                   </div>
                 )}
               </div>

@@ -764,6 +764,17 @@
       "title": "Categoria Nombre",
       "type": "string"
      },
+     "clave_sat": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sat"
+     },
      "esquema_codigo": {
       "default": "",
       "title": "Esquema Codigo",
@@ -828,6 +839,17 @@
        }
       ],
       "title": "Unidad Base"
+     },
+     "unidad_sat": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Sat"
      }
     },
     "required": [
@@ -12179,6 +12201,18 @@
       "default": "0",
       "title": "Descuento"
      },
+     "factura_sae": {
+      "anyOf": [
+       {
+        "maxLength": 30,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Factura Sae"
+     },
      "fecha_entrega": {
       "anyOf": [
        {
@@ -12268,6 +12302,18 @@
        }
       ],
       "title": "Serie Id"
+     },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "maxLength": 30,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
      },
      "sucursal_id": {
       "anyOf": [
@@ -12366,6 +12412,17 @@
        }
       ],
       "title": "Factura Id"
+     },
+     "factura_sae": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Factura Sae"
      },
      "fecha_entrega": {
       "anyOf": [
@@ -12482,6 +12539,17 @@
        }
       ],
       "title": "Serie Id"
+     },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
      },
      "subtotal": {
       "title": "Subtotal",
@@ -12603,6 +12671,17 @@
       ],
       "title": "Factura Id"
      },
+     "factura_sae": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Factura Sae"
+     },
      "fecha_entrega": {
       "anyOf": [
        {
@@ -12711,6 +12790,17 @@
       ],
       "title": "Serie Id"
      },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
+     },
      "subtotal": {
       "title": "Subtotal",
       "type": "string"
@@ -12802,6 +12892,18 @@
       ],
       "title": "Descuento"
      },
+     "factura_sae": {
+      "anyOf": [
+       {
+        "maxLength": 30,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Factura Sae"
+     },
      "fecha_entrega": {
       "anyOf": [
        {
@@ -12890,6 +12992,18 @@
        }
       ],
       "title": "Proyecto Id"
+     },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "maxLength": 30,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
      },
      "sucursal_id": {
       "anyOf": [
@@ -27156,7 +27270,7 @@
   },
   "/api/v1/remisiones/importar-preview": {
    "post": {
-    "description": "Importación masiva estilo SAE: parsea el Excel, agrupa por FOLIO (una\nremisión por folio del archivo) y cruza cliente (código) y productos (CLAVE/\nSKU exacto; si no, candidatos del cruce). NO crea nada: la UI muestra el\npreview, el usuario resuelve lo no cruzado y crea con POST /remisiones.",
+    "description": "Importación masiva (SAE o Master Ordenes): parsea el Excel, agrupa por\nFOLIO (una remisión por folio del archivo) y cruza cliente (código, RFC o\nnombre) y productos (CLAVE/SKU exacto; si no, candidatos del cruce). NO crea\nnada: la UI muestra el preview, el usuario resuelve lo no cruzado y crea con\nPOST /remisiones.",
     "operationId": "importar_preview_api_v1_remisiones_importar_preview_post",
     "parameters": [
      {

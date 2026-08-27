@@ -667,7 +667,7 @@ export default function ImportarProductosPage() {
               <Badge tone="warning">Mismo producto que fila {mismoProducto.get(f.fila)}</Badge>
             ) : null}
             {f.baja ? <Badge tone="muted">BAJA</Badge> : null}
-            {f.clave_sat_valida === false ? (
+            {f.clave_sat_valida === false && f.accion !== "vincular" ? (
               <Badge tone="danger">Clave SAT inexistente</Badge>
             ) : null}
           </div>
@@ -810,8 +810,21 @@ export default function ImportarProductosPage() {
       className: "align-top min-w-[12rem]",
       sortable: true,
       sortValue: (f) => f.clave_sat,
-      cell: (f) =>
-        seImporta(f) ? (
+      cell: (f) => {
+        // Vinculada: el CFDI sale con lo fiscal del producto que ya existe, no
+        // con lo que traiga el archivo. Se enseña eso —y sin el aviso de clave
+        // inexistente, que hablaba de un dato que no se va a usar.
+        if (seImporta(f) && f.accion === "vincular") {
+          const cand = candidatosDe(f).find((c) => c.producto_id === f.producto_sel);
+          return (
+            <div className="text-sm">
+              <span className="tabular-nums">{cand?.clave_sat || "—"}</span>
+              <span className="text-muted"> · {cand?.unidad_sat || "—"}</span>
+              <div className="text-xs text-muted">del producto existente</div>
+            </div>
+          );
+        }
+        return seImporta(f) ? (
           <div className="flex gap-1">
             <div className="w-[7rem]">
               <Input
@@ -832,7 +845,8 @@ export default function ImportarProductosPage() {
           </div>
         ) : (
           <span className="text-muted">—</span>
-        ),
+        );
+      },
     },
     {
       key: "precio",

@@ -2573,10 +2573,11 @@ export interface paths {
         put?: never;
         /**
          * Importar Preview
-         * @description Importación masiva estilo SAE: parsea el Excel, agrupa por FOLIO (una
-         *     remisión por folio del archivo) y cruza cliente (código) y productos (CLAVE/
-         *     SKU exacto; si no, candidatos del cruce). NO crea nada: la UI muestra el
-         *     preview, el usuario resuelve lo no cruzado y crea con POST /remisiones.
+         * @description Importación masiva (SAE o Master Ordenes): parsea el Excel, agrupa por
+         *     FOLIO (una remisión por folio del archivo) y cruza cliente (código, RFC o
+         *     nombre) y productos (CLAVE/SKU exacto; si no, candidatos del cruce). NO crea
+         *     nada: la UI muestra el preview, el usuario resuelve lo no cruzado y crea con
+         *     POST /remisiones.
          */
         post: operations["importar_preview_api_v1_remisiones_importar_preview_post"];
         delete?: never;
@@ -3280,6 +3281,8 @@ export interface components {
              * @default
              */
             categoria_nombre: string;
+            /** Clave Sat */
+            clave_sat?: string | null;
             /**
              * Esquema Codigo
              * @default
@@ -3309,6 +3312,8 @@ export interface components {
             sku: string;
             /** Unidad Base */
             unidad_base?: string | null;
+            /** Unidad Sat */
+            unidad_sat?: string | null;
         };
         /**
          * CatalogoClienteBatchIn
@@ -7305,6 +7310,8 @@ export interface components {
              * @default 0
              */
             descuento: number | string;
+            /** Factura Sae */
+            factura_sae?: string | null;
             /** Fecha Entrega */
             fecha_entrega?: string | null;
             /** Fecha Remision */
@@ -7321,6 +7328,8 @@ export interface components {
             proyecto_id?: string | null;
             /** Serie Id */
             serie_id?: string | null;
+            /** Su Pedido */
+            su_pedido?: string | null;
             /** Sucursal Id */
             sucursal_id?: string | null;
         };
@@ -7355,6 +7364,8 @@ export interface components {
             factura_folio?: string | null;
             /** Factura Id */
             factura_id?: string | null;
+            /** Factura Sae */
+            factura_sae?: string | null;
             /** Fecha Entrega */
             fecha_entrega?: string | null;
             /**
@@ -7395,6 +7406,8 @@ export interface components {
             proyecto_id?: string | null;
             /** Serie Id */
             serie_id?: string | null;
+            /** Su Pedido */
+            su_pedido?: string | null;
             /** Subtotal */
             subtotal: string;
             /** Sucursal Id */
@@ -7438,6 +7451,8 @@ export interface components {
             factura_folio?: string | null;
             /** Factura Id */
             factura_id?: string | null;
+            /** Factura Sae */
+            factura_sae?: string | null;
             /** Fecha Entrega */
             fecha_entrega?: string | null;
             /**
@@ -7473,6 +7488,8 @@ export interface components {
             proyecto_id?: string | null;
             /** Serie Id */
             serie_id?: string | null;
+            /** Su Pedido */
+            su_pedido?: string | null;
             /** Subtotal */
             subtotal: string;
             /** Sucursal Id */
@@ -7498,6 +7515,8 @@ export interface components {
             cliente_facturacion_id?: string | null;
             /** Descuento */
             descuento?: number | string | null;
+            /** Factura Sae */
+            factura_sae?: string | null;
             /** Fecha Entrega */
             fecha_entrega?: string | null;
             /** Fecha Remision */
@@ -7517,6 +7536,8 @@ export interface components {
             permitir_negativos: boolean;
             /** Proyecto Id */
             proyecto_id?: string | null;
+            /** Su Pedido */
+            su_pedido?: string | null;
             /** Sucursal Id */
             sucursal_id?: string | null;
         };

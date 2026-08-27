@@ -19,6 +19,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...core.ratelimit import enforce
+from rapidfuzz import fuzz
+
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
     CategoriaProducto,
@@ -212,6 +214,8 @@ def _candidato_out(c, cats_por_id: dict, esquemas_por_id: dict) -> CandidatoOut:
         categoria_nombre=(cats_por_id.get(c.categoria_id) or ""),
         esquema_impuesto_id=c.esquema_impuesto_id,
         esquema_codigo=(esquemas_por_id.get(c.esquema_impuesto_id) or ""),
+        clave_sat=c.clave_sat,
+        unidad_sat=c.unidad_sat,
     )
 
 
@@ -362,6 +366,20 @@ _PROCESADO = {
 }
 
 
+def _misma_palabra(a: str, b: str) -> bool:
+    """¿Dos tokens son la MISMA palabra escrita distinto?
+
+    Singular/plural y erratas cortas no cambian de producto: "ACELGAS" es la
+    "ACELGA" del catálogo. Sin esto, la s de más contaba como token extra y la
+    fila se iba a "crear producto nuevo" teniendo el suyo al 96%."""
+    if a == b:
+        return True
+    corto, largo = sorted((a, b), key=len)
+    if len(corto) >= 4 and largo in (corto + "s", corto + "es"):
+        return True
+    return len(corto) >= 5 and fuzz.ratio(a, b) >= 90
+
+
 def _cruce_confiable(nombre_archivo: str, nombre_candidato: str) -> bool:
     """¿Se puede auto-sugerir VINCULAR un candidato difuso?
 
@@ -370,15 +388,18 @@ def _cruce_confiable(nombre_archivo: str, nombre_candidato: str) -> bool:
     Dos reglas:
     1. Si el nombre del ARCHIVO trae tokens con contenido que el candidato no
        tiene (es MÁS específico: "AJO EN POLVO" vs "AJO"), no se auto-vincula.
+       "Tener" se mide con `_misma_palabra`: el plural no hace un token nuevo.
     2. Si el CANDIDATO trae una transformación que el archivo no pide
        ("CHILE JALAPEÑO" vs "...PICADOS 215 GR LATA"), tampoco.
     En ambos casos la fila queda como "crear" con los candidatos visibles para
     que el usuario decida en un clic."""
     qa = {t for t in normalizar(nombre_archivo).split() if t not in _STOP_CRUCE}
     pa = {t for t in normalizar(nombre_candidato).split() if t not in _STOP_CRUCE}
-    if qa - pa:                      # tokens extra del lado del archivo
+    # Tokens del archivo que el candidato no tiene ni siquiera como variante.
+    if any(not any(_misma_palabra(t, c) for c in pa) for t in qa):
         return False
-    return not ((pa - qa) & _PROCESADO)   # transformación solo en el candidato
+    sobran = {c for c in pa if not any(_misma_palabra(c, t) for t in qa)}
+    return not (sobran & _PROCESADO)      # transformación solo en el candidato
 
 
 @router.get("/plantilla-importacion")

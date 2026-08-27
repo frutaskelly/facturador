@@ -38,6 +38,25 @@ def normalizar(texto: str) -> str:
     return " ".join(s.split())
 
 
+def _singular(token: str) -> str:
+    """'acelgas' → 'acelga', 'limones' → 'limon'.
+
+    Solo tokens largos: 'gas' o 'mes' no son plurales de nada. No pretende ser
+    un lematizador — basta para que la lista del cliente ("ACELGAS") encuentre
+    el producto del catálogo ("ACELGA MANOJO DE 1 KG")."""
+    if len(token) >= 6 and token.endswith("es"):
+        return token[:-2]
+    if len(token) >= 5 and token.endswith("s"):
+        return token[:-1]
+    return token
+
+
+def variantes_de(norm: str) -> list[str]:
+    """El texto normalizado y, si trae plurales, su versión en singular."""
+    sing = " ".join(_singular(t) for t in norm.split())
+    return [norm] if sing == norm else [norm, sing]
+
+
 @dataclass
 class Candidato:
     producto_id: UUID
@@ -51,6 +70,10 @@ class Candidato:
     # La categoría del producto existente: al vincular, la fila hereda la suya.
     categoria_id: Optional[UUID] = None
     esquema_impuesto_id: Optional[UUID] = None
+    # Lo fiscal del producto YA dado de alta: al vincular es lo que manda, y
+    # por definición ya está registrado (no hay clave inexistente que avisar).
+    clave_sat: Optional[str] = None
+    unidad_sat: Optional[str] = None
 
 
 def _cand(p: Producto, score: int, origen: str) -> "Candidato":
@@ -61,6 +84,8 @@ def _cand(p: Producto, score: int, origen: str) -> "Candidato":
         unidad_base=p.unidad_base,
         categoria_id=p.categoria_id,
         esquema_impuesto_id=p.esquema_impuesto_id,
+        clave_sat=p.clave_sat,
+        unidad_sat=p.unidad_sat,
     )
 
 
@@ -119,6 +144,9 @@ def buscar(
     norm = normalizar(texto)
     if not norm:
         return []
+    # El plural del archivo del cliente no debe esconder el producto: se cruza
+    # con el texto tal cual Y con su singular, y gana el mejor de los dos.
+    variantes = variantes_de(norm)
 
     if prods is None:
         prods = productos_activos(db)
@@ -133,7 +161,7 @@ def buscar(
     for p in prods:
         nombre_n, sku_n, _ = (norms or {}).get(p.id) or (
             normalizar(p.nombre), normalizar(p.sku), [])
-        if nombre_n == norm or sku_n == norm:
+        if nombre_n in variantes or sku_n in variantes:
             out.append(_cand(p, 100, "exacto"))
             seen.add(p.id)
 
@@ -170,14 +198,15 @@ def buscar(
         for h in textos:
             if not h:
                 continue
-            if h.startswith(norm):
-                score = max(score, 96)
-            elif norm in h:
-                score = max(score, 88)
-            else:
-                fz = int(fuzz.token_set_ratio(norm, h))
-                if fz >= _FUZZY_MIN:
-                    score = max(score, fz)
+            for v in variantes:
+                if h.startswith(v):
+                    score = max(score, 96)
+                elif v in h:
+                    score = max(score, 88)
+                else:
+                    fz = int(fuzz.token_set_ratio(v, h))
+                    if fz >= _FUZZY_MIN:
+                        score = max(score, fz)
         if score >= _FUZZY_FLOOR:
             scored.append((p, score))
 
