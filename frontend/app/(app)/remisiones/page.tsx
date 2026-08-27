@@ -38,8 +38,10 @@ const WRITE = "remision:gestionar";
 // selectedRows/onSelectionChange).
 const EMPTY_REMISIONES: Remision[] = [];
 
-const ESTADO_TONE: Record<string, "success" | "warning" | "muted" | "danger" | "accent"> = {
+const ESTADO_TONE: Record<string, "default" | "success" | "warning" | "muted" | "danger" | "accent"> = {
   BORRADOR: "warning",
+  // Reservada: la ampara una factura de SAE, pero la mercancía no ha salido.
+  RESERVADO: "default",
   CONFIRMADA: "success",
   FACTURADA: "accent",
   CANCELADA: "danger",
@@ -123,6 +125,7 @@ export default function RemisionesPage() {
   const [fecha, setFecha] = useState("");
   const [serieOverride, setSerieOverride] = useState("");
   const [notas, setNotas] = useState("");
+  const [facturaSae, setFacturaSae] = useState("");
   const [lineas, setLineas] = useState<LineaForm[]>([nuevaLinea()]);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
@@ -225,7 +228,7 @@ export default function RemisionesPage() {
   // Lo usa "Borrar" y también openCreate al entrar.
   function resetForm() {
     setClienteId(""); setSucursalId(""); setAlmacenId(""); setSerieOverride("");
-    setSucursales([]); setNotas(""); setLineas([nuevaLinea()]);
+    setSucursales([]); setNotas(""); setFacturaSae(""); setLineas([nuevaLinea()]);
     setFecha(today());            // fecha de hoy por defecto (el flujo la salta)
     setStep("cliente");           // arranca con el cliente abierto
   }
@@ -241,7 +244,7 @@ export default function RemisionesPage() {
   // Abre esta misma pantalla para EDITAR una remisión en BORRADOR: carga sus
   // datos y líneas. Solo BORRADOR es editable (el backend lo exige).
   async function openEdit(r: Remision) {
-    if (r.estado !== "BORRADOR" && r.estado !== "CONFIRMADA") {
+    if (r.estado !== "BORRADOR" && r.estado !== "RESERVADO" && r.estado !== "CONFIRMADA") {
       toast.error("Solo se puede editar una remisión en borrador o confirmada");
       return;
     }
@@ -257,6 +260,7 @@ export default function RemisionesPage() {
       setSerieOverride("");                       // el folio ya está fijo; no se re-serie al editar
       setFecha(det.fecha_remision ?? today());
       setNotas(det.notas ?? "");
+      setFacturaSae(det.factura_sae ?? "");
       setLineas((det.lineas ?? []).map((ln) => {
         const presKeys = Object.keys(prodById[ln.producto_id]?.presentaciones ?? {});
         return nuevaLinea({
@@ -540,6 +544,9 @@ export default function RemisionesPage() {
       // en el PATCH provoca un 500); el backend conserva/asigna la suya.
       ...(fecha ? { fecha_remision: fecha } : {}),
       notas: notas || null,
+      // Vacío se manda como cadena vacía (no null): así el backend distingue
+      // "quítalo" —y regresa la remisión a BORRADOR— de "no lo toques".
+      factura_sae: facturaSae.trim(),
       lineas: lns.map((l) => ({
         producto_id: l.producto_id,
         presentacion: l.presentacion,
@@ -1064,7 +1071,7 @@ export default function RemisionesPage() {
   // Confirmar en lote las remisiones en BORRADOR seleccionadas (reserva stock).
   // Si alguna no tiene existencia, se ofrece confirmarla con sobregiro.
   async function bulkConfirmar() {
-    const elegibles = selected.filter((r) => r.estado === "BORRADOR");
+    const elegibles = selected.filter((r) => r.estado === "BORRADOR" || r.estado === "RESERVADO");
     if (elegibles.length === 0) {
       toast.error("No hay remisiones en borrador en la selección");
       setConfirmarBulkOpen(false);
@@ -1370,6 +1377,14 @@ export default function RemisionesPage() {
           <span className="text-muted">—</span>
         ),
     },
+    {
+      header: "Factura SAE",
+      sortable: true,
+      sortValue: (r) => r.factura_sae ?? "",
+      cell: (r) => r.factura_sae
+        ? <span className="font-medium tabular-nums">{r.factura_sae}</span>
+        : <span className="text-muted">—</span>,
+    },
     { header: "Cliente", sortable: true, sortValue: (r) => cliName[r.cliente_facturacion_id] ?? "", cell: (r) => cliName[r.cliente_facturacion_id] ?? "—" },
     { header: "Fecha", sortable: true, sortValue: (r) => r.fecha_remision, cell: (r) => fmtDate(r.fecha_remision) },
     { header: "Estado", sortable: true, sortValue: (r) => r.estado, cell: (r) => <Badge tone={ESTADO_TONE[r.estado] ?? "muted"}>{r.estado}</Badge> },
@@ -1382,10 +1397,11 @@ export default function RemisionesPage() {
 
   const rowActions: RowAction<Remision>[] = [
     { id: "editar", label: "Editar", icon: <Pencil size={15} />, onClick: (r) => { void openEdit(r); },
-      hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "CONFIRMADA")
+      hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "RESERVADO" || r.estado === "CONFIRMADA")
         && (!r.factura_id || r.factura_estado === "CANCELADA")) },
     { id: "confirmar", label: "Confirmar", icon: <Check size={15} />, tone: "success",
-      onClick: (r) => setToConfirm(r), hidden: (r) => !(canWrite && r.estado === "BORRADOR") },
+      onClick: (r) => setToConfirm(r),
+      hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "RESERVADO")) },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
       onClick: (r) => setToCancel(r), hidden: (r) => !(canWrite && r.estado !== "CANCELADA" && r.estado !== "FACTURADA") },
     { id: "devolucion", label: "Devolución", icon: <Undo2 size={15} />,
@@ -1567,9 +1583,15 @@ export default function RemisionesPage() {
             })}
           </div>
 
-          <Field label="Notas">
-            <Textarea rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} />
-          </Field>
+          <div className="grid gap-3 sm:grid-cols-[1fr_16rem]">
+            <Field label="Notas">
+              <Textarea rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} />
+            </Field>
+            <Field label="Factura SAE" hint="Folio de la factura en SAE; al ponerlo la remisión queda RESERVADA">
+              <Input value={facturaSae} onChange={(e) => setFacturaSae(e.target.value)}
+                placeholder="ZHGO 233" maxLength={30} />
+            </Field>
+          </div>
 
           <div className="mt-4 flex items-start justify-between border-t border-border pt-4">
             <div />
@@ -1632,7 +1654,7 @@ export default function RemisionesPage() {
   const clientesElegibles = [...new Set(facturarElegibles.map((r) => r.cliente_facturacion_id))];
   const multiCliente = clientesElegibles.length > 1;
   // Borradores (confirmables) y no-canceladas (cancelables) dentro de la selección.
-  const borradoresSel = selected.filter((r) => r.estado === "BORRADOR");
+  const borradoresSel = selected.filter((r) => r.estado === "BORRADOR" || r.estado === "RESERVADO");
   const cancelablesSel = selected.filter((r) => r.estado !== "CANCELADA" && r.estado !== "FACTURADA");
 
   return (

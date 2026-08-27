@@ -53,6 +53,8 @@ class RemisionCreate(BaseModel):
     descuento: Decimal = Field(default=Decimal("0"), ge=0)
     notas: Optional[str] = None
     nota_entrega: Optional[str] = None
+    # Folio de la factura de SAE que ampara la remisión; traerlo la deja RESERVADO.
+    factura_sae: Optional[str] = Field(default=None, max_length=30)
     lineas: list[LineaRemisionCreate] = Field(min_length=1)
 
 
@@ -70,6 +72,9 @@ class RemisionUpdate(BaseModel):
     descuento: Optional[Decimal] = Field(default=None, ge=0)
     notas: Optional[str] = None
     nota_entrega: Optional[str] = None
+    # Folio de SAE: al ponerlo la remisión pasa a RESERVADO; vacío la regresa
+    # a BORRADOR. `None` (ausente) no toca el dato.
+    factura_sae: Optional[str] = Field(default=None, max_length=30)
     lineas: Optional[list[LineaRemisionCreate]] = None
     # Sobregiro autorizado al re-descontar inventario de una CONFIRMADA
     # (misma política que confirmar/facturar — decisión 2026-07-29 #5).
@@ -98,6 +103,8 @@ class RemisionOut(ORMModel):
     # columna "Factura" de la lista (incluye facturas canceladas).
     factura_folio: Optional[str] = None
     factura_estado: Optional[str] = None
+    # Folio de la factura de SAE que ampara la remisión (relación con el legado).
+    factura_sae: Optional[str] = None
     subtotal: Decimal
     descuento: Decimal
     iva: Decimal

@@ -2,7 +2,9 @@
 
 Reads gated by `menu:remisiones`; writes by `remision:gestionar`.
 
-Lifecycle: BORRADOR (editable, no stock effect) → CONFIRMADA (salida directa:
+Lifecycle: BORRADOR (editable, no stock effect) → RESERVADO (trae folio de
+factura de SAE: mercancía comprometida con un comprobante de fuera; tampoco
+mueve inventario y se edita igual) → CONFIRMADA (salida directa:
 disponible baja, one SALIDA_REMISION movement per line; la línea guarda
 lote_id/cantidad_surtida para poder restituir) → CANCELADA (restituye:
 disponible sube, CANCELACION_REMISION). A draft cancels with no inventory
@@ -211,7 +213,10 @@ def create_remision(
         descuento=payload.descuento,
         notas=payload.notas,
         nota_entrega=payload.nota_entrega,
-        estado="BORRADOR",
+        factura_sae=(payload.factura_sae or "").strip() or None,
+        # Traer folio de factura de SAE = mercancía ya comprometida con un
+        # comprobante de fuera: nace RESERVADA, no como borrador cualquiera.
+        estado="RESERVADO" if (payload.factura_sae or "").strip() else "BORRADOR",
         created_by=ctx.user_id,
         updated_by=ctx.user_id,
     )
@@ -364,8 +369,11 @@ def update_remision(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     rem = get_or_404(db, Remision, rem_id)
-    if rem.estado not in ("BORRADOR", "CONFIRMADA"):
-        raise HTTPException(status_code=409, detail="Solo se puede editar una remisión en borrador o confirmada")
+    if rem.estado not in ("BORRADOR", "RESERVADO", "CONFIRMADA"):
+        raise HTTPException(
+            status_code=409,
+            detail="Solo se puede editar una remisión en borrador, reservada o confirmada",
+        )
     # No editar por detrás de una factura viva: si la remisión está ligada a una
     # factura BORRADOR o TIMBRADA, editarla desincronizaría el comprobante ya
     # emitido. Solo se edita si no tiene factura o si la última fue CANCELADA.
@@ -409,6 +417,16 @@ def update_remision(
 
     for key, value in data.items():
         setattr(rem, key, value)
+
+    # El folio de SAE manda sobre el estado mientras la remisión no haya salido:
+    # ponerlo la reserva, quitarlo la regresa a borrador. Una CONFIRMADA o
+    # FACTURADA no retrocede — ahí el folio es solo un dato más.
+    if "factura_sae" in data:
+        rem.factura_sae = (data["factura_sae"] or "").strip() or None
+        if rem.factura_sae and rem.estado == "BORRADOR":
+            rem.estado = "RESERVADO"
+        elif not rem.factura_sae and rem.estado == "RESERVADO":
+            rem.estado = "BORRADOR"
 
     # Cambio de almacén SIN reenviar líneas en una CONFIRMADA: la reserva vive en
     # lotes del almacén anterior → se libera y se re-reserva en el nuevo (el mismo
@@ -573,8 +591,11 @@ def confirmar_remision(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     rem = get_or_404(db, Remision, rem_id)
-    if rem.estado != "BORRADOR":
-        raise HTTPException(status_code=409, detail=f"Solo se confirma desde BORRADOR (actual: {rem.estado})")
+    if rem.estado not in ("BORRADOR", "RESERVADO"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Solo se confirma desde BORRADOR o RESERVADO (actual: {rem.estado})",
+        )
 
     # Optional per-line real weights (catch-weight); override the estimate.
     pesos = {p.linea_id: p.cantidad_base for p in (payload.pesos or [])} if payload else {}
@@ -823,6 +844,7 @@ def devolucion_remision(
     if rem.estado != "CONFIRMADA":
         detalle = {
             "BORRADOR": "La remisión está en borrador: aún no sale mercancía que devolver",
+            "RESERVADO": "La remisión está reservada: aún no sale mercancía que devolver",
             "FACTURADA": "La remisión ya está facturada; cancela la factura primero",
             "CANCELADA": "La remisión está cancelada",
         }.get(rem.estado, f"No se puede devolver en estado {rem.estado}")

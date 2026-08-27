@@ -261,9 +261,11 @@ export type Remision = {
   serie_id?: string | null;
   fecha_remision: string;
   fecha_entrega?: string | null;
-  estado: "BORRADOR" | "CONFIRMADA" | "FACTURADA" | "CANCELADA";
+  estado: "BORRADOR" | "RESERVADO" | "CONFIRMADA" | "FACTURADA" | "CANCELADA";
   canal: string;
   factura_folio?: string | null;
+  // Folio de la factura de SAE que ampara la remisión (relación con el legado).
+  factura_sae?: string | null;
   factura_estado?: "BORRADOR" | "TIMBRADA" | "CANCELADA" | null;
   factura_id?: string | null;
   subtotal: string;

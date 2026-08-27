@@ -364,3 +364,39 @@ def test_importar_master_ordenes_cruza_por_rfc_y_nombre(client, env, auth_as):
     g2 = next(g for g in p["grupos"] if g["folio_ref"] == "24460")
     assert g2["cliente_id"] == env["cli_a"]                          # cruzó por nombre
     assert p["clientes_sin_cruce"] == 0
+
+
+# ── Factura de SAE → estado RESERVADO ─────────────────────────────────────────
+def test_factura_sae_reserva_y_al_quitarla_vuelve_a_borrador(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    base = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+            "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "2", "precio_unitario": "10"}]}
+
+    # Nace RESERVADA si el alta trae el folio de SAE.
+    r = client.post("/api/v1/remisiones", headers=h, json={**base, "factura_sae": "ZHGO 233"})
+    assert r.status_code == 201, r.text
+    assert r.json()["estado"] == "RESERVADO"
+    assert r.json()["factura_sae"] == "ZHGO 233"
+
+    # Sin folio nace BORRADOR; ponérselo después la reserva.
+    rem = client.post("/api/v1/remisiones", headers=h, json=base).json()
+    assert rem["estado"] == "BORRADOR" and rem["factura_sae"] is None
+    up = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"factura_sae": "ZHGO 234"})
+    assert up.status_code == 200, up.text
+    assert up.json()["estado"] == "RESERVADO"
+
+    # Quitarlo la regresa a BORRADOR.
+    up = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"factura_sae": ""})
+    assert up.json()["estado"] == "BORRADOR" and up.json()["factura_sae"] is None
+
+    # Una RESERVADA se confirma igual que un borrador (la salida es el confirmar).
+    client.post("/api/v1/inventario/movimientos", headers=h, json={
+        "tipo": "ENTRADA_COMPRA", "producto_id": env["prod_a"], "almacen_id": env["alm_a"],
+        "cantidad": "10", "costo_unitario": "4"})
+    client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"factura_sae": "ZHGO 235"})
+    conf = client.post(f"/api/v1/remisiones/{rem['id']}/confirmar", headers=h, json={})
+    assert conf.status_code == 200, conf.text
+    assert conf.json()["estado"] == "CONFIRMADA"
+    # Ya confirmada, el folio de SAE es un dato más: no la regresa a borrador.
+    up = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"factura_sae": ""})
+    assert up.json()["estado"] == "CONFIRMADA"
