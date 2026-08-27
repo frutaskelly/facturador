@@ -15,6 +15,7 @@ import { ArrowLeft, Download, FileUp, Sparkles } from "lucide-react";
 
 import { CategoriaCombobox } from "@/components/CategoriaCombobox";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select, Switch } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -36,7 +37,6 @@ import type {
 } from "@/lib/types";
 
 const ACCEPT = ".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp";
-const POR_PAGINA = 50;   // 508 filas × varios dropdowns no caben de golpe en el DOM
 
 // Unidad de venta → clave de unidad SAT. Espejo de _UNIDAD_A_SAT del backend:
 // cambiar la unidad de salida debe cambiar la unidad SAT con la que se timbra.
@@ -123,7 +123,14 @@ export default function ImportarProductosPage() {
   const [campos, setCampos] = useState<{ valor: string; etiqueta: string }[]>([]);
   const [filas, setFilas] = useState<Fila[]>([]);
   const [resultado, setResultado] = useState<ImportResult | null>(null);
-  const [pagina, setPagina] = useState(0);
+  // Selección de la tabla para las acciones en lote (omitir/incluir, aplicar
+  // categoría o esquema a muchas filas de golpe).
+  const [seleccion, setSeleccion] = useState<Fila[]>([]);
+  const [resetSeleccion, setResetSeleccion] = useState(0);
+  // Último fallo al aprobar: se muestra junto al botón para que quede claro que
+  // el trabajo sigue en pantalla y basta reintentar (pasa si el servidor se
+  // reinicia a media aprobación).
+  const [falloImport, setFalloImport] = useState("");
 
   // Paso 3 — decisiones de lote
   const [p1, setP1] = useState<"sugerida" | "generica">("sugerida");
@@ -155,6 +162,17 @@ export default function ImportarProductosPage() {
     const variantes = filas.filter(esVarianteNueva).length;
     return { crear, vincular, omitir, sinEsquema, conPrecio, variantes };
   }, [filas]);
+
+  // La selección pertenece a la tabla del preview: al salir de ese paso se
+  // limpia. Si no, al volver la barra de lote seguía mostrando el conteo viejo
+  // con las casillas ya vacías — y peor tras releer el archivo, porque esos
+  // números de fila ya apuntan a otros productos.
+  useEffect(() => {
+    if (paso !== "preview") {
+      setSeleccion([]);
+      setResetSeleccion((n) => n + 1);
+    }
+  }, [paso]);
 
   // Media hora de decisiones no se pierden por un F5 o un clic al menú.
   const hayTrabajo = filas.length > 0 && paso !== "resultado";
@@ -197,7 +215,6 @@ export default function ImportarProductosPage() {
         setColumnas(p.columnas ?? []);
         setCampos(p.campos_mapeables ?? []);
         setFilas(p.filas.map(aFila));
-        setPagina(0);
         // Cada categoría del archivo arranca apuntando a la que le corresponde.
         setCatDestino(
           Object.fromEntries(
@@ -334,7 +351,6 @@ export default function ImportarProductosPage() {
         await sugerirEsquemas();
       }
       setPaso("preview");
-      setPagina(0);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudieron aplicar las sugerencias");
     } finally {
@@ -352,10 +368,12 @@ export default function ImportarProductosPage() {
       toast.error("Todas las filas están omitidas");
       return;
     }
-    const idx = filas.findIndex((f) => f.accion === "vincular" && !f.producto_sel);
-    if (idx >= 0) {
-      setPagina(Math.floor(idx / POR_PAGINA));   // llevarlo a la fila, no solo avisar
-      toast.error(`Fila ${filas[idx].fila}: elige el producto a vincular`);
+    const pendiente = filas.find((f) => f.accion === "vincular" && !f.producto_sel);
+    if (pendiente) {
+      toast.error(
+        `Fila ${pendiente.fila} (${pendiente.nombre}): elige el producto a vincular ` +
+        "— búscala con el buscador de la tabla"
+      );
       return;
     }
     setCargando(true);
@@ -393,8 +411,11 @@ export default function ImportarProductosPage() {
       });
       setResultado(res);
       setPaso("resultado");
+      setFalloImport("");
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo importar");
+      const msg = e instanceof ApiError ? e.message : "No se pudo importar";
+      setFalloImport(msg);
+      toast.error(msg);
     } finally {
       setCargando(false);
     }
@@ -430,8 +451,227 @@ export default function ImportarProductosPage() {
     }
   }
 
-  const visibles = filas.slice(pagina * POR_PAGINA, (pagina + 1) * POR_PAGINA);
-  const paginas = Math.ceil(filas.length / POR_PAGINA);
+  /** Aplica un cambio a todas las filas seleccionadas (acciones en lote). */
+  function aplicarALaSeleccion(patch: Partial<Fila> | ((f: Fila) => Partial<Fila>)) {
+    if (seleccion.length === 0) return;
+    const ids = new Set(seleccion.map((f) => f.fila));
+    setFilas((rows) =>
+      rows.map((f) => (ids.has(f.fila) ? { ...f, ...(typeof patch === "function" ? patch(f) : patch) } : f))
+    );
+    setSeleccion([]);
+    setResetSeleccion((n) => n + 1);   // limpia las casillas de la tabla
+  }
+
+  // Columnas de la tabla del preview: todo lo que se va a dar de alta.
+  const columnasPreview: Column<Fila>[] = [
+    {
+      key: "fila",
+      header: "#",
+      className: "align-top",
+      sortable: true,
+      sortValue: (f) => f.fila,
+      cell: (f) => <span className="text-muted tabular-nums">{f.fila}</span>,
+    },
+    {
+      key: "producto",
+      header: "Producto del archivo",
+      className: "align-top min-w-[15rem]",
+      sortable: true,
+      sortValue: (f) => f.nombre,
+      // Accessor de BÚSQUEDA (el orden sigue siendo por nombre): con una lista
+      // SAE el código es justo por lo que el usuario busca.
+      exportValue: (f) => [f.nombre, f.codigo, f.codigo_barras, f.descripcion].filter(Boolean).join(" "),
+      cell: (f) => (
+        <div className={f.accion === "omitir" ? "opacity-50" : ""}>
+          <div className="font-medium">{f.nombre}</div>
+          {f.codigo ? <div className="text-xs text-muted tabular-nums">{f.codigo}</div> : null}
+          <div className="flex flex-wrap gap-1 pt-0.5">
+            {f.ya_vinculado ? <Badge tone="accent">Ya vinculado</Badge> : null}
+            {f.duplicada_de ? (
+              <Badge tone={f.precio_distinto ? "danger" : "warning"}>
+                {f.precio_distinto
+                  ? `Repetida con otro precio (fila ${f.duplicada_de})`
+                  : `Repetida (fila ${f.duplicada_de})`}
+              </Badge>
+            ) : null}
+            {f.mismo_producto_que ? (
+              <Badge tone="warning">Mismo producto que fila {f.mismo_producto_que}</Badge>
+            ) : null}
+            {f.baja ? <Badge tone="muted">BAJA</Badge> : null}
+            {f.clave_sat_valida === false ? (
+              <Badge tone="danger">Clave SAT inexistente</Badge>
+            ) : null}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "accion",
+      header: "Acción",
+      sortValue: (f) => f.accion,
+      className: "align-top min-w-[13rem]",
+      cell: (f) => (
+        <div className="space-y-1.5">
+          <Select
+            value={f.accion}
+            aria-label={`Acción para ${f.nombre}`}
+            onChange={(e) => setFila(f.fila, { accion: e.target.value as Accion })}
+          >
+            <option value="vincular">Vincular a existente</option>
+            <option value="crear">Crear producto nuevo</option>
+            <option value="omitir">Omitir</option>
+          </Select>
+          {f.accion === "vincular" ? (
+            <Select
+              value={f.producto_sel}
+              aria-label={`Producto a vincular para ${f.nombre}`}
+              onChange={(e) => setFila(f.fila, { producto_sel: e.target.value })}
+            >
+              <option value="">— Elige el producto —</option>
+              {f.candidatos.map((c) => (
+                <option key={c.producto_id} value={c.producto_id}>
+                  {c.nombre} ({c.sku}) · {c.score}%
+                </option>
+              ))}
+            </Select>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      key: "unidad",
+      header: "Unidad de salida",
+      sortValue: (f) => f.unidad,
+      className: "align-top min-w-[9rem]",
+      cell: (f) => (
+        <>
+          <Select
+            value={f.unidad || "KILO"}
+            aria-label={`Unidad de salida de ${f.nombre}`}
+            onChange={(e) => {
+              const u = e.target.value;
+              setFila(f.fila, {
+                unidad: u,
+                // La unidad SAT sigue a la de salida: es con la que se timbra.
+                ...(UNIDAD_SAT[u] ? { unidad_sat: UNIDAD_SAT[u] } : {}),
+              });
+            }}
+          >
+            {(UNIDADES.includes(f.unidad.toUpperCase()) || !f.unidad
+              ? UNIDADES
+              : [f.unidad, ...UNIDADES]
+            ).map((u) => (
+              <option key={u} value={u}>
+                {u}
+              </option>
+            ))}
+          </Select>
+          {esVarianteNueva(f) ? (
+            <div className="mt-1 flex items-center gap-1 text-xs">
+              <span>1 =</span>
+              <div className="w-14">
+                <Input
+                  value={f.factor}
+                  onChange={(e) => setFila(f.fila, { factor: e.target.value })}
+                  aria-label={`Equivalencia de la presentación de ${f.nombre}`}
+                />
+              </div>
+              <span className="text-muted">
+                {f.candidatos.find((c) => c.producto_id === f.producto_sel)?.unidad_base ?? "base"}
+              </span>
+            </div>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      key: "categoria",
+      header: "Categoría",
+      sortValue: (f) => categorias.find((c) => c.id === f.cat_id)?.nombre ?? f.categoria,
+      className: "align-top min-w-[12rem]",
+      cell: (f) => (
+        <CategoriaCombobox
+          value={f.cat_id}
+          categorias={categorias}
+          sugerida={f.categoria || undefined}
+          disabled={f.accion !== "crear"}
+          ariaLabel={`Categoría de ${f.nombre}`}
+          onCreada={(c) => setCatsExtra((x) => [...x, c])}
+          onChange={(v) => setFila(f.fila, { cat_id: v })}
+        />
+      ),
+    },
+    {
+      key: "esquema",
+      header: "Esquema de impuesto",
+      sortValue: (f) => esquemas.find((e) => e.id === f.esq_id)?.codigo ?? "",
+      className: "align-top min-w-[11rem]",
+      cell: (f) => (
+        <>
+          <Select
+            value={f.esq_id}
+            disabled={f.accion !== "crear"}
+            aria-label={`Esquema de impuesto de ${f.nombre}`}
+            onChange={(e) => setFila(f.fila, { esq_id: e.target.value })}
+          >
+            <option value="">— Sin esquema —</option>
+            {esquemas.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.codigo} · IVA {Math.round(Number(e.iva_tasa) * 100)}%
+              </option>
+            ))}
+          </Select>
+          {f.accion !== "crear" ? (
+            <div className="pt-0.5 text-xs text-muted">del producto existente</div>
+          ) : f.esq_id && f.esquema_origen === "ia" ? (
+            <div className="pt-0.5 text-xs text-muted">sugerido con IA</div>
+          ) : f.esq_id && f.esquema_origen === "regla" ? (
+            <div className="pt-0.5 text-xs text-muted">regla SAT</div>
+          ) : f.esquema_motivo ? (
+            <div className="pt-0.5 text-xs text-danger">{f.esquema_motivo}</div>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      key: "sat",
+      header: "Clave / unidad SAT",
+      className: "align-top min-w-[12rem]",
+      sortable: true,
+      sortValue: (f) => f.clave_sat,
+      cell: (f) =>
+        f.accion !== "omitir" ? (
+          <div className="flex gap-1">
+            <div className="w-[7rem]">
+              <Input
+                value={f.clave_sat}
+                onChange={(e) => setFila(f.fila, { clave_sat: e.target.value })}
+                placeholder="01010101"
+                aria-label={`Clave SAT de ${f.nombre}`}
+              />
+            </div>
+            <div className="w-[4.5rem]">
+              <Input
+                value={f.unidad_sat}
+                onChange={(e) => setFila(f.fila, { unidad_sat: e.target.value.toUpperCase() })}
+                placeholder="KGM"
+                aria-label={`Unidad SAT de ${f.nombre}`}
+              />
+            </div>
+          </div>
+        ) : (
+          <span className="text-muted">—</span>
+        ),
+    },
+    {
+      key: "precio",
+      header: "Precio",
+      className: "align-top text-right",
+      sortable: true,
+      sortValue: (f) => f.precio || "",
+      cell: (f) => <span className="tabular-nums">{f.precio || "—"}</span>,
+    },
+  ];
 
   if (!puedeEscribir) {
     return <div className="text-sm text-muted">No tienes permiso para importar productos.</div>;
@@ -833,217 +1073,75 @@ export default function ImportarProductosPage() {
             ) : null}
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-surface-2 text-left text-xs uppercase text-muted">
-                <tr>
-                  <th className="px-2 py-2">#</th>
-                  <th className="min-w-[15rem] px-2 py-2">Producto del archivo</th>
-                  <th className="min-w-[13rem] px-2 py-2">Acción</th>
-                  <th className="min-w-[9rem] px-2 py-2">Unidad de salida</th>
-                  <th className="min-w-[11rem] px-2 py-2">Categoría</th>
-                  <th className="min-w-[11rem] px-2 py-2">Esquema de impuesto</th>
-                  <th className="min-w-[12rem] px-2 py-2">Clave / unidad SAT</th>
-                  <th className="px-2 py-2 text-right">Precio</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibles.map((f) => (
-                  <tr key={f.fila} className="border-t border-border align-top">
-                    <td className="px-2 py-2 text-muted">{f.fila}</td>
-                    <td className="px-2 py-2">
-                      <div className="font-medium">{f.nombre}</div>
-                      {f.codigo ? (
-                        <div className="text-xs text-muted tabular-nums">{f.codigo}</div>
-                      ) : null}
-                      <div className="flex flex-wrap gap-1 pt-0.5">
-                        {f.ya_vinculado ? <Badge tone="accent">Ya vinculado</Badge> : null}
-                        {f.duplicada_de ? (
-                          <Badge tone={f.precio_distinto ? "danger" : "warning"}>
-                            {f.precio_distinto
-                              ? `Repetida con otro precio (fila ${f.duplicada_de})`
-                              : `Repetida (fila ${f.duplicada_de})`}
-                          </Badge>
-                        ) : null}
-                        {f.mismo_producto_que ? (
-                          <Badge tone="warning">Mismo producto que fila {f.mismo_producto_que}</Badge>
-                        ) : null}
-                        {f.baja ? <Badge tone="muted">BAJA</Badge> : null}
-                        {f.clave_sat_valida === false ? (
-                          <Badge tone="danger">Clave SAT inexistente</Badge>
-                        ) : null}
-                      </div>
-                    </td>
-
-                    {/* Acción */}
-                    <td className="px-2 py-2">
-                      <div className="space-y-1.5">
-                        <Select
-                          value={f.accion}
-                          aria-label={`Acción para ${f.nombre}`}
-                          onChange={(e) => setFila(f.fila, { accion: e.target.value as Accion })}
-                        >
-                          <option value="vincular">Vincular a existente</option>
-                          <option value="crear">Crear producto nuevo</option>
-                          <option value="omitir">Omitir</option>
-                        </Select>
-                        {f.accion === "vincular" ? (
-                          <Select
-                            value={f.producto_sel}
-                            aria-label={`Producto a vincular para ${f.nombre}`}
-                            onChange={(e) => setFila(f.fila, { producto_sel: e.target.value })}
-                          >
-                            <option value="">— Elige el producto —</option>
-                            {f.candidatos.map((c) => (
-                              <option key={c.producto_id} value={c.producto_id}>
-                                {c.nombre} ({c.sku}) · {c.score}%
-                              </option>
-                            ))}
-                          </Select>
-                        ) : null}
-                      </div>
-                    </td>
-
-                    {/* Unidad de salida — un producto puede tener varias */}
-                    <td className="px-2 py-2">
-                      <Select
-                        value={f.unidad || "KILO"}
-                        aria-label={`Unidad de salida de ${f.nombre}`}
-                        onChange={(e) => {
-                          const u = e.target.value;
-                          setFila(f.fila, {
-                            unidad: u,
-                            // La unidad SAT sigue a la de salida (manojo → H87,
-                            // kilo → KGM): es con la que se timbra la línea.
-                            ...(UNIDAD_SAT[u] ? { unidad_sat: UNIDAD_SAT[u] } : {}),
-                          });
-                        }}
-                      >
-                        {(UNIDADES.includes(f.unidad.toUpperCase()) || !f.unidad
-                          ? UNIDADES
-                          : [f.unidad, ...UNIDADES]
-                        ).map((u) => (
-                          <option key={u} value={u}>
-                            {u}
-                          </option>
-                        ))}
-                      </Select>
-                      {esVarianteNueva(f) ? (
-                        <div className="mt-1 flex items-center gap-1 text-xs">
-                          <span>1 =</span>
-                          <div className="w-14">
-                            <Input
-                              value={f.factor}
-                              onChange={(e) => setFila(f.fila, { factor: e.target.value })}
-                              aria-label={`Equivalencia de la presentación de ${f.nombre}`}
-                            />
-                          </div>
-                          <span className="text-muted">
-                            {f.candidatos.find((c) => c.producto_id === f.producto_sel)?.unidad_base ??
-                              "base"}
-                          </span>
-                        </div>
-                      ) : null}
-                    </td>
-
-                    {/* Categoría — con alta al vuelo */}
-                    <td className="px-2 py-2">
-                      <CategoriaCombobox
-                        value={f.cat_id}
-                        categorias={categorias}
-                        sugerida={f.categoria || undefined}
-                        disabled={f.accion !== "crear"}
-                        ariaLabel={`Categoría de ${f.nombre}`}
-                        onCreada={(c) => setCatsExtra((x) => [...x, c])}
-                        onChange={(v) => setFila(f.fila, { cat_id: v })}
-                      />
-                    </td>
-
-                    {/* Esquema de impuesto */}
-                    <td className="px-2 py-2">
-                      <Select
-                        value={f.esq_id}
-                        disabled={f.accion !== "crear"}
-                        aria-label={`Esquema de impuesto de ${f.nombre}`}
-                        onChange={(e) => setFila(f.fila, { esq_id: e.target.value })}
-                      >
-                        <option value="">— Sin esquema —</option>
-                        {esquemas.map((e) => (
-                          <option key={e.id} value={e.id}>
-                            {e.codigo} · IVA {Math.round(Number(e.iva_tasa) * 100)}%
-                          </option>
-                        ))}
-                      </Select>
-                      {f.accion !== "crear" ? (
-                        <div className="pt-0.5 text-xs text-muted">del producto existente</div>
-                      ) : f.esq_id && f.esquema_origen === "ia" ? (
-                        <div className="pt-0.5 text-xs text-muted">sugerido con IA</div>
-                      ) : f.esq_id && f.esquema_origen === "regla" ? (
-                        <div className="pt-0.5 text-xs text-muted">regla SAT</div>
-                      ) : f.esquema_motivo ? (
-                        <div className="pt-0.5 text-xs text-danger">{f.esquema_motivo}</div>
-                      ) : null}
-                    </td>
-
-                    {/* SAT */}
-                    <td className="px-2 py-2">
-                      {f.accion !== "omitir" ? (
-                        <div className="flex gap-1">
-                          <div className="w-[7rem]">
-                            <Input
-                              value={f.clave_sat}
-                              onChange={(e) => setFila(f.fila, { clave_sat: e.target.value })}
-                              placeholder="01010101"
-                              aria-label={`Clave SAT de ${f.nombre}`}
-                            />
-                          </div>
-                          <div className="w-[4.5rem]">
-                            <Input
-                              value={f.unidad_sat}
-                              onChange={(e) =>
-                                setFila(f.fila, { unidad_sat: e.target.value.toUpperCase() })
-                              }
-                              placeholder="KGM"
-                              aria-label={`Unidad SAT de ${f.nombre}`}
-                            />
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-muted">—</span>
-                      )}
-                    </td>
-
-                    <td className="px-2 py-2 text-right tabular-nums">{f.precio || "—"}</td>
-                  </tr>
+          {/* Acciones en lote: marcar filas con las casillas y aplicarlas de golpe. */}
+          {seleccion.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-accent/40 bg-accent/5 p-2 text-sm">
+              <span className="font-medium">{seleccion.length} seleccionados:</span>
+              <Button variant="secondary" onClick={() => aplicarALaSeleccion({ accion: "omitir" })}>
+                Omitir
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  aplicarALaSeleccion((f) =>
+                    f.accion !== "omitir"
+                      ? {}   // ya está incluida: no se pisa su decisión
+                      : { accion: f.producto_sel || f.producto_id ? "vincular" : "crear" }
+                  )
+                }
+              >
+                Incluir
+              </Button>
+              <span className="mx-1 text-muted">|</span>
+              <Select
+                value=""
+                aria-label="Categoría para los seleccionados"
+                onChange={(e) => {
+                  const id = e.target.value;
+                  // Al vincular, el backend conserva la del producto existente.
+                  aplicarALaSeleccion((f) => (f.accion === "crear" ? { cat_id: id } : {}));
+                }}
+              >
+                <option value="">Categoría…</option>
+                {categorias.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nombre}
+                  </option>
                 ))}
-              </tbody>
-            </table>
-          </div>
-
-          {paginas > 1 ? (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted">
-                {pagina * POR_PAGINA + 1}–{Math.min((pagina + 1) * POR_PAGINA, filas.length)} de{" "}
-                {filas.length}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={() => setPagina((p) => Math.max(0, p - 1))}
-                  disabled={pagina === 0}
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => setPagina((p) => Math.min(paginas - 1, p + 1))}
-                  disabled={pagina >= paginas - 1}
-                >
-                  Siguiente
-                </Button>
-              </div>
+              </Select>
+              <Select
+                value=""
+                aria-label="Esquema de impuesto para los seleccionados"
+                onChange={(e) => {
+                  const id = e.target.value;
+                  aplicarALaSeleccion((f) => (f.accion === "crear" ? { esq_id: id } : {}));
+                }}
+              >
+                <option value="">Esquema de impuesto…</option>
+                {esquemas.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.codigo} · IVA {Math.round(Number(e.iva_tasa) * 100)}%
+                  </option>
+                ))}
+              </Select>
             </div>
           ) : null}
+
+          <DataTable
+            columns={columnasPreview}
+            rows={filas}
+            rowKey={(f) => f.fila}
+            selectable
+            onSelectionChange={setSeleccion}
+            selectionResetKey={resetSeleccion}
+            searchable
+            searchPlaceholder="Buscar producto, código, categoría…"
+            paginated
+            defaultPageSize={50}
+            columnsMenu
+            storageKey="importar-productos-preview"
+            empty="Sin filas"
+          />
 
           <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-background py-3">
             <Button variant="secondary" onClick={() => setPaso("revisar")} disabled={cargando}>
@@ -1058,6 +1156,12 @@ export default function ImportarProductosPage() {
             {resumen.sinEsquema > 0 ? (
               <span className="text-sm text-danger">
                 {resumen.sinEsquema} productos quedarían sin esquema de impuesto
+              </span>
+            ) : null}
+            {falloImport ? (
+              <span className="text-sm text-danger">
+                {falloImport} — tus {filas.length} decisiones siguen aquí: vuelve a
+                darle a Aprobar todo.
               </span>
             ) : null}
           </div>
