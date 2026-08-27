@@ -100,6 +100,7 @@ export type Sucursal = {
   contacto?: string | null;
   telefono?: string | null;
   activo: boolean;
+  almacen_id?: string | null;
   serie_factura_id?: string | null;
   serie_remision_id?: string | null;
   created_at: string;
@@ -168,6 +169,7 @@ export type Cliente = {
   dias_credito: number;
   descuento_default: string;
   config_addenda: Record<string, unknown>;
+  almacen_id?: string | null;
   serie_factura_id?: string | null;
   serie_remision_id?: string | null;
   saldo_actual: string;

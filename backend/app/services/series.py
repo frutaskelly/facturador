@@ -108,3 +108,69 @@ def siguiente_folio(db: Session, tenant_id: UUID, *, codigo: str, tipo_documento
         {"tid": str(tenant_id), "codigo": codigo, "td": tipo_documento},
     ).first()
     return int(row[0]) if row else None
+
+
+# ─── Almacén: de dónde sale la mercancía ─────────────────────────────────────
+# Vive aquí, junto a la resolución de serie, porque es EXACTAMENTE la misma
+# cascada y conviene que no se separen: si una cambia, la otra debería cambiar
+# con ella. Orden: elección manual → sucursal → cliente → predeterminado.
+
+
+def resolver_almacen(
+    db: Session,
+    tenant_id,
+    *,
+    almacen_id=None,
+    sucursal_id=None,
+    cliente_id=None,
+):
+    """El almacén del que sale una remisión, o None si no hay ninguno aplicable.
+
+    None es una respuesta legítima, no un error: una remisión sin almacén no
+    mueve inventario, que es como funcionó todo hasta ahora.
+    """
+    from ..models import Almacen
+
+    def _vivo(aid):
+        if not aid:
+            return None
+        a = (
+            db.query(Almacen)
+            .filter(Almacen.id == aid, Almacen.deleted_at.is_(None))
+            .one_or_none()
+        )
+        return a.id if a else None
+
+    # 1) elección manual
+    hit = _vivo(almacen_id)
+    if hit:
+        return hit
+
+    # 2) almacén de la sucursal
+    if sucursal_id:
+        suc = db.query(Sucursal).filter(Sucursal.id == sucursal_id).one_or_none()
+        if suc:
+            hit = _vivo(suc.almacen_id)
+            if hit:
+                return hit
+
+    # 3) almacén del cliente
+    if cliente_id:
+        cli = db.query(Cliente).filter(Cliente.id == cliente_id).one_or_none()
+        if cli:
+            hit = _vivo(cli.almacen_id)
+            if hit:
+                return hit
+
+    # 4) el predeterminado del inquilino
+    row = (
+        db.query(Almacen.id)
+        .filter(
+            Almacen.tenant_id == tenant_id,
+            Almacen.es_default.is_(True),
+            Almacen.deleted_at.is_(None),
+        )
+        .order_by(Almacen.created_at.asc())
+        .first()
+    )
+    return row[0] if row else None

@@ -69,6 +69,9 @@ class Cliente(Base, TimestampMixin, SoftDeleteMixin):
     custom_fields = Column(JSONB, nullable=False, server_default="{}")
 
     # ── series de folios predeterminadas del cliente (la sucursal gana sobre esto) ──
+    # De qué almacén sale su mercancía. NULL = el predeterminado del inquilino.
+    # Varios clientes pueden apuntar al mismo almacén: el enlace es muchos a uno.
+    almacen_id = Column(UUID(as_uuid=True), ForeignKey("almacenes.id", ondelete="SET NULL"))
     serie_factura_id = Column(
         UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"), nullable=True
     )

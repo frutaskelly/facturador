@@ -15,7 +15,7 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
-import type { Cliente, ListaPrecios, PrecioOverride, Producto, Serie, Sucursal } from "@/lib/types";
+import type { Almacen, Cliente, ListaPrecios, PrecioOverride, Producto, Serie, Sucursal } from "@/lib/types";
 
 // Permisos de escritura (igual que la versión previa de esta página):
 //  - alta/baja de sucursales -> cliente:gestionar
@@ -42,6 +42,7 @@ export default function SucursalesPage() {
   const sucursalesRes = useResource<Page<Sucursal>>("/api/v1/sucursales?limit=1000");
   const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=1000");
   const listasRes = useResource<Page<ListaPrecios>>("/api/v1/listas-precios?limit=200");
+  const almacenesRes = useResource<Page<Almacen>>("/api/v1/almacenes?limit=200");
   const seriesFacRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
   const seriesRemRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=REMISION&activa=true&limit=200");
 
@@ -52,6 +53,7 @@ export default function SucursalesPage() {
   const allSucursales = sucursalesRes.data?.items ?? [];
   const productos = productosRes.data?.items ?? [];
   const listas = listasRes.data?.items ?? [];
+  const almacenes = almacenesRes.data?.items ?? [];
   const seriesFac = seriesFacRes.data?.items ?? [];
   const seriesRem = seriesRemRes.data?.items ?? [];
 
@@ -95,7 +97,7 @@ export default function SucursalesPage() {
   }
 
   // ── modales de alta ──
-  const emptySuc = { nombre: "", contacto: "", telefono: "", lista_precios_id: "", serie_factura_id: "", serie_remision_id: "" };
+  const emptySuc = { nombre: "", contacto: "", telefono: "", lista_precios_id: "", serie_factura_id: "", serie_remision_id: "", almacen_id: "" };
   const [sucModal, setSucModal] = useState<{ clienteId: string } | null>(null);
   const [nuevaSuc, setNuevaSuc] = useState(emptySuc);
 
@@ -133,6 +135,7 @@ export default function SucursalesPage() {
         lista_precios_id: nuevaSuc.lista_precios_id || null,
         serie_factura_id: nuevaSuc.serie_factura_id || null,
         serie_remision_id: nuevaSuc.serie_remision_id || null,
+        almacen_id: nuevaSuc.almacen_id || null,
       });
       toast.success("Sucursal creada");
       reloadDetalle(sucModal.clienteId);
@@ -340,6 +343,14 @@ export default function SucursalesPage() {
               </Select>
             </Field>
           </div>
+          <Field label="Almacén" hint="De dónde sale la mercancía de esta sucursal. Gana sobre el del cliente.">
+            <Select value={nuevaSuc.almacen_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, almacen_id: e.target.value })}>
+              <option value="">(usa el del cliente / predeterminado)</option>
+              {almacenes.map((a) => (
+                <option key={a.id} value={a.id}>{a.codigo ? `${a.codigo} · ${a.nombre}` : a.nombre}</option>
+              ))}
+            </Select>
+          </Field>
           <p className="text-xs text-muted">El código (SUC-01, SUC-02, …) se genera automáticamente.</p>
         </div>
       </Modal>

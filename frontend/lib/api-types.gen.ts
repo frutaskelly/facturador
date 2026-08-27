@@ -2074,10 +2074,13 @@ export interface paths {
         put?: never;
         /**
          * Importar Productos
-         * @description Aplica el preview confirmado: crea productos nuevos (SKU automático),
-         *     vincula existentes y, si la lista es de UN cliente, guarda su código/nombre
-         *     en el catálogo del cliente (+ alias para el cruce) y opcionalmente sus
-         *     precios en la lista de precios del cliente.
+         * @description Aplica el preview confirmado. Ver `_ejecutar_import`.
+         *
+         *     Se intenta en modo LOTE (un flush para todo: con 500 productos es la
+         *     diferencia entre 2 segundos y varios minutos contra una base en la nube).
+         *     Si el lote choca contra una restricción, se rehace fila por fila —dentro de
+         *     un savepoint, para no perder el scope de RLS de la transacción— y así se
+         *     puede señalar CUÁL fila falló conservando las demás.
          */
         post: operations["importar_productos_api_v1_productos_importar_post"];
         delete?: never;
@@ -3182,6 +3185,8 @@ export interface components {
         };
         /** ClienteCreate */
         ClienteCreate: {
+            /** Almacen Id */
+            almacen_id?: string | null;
             /** Codigo */
             codigo?: string | null;
             /** Condiciones Pago */
@@ -3302,6 +3307,8 @@ export interface components {
         };
         /** ClienteOut */
         ClienteOut: {
+            /** Almacen Id */
+            almacen_id?: string | null;
             /** Codigo */
             codigo?: string | null;
             /** Condiciones Pago */
@@ -3387,6 +3394,8 @@ export interface components {
         };
         /** ClienteUpdate */
         ClienteUpdate: {
+            /** Almacen Id */
+            almacen_id?: string | null;
             /** Codigo */
             codigo?: string | null;
             /** Condiciones Pago */
@@ -7245,6 +7254,8 @@ export interface components {
              * @default true
              */
             activo: boolean;
+            /** Almacen Id */
+            almacen_id?: string | null;
             /**
              * Cliente Id
              * Format: uuid
@@ -7274,6 +7285,8 @@ export interface components {
              * @default true
              */
             activo: boolean;
+            /** Almacen Id */
+            almacen_id?: string | null;
             /**
              * Cliente Id
              * Format: uuid
@@ -7320,6 +7333,8 @@ export interface components {
         SucursalUpdate: {
             /** Activo */
             activo?: boolean | null;
+            /** Almacen Id */
+            almacen_id?: string | null;
             /** Codigo */
             codigo?: string | null;
             /** Contacto */

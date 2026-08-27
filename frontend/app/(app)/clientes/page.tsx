@@ -220,6 +220,12 @@ const config: CrudConfig<Cliente> = {
       type: "select",
       hint: "La sucursal puede sobreescribirla; en blanco usa la predeterminada",
     },
+    {
+      name: "almacen_id",
+      label: "Almacén",
+      type: "select",
+      hint: "De dónde sale su mercancía. La sucursal puede sobreescribirlo; en blanco usa el predeterminado",
+    },
   ],
   // Accesos rápidos por fila, como iconos junto a editar/eliminar.
   rowLinks: (c) => [
@@ -238,6 +244,11 @@ const config: CrudConfig<Cliente> = {
       path: "/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200",
       value: (r) => String(r.id),
       label: (r) => `${r.codigo}${r.nombre ? ` · ${r.nombre}` : ""}`,
+    },
+    almacen_id: {
+      path: "/api/v1/almacenes?limit=200",
+      value: (r) => String(r.id),
+      label: (r) => `${r.codigo ? `${r.codigo} · ` : ""}${r.nombre}`,
     },
     serie_remision_id: {
       path: "/api/v1/series?tipo_documento=REMISION&activa=true&limit=200",

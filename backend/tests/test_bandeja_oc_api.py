@@ -486,3 +486,34 @@ def test_el_punto_de_entrega_se_puede_corregir_a_mano(client, env, auth_as):
     }).json()
     rem = client.get(f"/api/v1/remisiones/{hecho['remision_id']}", headers=h).json()
     assert (rem["notas"] or "").startswith("HOSPITAL JUAN GRAHAM (URGENCIAS)")
+
+
+def test_el_almacen_se_resuelve_como_la_serie(client, env, auth_as):
+    """sucursal → cliente → predeterminado. El bot no puede elegir almacén, y
+    dejarlo vacío significaría no descontar inventario sin que nadie lo decida."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+
+    def _crear():
+        oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+        client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                     json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"],
+                           "aprender": False})
+        hecho = client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision", headers=h, json={
+            "lineas": [{"producto_id": env["prod"], "cantidad": "1", "precio_unitario": "10"}],
+        }).json()
+        return client.get(f"/api/v1/remisiones/{hecho['remision_id']}", headers=h).json()
+
+    # Sin nada configurado y sin predeterminado: sale sin almacén (no toca stock).
+    assert _crear()["almacen_id"] is None
+
+    # Con almacén en el CLIENTE, lo hereda.
+    client.patch(f"/api/v1/clientes/{env['ehmo']}", headers=h, json={"almacen_id": env["alm"]})
+    assert _crear()["almacen_id"] == env["alm"]
+
+    # El de la SUCURSAL gana sobre el del cliente.
+    r = client.post("/api/v1/almacenes", headers=h,
+                    json={"codigo": "OC-SUC", "nombre": "Bodega de la sucursal"})
+    alm_suc = r.json()["id"]
+    client.patch(f"/api/v1/sucursales/{env['suc']}", headers=h, json={"almacen_id": alm_suc})
+    assert _crear()["almacen_id"] == alm_suc

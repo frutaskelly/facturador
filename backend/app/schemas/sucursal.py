@@ -20,6 +20,7 @@ class SucursalBase(BaseModel):
     telefono: Optional[str] = Field(default=None, max_length=20)
     activo: bool = True
     # series de la sucursal (ganan sobre las del cliente)
+    almacen_id: Optional[uuid.UUID] = None
     serie_factura_id: Optional[uuid.UUID] = None
     serie_remision_id: Optional[uuid.UUID] = None
 
@@ -36,6 +37,7 @@ class SucursalUpdate(BaseModel):
     contacto: Optional[str] = Field(default=None, max_length=254)
     telefono: Optional[str] = Field(default=None, max_length=20)
     activo: Optional[bool] = None
+    almacen_id: Optional[uuid.UUID] = None
     serie_factura_id: Optional[uuid.UUID] = None
     serie_remision_id: Optional[uuid.UUID] = None
 

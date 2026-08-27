@@ -36,6 +36,7 @@ from ...schemas.oc_recibida import (
     OCRecibidaUpdate,
 )
 from ...services import cliente_match
+from ...services.series import resolver_almacen
 from ...services.producto_match import (
     aprender_alias,
     buscar,
@@ -399,6 +400,15 @@ def crear_remision(
             status_code=422, detail="Asigna primero el cliente de la orden"
         )
     ensure_fk(db, Almacen, payload.almacen_id, "almacen_id")
+    # Si no se eligió almacén, se resuelve como la serie: sucursal → cliente →
+    # predeterminado. El bot no tiene cómo elegirlo, y dejarlo vacío significaría
+    # que la remisión no descuenta inventario sin que nadie lo haya decidido.
+    almacen_id = resolver_almacen(
+        db, ctx.tenant_id,
+        almacen_id=payload.almacen_id,
+        sucursal_id=oc.sucursal_id,
+        cliente_id=oc.cliente_id,
+    )
     for ln in payload.lineas:
         ensure_fk(db, Producto, ln.producto_id, "producto_id")
 
@@ -418,7 +428,7 @@ def crear_remision(
     body = RemisionCreate(
         cliente_facturacion_id=oc.cliente_id,
         sucursal_id=oc.sucursal_id,
-        almacen_id=payload.almacen_id,
+        almacen_id=almacen_id,
         fecha_remision=payload.fecha_remision,
         fecha_entrega=payload.fecha_entrega or _fecha(p.get("fecha_entrega")),
         canal="API",
