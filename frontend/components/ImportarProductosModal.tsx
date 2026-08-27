@@ -1,11 +1,13 @@
 "use client";
 
-// Importación masiva de productos — wizard de 4 pasos:
+// Importación masiva de productos — wizard:
 //   1. Subir (plantilla/SAE determinista, o Excel libre/CSV/PDF/foto con IA)
-//   2. Preguntas en LOTE (solo si el archivo las necesita): claves SAT
+//   2. Columnas: qué columna del archivo se lee como qué campo — el usuario
+//      reasigna o descarta antes de que nada toque el sistema (solo tabulares)
+//   3. Preguntas en LOTE (solo si el archivo las necesita): claves SAT
 //      sugeridas-del-catálogo-oficial o genéricas, categorías, esquema, precios
-//   3. Preview → Aprobar todo (cruce anti-duplicados, fila por fila editable)
-//   4. Resultado + asignar la lista de precios (default / clientes)
+//   4. Preview → Aprobar todo (cruce anti-duplicados, fila por fila editable)
+//   5. Resultado + asignar la lista de precios (default / clientes)
 // Una subida construye el catálogo, el catálogo del cliente (claves/nombres
 // que van al CFDI) y la lista de precios.
 import { useMemo, useRef, useState } from "react";
@@ -22,6 +24,7 @@ import { useResource, type Page } from "@/lib/hooks";
 import type {
   Cliente,
   EsquemaImpuesto,
+  ImportColumna,
   ImportFilaPreview,
   ImportPreview,
   ImportResult,
@@ -38,7 +41,7 @@ type Fila = ImportFilaPreview & {
   factor: string;            // variante nueva: 1 UNIDAD = factor × unidad base
 };
 
-type Paso = "subir" | "preguntas" | "preview" | "resultado";
+type Paso = "subir" | "columnas" | "preguntas" | "preview" | "resultado";
 
 function defaultAccion(f: ImportFilaPreview): Accion {
   if (f.duplicada_de || f.baja) return "omitir";
@@ -73,6 +76,9 @@ export function ImportarProductosModal({
   const [cargando, setCargando] = useState(false);
   const [formato, setFormato] = useState<"plantilla" | "ia">("plantilla");
   const [meta, setMeta] = useState<ImportPreview | null>(null);
+  // Mapeo columna→campo que el usuario revisa antes de aprobar nada.
+  const [columnas, setColumnas] = useState<ImportColumna[]>([]);
+  const [campos, setCampos] = useState<{ valor: string; etiqueta: string }[]>([]);
   const [filas, setFilas] = useState<Fila[]>([]);
   const [resultado, setResultado] = useState<ImportResult | null>(null);
 
@@ -102,6 +108,8 @@ export function ImportarProductosModal({
     setFiltroCliente("");
     setUsarIa(true);
     setMeta(null);
+    setColumnas([]);
+    setCampos([]);
     setFilas([]);
     setResultado(null);
     setP1("sugerida");
@@ -127,7 +135,19 @@ export function ImportarProductosModal({
     }
   }
 
-  async function analizar() {
+  function hayPreguntas(p: ImportPreview): boolean {
+    return (
+      p.faltan_clave_sat > 0 ||
+      p.faltan_unidad_sat > 0 ||
+      p.categorias_nuevas.length > 0 ||
+      p.filas_sin_esquema > 0 ||
+      p.tiene_precios
+    );
+  }
+
+  /** Lee el archivo en el servidor. `mapeo` (columna→campo) lo manda el paso
+   *  de columnas cuando el usuario corrige lo que se detectó solo. */
+  async function analizar(mapeo?: Record<number, string>) {
     if (!archivo) {
       toast.error("Elige un archivo primero");
       return;
@@ -138,12 +158,15 @@ export function ImportarProductosModal({
       fd.append("archivo", archivo);
       fd.append("usar_ia", String(usarIa));
       clienteIds.forEach((id) => fd.append("cliente_ids", id));
+      if (mapeo) fd.append("mapeo", JSON.stringify(mapeo));
       const p = await apiFetch<ImportPreview>("/api/v1/productos/importar-preview", {
         method: "POST",
         body: fd,
       });
       setFormato(p.formato);
       setMeta(p);
+      setColumnas(p.columnas ?? []);
+      setCampos(p.campos_mapeables ?? []);
       setFilas(
         p.filas.map((f) => ({
           ...f,
@@ -153,14 +176,18 @@ export function ImportarProductosModal({
         }))
       );
       if (!listaNombre) setListaNombre(archivo.name.replace(/\.[^.]+$/, ""));
-      // Con preguntas pendientes → paso 2; si el archivo trae todo → directo al preview.
-      const hayPreguntas =
-        p.faltan_clave_sat > 0 ||
-        p.faltan_unidad_sat > 0 ||
-        p.categorias_nuevas.length > 0 ||
-        p.filas_sin_esquema > 0 ||
-        p.tiene_precios;
-      setPaso(hayPreguntas ? "preguntas" : "preview");
+      if (p.requiere_mapeo) {
+        // No se reconoció qué columna trae la descripción: hay que mapear.
+        setPaso("columnas");
+      } else if (mapeo) {
+        // Ya venimos de revisar las columnas: sigue el flujo normal.
+        setPaso(hayPreguntas(p) ? "preguntas" : "preview");
+      } else if ((p.columnas ?? []).length > 0) {
+        // Primera lectura de un archivo tabular: se revisa el mapeo primero.
+        setPaso("columnas");
+      } else {
+        setPaso(hayPreguntas(p) ? "preguntas" : "preview");
+      }
     } catch (e) {
       toast.error(
         e instanceof ApiError ? e.message : "No se pudo leer el archivo. Intenta de nuevo."
@@ -168,6 +195,32 @@ export function ImportarProductosModal({
     } finally {
       setCargando(false);
     }
+  }
+
+  /** Confirma el mapeo de columnas: si el usuario cambió algo, se relee el
+   *  archivo con su mapeo; si no, se sigue con lo que ya está leído. */
+  async function confirmarColumnas() {
+    if (!meta) return;
+    if (!columnas.some((c) => c.campo === "nombre")) {
+      toast.error("Indica qué columna trae la DESCRIPCIÓN (nombre) del producto");
+      return;
+    }
+    const cambio = columnas.some(
+      (c, i) => c.campo !== (meta.columnas[i]?.campo ?? "")
+    );
+    if (!cambio && !meta.requiere_mapeo) {
+      setPaso(hayPreguntas(meta) ? "preguntas" : "preview");
+      return;
+    }
+    if (filas.some((f) => f.accion !== defaultAccion(f) || f.producto_sel !== (f.producto_id ?? ""))) {
+      // Releer el archivo reconstruye las filas: no se pierde nada en silencio.
+      toast.info("Se releerá el archivo con el nuevo mapeo");
+    }
+    const mapeo: Record<number, string> = {};
+    columnas.forEach((c) => {
+      if (c.campo) mapeo[c.indice] = c.campo;
+    });
+    await analizar(mapeo);
   }
 
   // Aplica las respuestas del lote (P1/P2) y pasa al preview.
@@ -322,14 +375,28 @@ export function ImportarProductosModal({
         paso === "subir" ? (
           <>
             <Button variant="secondary" onClick={close}>Cancelar</Button>
-            <Button onClick={analizar} disabled={!archivo || cargando}>
+            <Button onClick={() => void analizar()} disabled={!archivo || cargando}>
               {cargando ? <Spinner className="h-4 w-4" /> : <FileUp size={16} />}
               {cargando ? "Leyendo archivo…" : "Analizar archivo"}
             </Button>
           </>
-        ) : paso === "preguntas" ? (
+        ) : paso === "columnas" ? (
           <>
             <Button variant="secondary" onClick={() => setPaso("subir")} disabled={cargando}>
+              Regresar
+            </Button>
+            <Button onClick={confirmarColumnas} disabled={cargando}>
+              {cargando ? <Spinner className="h-4 w-4" /> : null}
+              {cargando ? "Releyendo…" : "Continuar"}
+            </Button>
+          </>
+        ) : paso === "preguntas" ? (
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setPaso(columnas.length > 0 ? "columnas" : "subir")}
+              disabled={cargando}
+            >
               Regresar
             </Button>
             <Button onClick={aplicarPreguntas} disabled={cargando}>
@@ -341,7 +408,15 @@ export function ImportarProductosModal({
           <>
             <Button
               variant="secondary"
-              onClick={() => setPaso(meta && (meta.faltan_clave_sat || meta.faltan_unidad_sat || meta.categorias_nuevas.length || meta.filas_sin_esquema || meta.tiene_precios) ? "preguntas" : "subir")}
+              onClick={() =>
+                setPaso(
+                  meta && hayPreguntas(meta)
+                    ? "preguntas"
+                    : columnas.length > 0
+                      ? "columnas"
+                      : "subir"
+                )
+              }
               disabled={cargando}
             >
               Regresar
@@ -455,6 +530,80 @@ export function ImportarProductosModal({
         </div>
       )}
 
+      {paso === "columnas" && (
+        <div className="space-y-3">
+          {meta?.requiere_mapeo ? (
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 text-sm">
+              No reconocí los encabezados de este archivo. Indica al menos qué
+              columna trae la <b>descripción (nombre)</b> del producto; el resto
+              es opcional.
+            </div>
+          ) : (
+            <div className="text-sm text-muted">
+              Así se está leyendo tu archivo. Cambia el campo de cualquier columna
+              o ponla en <b>No importar</b> — lo que no se importa no toca nada del
+              sistema.
+            </div>
+          )}
+          {meta && meta.filas_sin_nombre > 0 ? (
+            <div className="text-sm text-muted">
+              {meta.filas_sin_nombre} renglones se descartaron por no traer nada
+              en la columna de descripción.
+            </div>
+          ) : null}
+          <div className="max-h-[55vh] overflow-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-surface-2 text-left text-xs uppercase text-muted">
+                <tr>
+                  <th className="px-3 py-2">Columna del archivo</th>
+                  <th className="px-3 py-2">Ejemplos</th>
+                  <th className="px-3 py-2 w-[280px]">Se importa como</th>
+                </tr>
+              </thead>
+              <tbody>
+                {columnas.map((c, i) => {
+                  // Un campo solo puede venir de una columna: las ya usadas se
+                  // ocultan del resto de selects (salvo la propia).
+                  const usados = new Set(
+                    columnas.filter((_, j) => j !== i).map((x) => x.campo).filter(Boolean)
+                  );
+                  return (
+                    <tr
+                      key={c.indice}
+                      className={`border-t border-border align-top ${c.campo ? "" : "opacity-60"}`}
+                    >
+                      <td className="px-3 py-2 font-medium">{c.encabezado}</td>
+                      <td className="px-3 py-2 text-xs text-muted">
+                        {c.muestras.length ? c.muestras.join(" · ") : "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <Select
+                          value={c.campo}
+                          onChange={(e) =>
+                            setColumnas((cols) =>
+                              cols.map((x, j) => (j === i ? { ...x, campo: e.target.value } : x))
+                            )
+                          }
+                        >
+                          <option value="">— No importar —</option>
+                          {campos
+                            .filter((k) => k.valor === c.campo || !usados.has(k.valor))
+                            .map((k) => (
+                              <option key={k.valor} value={k.valor}>
+                                {k.etiqueta}
+                              </option>
+                            ))}
+                        </Select>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {paso === "preguntas" && meta && (
         <div className="space-y-4">
           <div className="text-sm text-muted">
@@ -562,7 +711,7 @@ export function ImportarProductosModal({
                   <th className="px-2 py-2">Código</th>
                   <th className="px-2 py-2">Precio</th>
                   <th className="px-2 py-2 min-w-[240px]">Acción</th>
-                  <th className="px-2 py-2">SAT</th>
+                  <th className="px-2 py-2 min-w-[13rem]">Clave y unidad SAT</th>
                 </tr>
               </thead>
               <tbody>
@@ -637,23 +786,41 @@ export function ImportarProductosModal({
                       </div>
                     </td>
                     <td className="px-2 py-2">
+                      {/* El ancho va en el contenedor: Input trae w-full y en
+                          Tailwind v4 una clase w-* en el atributo no gana. */}
                       {f.accion === "crear" ? (
                         <div className="flex gap-1">
-                          <Input
-                            value={f.clave_sat}
-                            onChange={(e) => setFila(i, { clave_sat: e.target.value })}
-                            placeholder="01010101"
-                            className="w-24"
-                          />
+                          <div className="w-[7.5rem]">
+                            <Input
+                              value={f.clave_sat}
+                              onChange={(e) => setFila(i, { clave_sat: e.target.value })}
+                              placeholder="01010101"
+                              aria-label={`Clave SAT de ${f.nombre}`}
+                            />
+                          </div>
+                          <div className="w-[4.5rem]">
+                            <Input
+                              value={f.unidad_sat}
+                              onChange={(e) => setFila(i, { unidad_sat: e.target.value.toUpperCase() })}
+                              placeholder="KGM"
+                              aria-label={`Unidad SAT de ${f.nombre}`}
+                            />
+                          </div>
+                        </div>
+                      ) : f.nueva_presentacion ? (
+                        // Al agregar una presentación SÍ se usa la unidad SAT.
+                        <div className="w-[4.5rem]">
                           <Input
                             value={f.unidad_sat}
                             onChange={(e) => setFila(i, { unidad_sat: e.target.value.toUpperCase() })}
-                            placeholder="KGM"
-                            className="w-16"
+                            placeholder="H87"
+                            aria-label={`Unidad SAT de la presentación de ${f.nombre}`}
                           />
                         </div>
                       ) : (
-                        <span className="text-muted">—</span>
+                        <span className="text-muted" title="Se usan la clave y unidad del producto existente">
+                          del producto
+                        </span>
                       )}
                     </td>
                   </tr>

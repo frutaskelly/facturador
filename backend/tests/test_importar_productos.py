@@ -6,6 +6,7 @@ automático, alias del cliente, precios a su lista) y que el CFDI use el
 código/nombre del cliente (NoIdentificacion / Descripcion).
 """
 import io
+import json
 import uuid
 from decimal import Decimal
 
@@ -163,7 +164,9 @@ def test_preview_codigo_ya_vinculado(client, env, auth_as):
     assert f1["ya_vinculado"] is True
 
 
-def test_preview_archivo_sin_nombre_sin_ia(client, env, auth_as):
+def test_preview_archivo_sin_nombre_ofrece_mapeo(client, env, auth_as):
+    """Encabezados irreconocibles ya no son un callejón sin salida: se devuelven
+    las columnas para que el usuario diga cuál es la descripción."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
     data = _xlsx([["COSA", "OTRA"], ["x", "y"]])
     r = client.post(
@@ -171,8 +174,10 @@ def test_preview_archivo_sin_nombre_sin_ia(client, env, auth_as):
         files={"archivo": ("raro.xlsx", data, "application/octet-stream")},
         data={"usar_ia": "false"},
     )
-    assert r.status_code == 422
-    assert "plantilla" in r.json()["detail"].lower()
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["requiere_mapeo"] is True and body["filas"] == []
+    assert [c["encabezado"] for c in body["columnas"]] == ["COSA", "OTRA"]
 
 
 # ─── importar ────────────────────────────────────────────────────────────────
@@ -872,3 +877,181 @@ def test_cruce_masivo_no_renormaliza_el_catalogo_por_fila(client, env, auth_as):
     # Sin memoizar serían ~40 × 121 × 2 ≈ 9,700. Con el catálogo precalculado
     # es del orden de (productos + filas), no su producto.
     assert llamadas["n"] < 1000, f"{llamadas['n']} normalizaciones (esperado O(productos+filas))"
+
+
+# ─── Mapeo de columnas (revisar el match archivo↔sistema antes de importar) ──
+def test_preview_expone_columnas_detectadas(client, env, auth_as):
+    """El preview dice qué columna se leyó como qué campo, con ejemplos — y las
+    que no se importan van con campo vacío (las informativas del export SAE)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["CLAVE", "DESCRIPCIÓN", "UNIDAD DE SALIDA", "CLAVE SAT", "DESCRIPCIÓN SAT",
+         "UNIDAD DE SALIDA SAT", "PRECIO", "CATEGORÍA", "ESTATUS"],
+        ["ACEI-1", "ACEITE CANOLA 946 ML", "PZ", "50151513", "Aceites vegetales",
+         "H87", "47.6", "ABARROTE", "ALTA"],
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("sae.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    por_encabezado = {c["encabezado"]: c for c in body["columnas"]}
+    assert por_encabezado["CLAVE"]["campo"] == "codigo"
+    assert por_encabezado["DESCRIPCIÓN"]["campo"] == "nombre"
+    assert por_encabezado["UNIDAD DE SALIDA"]["campo"] == "unidad"
+    assert por_encabezado["CLAVE SAT"]["campo"] == "clave_sat"
+    assert por_encabezado["UNIDAD DE SALIDA SAT"]["campo"] == "unidad_sat"
+    assert por_encabezado["CATEGORÍA"]["campo"] == "categoria"
+    # Columna informativa del export: no se importa.
+    assert por_encabezado["DESCRIPCIÓN SAT"]["campo"] == ""
+    # Ejemplos para que el usuario reconozca la columna.
+    assert por_encabezado["CLAVE"]["muestras"] == ["ACEI-1"]
+    # Y el catálogo de campos a los que puede reasignar.
+    assert any(k["valor"] == "clave_sat" for k in body["campos_mapeables"])
+    # La fila se leyó con las claves SAT del archivo (no vacías).
+    f1 = body["filas"][0]
+    assert f1["clave_sat"] == "50151513" and f1["unidad_sat"] == "H87"
+
+
+def test_preview_respeta_el_mapeo_del_usuario(client, env, auth_as):
+    """El usuario reasigna columnas: su mapeo gana sobre la detección."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["CLAVE", "DESCRIPCIÓN", "DESCRIPCIÓN SAT", "PRECIO"],
+        ["A-1", "PRODUCTO UNO", "Aceites vegetales", "10"],
+    ])
+    # Mapeo: la columna 2 (DESCRIPCIÓN SAT, ignorada por default) se importa
+    # como descripción, y el PRECIO (columna 3) se deja fuera.
+    mapeo = {"0": "codigo", "1": "nombre", "2": "descripcion"}
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("x.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false", "mapeo": json.dumps(mapeo)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    f1 = body["filas"][0]
+    assert f1["nombre"] == "PRODUCTO UNO"
+    assert f1["descripcion"] == "Aceites vegetales"   # columna reasignada
+    assert f1["precio"] == ""                         # columna descartada
+    assert body["tiene_precios"] is False
+    # Las columnas devueltas reflejan lo que el usuario eligió.
+    campos = {c["encabezado"]: c["campo"] for c in body["columnas"]}
+    assert campos["DESCRIPCIÓN SAT"] == "descripcion" and campos["PRECIO"] == ""
+
+
+def test_preview_mapeo_sin_nombre_regresa_a_columnas(client, env, auth_as):
+    """Si el mapeo del usuario no dice cuál es la descripción, se le devuelven
+    las columnas para corregir — no un 422 sin salida."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([["CLAVE", "DESCRIPCIÓN"], ["A-1", "PRODUCTO UNO"]])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("x.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false", "mapeo": json.dumps({"0": "codigo"})},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["requiere_mapeo"] is True and body["filas"] == []
+    # Se respeta lo que el usuario ya había elegido.
+    assert body["columnas"][0]["campo"] == "codigo"
+
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("x.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false", "mapeo": "no-es-json"},
+    )
+    assert r.status_code == 422 and "Mapeo" in r.json()["detail"]
+
+
+def test_preview_encabezados_ajenos_ofrece_mapeo(client, env, auth_as):
+    """Una lista de proveedor con encabezados propios (ARTICULO | PRESENTACION
+    | $ LISTA) llega a la pantalla de mapeo en vez de morir en un 422: es
+    justamente el archivo que más necesita que el usuario diga qué es qué."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["ARTICULO", "PRESENTACION", "$ LISTA"],
+        ["TOMATE BOLA", "KG", "24.50"],
+        ["CEBOLLA BLANCA", "KG", "15.50"],
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("proveedor.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["requiere_mapeo"] is True
+    assert body["filas"] == []
+    assert [c["encabezado"] for c in body["columnas"]] == ["ARTICULO", "PRESENTACION", "$ LISTA"]
+    assert body["columnas"][0]["muestras"] == ["TOMATE BOLA", "CEBOLLA BLANCA"]
+
+    # El usuario mapea y ya se puede importar.
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("proveedor.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false",
+              "mapeo": json.dumps({"0": "nombre", "1": "unidad", "2": "precio"})},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["requiere_mapeo"] is False
+    assert len(body["filas"]) == 2
+    assert body["filas"][0]["nombre"] == "TOMATE BOLA"
+    assert body["filas"][0]["unidad"] == "KILO" and body["filas"][0]["precio"] == "24.50"
+
+
+def test_preview_avisa_filas_descartadas(client, env, auth_as):
+    """Renglones con datos pero sin descripción no desaparecen en silencio."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["DESCRIPCIÓN", "PRECIO"],
+        ["PRODUCTO BUENO", "10"],
+        ["", "99"],            # renglón con datos, sin nombre → se avisa
+        ["", ""],              # fila vacía → no cuenta
+        ["OTRO PRODUCTO", "20"],
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("x.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["filas"]) == 2
+    assert body["filas_sin_nombre"] == 1
+
+
+def test_preview_mapeo_vacio_no_miente(client, env, auth_as):
+    """Un mapeo con todo en blanco no puede importar por auto-detección y
+    responder que no se importa nada."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([["DESCRIPCIÓN", "PRECIO"], ["PRODUCTO UNO", "10"]])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("x.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false", "mapeo": json.dumps({"0": "", "1": ""})},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Sin columna de nombre → pide mapeo, no inventa un import.
+    assert body["requiere_mapeo"] is True and body["filas"] == []
+    assert all(c["campo"] == "" for c in body["columnas"])
+
+
+def test_preview_muestras_ven_mas_alla_de_las_primeras_filas(client, env, auth_as):
+    """Una columna vacía al inicio y con datos abajo NO se ve como vacía."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    filas = [["DESCRIPCIÓN", "CATEGORÍA"]]
+    filas += [[f"PRODUCTO {i}", ""] for i in range(20)]
+    filas += [["PRODUCTO TARDIO", "ABARROTE"]]
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("x.xlsx", _xlsx(filas), "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    cat = next(c for c in r.json()["columnas"] if c["encabezado"] == "CATEGORÍA")
+    assert cat["muestras"] == ["ABARROTE"]

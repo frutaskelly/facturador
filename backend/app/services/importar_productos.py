@@ -154,12 +154,24 @@ def _leer_tabla(data: bytes, filename: str):
         ) from exc
 
 
-def parsear_plantilla(data: bytes, filename: str) -> Optional[list[dict]]:
-    """Camino determinista: si el archivo trae al menos la columna NOMBRE (o
-    PRODUCTO) en el encabezado, se parsea sin IA. Devuelve None si el archivo
-    no se parece a la plantilla (→ probar con IA)."""
-    df = _leer_tabla(data, filename)
+# Campos del sistema a los que se puede mapear una columna del archivo.
+CAMPOS_MAPEABLES = [
+    ("nombre", "Descripción / nombre del producto"),
+    ("codigo", "Clave / SKU"),
+    ("descripcion", "Descripción adicional"),
+    ("unidad", "Unidad de venta"),
+    ("precio", "Precio"),
+    ("clave_sat", "Clave SAT (producto/servicio)"),
+    ("unidad_sat", "Unidad SAT"),
+    ("categoria", "Categoría"),
+    ("esquema", "Esquema de impuesto"),
+    ("codigo_barras", "Código de barras"),
+    ("estatus", "Estatus (ALTA/BAJA)"),
+]
 
+
+def _detectar_columnas(df) -> dict[int, str]:
+    """Encabezados del archivo → campo del sistema (mapeo automático)."""
     cols: dict[int, str] = {}
     for i, h in enumerate(df.columns):
         campo = _HEADERS.get(_norm_header(h))
@@ -171,15 +183,83 @@ def parsear_plantilla(data: bytes, filename: str) -> Optional[list[dict]]:
         desc_idx = next((i for i, c in cols.items() if c == "descripcion"), None)
         if desc_idx is not None:
             cols[desc_idx] = "nombre"
-        else:
-            return None
+    return cols
+
+
+def analizar_columnas(data: bytes, filename: str) -> Optional[dict]:
+    """Qué columna del archivo se leyó como qué campo, con valores de muestra.
+
+    Es lo que el usuario revisa ANTES del preview: puede reasignar una columna
+    a otro campo o dejar de importarla. Devuelve None si el archivo no es
+    tabular reconocible (→ camino IA)."""
+    df = _leer_tabla(data, filename)
+    detectadas = _detectar_columnas(df)
+    columnas = []
+    for i, h in enumerate(df.columns):
+        # Se escanean bastantes filas, no solo las primeras: una columna vacía
+        # al inicio y con datos más abajo se veía como "sin datos" e invitaba a
+        # descartarla.
+        muestras: list[str] = []
+        for v in df.iloc[:400, i].tolist():
+            t = _texto(v)
+            if t:
+                muestras.append(t)
+            if len(muestras) == 3:
+                break
+        columnas.append({
+            "indice": i,
+            "encabezado": _texto(h) or f"Columna {i + 1}",
+            "campo": detectadas.get(i, ""),        # "" = no se importa
+            "muestras": muestras,
+        })
+    return {
+        "columnas": columnas,
+        "campos": [{"valor": v, "etiqueta": e} for v, e in CAMPOS_MAPEABLES],
+    }
+
+
+def parsear_plantilla(
+    data: bytes, filename: str, mapeo: Optional[dict[int, str]] = None
+) -> Optional[list[dict]]:
+    """Camino determinista: si el archivo trae al menos la columna NOMBRE (o
+    PRODUCTO) en el encabezado, se parsea sin IA. Devuelve None si el archivo
+    no se parece a la plantilla (→ probar con IA).
+
+    `mapeo` (índice de columna → campo) lo manda el usuario desde la pantalla
+    de columnas y GANA sobre la detección automática."""
+    df = _leer_tabla(data, filename)
+
+    # `mapeo is not None` (no `if mapeo`): un mapeo vacío es una decisión del
+    # usuario — "no importar nada" — y NO debe caer en auto-detección.
+    if mapeo is not None:
+        # Solo columnas que existen en el archivo y campos conocidos; un campo
+        # no puede venir de dos columnas (gana la primera).
+        validos = {v for v, _ in CAMPOS_MAPEABLES}
+        cols: dict[int, str] = {}
+        for i, campo in sorted(mapeo.items()):
+            if 0 <= i < len(df.columns) and campo in validos and campo not in cols.values():
+                cols[i] = campo
+    else:
+        cols = _detectar_columnas(df)
+    if "nombre" not in cols.values():
+        if mapeo is not None:
+            raise ImportProductosError(
+                "Falta indicar qué columna trae la DESCRIPCIÓN (nombre) del producto"
+            )
+        return None
 
     filas: list[dict] = []
+    saltadas = 0
     for _, row in df.iterrows():
         r = {campo: row.iloc[i] for i, campo in cols.items()}
         nombre = _texto(r.get("nombre"))
         if not nombre:
-            continue  # filas vacías / totales
+            # Filas vacías / totales — pero si la fila trae ALGO en otra
+            # columna, es un renglón real que se está descartando: se cuenta
+            # para avisarlo (antes desaparecían en silencio).
+            if any(_texto(v) for v in row.tolist()):
+                saltadas += 1
+            continue
         precio = _decimal(r.get("precio"))
         categoria = _texto(r.get("categoria"))
         # "— sin categoría —" y similares cuentan como vacío.
@@ -204,6 +284,8 @@ def parsear_plantilla(data: bytes, filename: str) -> Optional[list[dict]]:
             raise ImportProductosError(f"Máximo {MAX_FILAS} productos por archivo")
     if not filas:
         raise ImportProductosError("El archivo no tiene filas con NOMBRE de producto")
+    # El contador viaja en la primera fila (el llamador lo lee y lo quita).
+    filas[0]["_saltadas"] = saltadas
     return filas
 
 
