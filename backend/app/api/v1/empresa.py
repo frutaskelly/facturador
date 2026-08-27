@@ -31,6 +31,7 @@ from ...schemas.empresa import (
     EmpresaUpdate,
 )
 from ...services.facturama import FacturamaClient, FacturamaError, csd_public_fields
+from ...services.catalogos_default import sembrar_esquemas_impuesto
 from ...services.csd_validador import validar_csd
 from ...services.rfc import validar_rfc_local
 from ...services.onboarding import compute_status, rfc_valido
@@ -219,6 +220,9 @@ def crear_empresa_hija(
             active=True,
         )
     )
+    # Catálogos base, igual que en el registro autoservicio: la empresa nueva
+    # arranca con sus esquemas de impuesto listos (editables).
+    sembrar_esquemas_impuesto(db, hija.id)
     try:
         db.commit()
     except IntegrityError:

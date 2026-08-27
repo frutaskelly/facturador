@@ -31,6 +31,7 @@ from ...core.ratelimit import client_ip, hit
 from ...models import Membership, Role, Tenant, User
 from ...schemas.registro import RegistroIn, RegistroOut
 from ...services import supabase_admin, turnstile
+from ...services.catalogos_default import sembrar_esquemas_impuesto
 from ...services.onboarding import rfc_valido
 
 router = APIRouter(prefix="/registro", tags=["registro"])
@@ -151,6 +152,9 @@ def registro(payload: RegistroIn, request: Request, db: Session = Depends(get_db
                 active=True,
             )
         )
+        # Catálogos base: sin esquemas de impuesto no se puede dar de alta un
+        # producto con sus tasas. Se siembran aquí para no arrancar en vacío.
+        sembrar_esquemas_impuesto(db, tenant.id)
         db.commit()
     except Exception:
         db.rollback()

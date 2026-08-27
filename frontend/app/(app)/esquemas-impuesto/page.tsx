@@ -23,26 +23,24 @@ const config: CrudConfig<EsquemaImpuesto> = {
     { header: "Exento", cell: (e) => (e.iva_exento ? "Sí" : "No") },
     { header: "Estado", cell: (e) => <Badge tone={e.activo ? "success" : "muted"}>{e.activo ? "Activo" : "Inactivo"}</Badge> },
   ],
-  // Los 8 esquemas de Aspel SAE (tabla IMPU02), listos para palomear.
-  // TASAS VIGENTES: hoy ningún esquema cobra IEPS en la empresa del cliente
-  // (instrucción del 23-jul-2026), así que 1/4/5/6/8 son 16% IVA a secas,
-  // 2 y 7 son 0% y el 3 es exento. Los nombres conservan la etiqueta original
-  // de SAE entre paréntesis para reconocerlos; todo es editable después.
+  // Los 8 esquemas por defecto (mismos de Aspel SAE). Se siembran solos al dar
+  // de alta la empresa; esto sirve para reponerlos si se borraron.
+  // TASAS REALES: los nombres 4/5/7/8 dicen "+ N% IEPS", pero hoy ningún
+  // esquema cobra IEPS — el nombre es la etiqueta con la que se reconocen.
   suggestions: {
-    label: "Esquemas de SAE",
-    title: "Esquemas de impuesto de SAE",
+    label: "Esquemas por defecto",
+    title: "Esquemas de impuesto por defecto",
     hint:
-      "Los mismos 8 esquemas que usa tu SAE. Hoy ninguno cobra IEPS: si lo reactivas, edita aquí la tasa.",
+      "Los mismos 8 que usa SAE. Puedes cambiarles el nombre y las tasas cuando quieras.",
     keyOf: (e) => e.nombre.trim().toLowerCase(),
     items: [
-      ["16% IVA", 16, false, "General gravado: no alimentos (limpieza, desechables), alimento para mascota, agua mineral o gaseosa."],
-      ["0% IVA", 0, false, "Alimentos: frutas, verduras, carne, lácteos, pan y abarrotes. Es el esquema normal de un alimento, aunque sea procesado."],
-      ["IVA exento", 0, true, "Exento. Evítalo en alimentos: para alimentos va el de 0%, que sí permite acreditar el IVA."],
-      ["16% IVA (SAE: + 8% IEPS)", 16, false, "Refrescos y jugos. Hoy sin IEPS; si lo reactivas, sube la tasa aquí."],
-      ["16% IVA (SAE: + 25% IEPS)", 16, false, "Etiqueta heredada de SAE con tasa desactualizada; hoy es 16% de IVA a secas."],
-      ["16% IVA (variante SAE)", 16, false, "Variante de 16% de IVA heredada de SAE."],
-      ["0% IVA (SAE: + 8% IEPS)", 0, false, "Dulces, chocolate, galletas dulces, botanas y granola. Hoy sin IEPS."],
-      ["16% IVA (SAE: + 26.5% IEPS)", 16, false, "Vino de mesa de hasta 14 grados. Hoy sin IEPS."],
+      ["16% IVA", 16, false, "No alimentos (limpieza, desechables), alimento para mascota, agua mineral/gaseosa"],
+      ["0% IVA", 0, false, "Alimentos — frutas, verduras, carne, lácteos, pan, abarrotes"],
+      ["IVA exento", 0, true, "Evitarlo en alimentos (para alimentos va el 2)"],
+      ["16% IVA + 8% IEPS", 16, false, "Refrescos y jugos"],
+      ["16% IVA + 25% IEPS", 16, false, "Etiqueta con tasa desactualizada"],
+      ["0% IVA + 8% IEPS", 0, false, "Dulces, chocolate, galletas dulces, botanas, granola"],
+      ["16% IVA + 26.5% IEPS", 16, false, "Vino de mesa hasta 14 grados"],
     ].map(([nombre, iva, exento, descripcion]) => ({
       key: String(nombre).trim().toLowerCase(),
       nombre: String(nombre),
