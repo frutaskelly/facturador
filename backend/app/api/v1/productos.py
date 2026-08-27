@@ -341,6 +341,7 @@ def plantilla_importacion(
 def importar_preview(
     archivo: UploadFile = File(...),
     cliente_id: Optional[UUID] = Form(default=None),
+    cliente_ids: list[UUID] = Form(default=[]),
     usar_ia: bool = Form(default=True),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
@@ -402,12 +403,18 @@ def importar_preview(
         esquemas_tenant.add(normalizar(e.codigo or ""))
         esquemas_tenant.add(normalizar(e.nombre or ""))
 
-    # Lo que el cliente ya tiene vinculado (por producto y por su código).
+    # Lo que los clientes elegidos YA tienen vinculado (por producto y código).
+    ids_clientes = list(dict.fromkeys(([cliente_id] if cliente_id else []) + list(cliente_ids)))
     pc_por_producto: dict = {}
     pc_por_codigo: dict = {}
-    if cliente_id is not None:
-        ensure_fk(db, Cliente, cliente_id, "cliente_id")
-        for pc in db.query(ProductoCliente).filter(ProductoCliente.cliente_id == cliente_id).all():
+    if ids_clientes:
+        for cid in ids_clientes:
+            ensure_fk(db, Cliente, cid, "cliente_id")
+        for pc in (
+            db.query(ProductoCliente)
+            .filter(ProductoCliente.cliente_id.in_(ids_clientes))
+            .all()
+        ):
             pc_por_producto[pc.producto_id] = pc
             cod = (pc.codigo_cliente or "").strip().upper()
             if cod:
@@ -579,17 +586,24 @@ def importar_productos(
     vincula existentes y, si la lista es de UN cliente, guarda su código/nombre
     en el catálogo del cliente (+ alias para el cruce) y opcionalmente sus
     precios en la lista de precios del cliente."""
-    cliente = None
-    if payload.cliente_id is not None:
-        cliente = get_or_404(db, Cliente, payload.cliente_id)
+    # Uno o VARIOS clientes (grupo/cadena que comparte la misma lista): los
+    # códigos/nombres/presentaciones del archivo se guardan para cada uno.
+    ids_clientes = list(dict.fromkeys(
+        ([payload.cliente_id] if payload.cliente_id else []) + list(payload.cliente_ids)
+    ))
+    clientes = [get_or_404(db, Cliente, cid) for cid in ids_clientes]
 
     lista_id = None
     lista_nombre_out = None
     if payload.guardar_precios:
-        lista_id = payload.lista_id or (cliente.lista_precios_id if cliente else None)
+        lista_id = payload.lista_id
+        # Un solo cliente CON lista → la suya (comportamiento de siempre).
+        if lista_id is None and len(clientes) == 1 and clientes[0].lista_precios_id:
+            lista_id = clientes[0].lista_precios_id
         if lista_id is None and (payload.lista_nombre or "").strip():
             # Crear la lista aquí mismo (menos pasos): código único desde el
-            # nombre. Si la importación es de un cliente SIN lista, se le asigna.
+            # nombre. Se asigna a los clientes elegidos que NO tengan lista
+            # (jamás se pisa una lista ya asignada).
             nombre_lista = payload.lista_nombre.strip()
             base = "".join(ch for ch in nombre_lista.upper() if ch.isalnum())[:20] or "LISTA"
             codigo_lista = base
@@ -602,8 +616,9 @@ def importar_productos(
             db.add(lista)
             db.flush()
             lista_id = lista.id
-            if cliente is not None and cliente.lista_precios_id is None:
-                cliente.lista_precios_id = lista.id
+            for cli in clientes:
+                if cli.lista_precios_id is None:
+                    cli.lista_precios_id = lista.id
         if lista_id is None:
             raise HTTPException(
                 status_code=422,
@@ -725,11 +740,12 @@ def importar_productos(
                     creados += 1
 
                 # Catálogo del cliente: su código → NoIdentificacion, su nombre
-                # → Descripcion del CFDI, su presentación → cómo le vende.
-                if cliente is not None:
-                    codigo_c = (fila.codigo_cliente or "").strip() or None
-                    nombre_c = (fila.nombre_cliente or "").strip() or None
-                    if codigo_c or nombre_c:
+                # → Descripcion del CFDI, su presentación → cómo le vende. Se
+                # guarda para CADA cliente elegido (una lista, varios clientes).
+                codigo_c = (fila.codigo_cliente or "").strip() or None
+                nombre_c = (fila.nombre_cliente or "").strip() or None
+                if clientes and (codigo_c or nombre_c):
+                    for cliente in clientes:
                         pc = (
                             db.query(ProductoCliente)
                             .filter(
@@ -751,12 +767,12 @@ def importar_productos(
                             pc.presentacion = unidad_fila
                         db.flush()
                         alias_guardados += 1
-                        # El cruce también aprende el nombre del cliente.
-                        if nombre_c:
-                            aprender_alias(
-                                db, ctx.tenant_id, nombre_c, prod.id,
-                                origen="IMPORT", user_id=ctx.user_id,
-                            )
+                    # El cruce también aprende el nombre (una vez, es del tenant).
+                    if nombre_c:
+                        aprender_alias(
+                            db, ctx.tenant_id, nombre_c, prod.id,
+                            origen="IMPORT", user_id=ctx.user_id,
+                        )
 
                 # Precio → lista indicada, EN la presentación de la fila (el
                 # precio del MANOJO no es el del KILO).

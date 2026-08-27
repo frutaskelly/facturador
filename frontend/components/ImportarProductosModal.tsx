@@ -66,7 +66,9 @@ export function ImportarProductosModal({
 
   const [paso, setPaso] = useState<Paso>("subir");
   const [archivo, setArchivo] = useState<File | null>(null);
-  const [clienteId, setClienteId] = useState("");
+  // Uno o VARIOS clientes: la misma lista puede ser de todo un grupo.
+  const [clienteIds, setClienteIds] = useState<string[]>([]);
+  const [filtroCliente, setFiltroCliente] = useState("");
   const [usarIa, setUsarIa] = useState(true);
   const [cargando, setCargando] = useState(false);
   const [formato, setFormato] = useState<"plantilla" | "ia">("plantilla");
@@ -88,13 +90,16 @@ export function ImportarProductosModal({
   const [asignando, setAsignando] = useState(false);
   const [asignadoMsg, setAsignadoMsg] = useState("");
 
-  const cliente = clientes.find((c) => c.id === clienteId) ?? null;
-  const clienteConLista = Boolean(cliente?.lista_precios_id);
+  const clientesSel = clientes.filter((c) => clienteIds.includes(c.id));
+  // Solo con UN cliente que ya tiene lista se guardan los precios en la suya.
+  const clienteConLista = clientesSel.length === 1 && Boolean(clientesSel[0].lista_precios_id);
+  const hayClientes = clienteIds.length > 0;
 
   function reset() {
     setPaso("subir");
     setArchivo(null);
-    setClienteId("");
+    setClienteIds([]);
+    setFiltroCliente("");
     setUsarIa(true);
     setMeta(null);
     setFilas([]);
@@ -132,7 +137,7 @@ export function ImportarProductosModal({
       const fd = new FormData();
       fd.append("archivo", archivo);
       fd.append("usar_ia", String(usarIa));
-      if (clienteId) fd.append("cliente_id", clienteId);
+      clienteIds.forEach((id) => fd.append("cliente_ids", id));
       const p = await apiFetch<ImportPreview>("/api/v1/productos/importar-preview", {
         method: "POST",
         body: fd,
@@ -231,9 +236,9 @@ export function ImportarProductosModal({
       const res = await apiFetch<ImportResult>("/api/v1/productos/importar", {
         method: "POST",
         body: JSON.stringify({
-          cliente_id: clienteId || null,
+          cliente_ids: clienteIds,
           guardar_precios: conPrecios,
-          // Cliente con lista → la suya; si no, se crea una con este nombre.
+          // Un cliente con lista → la suya; si no, se crea una con este nombre.
           lista_nombre: conPrecios && !clienteConLista ? listaNombre.trim() || null : null,
           crear_categorias: crearCategorias,
           esquema_default_id: esquemaDefaultId || null,
@@ -241,9 +246,9 @@ export function ImportarProductosModal({
             accion: f.accion,
             producto_id: f.accion === "vincular" ? f.producto_sel : null,
             nombre: f.nombre,
-            // Sin cliente, el CODIGO capturado es el SKU deseado; con cliente,
-            // el SKU interno siempre es automático y su código va como alias.
-            sku: !clienteId && f.accion === "crear" && f.codigo ? f.codigo : null,
+            // Sin clientes, el CODIGO capturado es el SKU deseado; con
+            // cliente(s), el SKU interno es automático y su código va de alias.
+            sku: !hayClientes && f.accion === "crear" && f.codigo ? f.codigo : null,
             descripcion: f.descripcion || null,
             unidad_base: f.unidad || null,
             clave_sat: f.clave_sat || null,
@@ -254,8 +259,8 @@ export function ImportarProductosModal({
             activo: !f.baja,
             presentacion_factor:
               f.accion === "vincular" && f.nueva_presentacion ? f.factor || "1" : null,
-            codigo_cliente: clienteId ? f.codigo || null : null,
-            nombre_cliente: clienteId ? f.nombre || null : null,
+            codigo_cliente: hayClientes ? f.codigo || null : null,
+            nombre_cliente: hayClientes ? f.nombre || null : null,
             precio: f.precio || null,
           })),
         }),
@@ -381,17 +386,62 @@ export function ImportarProductosModal({
           </Field>
 
           <Field
-            label="¿Es la lista de un cliente? (opcional)"
-            hint="Se guardan SU código, SU nombre y SU presentación por producto — salen en sus facturas (NoIdentificacion y Descripción)."
+            label={
+              clienteIds.length > 0
+                ? `¿De qué cliente(s) es la lista? — ${clienteIds.length} seleccionado(s)`
+                : "¿Es la lista de uno o varios clientes? (opcional)"
+            }
+            hint="Se guardan SU código, SU nombre y SU presentación por producto — salen en las facturas de CADA cliente seleccionado (NoIdentificacion y Descripción). Sin selección = es tu catálogo."
           >
-            <Select value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
-              <option value="">— No, es mi catálogo —</option>
-              {clientes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.legal_name}
-                </option>
-              ))}
-            </Select>
+            <div className="rounded-lg border border-border">
+              <div className="border-b border-border p-2">
+                <Input
+                  value={filtroCliente}
+                  onChange={(e) => setFiltroCliente(e.target.value)}
+                  placeholder="Filtrar clientes…"
+                />
+              </div>
+              <div className="max-h-44 space-y-0.5 overflow-auto p-2">
+                {clientes
+                  .filter((c) =>
+                    c.legal_name.toLowerCase().includes(filtroCliente.trim().toLowerCase())
+                  )
+                  .map((c) => (
+                    <label
+                      key={c.id}
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-surface-2"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={clienteIds.includes(c.id)}
+                        onChange={(e) =>
+                          setClienteIds((ids) =>
+                            e.target.checked ? [...ids, c.id] : ids.filter((x) => x !== c.id)
+                          )
+                        }
+                      />
+                      <span className="truncate">{c.legal_name}</span>
+                    </label>
+                  ))}
+                {clientes.length === 0 ? (
+                  <div className="px-2 py-1 text-sm text-muted">Sin clientes</div>
+                ) : null}
+              </div>
+              {clienteIds.length > 0 ? (
+                <div className="flex items-center justify-between border-t border-border px-3 py-1.5 text-xs text-muted">
+                  <span className="truncate">
+                    {clientesSel.map((c) => c.legal_name).join(" · ")}
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 pl-2 text-accent hover:underline"
+                    onClick={() => setClienteIds([])}
+                  >
+                    Quitar todos
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </Field>
 
           <div className="flex items-center gap-3">
@@ -469,7 +519,14 @@ export function ImportarProductosModal({
                 </span>
               </div>
               {guardarPrecios && !clienteConLista ? (
-                <Field label="Nombre de la lista" hint={clienteId ? "El cliente no tiene lista: se crea esta y se le asigna." : "Al terminar puedes asignarla como default o a clientes."}>
+                <Field
+                  label="Nombre de la lista"
+                  hint={
+                    hayClientes
+                      ? "Se crea y se asigna a los clientes seleccionados que no tengan lista propia (las ya asignadas no se tocan)."
+                      : "Al terminar puedes asignarla como default o a clientes."
+                  }
+                >
                   <Input value={listaNombre} onChange={(e) => setListaNombre(e.target.value)} />
                 </Field>
               ) : null}

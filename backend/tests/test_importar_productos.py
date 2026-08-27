@@ -691,3 +691,56 @@ def test_importar_crea_lista_y_se_asigna(client, env, auth_as):
         assert len(defaults) == 1 and str(defaults[0].id) == lista2
     finally:
         db.close()
+
+
+def test_importar_varios_clientes(client, env, auth_as):
+    """Una lista para VARIOS clientes: códigos/nombres se guardan para cada uno
+    y la lista creada se asigna a los seleccionados sin lista propia."""
+    db = SessionLocal()
+    try:
+        c2 = Cliente(tenant_id=env["tenant_id"], codigo="CIMP2", legal_name="Cliente Dos SA",
+                     rfc="CDO900101AA1", regimen_fiscal="601")   # SIN lista
+        db.add(c2); db.commit()
+        c2_id = str(c2.id)
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+
+    # Preview acepta varios clientes (marca lo ya vinculado de cualquiera).
+    data = _xlsx([["NOMBRE", "CODIGO", "PRECIO"], ["JITOMATE SALADETT", "GRP-001", "28.50"]])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false", "cliente_ids": [env["cli_id"], c2_id]},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["filas"][0]["producto_id"] == env["prod_id"]
+
+    r = client.post("/api/v1/productos/importar", headers=h, json={
+        "cliente_ids": [env["cli_id"], c2_id],
+        "guardar_precios": True, "lista_nombre": "Lista Grupo",
+        "filas": [{
+            "accion": "vincular", "producto_id": env["prod_id"],
+            "nombre": "JITOMATE SALADETT", "codigo_cliente": "GRP-001",
+            "nombre_cliente": "JITOMATE ROMA GRUPO", "precio": "28.50",
+        }],
+    })
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert res["vinculados"] == 1
+    assert res["alias_guardados"] == 2          # un upsert POR cliente
+    assert res["lista_nombre"] == "Lista Grupo"
+
+    db = SessionLocal()
+    try:
+        pcs = db.query(ProductoCliente).filter(
+            ProductoCliente.producto_id == uuid.UUID(env["prod_id"])).all()
+        assert {str(p.cliente_id) for p in pcs} == {env["cli_id"], c2_id}
+        assert all(p.codigo_cliente == "GRP-001" for p in pcs)
+        # cli del fixture YA tenía lista → no se pisa; c2 sin lista → se asigna.
+        cli1 = db.query(Cliente).filter(Cliente.id == uuid.UUID(env["cli_id"])).one()
+        assert str(cli1.lista_precios_id) == env["lista_id"]
+        cli2 = db.query(Cliente).filter(Cliente.id == uuid.UUID(c2_id)).one()
+        assert str(cli2.lista_precios_id) == str(res["lista_id"])
+    finally:
+        db.close()
