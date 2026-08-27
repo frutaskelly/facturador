@@ -180,7 +180,10 @@ abarrotes (en cualquier acomodo: Excel pegado, PDF o foto) en filas \
 estructuradas de productos para darlos de alta en un catálogo mexicano (CFDI 4.0).
 
 Reglas:
-- Una fila por producto. Ignora encabezados, títulos, totales, notas y filas vacías.
+- UNA fila de salida por CADA renglón de producto del documento, en orden. \
+NUNCA fusiones ni saltes renglones parecidos: si el documento repite un nombre \
+(o solo cambia variedad, unidad o precio), devuelve cada renglón por separado.
+- Ignora encabezados, títulos, totales, notas y filas vacías.
 - `nombre`: el nombre del producto tal como viene (limpio de espacios dobles).
 - `codigo`: el código/clave del producto SI la lista lo trae (p. ej. \
 "JIT-SAD-001", "A0125"); vacío si no hay.

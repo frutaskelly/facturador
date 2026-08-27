@@ -404,3 +404,47 @@ def test_preview_difuso_direccional(client, env, auth_as):
     assert f1["producto_id"] is None            # más específico → crear
     assert any(c["nombre"] == "AJO" for c in f1["candidatos"])  # pero se ofrece
     assert f2["producto_id"] is not None        # calificativo genérico → vincular
+
+
+def test_preview_repetida_con_otro_precio(client, env, auth_as):
+    """Renglón repetido con OTRO precio = conflicto visible, no descarte mudo."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        ["NOMBRE", "UNIDAD", "PRECIO"],
+        ["CACAHUATE JAPONES", "PIEZA", "130.00"],
+        ["CACAHUATE JAPONES", "PIEZA", "110.50"],   # mismo producto, otro precio
+        ["ESPARRAGOS", "KILO", "264"],
+        ["ESPARRAGOS", "KILO", "264"],              # repetida idéntica
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    f = r.json()["filas"]
+    assert f[1]["duplicada_de"] == 1 and f[1]["precio_distinto"] is True
+    assert f[3]["duplicada_de"] == 3 and f[3]["precio_distinto"] is False
+
+
+def test_preview_no_liga_a_procesado(client, env, auth_as):
+    """'CHILE JALAPEÑO' (fresco) no se auto-liga a la lata de picados."""
+    db = SessionLocal()
+    try:
+        db.add(Producto(tenant_id=env["tenant_id"], sku="00000030",
+                        nombre="CHILE JALAPENO PICADOS 215 GR SAN MARCOS",
+                        clave_sat="50405600", unidad_sat="H87"))
+        db.commit()
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([["NOMBRE", "UNIDAD"], ["CHILE JALAPEÑO", "KILO"]])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    f1 = r.json()["filas"][0]
+    assert f1["producto_id"] is None        # transformación solo en el candidato
+    assert len(f1["candidatos"]) >= 1       # pero se ofrece en el desplegable

@@ -303,7 +303,11 @@ export function ImportarProductosModal({
                         <Badge tone="accent">Ya vinculado a este cliente</Badge>
                       ) : null}
                       {f.duplicada_de ? (
-                        <Badge tone="warning">Repetida (ver fila {f.duplicada_de})</Badge>
+                        <Badge tone={f.precio_distinto ? "danger" : "warning"}>
+                          {f.precio_distinto
+                            ? `Repetida con OTRO precio (ver fila ${f.duplicada_de})`
+                            : `Repetida (ver fila ${f.duplicada_de})`}
+                        </Badge>
                       ) : null}
                     </td>
                     <td className="px-2 py-2 tabular-nums">{f.codigo || "—"}</td>

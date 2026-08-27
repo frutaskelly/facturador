@@ -141,6 +141,8 @@ class ImportFilaPreview(BaseModel):
     ya_vinculado: bool = False
     # El archivo repite este producto (mismo nombre o código): fila original.
     duplicada_de: Optional[int] = None
+    # La repetición trae OTRO precio que la fila original — conflicto a revisar.
+    precio_distinto: bool = False
 
 
 class ImportPreviewOut(BaseModel):

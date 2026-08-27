@@ -289,19 +289,33 @@ _STOP_CRUCE = {
     "kg", "kilo", "kilogramo", "pza", "pieza", "pz", "lt", "litro",
 }
 
+# Transformaciones del producto: si el CANDIDATO las trae y el archivo NO, es
+# otro producto ("CHILE JALAPEÑO" fresco ≠ "CHILE JALAPEÑO PICADOS EN LATA").
+_PROCESADO = {
+    "picado", "picados", "polvo", "pulpa", "molido", "molida", "lata",
+    "enlatado", "enlatada", "escabeche", "adobado", "adobados", "congelado",
+    "congelada", "jugo", "deshidratado", "deshidratada", "seco", "seca",
+    "japones", "caramelizado", "caramelizada", "tostado", "tostada",
+}
+
 
 def _cruce_confiable(nombre_archivo: str, nombre_candidato: str) -> bool:
     """¿Se puede auto-sugerir VINCULAR un candidato difuso?
 
     El scorer de búsqueda (token_set_ratio) ignora tokens sobrantes: tecleando
-    "ajo" debe aparecer "AJO EN POLVO". Pero al IMPORTAR esa dirección liga mal:
-    "AJO EN POLVO" del archivo NO es el "AJO" del catálogo. Regla direccional:
-    si el nombre del archivo trae tokens con contenido que el candidato no
-    tiene (es MÁS específico), no se auto-vincula — se deja como "crear" con
-    los candidatos visibles para que el usuario decida en un clic."""
+    "ajo" debe aparecer "AJO EN POLVO". Pero al IMPORTAR esa dirección liga mal.
+    Dos reglas:
+    1. Si el nombre del ARCHIVO trae tokens con contenido que el candidato no
+       tiene (es MÁS específico: "AJO EN POLVO" vs "AJO"), no se auto-vincula.
+    2. Si el CANDIDATO trae una transformación que el archivo no pide
+       ("CHILE JALAPEÑO" vs "...PICADOS 215 GR LATA"), tampoco.
+    En ambos casos la fila queda como "crear" con los candidatos visibles para
+    que el usuario decida en un clic."""
     qa = {t for t in normalizar(nombre_archivo).split() if t not in _STOP_CRUCE}
     pa = {t for t in normalizar(nombre_candidato).split() if t not in _STOP_CRUCE}
-    return not (qa - pa)   # sin tokens extra del lado del archivo
+    if qa - pa:                      # tokens extra del lado del archivo
+        return False
+    return not ((pa - qa) & _PROCESADO)   # transformación solo en el candidato
 
 
 @router.get("/plantilla-importacion")
@@ -371,7 +385,8 @@ def importar_preview(
                 pc_por_codigo.setdefault(cod, pc)
 
     out: list[ImportFilaPreview] = []
-    vistos: dict[str, int] = {}   # nombre/código normalizado → primera fila
+    # nombre/código normalizado → (primera fila, su precio)
+    vistos: dict[str, tuple[int, str]] = {}
     for n, f in enumerate(filas, start=1):
         codigo = (f.get("codigo") or "").strip()
         sugerido = None
@@ -379,12 +394,19 @@ def importar_preview(
 
         # Duplicados DENTRO del archivo (listas reales repiten renglones): se
         # marca la repetición para que la UI la omita por default. Mismo nombre
-        # con OTRA unidad no es duplicado (KG vs PZ = dos presentaciones).
+        # con OTRA unidad no es duplicado (KG vs PZ = dos presentaciones). Si la
+        # repetida trae OTRO precio, se marca el conflicto — que lo vea un
+        # humano, no se descarta un precio distinto en silencio.
         claves = [f"n:{normalizar(f['nombre'])}|{f.get('unidad') or ''}"] + (
             [f"c:{codigo.upper()}"] if codigo else [])
-        duplicada_de = next((vistos[k] for k in claves if k in vistos), None)
+        previa = next((vistos[k] for k in claves if k in vistos), None)
+        duplicada_de = previa[0] if previa else None
+        precio_distinto = bool(
+            previa and previa[1] and (f.get("precio") or "")
+            and previa[1] != f.get("precio")
+        )
         for k in claves:
-            vistos.setdefault(k, n)
+            vistos.setdefault(k, (n, f.get("precio") or ""))
 
         # 1) El código del cliente ya está vinculado → ese producto, sin dudar.
         pc = pc_por_codigo.get(codigo.upper()) if codigo else None
@@ -429,6 +451,7 @@ def importar_preview(
             ],
             ya_vinculado=ya_vinculado,
             duplicada_de=duplicada_de,
+            precio_distinto=precio_distinto,
         ))
     return ImportPreviewOut(formato=formato, filas=out)
 

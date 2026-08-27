@@ -331,6 +331,7 @@ export type ImportFilaPreview = {
   candidatos: Candidato[];
   ya_vinculado: boolean;           // el cliente ya tiene código/nombre para él
   duplicada_de?: number | null;    // el archivo repite este producto (fila original)
+  precio_distinto?: boolean;       // la repetición trae OTRO precio (conflicto)
 };
 export type ImportPreview = { formato: "plantilla" | "ia"; filas: ImportFilaPreview[] };
 export type ImportResult = {
