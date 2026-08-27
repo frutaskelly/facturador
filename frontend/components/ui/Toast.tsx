@@ -71,15 +71,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   // Foco al botón OK al abrir; Enter/Escape lo cierran.
   useEffect(() => {
     if (cola.length === 0) return;
+    // El foco va al botón OK: Enter/Espacio lo activan de forma nativa. No se
+    // cierra con clic fuera ni con Escape — solo con el botón.
     okRef.current?.focus();
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape" || e.key === "Enter") {
-        e.preventDefault();
-        cerrar();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
   }, [cola.length]);
 
   const actual = cola[0];
@@ -95,11 +89,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           aria-modal="true"
           aria-label={estilo.titulo}
           className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
-          onClick={cerrar}
         >
           <div
             className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start gap-3">
               <span

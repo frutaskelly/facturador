@@ -33,10 +33,9 @@ export function Modal({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        onClose();
-        return;
-      }
+      // El modal NO se cierra con Escape ni con clic fuera: solo con sus
+      // botones de acción (Cancelar / Guardar / la X). Cerrarlo por accidente
+      // a media captura tira todo lo que el usuario llevaba escrito.
       // Trap de Tab: el foco circula dentro del modal (patrón de diálogo).
       if (e.key === "Tab") {
         const root = dialogRef.current;
@@ -91,7 +90,7 @@ export function Modal({
   const maxWidthRem = wide ? 48 : 32; // max-w-3xl / max-w-lg, en rem
 
   return (
-    <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose}>
+    <div className="fixed inset-0 z-40 bg-black/30">
       <div
         ref={dialogRef}
         role="dialog"
@@ -112,7 +111,6 @@ export function Modal({
         className={`fixed flex max-h-[90vh] w-full min-w-[22rem] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-xl outline-none ${
           resizable ? "min-h-[16rem] resize" : ""
         }`}
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
           <h2 id={titleId} className="text-base font-semibold">{title}</h2>
