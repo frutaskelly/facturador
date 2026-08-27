@@ -7324,6 +7324,8 @@ export interface components {
             proyecto_id?: string | null;
             /** Serie Id */
             serie_id?: string | null;
+            /** Su Pedido */
+            su_pedido?: string | null;
             /** Sucursal Id */
             sucursal_id?: string | null;
         };
@@ -7400,6 +7402,8 @@ export interface components {
             proyecto_id?: string | null;
             /** Serie Id */
             serie_id?: string | null;
+            /** Su Pedido */
+            su_pedido?: string | null;
             /** Subtotal */
             subtotal: string;
             /** Sucursal Id */
@@ -7480,6 +7484,8 @@ export interface components {
             proyecto_id?: string | null;
             /** Serie Id */
             serie_id?: string | null;
+            /** Su Pedido */
+            su_pedido?: string | null;
             /** Subtotal */
             subtotal: string;
             /** Sucursal Id */
@@ -7526,6 +7532,8 @@ export interface components {
             permitir_negativos: boolean;
             /** Proyecto Id */
             proyecto_id?: string | null;
+            /** Su Pedido */
+            su_pedido?: string | null;
             /** Sucursal Id */
             sucursal_id?: string | null;
         };

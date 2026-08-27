@@ -126,6 +126,7 @@ export default function RemisionesPage() {
   const [serieOverride, setSerieOverride] = useState("");
   const [notas, setNotas] = useState("");
   const [facturaSae, setFacturaSae] = useState("");
+  const [suPedido, setSuPedido] = useState("");
   const [lineas, setLineas] = useState<LineaForm[]>([nuevaLinea()]);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
@@ -228,7 +229,7 @@ export default function RemisionesPage() {
   // Lo usa "Borrar" y también openCreate al entrar.
   function resetForm() {
     setClienteId(""); setSucursalId(""); setAlmacenId(""); setSerieOverride("");
-    setSucursales([]); setNotas(""); setFacturaSae(""); setLineas([nuevaLinea()]);
+    setSucursales([]); setNotas(""); setFacturaSae(""); setSuPedido(""); setLineas([nuevaLinea()]);
     setFecha(today());            // fecha de hoy por defecto (el flujo la salta)
     setStep("cliente");           // arranca con el cliente abierto
   }
@@ -261,6 +262,7 @@ export default function RemisionesPage() {
       setFecha(det.fecha_remision ?? today());
       setNotas(det.notas ?? "");
       setFacturaSae(det.factura_sae ?? "");
+      setSuPedido(det.su_pedido ?? "");
       setLineas((det.lineas ?? []).map((ln) => {
         const presKeys = Object.keys(prodById[ln.producto_id]?.presentaciones ?? {});
         return nuevaLinea({
@@ -547,6 +549,7 @@ export default function RemisionesPage() {
       // Vacío se manda como cadena vacía (no null): así el backend distingue
       // "quítalo" —y regresa la remisión a BORRADOR— de "no lo toques".
       factura_sae: facturaSae.trim(),
+      su_pedido: suPedido.trim(),
       lineas: lns.map((l) => ({
         producto_id: l.producto_id,
         presentacion: l.presentacion,
@@ -882,7 +885,6 @@ export default function RemisionesPage() {
         }));
         if (!g.cliente_id || lineas.length === 0) { fail += 1; continue; }
         const notas = [
-          `Ref ${g.folio_ref}`,
           g.requisicion ? `Req ${g.requisicion}` : null,
           g.su_pedido ? `Su pedido: ${g.su_pedido}` : null,
           g.entregar_bodega ? `Entregar en bodega: ${g.entregar_bodega}` : null,
@@ -891,6 +893,7 @@ export default function RemisionesPage() {
         try {
           await post("/api/v1/remisiones", {
             cliente_facturacion_id: g.cliente_id,
+            su_pedido: g.folio_ref,
             ...(importAlmacen ? { almacen_id: importAlmacen } : {}),
             ...(g.fecha ? { fecha_remision: g.fecha } : {}),
             notas,
@@ -1378,6 +1381,14 @@ export default function RemisionesPage() {
         ),
     },
     {
+      header: "Su pedido",
+      sortable: true,
+      sortValue: (r) => r.su_pedido ?? "",
+      cell: (r) => r.su_pedido
+        ? <span className="tabular-nums">{r.su_pedido}</span>
+        : <span className="text-muted">—</span>,
+    },
+    {
       header: "Factura SAE",
       sortable: true,
       sortValue: (r) => r.factura_sae ?? "",
@@ -1583,11 +1594,15 @@ export default function RemisionesPage() {
             })}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-[1fr_16rem]">
+          <div className="grid gap-3 sm:grid-cols-[1fr_14rem_14rem]">
             <Field label="Notas">
               <Textarea rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} />
             </Field>
-            <Field label="Factura SAE" hint="Folio de la factura en SAE; al ponerlo la remisión queda RESERVADA">
+            <Field label="Su pedido" hint="Orden de compra del cliente">
+              <Input value={suPedido} onChange={(e) => setSuPedido(e.target.value)}
+                placeholder="24478" maxLength={30} />
+            </Field>
+            <Field label="Factura SAE" hint="Folio en SAE; al ponerlo la remisión queda RESERVADA">
               <Input value={facturaSae} onChange={(e) => setFacturaSae(e.target.value)}
                 placeholder="ZHGO 233" maxLength={30} />
             </Field>

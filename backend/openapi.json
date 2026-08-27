@@ -12281,6 +12281,18 @@
       ],
       "title": "Serie Id"
      },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "maxLength": 30,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
+     },
      "sucursal_id": {
       "anyOf": [
        {
@@ -12505,6 +12517,17 @@
        }
       ],
       "title": "Serie Id"
+     },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
      },
      "subtotal": {
       "title": "Subtotal",
@@ -12745,6 +12768,17 @@
       ],
       "title": "Serie Id"
      },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
+     },
      "subtotal": {
       "title": "Subtotal",
       "type": "string"
@@ -12936,6 +12970,18 @@
        }
       ],
       "title": "Proyecto Id"
+     },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "maxLength": 30,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
      },
      "sucursal_id": {
       "anyOf": [

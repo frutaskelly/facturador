@@ -214,6 +214,7 @@ def create_remision(
         notas=payload.notas,
         nota_entrega=payload.nota_entrega,
         factura_sae=(payload.factura_sae or "").strip() or None,
+        su_pedido=(payload.su_pedido or "").strip() or None,
         # Traer folio de factura de SAE = mercancía ya comprometida con un
         # comprobante de fuera: nace RESERVADA, no como borrador cualquiera.
         estado="RESERVADO" if (payload.factura_sae or "").strip() else "BORRADOR",
@@ -421,6 +422,8 @@ def update_remision(
     # El folio de SAE manda sobre el estado mientras la remisión no haya salido:
     # ponerlo la reserva, quitarlo la regresa a borrador. Una CONFIRMADA o
     # FACTURADA no retrocede — ahí el folio es solo un dato más.
+    if "su_pedido" in data:
+        rem.su_pedido = (data["su_pedido"] or "").strip() or None
     if "factura_sae" in data:
         rem.factura_sae = (data["factura_sae"] or "").strip() or None
         if rem.factura_sae and rem.estado == "BORRADOR":

@@ -373,10 +373,13 @@ def test_factura_sae_reserva_y_al_quitarla_vuelve_a_borrador(client, env, auth_a
             "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "2", "precio_unitario": "10"}]}
 
     # Nace RESERVADA si el alta trae el folio de SAE.
-    r = client.post("/api/v1/remisiones", headers=h, json={**base, "factura_sae": "ZHGO 233"})
+    r = client.post("/api/v1/remisiones", headers=h,
+                    json={**base, "factura_sae": "ZHGO 233", "su_pedido": "0000024478"})
     assert r.status_code == 201, r.text
     assert r.json()["estado"] == "RESERVADO"
     assert r.json()["factura_sae"] == "ZHGO 233"
+    # "Su pedido" es la OC del cliente y va en su propia columna, no en las notas.
+    assert r.json()["su_pedido"] == "0000024478"
 
     # Sin folio nace BORRADOR; ponérselo después la reserva.
     rem = client.post("/api/v1/remisiones", headers=h, json=base).json()

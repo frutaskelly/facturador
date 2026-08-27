@@ -81,6 +81,9 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     # Folio de la factura que ampara esta remisión en SAE ("ZHGO 233"). Es de
     # OTRO sistema: texto libre, sin FK. Tenerlo pone la remisión en RESERVADO.
     factura_sae = Column(String(30))
+    # "Su pedido": la ORDEN DE COMPRA del cliente ("24478"), con la que él
+    # reconoce el documento. Texto libre: es un folio de su sistema, no del nuestro.
+    su_pedido = Column(String(30))
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
 

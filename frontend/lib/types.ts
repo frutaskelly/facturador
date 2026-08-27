@@ -266,6 +266,8 @@ export type Remision = {
   factura_folio?: string | null;
   // Folio de la factura de SAE que ampara la remisión (relación con el legado).
   factura_sae?: string | null;
+  // Orden de compra del cliente ("su pedido").
+  su_pedido?: string | null;
   factura_estado?: "BORRADOR" | "TIMBRADA" | "CANCELADA" | null;
   factura_id?: string | null;
   subtotal: string;
