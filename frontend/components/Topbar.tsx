@@ -4,17 +4,18 @@ import { useEffect, useRef, useState } from "react";
 import { Check, ChevronsUpDown, LogOut, Plus } from "lucide-react";
 
 import { AgregarEmpresaModal } from "@/components/AgregarEmpresaModal";
-import { useAuth, type Me } from "@/lib/auth";
+import { can, useAuth, type Me } from "@/lib/auth";
+import { colorEmpresa } from "@/lib/empresa-color";
 
 export function Topbar({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const { switchTenant } = useAuth();
   const tenant = me.tenants.find(
     (t) => t.tenant_id === me.active_tenant.tenant_id
   );
-  // El menú aparece con varias empresas O para el OWNER (que puede agregar la
-  // primera hija del grupo desde aquí).
-  const isOwner = me.active_tenant.is_owner;
-  const multi = me.tenants.length > 1 || isOwner;
+  // El menú aparece con varias empresas O para quien puede agregar la primera
+  // hija del grupo desde aquí (dueño y administradores).
+  const puedeAgregar = can(me, "membership:gestionar");
+  const multi = me.tenants.length > 1 || puedeAgregar;
 
   const [open, setOpen] = useState(false);
   const [agregar, setAgregar] = useState(false);
@@ -49,6 +50,13 @@ export function Topbar({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             aria-label="Cambiar de empresa"
             className="-ml-2 flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-muted transition hover:bg-surface-2 hover:text-foreground"
           >
+            {tenant && (
+              <span
+                aria-hidden="true"
+                className="h-2.5 w-2.5 shrink-0 rounded-[3px]"
+                style={{ background: colorEmpresa(tenant.tenant_id, tenant.color) }}
+              />
+            )}
             <span className="max-w-[16rem] truncate">{tenant?.name ?? "—"}</span>
             <ChevronsUpDown size={14} className="shrink-0" />
           </button>
@@ -69,15 +77,22 @@ export function Topbar({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                     }}
                     className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm transition hover:bg-surface-2"
                   >
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium">{t.name}</span>
-                      <span className="block text-xs text-muted">{t.role}</span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="h-5 w-5 shrink-0 rounded-md"
+                        style={{ background: colorEmpresa(t.tenant_id, t.color) }}
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{t.name}</span>
+                        <span className="block text-xs text-muted">{t.role}</span>
+                      </span>
                     </span>
                     {activa && <Check size={15} className="shrink-0 text-accent" />}
                   </button>
                 );
               })}
-              {isOwner && (
+              {puedeAgregar && (
                 <>
                   <div className="my-1 border-t border-border" />
                   <button

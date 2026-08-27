@@ -47,7 +47,7 @@ export default function OnboardingPage() {
 
       {canWrite && (
         <div className="flex items-center gap-2">
-          <Link href="/ajustes/empresa">
+          <Link href="/ajustes/empresa/configuracion">
             <Button>
               {status?.listo_para_facturar ? (
                 <>

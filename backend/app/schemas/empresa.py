@@ -63,3 +63,52 @@ class EmpresaOnboardingOut(BaseModel):
     pasos: list[OnboardingPaso] = Field(default_factory=list)
     # Ambiente real del PAC ("sandbox" | "producción"), lo decide FACTURAMA_BASE_URL.
     ambiente: str = "sandbox"
+
+
+class EmpresaGrupoItem(BaseModel):
+    """Una empresa del usuario, con lo que le falta para poder facturar."""
+
+    tenant_id: str
+    slug: str
+    legal_name: str = ""
+    trade_name: str = ""
+    rfc: str = ""
+    regimen_fiscal_sat: str = ""
+    domicilio_fiscal_cp: str = ""
+    domicilio_fiscal: Dict[str, Any] = Field(default_factory=dict)
+    # Color con el que se reconoce la empresa. None = automático (el front lo
+    # deriva del id): así una cuenta nueva ya viene con colores distintos sin
+    # que nadie los elija.
+    color: str | None = None
+    es_principal: bool = False
+    es_actual: bool = False
+    # ¿Pertenece al grupo de la empresa activa? (un usuario puede estar invitado
+    # a empresas de otro dueño; esas se listan pero no cuentan para el tope).
+    en_grupo: bool = True
+    rol: str = ""
+    # ¿Puede editar sus datos fiscales desde aquí, sin cambiarse a ella?
+    puede_editar: bool = False
+    # Estado de configuración — los chips de la tarjeta.
+    datos_fiscales: bool = False
+    csd: bool = False
+    logo: bool = False
+    series: bool = False
+    correo: bool = False
+    listo_para_facturar: bool = False
+
+
+class EmpresaGrupoOut(BaseModel):
+    empresas: list[EmpresaGrupoItem] = Field(default_factory=list)
+    grupo_total: int = 0
+    grupo_max: int = 0
+    puede_agregar: bool = False
+
+
+class EmpresaColorIn(BaseModel):
+    """`null` devuelve la empresa al color automático."""
+
+    color: str | None = None
+
+
+class EmpresaColorOut(BaseModel):
+    color: str | None = None

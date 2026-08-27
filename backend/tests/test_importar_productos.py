@@ -1270,3 +1270,30 @@ def test_falta_esquema_dice_cual_crear(client, env, auth_as):
     for s in r.json():
         assert s["origen"] == "falta_esquema"
         assert "IEPS" in s["motivo"]
+
+
+def test_categorias_activas_para_el_selector(client, env, auth_as):
+    """El selector de categorías de la importación pide ?limit=200&activo=true:
+    200 es el TOPE del endpoint (pedir 500 devolvía 422 y el dropdown se
+    quedaba vacío) y solo deben venir las activas, que son las que el usuario
+    ve en /categorias."""
+    db = SessionLocal()
+    try:
+        db.add_all([
+            CategoriaProducto(tenant_id=env["tenant_id"], codigo="ACT1", nombre="Abarrotes"),
+            CategoriaProducto(tenant_id=env["tenant_id"], codigo="INA1", nombre="Descontinuada",
+                              activo=False),
+        ])
+        db.commit()
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+
+    r = client.get("/api/v1/categorias?limit=200&activo=true", headers=h)
+    assert r.status_code == 200, r.text
+    nombres = {c["nombre"] for c in r.json()["items"]}
+    assert "Abarrotes" in nombres
+    assert "Descontinuada" not in nombres
+
+    # Pedir por encima del tope es un 422: la página no debe hacerlo.
+    assert client.get("/api/v1/categorias?limit=500", headers=h).status_code == 422

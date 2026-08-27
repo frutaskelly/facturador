@@ -68,6 +68,7 @@ export function useMutation() {
     loading,
     post: <T,>(path: string, body?: unknown) => send<T>(path, "POST", body),
     patch: <T,>(path: string, body?: unknown) => send<T>(path, "PATCH", body),
+    put: <T,>(path: string, body?: unknown) => send<T>(path, "PUT", body),
     del: <T,>(path: string) => send<T>(path, "DELETE"),
   };
 }

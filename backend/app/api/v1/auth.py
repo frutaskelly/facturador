@@ -31,6 +31,7 @@ def me(ctx: AuthContext = Depends(get_auth_context)) -> dict:
                 "slug": m.slug,
                 "name": m.name,
                 "role": m.role_name,
+                "color": m.color,
             }
             for m in ctx.memberships
         ],

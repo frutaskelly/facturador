@@ -65,6 +65,8 @@ class TenantMembershipView:
     name: str
     role_id: UUID
     role_name: str
+    # Color elegido en Ajustes › Empresas (None = automático).
+    color: Optional[str] = None
 
 
 @dataclass
@@ -191,6 +193,7 @@ def _membership_views(db: Session, memberships: list[Membership]) -> list[Tenant
                 name=t.trade_name or t.legal_name,
                 role_id=r.id,
                 role_name=r.nombre,
+                color=((t.config or {}).get("color") or None),
             )
         )
     return views
