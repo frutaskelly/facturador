@@ -440,6 +440,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conexiones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Listar
+         * @description Todo lo conectable, conectado o no. La pantalla no necesita otra llamada.
+         */
+        get: operations["listar_api_v1_conexiones_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conexiones/probar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Probar
+         * @description Confirma que una clave sirve, sin escribir nada.
+         *
+         *     Lo llama el bot al conectarse (para poder responder «listo» en el chat) y la
+         *     pantalla con el botón «Probar conexión». Pide un permiso que TODA conexión
+         *     tiene, así que sirve para ambas identidades.
+         */
+        get: operations["probar_api_v1_conexiones_probar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conexiones/{conexion_id}/revocar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revocar */
+        post: operations["revocar_api_v1_conexiones__conexion_id__revocar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conexiones/{tipo}/actividad": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Actividad
+         * @description Las últimas órdenes que entraron. Es la prueba de que sirve, no un log.
+         */
+        get: operations["actividad_api_v1_conexiones__tipo__actividad_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conexiones/{tipo}/clave": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generar
+         * @description Genera la clave. Se devuelve en claro UNA vez y ya no se puede volver a leer.
+         *
+         *     Si ya había una viva se revoca en el acto: «generar otra» y «la anterior deja
+         *     de servir» tienen que ser el mismo gesto, o quedarían dos claves buenas y
+         *     nadie sabría cuál está usando el bot.
+         */
+        post: operations["generar_api_v1_conexiones__tipo__clave_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/contacto": {
         parameters: {
             query?: never;
@@ -2529,6 +2634,27 @@ export interface components {
              */
             fondo_inicial: number | string;
         };
+        /** ActividadConexionOut */
+        ActividadConexionOut: {
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /** Estado */
+            estado: string;
+            /** Folio Externo */
+            folio_externo?: string | null;
+            /**
+             * Partidas
+             * @default 0
+             */
+            partidas: number;
+            /**
+             * Recibida At
+             * Format: date-time
+             */
+            recibida_at: string;
+            /** Remitente */
+            remitente?: string | null;
+        };
         /** AliasIn */
         AliasIn: {
             /**
@@ -2841,6 +2967,17 @@ export interface components {
             /** Notas */
             notas?: string | null;
         };
+        /**
+         * ClaveNuevaOut
+         * @description La clave en claro. Se devuelve UNA vez y no se vuelve a poder leer.
+         */
+        ClaveNuevaOut: {
+            /** Clave */
+            clave: string;
+            conexion: components["schemas"]["ConexionOut"];
+            /** Instruccion Whatsapp */
+            instruccion_whatsapp: string;
+        };
         /** ClienteCreate */
         ClienteCreate: {
             /** Codigo */
@@ -3105,6 +3242,61 @@ export interface components {
             sistema: string;
             /** Sucursal Id */
             sucursal_id?: string | null;
+        };
+        /**
+         * ConexionEstadoOut
+         * @description Lo que la pantalla necesita para responder «¿está entrando lo que debe?».
+         */
+        ConexionEstadoOut: {
+            conexion?: components["schemas"]["ConexionOut"] | null;
+            /**
+             * Conviene Rotar
+             * @default false
+             */
+            conviene_rotar: boolean;
+            /** Dias Desde Creacion */
+            dias_desde_creacion?: number | null;
+            /** Nombre */
+            nombre: string;
+            /**
+             * Ordenes Hoy
+             * @default 0
+             */
+            ordenes_hoy: number;
+            /**
+             * Ordenes Sin Resolver
+             * @default 0
+             */
+            ordenes_sin_resolver: number;
+            /** Tipo */
+            tipo: string;
+            /** Ultima Orden At */
+            ultima_orden_at?: string | null;
+        };
+        /** ConexionOut */
+        ConexionOut: {
+            /** Activada At */
+            activada_at?: string | null;
+            /** Clave Pista */
+            clave_pista: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Estado */
+            estado: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+            /** Tipo */
+            tipo: string;
+            /** Ultimo Uso At */
+            ultimo_uso_at?: string | null;
         };
         /**
          * ConfirmarRemisionIn
@@ -6044,6 +6236,17 @@ export interface components {
             /** Telefono */
             telefono?: string | null;
         };
+        /** PruebaOut */
+        PruebaOut: {
+            /** Mensaje */
+            mensaje: string;
+            /** Ok */
+            ok: boolean;
+            /** Permisos */
+            permisos?: string[];
+            /** Tenant */
+            tenant?: string | null;
+        };
         /** RecepcionLinea */
         RecepcionLinea: {
             /** Cantidad */
@@ -7974,6 +8177,167 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listar_api_v1_conexiones_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConexionEstadoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    probar_api_v1_conexiones_probar_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PruebaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revocar_api_v1_conexiones__conexion_id__revocar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                conexion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConexionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    actividad_api_v1_conexiones__tipo__actividad_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tipo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActividadConexionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generar_api_v1_conexiones__tipo__clave_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tipo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaveNuevaOut"];
                 };
             };
             /** @description Validation Error */

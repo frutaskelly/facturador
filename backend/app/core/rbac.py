@@ -26,6 +26,7 @@ import logging
 import os
 import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Iterator, Optional
 from uuid import UUID
@@ -41,6 +42,20 @@ logger = logging.getLogger(__name__)
 
 # Preset role that bypasses the permission catalog within its own tenant.
 _OWNER_ROLE = "OWNER"
+
+# Alcance FIJO de una clave de conexión. No sale del catálogo de roles a
+# propósito: nadie puede ampliarlo desde la UI por accidente, y la pantalla de
+# Conexiones puede prometer en español lo que aquí está escrito en código.
+#   - dejar órdenes en la bandeja y convertirlas en remisión
+#   - leer clientes y productos para cruzarlas
+# Fuera, deliberadamente: cualquier cosa de CFDI, borrar, usuarios, series,
+# y `producto:gestionar` (reapuntar un alias afecta a todo el catálogo).
+PERMISOS_CONEXION = frozenset({
+    "menu:remisiones",
+    "remision:gestionar",
+    "menu:clientes",
+    "menu:productos",
+})
 
 
 @dataclass
@@ -58,15 +73,18 @@ class TenantMembershipView:
 class AuthContext:
     """Everything an endpoint needs, all derived from the verified identity."""
 
-    user_id: UUID
+    # None cuando quien pide NO es una persona sino una conexión (Smart Supply):
+    # no hay usuario al que atribuir el `created_by` ni rol del catálogo.
+    user_id: Optional[UUID]
     auth_user_id: str
     email: Optional[str]
     tenant_id: UUID
-    role_id: UUID
+    role_id: Optional[UUID]
     role_name: str
     is_owner: bool
     permissions: set[str]
     memberships: list[TenantMembershipView] = field(default_factory=list)
+    conexion_id: Optional[UUID] = None      # de qué conexión vino, si vino de una
 
     def has(self, permission: str) -> bool:
         return self.is_owner or permission in self.permissions
@@ -193,6 +211,55 @@ def invalidate_auth_cache() -> None:
     _AUTH_CACHE.clear()
 
 
+def _contexto_de_conexion(principal: Principal) -> AuthContext:
+    """Resuelve la clave de un sistema externo contra `conexiones`.
+
+    Corre en sesión privilegiada porque el inquilino todavía no se conoce — es
+    justo lo que la clave viene a decir. NO se cachea: revocar una conexión
+    tiene que surtir efecto en el siguiente request, no cuando expire un TTL.
+    """
+    from ..models import Conexion            # import tardío: evita ciclo de módulos
+
+    digest = principal.claims.get("conexion_hash")
+    db = SessionLocal()
+    try:
+        con = (
+            db.query(Conexion)
+            .filter(Conexion.clave_hash == digest, Conexion.estado != "REVOCADA")
+            .one_or_none()
+        )
+        if con is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Clave de conexión inválida o revocada",
+            )
+        ahora = datetime.now(timezone.utc)
+        if con.estado == "PENDIENTE":
+            con.estado = "ACTIVA"
+            con.activada_at = ahora
+            con.ultimo_uso_at = ahora
+            db.commit()
+        elif con.ultimo_uso_at is None or (ahora - con.ultimo_uso_at).total_seconds() > 60:
+            # Se anota el uso a lo mucho una vez por minuto: la pantalla solo
+            # necesita saber «hace cuánto», no contar cada request.
+            con.ultimo_uso_at = ahora
+            db.commit()
+        return AuthContext(
+            user_id=None,
+            auth_user_id=principal.auth_user_id,
+            email=None,
+            tenant_id=con.tenant_id,
+            role_id=None,
+            role_name=f"Conexión · {con.nombre}",
+            is_owner=False,
+            permissions=set(PERMISOS_CONEXION),
+            memberships=[],
+            conexion_id=con.id,
+        )
+    finally:
+        db.close()
+
+
 def get_auth_context(
     principal: Principal = Depends(get_principal),
     x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
@@ -205,6 +272,9 @@ def get_auth_context(
     except to *select among* memberships that already exist. Cacheado por token
     durante `_AUTH_TTL` segundos para no repetir las consultas en cada request.
     """
+    if principal.role == "conexion":
+        return _contexto_de_conexion(principal)
+
     key = (principal.auth_user_id, x_tenant_id or "")
     now = time.monotonic()
     if _AUTH_TTL > 0:
