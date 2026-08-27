@@ -17,10 +17,13 @@ de compra de forma desatendida:
    3am hace que el reintento cree una remisión duplicada Y queme un folio de la
    serie (el mismo dolor que ya se resolvió en el timbrado con OrderNumber).
 
-De paso: UNIQUE (tenant, cliente, codigo) en `sucursales`. El generador de
-códigos SUC-NN no está serializado, así que dos altas simultáneas del mismo
-cliente podían dejar dos sucursales con el mismo código en silencio — y ese
-código es justamente la llave con la que el bot cruza la ubicación.
+De paso: índice único PARCIAL (tenant, cliente, codigo) sobre las sucursales
+VIVAS. El generador de códigos SUC-NN no está serializado, así que dos altas
+simultáneas del mismo cliente podían dejar dos sucursales con el mismo código en
+silencio — y ese código es justamente la llave con la que el bot cruza la
+ubicación. Parcial y no total porque `sucursales` tiene borrado lógico: en la BD
+ya conviven dos SUC-01 del mismo cliente, una de ellas borrada, y una sucursal
+dada de baja no puede reservar su código para siempre.
 """
 from typing import Sequence, Union
 
@@ -131,13 +134,20 @@ def upgrade() -> None:
     )
 
     # ── 4. el código de sucursal es llave de cruce: que no se duplique ───────
-    op.create_unique_constraint(
-        "uq_sucursal_tenant_cliente_codigo", "sucursales", ["tenant_id", "cliente_id", "codigo"]
+    # PARCIAL sobre las vivas: `sucursales` tiene borrado lógico, y una sucursal
+    # dada de baja no puede reservar su código para siempre — de hecho en la BD
+    # ya conviven dos SUC-01 del mismo cliente, una de ellas borrada.
+    op.execute(
+        "CREATE UNIQUE INDEX uq_sucursal_tenant_cliente_codigo "
+        "ON sucursales (tenant_id, cliente_id, codigo) WHERE deleted_at IS NULL"
     )
 
 
 def downgrade() -> None:
-    op.drop_constraint("uq_sucursal_tenant_cliente_codigo", "sucursales", type_="unique")
+    # Ambas formas: en su primera versión esto fue una UNIQUE CONSTRAINT, que
+    # DROP INDEX no alcanza a borrar.
+    op.execute("ALTER TABLE sucursales DROP CONSTRAINT IF EXISTS uq_sucursal_tenant_cliente_codigo")
+    op.execute("DROP INDEX IF EXISTS uq_sucursal_tenant_cliente_codigo")
     op.execute("DROP INDEX IF EXISTS uq_remision_origen_externo")
     op.drop_column("remisiones", "origen_externo")
 
