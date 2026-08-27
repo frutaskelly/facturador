@@ -4335,6 +4335,47 @@
     "title": "HTTPValidationError",
     "type": "object"
    },
+   "ImportCategoriaMatch": {
+    "description": "Una categoría del archivo y a cuál existente corresponde (o si es nueva).",
+    "properties": {
+     "categoria_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Categoria Id"
+     },
+     "categoria_nombre": {
+      "default": "",
+      "title": "Categoria Nombre",
+      "type": "string"
+     },
+     "es_nueva": {
+      "default": true,
+      "title": "Es Nueva",
+      "type": "boolean"
+     },
+     "nombre_archivo": {
+      "title": "Nombre Archivo",
+      "type": "string"
+     },
+     "score": {
+      "default": 0,
+      "title": "Score",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "nombre_archivo"
+    ],
+    "title": "ImportCategoriaMatch",
+    "type": "object"
+   },
    "ImportColumnaOut": {
     "description": "Una columna del archivo y a qué campo del sistema se está leyendo.",
     "properties": {
@@ -4615,6 +4656,18 @@
       "title": "Categoria",
       "type": "string"
      },
+     "categoria_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Categoria Id"
+     },
      "clave_sat": {
       "default": "",
       "title": "Clave Sat",
@@ -4660,6 +4713,23 @@
      "esquema": {
       "default": "",
       "title": "Esquema",
+      "type": "string"
+     },
+     "esquema_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Esquema Id"
+     },
+     "esquema_origen": {
+      "default": "",
+      "title": "Esquema Origen",
       "type": "string"
      },
      "fila": {
@@ -4834,6 +4904,13 @@
        "type": "object"
       },
       "title": "Campos Mapeables",
+      "type": "array"
+     },
+     "categorias_match": {
+      "items": {
+       "$ref": "#/components/schemas/ImportCategoriaMatch"
+      },
+      "title": "Categorias Match",
       "type": "array"
      },
      "categorias_nuevas": {
@@ -12501,6 +12578,46 @@
     "title": "SucursalUpdate",
     "type": "object"
    },
+   "SugerenciaEsquemaOut": {
+    "properties": {
+     "esquema_codigo": {
+      "default": "",
+      "title": "Esquema Codigo",
+      "type": "string"
+     },
+     "esquema_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Esquema Id"
+     },
+     "motivo": {
+      "default": "",
+      "title": "Motivo",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "origen": {
+      "default": "",
+      "title": "Origen",
+      "type": "string"
+     }
+    },
+    "required": [
+     "nombre"
+    ],
+    "title": "SugerenciaEsquemaOut",
+    "type": "object"
+   },
    "SugerenciaSatOut": {
     "properties": {
      "clave_sat": {
@@ -12532,6 +12649,29 @@
      "unidad_sat_generica"
     ],
     "title": "SugerenciaSatOut",
+    "type": "object"
+   },
+   "SugerirEsquemaBatchIn": {
+    "properties": {
+     "productos": {
+      "items": {
+       "type": "object"
+      },
+      "maxItems": 2000,
+      "minItems": 1,
+      "title": "Productos",
+      "type": "array"
+     },
+     "usar_ia": {
+      "default": true,
+      "title": "Usar Ia",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "productos"
+    ],
+    "title": "SugerirEsquemaBatchIn",
     "type": "object"
    },
    "SugerirSatBatchIn": {
@@ -22749,6 +22889,75 @@
      }
     ],
     "summary": "Productos Similares",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/sugerir-esquema-batch": {
+   "post": {
+    "description": "Qué esquema de impuesto le toca a cada producto, entre los que YA tiene\nel negocio. Sin esquema el CFDI saldría sin IVA/IEPS, así que la\nimportación no debe dejar productos en blanco.\n\nPrimero reglas fiscales mexicanas por clave SAT/nombre (alimentos IVA 0%,\nlimpieza y plásticos 16%, refrescos y botanas con IEPS) y, para lo que no\nresuelvan, una sola llamada de IA que ELIGE entre los esquemas del tenant.",
+    "operationId": "sugerir_esquema_batch_api_v1_productos_sugerir_esquema_batch_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SugerirEsquemaBatchIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/SugerenciaEsquemaOut"
+         },
+         "title": "Response Sugerir Esquema Batch Api V1 Productos Sugerir Esquema Batch Post",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Sugerir Esquema Batch",
     "tags": [
      "productos"
     ]
