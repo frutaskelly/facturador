@@ -31,7 +31,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
-import type { ActividadConexion, ClaveNueva, ConexionEstado } from "@/lib/types";
+import type { ActividadConexion, ClaveNueva, ConexionEstado, GrupoWhatsapp } from "@/lib/types";
 
 const WRITE = "membership:gestionar";
 
@@ -64,6 +64,7 @@ export default function Page() {
   const [estados, setEstados] = useState<ConexionEstado[] | null>(null);
   const [error, setError] = useState(false);
   const [actividad, setActividad] = useState<ActividadConexion[]>([]);
+  const [grupos, setGrupos] = useState<GrupoWhatsapp[]>([]);
   // La clave en claro solo vive aquí, en memoria, hasta que se recarga la página.
   const [nueva, setNueva] = useState<ClaveNueva | null>(null);
   const [copiado, setCopiado] = useState(false);
@@ -91,8 +92,12 @@ export default function Page() {
           apiFetch<ActividadConexion[]>("/api/v1/conexiones/SMART_SUPPLY/actividad")
             .then(setActividad)
             .catch(() => setActividad([]));
+          apiFetch<GrupoWhatsapp[]>("/api/v1/conexiones/grupos")
+            .then(setGrupos)
+            .catch(() => setGrupos([]));
         } else {
           setActividad([]);
+          setGrupos([]);
         }
       })
       .catch(() => setError(true));
@@ -439,6 +444,118 @@ export default function Page() {
           </Card>
         );
       })}
+
+      {/* ── El mapa: qué grupo alimenta a qué ──────────────────────────── */}
+      {grupos.length ? (
+        <Card className="mt-6">
+          <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-semibold">Grupos de WhatsApp</h2>
+            <span className="text-xs text-muted">
+              {grupos.filter((g) => g.activo).length} activos de {grupos.length}
+            </span>
+          </div>
+          <p className="mb-4 text-sm text-muted">
+            De dónde llega cada orden y a quién se le factura. Lo reporta Smart Supply;
+            para cambiarlo se edita allá.
+          </p>
+
+          <div className="space-y-3">
+            {grupos.map((g) => (
+              <div
+                key={g.jid}
+                className={`rounded-lg border border-border p-4 ${g.activo ? "" : "opacity-55"}`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{g.nombre ?? "Grupo sin nombre"}</span>
+                      {g.rol === "cliente" ? (
+                        <Badge tone="accent">Del cliente</Badge>
+                      ) : (
+                        <Badge tone="muted">Interno</Badge>
+                      )}
+                      {g.perfil ? <Badge tone="default">{g.perfil}</Badge> : null}
+                      {!g.activo ? <Badge tone="warning">Apagado</Badge> : null}
+                    </div>
+                    <div className="mt-0.5 font-mono text-[11px] text-muted">{g.jid}</div>
+                  </div>
+                  <div className="text-right text-sm">
+                    <div className="tabular-nums">
+                      <span className="font-semibold">{g.ordenes}</span>{" "}
+                      <span className="text-muted">órdenes</span>
+                      {g.ordenes_24h ? (
+                        <span className="text-muted"> · {g.ordenes_24h} en 24 h</span>
+                      ) : null}
+                    </div>
+                    <div className="text-xs text-muted">
+                      {g.ultima_orden_at ? `última ${haceCuanto(g.ultima_orden_at)}` : "sin órdenes aún"}
+                      {g.sin_resolver ? (
+                        <span className="text-favorite"> · {g.sin_resolver} sin asignar</span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                {g.clientes.length ? (
+                  <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+                    <table className="w-full min-w-[520px] text-sm">
+                      <thead className="bg-surface-2 text-[11px] uppercase tracking-wider text-muted">
+                        <tr>
+                          <th className="px-3 py-1.5 text-left font-semibold">Cliente</th>
+                          <th className="px-3 py-1.5 text-left font-semibold">Sucursales</th>
+                          <th className="px-3 py-1.5 text-left font-semibold">Series</th>
+                          <th className="px-3 py-1.5 text-left font-semibold">Almacén</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {g.clientes.map((c) => (
+                          <tr key={c.cliente_id} className="border-t border-border">
+                            <td className="px-3 py-2">
+                              {c.nombre}
+                              {!c.registrado ? (
+                                <span
+                                  className="ml-2 text-xs text-favorite"
+                                  title="Le han llegado órdenes de este grupo sin estar registrado como candidato"
+                                >
+                                  no registrado
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="px-3 py-2 text-muted">
+                              {c.sucursales.length ? c.sucursales.join(" · ") : "—"}
+                            </td>
+                            <td className="px-3 py-2 font-mono text-xs">
+                              {c.serie_factura || c.serie_remision ? (
+                                <>
+                                  {c.serie_factura ?? "—"}
+                                  <span className="text-muted"> / </span>
+                                  {c.serie_remision ?? "—"}
+                                </>
+                              ) : (
+                                <span className="font-sans text-muted">predeterminadas</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-muted">{c.almacen ?? "predeterminado"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-favorite">
+                    Sin cliente asignado — las órdenes de este grupo van a llegar sin asignar.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-xs text-muted">
+            Las series se muestran como <em>factura / remisión</em>. Un grupo puede alimentar a
+            varias razones sociales: el documento decide cuál, y si no lo dice, la orden espera en
+            la bandeja.
+          </p>
+        </Card>
+      ) : null}
 
       <ConfirmDialog
         open={aDesconectar !== null}

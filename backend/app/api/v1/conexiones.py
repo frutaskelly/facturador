@@ -20,15 +20,29 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.rbac import PERMISOS_CONEXION, AuthContext, get_tenant_db, require_permission
-from ...models import Conexion, OCRecibida, Tenant
+from ...models import (
+    Almacen,
+    Cliente,
+    ClienteExterno,
+    Conexion,
+    GrupoWhatsapp,
+    OCRecibida,
+    Serie,
+    Sucursal,
+    Tenant,
+)
 from ...models.conexion import generar_clave, hash_clave, pista_de
 from ...schemas.conexion import (
     ActividadConexionOut,
     ClaveNuevaOut,
+    ClienteDelGrupoOut,
     ConexionEstadoOut,
     ConexionOut,
+    GrupoOut,
     PruebaOut,
+    SincronizarGruposIn,
 )
+from ...services import cliente_match
 from ._helpers import get_or_404
 
 router = APIRouter(prefix="/conexiones", tags=["conexiones"])
@@ -210,3 +224,128 @@ def probar(
         tenant=t.legal_name if t else None,
         permisos=sorted(ctx.permissions),
     )
+
+
+# ─── Directorio de grupos ────────────────────────────────────────────────────
+
+
+@router.post("/grupos", response_model=dict)
+def sincronizar_grupos(
+    payload: SincronizarGruposIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("menu:remisiones")),
+):
+    """El bot reporta su directorio. Lo llama con su propia clave de conexión.
+
+    Es un espejo, no la fuente: la verdad sigue viviendo en la config del bot.
+    Los grupos que dejaron de reportarse NO se borran —se marcan inactivos— para
+    no perder el historial de las órdenes que ya entraron por ahí.
+    """
+    vistos = set()
+    for g in payload.grupos:
+        vistos.add(g.jid)
+        row = (
+            db.query(GrupoWhatsapp)
+            .filter(GrupoWhatsapp.jid == g.jid)
+            .one_or_none()
+        )
+        if row is None:
+            row = GrupoWhatsapp(tenant_id=ctx.tenant_id, jid=g.jid)
+            db.add(row)
+        row.nombre = g.nombre
+        row.rol = (g.rol or "interno").lower()
+        row.perfil = (g.perfil or "").lower() or None
+        row.activo = g.activo
+        row.config = g.config or {}
+        row.sincronizado_at = datetime.now(timezone.utc)
+    if vistos:
+        (
+            db.query(GrupoWhatsapp)
+            .filter(GrupoWhatsapp.jid.notin_(vistos))
+            .update({GrupoWhatsapp.activo: False}, synchronize_session=False)
+        )
+    db.flush()
+    return {"ok": True, "grupos": len(vistos)}
+
+
+@router.get("/grupos", response_model=list[GrupoOut])
+def listar_grupos(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_GESTIONAR)),
+):
+    """El mapa de qué grupo alimenta a qué: cliente, sucursales, series y qué ha
+    entrado por ahí. Es la pregunta que la pantalla de Conexiones existe para
+    responder una vez que el bot ya está conectado."""
+    grupos = db.query(GrupoWhatsapp).order_by(GrupoWhatsapp.nombre).all()
+
+    # Todo en tres consultas, no una por grupo.
+    externos = (
+        db.query(ClienteExterno)
+        .filter(ClienteExterno.sistema == "WHATSAPP")
+        .all()
+    )
+    por_jid: dict[str, set] = {}
+    for e in externos:
+        por_jid.setdefault(e.clave_normalizada, set()).add(e.cliente_id)
+
+    clientes = {
+        c.id: c
+        for c in db.query(Cliente).filter(Cliente.deleted_at.is_(None)).all()
+    }
+    series = {s.id: s.codigo for s in db.query(Serie).all()}
+    almacenes = {a.id: a.nombre for a in db.query(Almacen).filter(Almacen.deleted_at.is_(None)).all()}
+    sucs: dict = {}
+    for s in db.query(Sucursal).filter(Sucursal.deleted_at.is_(None)).all():
+        sucs.setdefault(s.cliente_id, []).append(s)
+
+    # Lo que REALMENTE ha entrado por cada grupo, que puede diferir de lo
+    # configurado — y esa diferencia es justo lo que hay que poder ver.
+    stats: dict = {}
+    desde = datetime.now(timezone.utc) - timedelta(hours=24)
+    for oc in db.query(OCRecibida).all():
+        jid = str((oc.payload or {}).get("jid") or "")
+        if not jid:
+            continue
+        st = stats.setdefault(jid, {"n": 0, "n24": 0, "ultima": None, "pend": 0, "clientes": set()})
+        st["n"] += 1
+        if oc.recibida_at and oc.recibida_at >= desde:
+            st["n24"] += 1
+        if st["ultima"] is None or (oc.recibida_at and oc.recibida_at > st["ultima"]):
+            st["ultima"] = oc.recibida_at
+        if oc.cliente_id is None:
+            st["pend"] += 1
+        else:
+            st["clientes"].add(oc.cliente_id)
+
+    salida: list[GrupoOut] = []
+    for g in grupos:
+        st = stats.get(g.jid, {})
+        registrados = por_jid.get(cliente_match.normalizar_clave("WHATSAPP", g.jid), set())
+        # Los que además han recibido órdenes de ahí sin estar registrados: se
+        # muestran igual, marcados, porque son una inconsistencia que conviene ver.
+        todos = list(registrados | set(st.get("clientes") or set()))
+        filas = []
+        for cid in todos:
+            c = clientes.get(cid)
+            if c is None:
+                continue
+            filas.append(ClienteDelGrupoOut(
+                cliente_id=c.id,
+                nombre=c.legal_name,
+                serie_factura=series.get(c.serie_factura_id),
+                serie_remision=series.get(c.serie_remision_id),
+                sucursales=[s.nombre for s in sorted(sucs.get(c.id, []), key=lambda x: x.nombre or "")],
+                almacen=almacenes.get(c.almacen_id),
+                registrado=cid in registrados,
+            ))
+        filas.sort(key=lambda f: f.nombre)
+        salida.append(GrupoOut(
+            jid=g.jid, nombre=g.nombre, rol=g.rol, perfil=g.perfil, activo=g.activo,
+            clientes=filas,
+            ordenes=st.get("n", 0),
+            ordenes_24h=st.get("n24", 0),
+            ultima_orden_at=st.get("ultima"),
+            sin_resolver=st.get("pend", 0),
+            sincronizado_at=g.sincronizado_at,
+        ))
+    return salida

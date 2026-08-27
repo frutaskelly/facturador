@@ -681,3 +681,28 @@ export type ActividadConexion = {
   estado: string;
   partidas: number;
 };
+
+export type ClienteDelGrupo = {
+  cliente_id: string;
+  nombre: string;
+  serie_factura?: string | null;
+  serie_remision?: string | null;
+  sucursales: string[];
+  almacen?: string | null;
+  /** false = le han llegado órdenes de ese grupo sin estar registrado como candidato. */
+  registrado: boolean;
+};
+
+export type GrupoWhatsapp = {
+  jid: string;
+  nombre?: string | null;
+  rol?: string | null;              // interno | cliente
+  perfil?: string | null;
+  activo: boolean;
+  clientes: ClienteDelGrupo[];
+  ordenes: number;
+  ordenes_24h: number;
+  ultima_orden_at?: string | null;
+  sin_resolver: number;
+  sincronizado_at?: string | null;
+};

@@ -58,3 +58,44 @@ class PruebaOut(BaseModel):
     mensaje: str
     tenant: Optional[str] = None
     permisos: list[str] = Field(default_factory=list)
+
+
+class GrupoIn(BaseModel):
+    """Un grupo tal como lo reporta el bot desde su config."""
+    jid: str = Field(min_length=1, max_length=120)
+    nombre: Optional[str] = Field(default=None, max_length=254)
+    rol: Optional[str] = Field(default=None, max_length=12)      # interno | cliente
+    perfil: Optional[str] = Field(default=None, max_length=40)
+    activo: bool = True
+    config: dict = Field(default_factory=dict)
+
+
+class SincronizarGruposIn(BaseModel):
+    grupos: list[GrupoIn] = Field(default_factory=list)
+
+
+class ClienteDelGrupoOut(BaseModel):
+    """Un cliente que recibe órdenes por ese grupo, con lo suyo."""
+    cliente_id: uuid.UUID
+    nombre: str
+    serie_factura: Optional[str] = None
+    serie_remision: Optional[str] = None
+    sucursales: list[str] = Field(default_factory=list)
+    almacen: Optional[str] = None
+    # Si es candidato del grupo o solo se le han asignado órdenes de ahí.
+    registrado: bool = True
+
+
+class GrupoOut(BaseModel):
+    jid: str
+    nombre: Optional[str] = None
+    rol: Optional[str] = None            # interno | cliente
+    perfil: Optional[str] = None
+    activo: bool = True
+    clientes: list[ClienteDelGrupoOut] = Field(default_factory=list)
+    # Resumen de lo que ha entrado por ahí.
+    ordenes: int = 0
+    ordenes_24h: int = 0
+    ultima_orden_at: Optional[datetime] = None
+    sin_resolver: int = 0
+    sincronizado_at: Optional[datetime] = None

@@ -460,6 +460,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conexiones/grupos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Listar Grupos
+         * @description El mapa de qué grupo alimenta a qué: cliente, sucursales, series y qué ha
+         *     entrado por ahí. Es la pregunta que la pantalla de Conexiones existe para
+         *     responder una vez que el bot ya está conectado.
+         */
+        get: operations["listar_grupos_api_v1_conexiones_grupos_get"];
+        put?: never;
+        /**
+         * Sincronizar Grupos
+         * @description El bot reporta su directorio. Lo llama con su propia clave de conexión.
+         *
+         *     Es un espejo, no la fuente: la verdad sigue viviendo en la config del bot.
+         *     Los grupos que dejaron de reportarse NO se borran —se marcan inactivos— para
+         *     no perder el historial de las órdenes que ya entraron por ahí.
+         */
+        post: operations["sincronizar_grupos_api_v1_conexiones_grupos_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conexiones/probar": {
         parameters: {
             query?: never;
@@ -3242,6 +3272,32 @@ export interface components {
             /** Uso Cfdi Default */
             uso_cfdi_default?: string | null;
         };
+        /**
+         * ClienteDelGrupoOut
+         * @description Un cliente que recibe órdenes por ese grupo, con lo suyo.
+         */
+        ClienteDelGrupoOut: {
+            /** Almacen */
+            almacen?: string | null;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Nombre */
+            nombre: string;
+            /**
+             * Registrado
+             * @default true
+             */
+            registrado: boolean;
+            /** Serie Factura */
+            serie_factura?: string | null;
+            /** Serie Remision */
+            serie_remision?: string | null;
+            /** Sucursales */
+            sucursales?: string[];
+        };
         /** ClienteExternoCreate */
         ClienteExternoCreate: {
             /** Clave */
@@ -4509,6 +4565,64 @@ export interface components {
             uuid?: string | null;
             /** Uuid Sustitucion */
             uuid_sustitucion?: string | null;
+        };
+        /**
+         * GrupoIn
+         * @description Un grupo tal como lo reporta el bot desde su config.
+         */
+        GrupoIn: {
+            /**
+             * Activo
+             * @default true
+             */
+            activo: boolean;
+            /** Config */
+            config?: Record<string, never>;
+            /** Jid */
+            jid: string;
+            /** Nombre */
+            nombre?: string | null;
+            /** Perfil */
+            perfil?: string | null;
+            /** Rol */
+            rol?: string | null;
+        };
+        /** GrupoOut */
+        GrupoOut: {
+            /**
+             * Activo
+             * @default true
+             */
+            activo: boolean;
+            /** Clientes */
+            clientes?: components["schemas"]["ClienteDelGrupoOut"][];
+            /** Jid */
+            jid: string;
+            /** Nombre */
+            nombre?: string | null;
+            /**
+             * Ordenes
+             * @default 0
+             */
+            ordenes: number;
+            /**
+             * Ordenes 24H
+             * @default 0
+             */
+            ordenes_24h: number;
+            /** Perfil */
+            perfil?: string | null;
+            /** Rol */
+            rol?: string | null;
+            /**
+             * Sin Resolver
+             * @default 0
+             */
+            sin_resolver: number;
+            /** Sincronizado At */
+            sincronizado_at?: string | null;
+            /** Ultima Orden At */
+            ultima_orden_at?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -7247,6 +7361,11 @@ export interface components {
             /** Vigencia Hasta */
             vigencia_hasta?: string | null;
         };
+        /** SincronizarGruposIn */
+        SincronizarGruposIn: {
+            /** Grupos */
+            grupos?: components["schemas"]["GrupoIn"][];
+        };
         /** SucursalCreate */
         SucursalCreate: {
             /**
@@ -8630,6 +8749,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConexionEstadoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listar_grupos_api_v1_conexiones_grupos_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrupoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sincronizar_grupos_api_v1_conexiones_grupos_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SincronizarGruposIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
                 };
             };
             /** @description Validation Error */

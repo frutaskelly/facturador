@@ -6,6 +6,7 @@ from .categoria import CategoriaProducto
 from .cliente import Cliente
 from .cliente_externo import ClienteExterno
 from .conexion import Conexion
+from .grupo_whatsapp import GrupoWhatsapp
 from .conversion import ConversionProducto
 from .esquema_impuesto import EsquemaImpuesto
 from .devolucion import Devolucion, LineaDevolucion
@@ -50,6 +51,7 @@ __all__ = [
     "Cliente",
     "ClienteExterno",
     "Conexion",
+    "GrupoWhatsapp",
     # ── Phase 4: operaciones ──
     "Proveedor",
     "Almacen",

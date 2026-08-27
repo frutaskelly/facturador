@@ -1236,6 +1236,71 @@
     "title": "ClienteCreate",
     "type": "object"
    },
+   "ClienteDelGrupoOut": {
+    "description": "Un cliente que recibe órdenes por ese grupo, con lo suyo.",
+    "properties": {
+     "almacen": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Almacen"
+     },
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "registrado": {
+      "default": true,
+      "title": "Registrado",
+      "type": "boolean"
+     },
+     "serie_factura": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Factura"
+     },
+     "serie_remision": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Remision"
+     },
+     "sucursales": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Sucursales",
+      "type": "array"
+     }
+    },
+    "required": [
+     "cliente_id",
+     "nombre"
+    ],
+    "title": "ClienteDelGrupoOut",
+    "type": "object"
+   },
    "ClienteExternoCreate": {
     "properties": {
      "clave": {
@@ -4601,6 +4666,164 @@
      "updated_at"
     ],
     "title": "FacturaOut",
+    "type": "object"
+   },
+   "GrupoIn": {
+    "description": "Un grupo tal como lo reporta el bot desde su config.",
+    "properties": {
+     "activo": {
+      "default": true,
+      "title": "Activo",
+      "type": "boolean"
+     },
+     "config": {
+      "title": "Config",
+      "type": "object"
+     },
+     "jid": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Jid",
+      "type": "string"
+     },
+     "nombre": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre"
+     },
+     "perfil": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Perfil"
+     },
+     "rol": {
+      "anyOf": [
+       {
+        "maxLength": 12,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rol"
+     }
+    },
+    "required": [
+     "jid"
+    ],
+    "title": "GrupoIn",
+    "type": "object"
+   },
+   "GrupoOut": {
+    "properties": {
+     "activo": {
+      "default": true,
+      "title": "Activo",
+      "type": "boolean"
+     },
+     "clientes": {
+      "items": {
+       "$ref": "#/components/schemas/ClienteDelGrupoOut"
+      },
+      "title": "Clientes",
+      "type": "array"
+     },
+     "jid": {
+      "title": "Jid",
+      "type": "string"
+     },
+     "nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre"
+     },
+     "ordenes": {
+      "default": 0,
+      "title": "Ordenes",
+      "type": "integer"
+     },
+     "ordenes_24h": {
+      "default": 0,
+      "title": "Ordenes 24H",
+      "type": "integer"
+     },
+     "perfil": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Perfil"
+     },
+     "rol": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rol"
+     },
+     "sin_resolver": {
+      "default": 0,
+      "title": "Sin Resolver",
+      "type": "integer"
+     },
+     "sincronizado_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sincronizado At"
+     },
+     "ultima_orden_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ultima Orden At"
+     }
+    },
+    "required": [
+     "jid"
+    ],
+    "title": "GrupoOut",
     "type": "object"
    },
    "HTTPValidationError": {
@@ -12571,6 +12794,19 @@
     "title": "SerieUpdate",
     "type": "object"
    },
+   "SincronizarGruposIn": {
+    "properties": {
+     "grupos": {
+      "items": {
+       "$ref": "#/components/schemas/GrupoIn"
+      },
+      "title": "Grupos",
+      "type": "array"
+     }
+    },
+    "title": "SincronizarGruposIn",
+    "type": "object"
+   },
    "SucursalCreate": {
     "properties": {
      "activo": {
@@ -15699,6 +15935,129 @@
      }
     ],
     "summary": "Listar",
+    "tags": [
+     "conexiones"
+    ]
+   }
+  },
+  "/api/v1/conexiones/grupos": {
+   "get": {
+    "description": "El mapa de qué grupo alimenta a qué: cliente, sucursales, series y qué ha\nentrado por ahí. Es la pregunta que la pantalla de Conexiones existe para\nresponder una vez que el bot ya está conectado.",
+    "operationId": "listar_grupos_api_v1_conexiones_grupos_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/GrupoOut"
+         },
+         "title": "Response Listar Grupos Api V1 Conexiones Grupos Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar Grupos",
+    "tags": [
+     "conexiones"
+    ]
+   },
+   "post": {
+    "description": "El bot reporta su directorio. Lo llama con su propia clave de conexión.\n\nEs un espejo, no la fuente: la verdad sigue viviendo en la config del bot.\nLos grupos que dejaron de reportarse NO se borran —se marcan inactivos— para\nno perder el historial de las órdenes que ya entraron por ahí.",
+    "operationId": "sincronizar_grupos_api_v1_conexiones_grupos_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SincronizarGruposIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "title": "Response Sincronizar Grupos Api V1 Conexiones Grupos Post",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Sincronizar Grupos",
     "tags": [
      "conexiones"
     ]

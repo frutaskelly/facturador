@@ -240,3 +240,70 @@ def test_actividad_muestra_lo_que_entro(client, env, auth_as, sin_sesion):
     assert filas[0]["remitente"] == "Pedidos FyV Tabasco"
     assert filas[0]["partidas"] == 1
     assert filas[0]["estado"] == "SIN_CLIENTE"     # nadie registró aún ese RFC
+
+
+def test_el_mapa_de_grupos(client, env, auth_as, sin_sesion):
+    """La pantalla tiene que poder responder: qué grupo alimenta a qué."""
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"]).json()["clave"]
+    h_owner = _hdr(env["dueno_a"])
+    cli = env["cli"]
+
+    # El grupo es candidato del cliente (así lo siembra el seed).
+    client.post("/api/v1/clientes/externos", headers=h_owner, json={
+        "sistema": "WHATSAPP", "clave": "grupo-uno@g.us", "cliente_id": cli})
+
+    sin_sesion()
+    # El bot reporta su directorio con SU clave, sin sesión de nadie.
+    r = client.post("/api/v1/conexiones/grupos", headers=_con_clave(clave), json={"grupos": [
+        {"jid": "grupo-uno@g.us", "nombre": "Interno SM Balles", "rol": "interno",
+         "perfil": "ehmo", "activo": True},
+        {"jid": "grupo-dos@g.us", "nombre": "Grupo apagado", "rol": "cliente",
+         "perfil": "villahermosa", "activo": False},
+    ]})
+    assert r.status_code == 200, r.text
+    assert r.json()["grupos"] == 2
+    # Y manda una orden por el grupo uno.
+    client.post("/api/v1/oc-recibidas", headers=_con_clave(clave),
+                json=_oc(jid="grupo-uno@g.us"))
+
+    auth_as(env["dueno_a"])
+    gs = client.get("/api/v1/conexiones/grupos", headers=h_owner).json()
+    assert len(gs) == 2
+    uno = next(g for g in gs if g["jid"] == "grupo-uno@g.us")
+    assert uno["nombre"] == "Interno SM Balles"
+    assert uno["rol"] == "interno" and uno["perfil"] == "ehmo" and uno["activo"] is True
+    assert uno["ordenes"] == 1 and uno["ordenes_24h"] == 1
+    assert uno["ultima_orden_at"] is not None
+    assert [c["cliente_id"] for c in uno["clientes"]] == [cli]
+    assert uno["clientes"][0]["registrado"] is True
+
+    dos = next(g for g in gs if g["jid"] == "grupo-dos@g.us")
+    assert dos["activo"] is False and dos["rol"] == "cliente"
+    assert dos["ordenes"] == 0 and dos["clientes"] == []
+
+
+def test_un_grupo_que_deja_de_reportarse_se_apaga_pero_no_se_borra(client, env, auth_as, sin_sesion):
+    """Borrarlo perdería el historial de las órdenes que ya entraron por ahí."""
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"]).json()["clave"]
+    sin_sesion()
+    h = _con_clave(clave)
+    client.post("/api/v1/conexiones/grupos", headers=h, json={"grupos": [
+        {"jid": "viejo@g.us", "nombre": "Se va a apagar", "rol": "interno"}]})
+    client.post("/api/v1/conexiones/grupos", headers=h, json={"grupos": [
+        {"jid": "nuevo@g.us", "nombre": "El que queda", "rol": "interno"}]})
+
+    auth_as(env["dueno_a"])
+    gs = {g["jid"]: g for g in client.get("/api/v1/conexiones/grupos",
+                                          headers=_hdr(env["dueno_a"])).json()}
+    assert gs["viejo@g.us"]["activo"] is False       # sigue ahí, apagado
+    assert gs["nuevo@g.us"]["activo"] is True
+
+
+def test_la_clave_no_puede_leer_el_mapa(client, env, auth_as, sin_sesion):
+    """Reportar sí; leer el mapa de clientes y series, no."""
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"]).json()["clave"]
+    sin_sesion()
+    assert client.get("/api/v1/conexiones/grupos", headers=_con_clave(clave)).status_code == 403
