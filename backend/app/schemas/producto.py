@@ -197,7 +197,10 @@ class ImportFilaIn(BaseModel):
 
 
 class ImportIn(BaseModel):
-    cliente_id: Optional[uuid.UUID] = None
+    cliente_id: Optional[uuid.UUID] = None                    # compat: uno solo
+    # La misma lista puede ser de VARIOS clientes (grupo/cadena): los códigos,
+    # nombres y presentaciones se guardan para cada uno.
+    cliente_ids: list[uuid.UUID] = Field(default_factory=list, max_length=200)
     guardar_precios: bool = False
     lista_id: Optional[uuid.UUID] = None          # default: la lista del cliente
     # Sin cliente y sin lista_id: crear una lista nueva con este nombre.
