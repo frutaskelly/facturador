@@ -1334,9 +1334,21 @@
       ],
       "title": "Serie Remision Id"
      },
+     "sucursal_grupo_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Grupo Id"
+     },
      "sucursales": {
       "items": {
-       "type": "string"
+       "$ref": "#/components/schemas/SucursalBreve"
       },
       "title": "Sucursales",
       "type": "array"
@@ -12872,6 +12884,25 @@
      }
     },
     "title": "SincronizarGruposIn",
+    "type": "object"
+   },
+   "SucursalBreve": {
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "nombre"
+    ],
+    "title": "SucursalBreve",
     "type": "object"
    },
    "SucursalCreate": {

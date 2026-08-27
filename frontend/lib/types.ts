@@ -689,7 +689,9 @@ export type ClienteDelGrupo = {
   nombre: string;
   serie_factura?: string | null;
   serie_remision?: string | null;
-  sucursales: string[];
+  sucursales: { id: string; nombre: string }[];
+  /** Sucursal por defecto de ESTE grupo para ESTE cliente (última red del destino). */
+  sucursal_grupo_id?: string | null;
   almacen?: string | null;
   serie_factura_id?: string | null;
   serie_remision_id?: string | null;

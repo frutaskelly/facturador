@@ -166,6 +166,23 @@ export default function Page() {
     }
   }
 
+  /** Sucursal por defecto de un grupo para un cliente. Se guarda en la propia
+   *  equivalencia del grupo, que es donde vive "de este grupo, a este destino". */
+  async function cambiarSucursalDelGrupo(jid: string, clienteId: string, sucursalId: string) {
+    try {
+      await apiFetch("/api/v1/clientes/externos", {
+        method: "POST",
+        body: JSON.stringify({
+          sistema: "WHATSAPP", clave: jid, cliente_id: clienteId,
+          sucursal_id: sucursalId || null,
+        }),
+      });
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo guardar");
+    }
+  }
+
   async function desconectarCliente(externoId: string) {
     try {
       await apiFetch(`/api/v1/clientes/externos/${externoId}`, { method: "DELETE" });
@@ -629,7 +646,7 @@ export default function Page() {
                                     <th className="px-3 py-1.5 text-left font-semibold">Serie factura</th>
                                     <th className="px-3 py-1.5 text-left font-semibold">Serie remisión</th>
                                     <th className="px-3 py-1.5 text-left font-semibold">Almacén</th>
-                                    <th className="px-3 py-1.5 text-left font-semibold">Sucursales</th>
+                                    <th className="px-3 py-1.5 text-left font-semibold">Sucursal por defecto</th>
                                     <th className="w-8 px-2 py-1.5" />
                                   </tr>
                                 </thead>
@@ -688,18 +705,31 @@ export default function Page() {
                                           ))}
                                         </Select>
                                       </td>
-                                      <td className="px-3 py-2 text-muted">
+                                      <td className="px-3 py-2">
                                         {c.sucursales.length ? (
-                                          c.sucursales.join(" · ")
+                                          <Select
+                                            value={c.sucursal_grupo_id ?? ""}
+                                            disabled={!canWrite}
+                                            onChange={(e) =>
+                                              cambiarSucursalDelGrupo(g.jid, c.cliente_id, e.target.value)
+                                            }
+                                          >
+                                            <option value="">— la que diga la orden —</option>
+                                            {c.sucursales.map((s) => (
+                                              <option key={s.id} value={s.id}>{s.nombre}</option>
+                                            ))}
+                                          </Select>
                                         ) : (
-                                          <span className="text-favorite">ninguna</span>
+                                          <span className="text-favorite">
+                                            sin sucursales
+                                            <Link
+                                              href={`/sucursales?cliente=${c.cliente_id}`}
+                                              className="ml-2 text-xs text-accent hover:underline"
+                                            >
+                                              crear
+                                            </Link>
+                                          </span>
                                         )}
-                                        <Link
-                                          href={`/sucursales?cliente=${c.cliente_id}`}
-                                          className="ml-2 text-xs text-accent hover:underline"
-                                        >
-                                          gestionar
-                                        </Link>
                                       </td>
                                       <td className="px-2 py-2 text-right">
                                         {canWrite && c.externo_id ? (
@@ -753,7 +783,10 @@ export default function Page() {
                             ) : null}
 
                             <p className="mt-3 text-xs text-muted">
-                              La serie y el almacén son del CLIENTE: cambiarlos aquí los cambia en
+                              La <strong>sucursal por defecto</strong> es de este grupo: solo se usa
+                              cuando la orden no dice a dónde va, o nombra un punto de entrega que
+                              nadie ha registrado. La <strong>serie</strong> y el{" "}
+                              <strong>almacén</strong> son del CLIENTE: cambiarlos aquí los cambia en
                               todos sus documentos, no solo en los de este grupo.
                             </p>
                           </td>

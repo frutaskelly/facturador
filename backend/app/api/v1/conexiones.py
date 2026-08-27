@@ -36,6 +36,7 @@ from ...schemas.conexion import (
     ActividadConexionOut,
     ClaveNuevaOut,
     ClienteDelGrupoOut,
+    SucursalBreve,
     ConexionEstadoOut,
     ConexionOut,
     GrupoOut,
@@ -299,7 +300,7 @@ def listar_grupos(
     )
     por_jid: dict[str, dict] = {}
     for e in externos:
-        por_jid.setdefault(e.clave_normalizada, {})[e.cliente_id] = e.id
+        por_jid.setdefault(e.clave_normalizada, {})[e.cliente_id] = e
 
     clientes = {
         c.id: c
@@ -343,15 +344,20 @@ def listar_grupos(
             c = clientes.get(cid)
             if c is None:
                 continue
+            ext = reg.get(cid)
             filas.append(ClienteDelGrupoOut(
-                externo_id=reg.get(cid),
+                externo_id=ext.id if ext else None,
+                sucursal_grupo_id=ext.sucursal_id if ext else None,
                 cliente_id=c.id,
                 nombre=c.legal_name,
                 serie_factura=series.get(c.serie_factura_id),
                 serie_remision=series.get(c.serie_remision_id),
                 serie_factura_id=c.serie_factura_id,
                 serie_remision_id=c.serie_remision_id,
-                sucursales=[s.nombre for s in sorted(sucs.get(c.id, []), key=lambda x: x.nombre or "")],
+                sucursales=[
+                    SucursalBreve(id=s.id, nombre=s.nombre)
+                    for s in sorted(sucs.get(c.id, []), key=lambda x: x.nombre or "")
+                ],
                 almacen=almacenes.get(c.almacen_id),
                 almacen_id=c.almacen_id,
                 registrado=cid in registrados,

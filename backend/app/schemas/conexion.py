@@ -74,6 +74,11 @@ class SincronizarGruposIn(BaseModel):
     grupos: list[GrupoIn] = Field(default_factory=list)
 
 
+class SucursalBreve(BaseModel):
+    id: uuid.UUID
+    nombre: str
+
+
 class ClienteDelGrupoOut(BaseModel):
     """Un cliente que recibe órdenes por ese grupo, con lo suyo."""
     # Id de la equivalencia, para poder desconectarlo desde la pantalla.
@@ -82,7 +87,10 @@ class ClienteDelGrupoOut(BaseModel):
     nombre: str
     serie_factura: Optional[str] = None
     serie_remision: Optional[str] = None
-    sucursales: list[str] = Field(default_factory=list)
+    sucursales: list[SucursalBreve] = Field(default_factory=list)
+    # La sucursal POR DEFECTO de este grupo para este cliente (última red del
+    # destino cuando el punto de entrega no resuelve nada).
+    sucursal_grupo_id: Optional[uuid.UUID] = None
     almacen: Optional[str] = None
     serie_factura_id: Optional[uuid.UUID] = None
     serie_remision_id: Optional[uuid.UUID] = None

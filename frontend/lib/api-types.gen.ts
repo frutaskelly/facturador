@@ -3326,8 +3326,10 @@ export interface components {
             serie_remision?: string | null;
             /** Serie Remision Id */
             serie_remision_id?: string | null;
+            /** Sucursal Grupo Id */
+            sucursal_grupo_id?: string | null;
             /** Sucursales */
-            sucursales?: string[];
+            sucursales?: components["schemas"]["SucursalBreve"][];
         };
         /** ClienteExternoCreate */
         ClienteExternoCreate: {
@@ -7409,6 +7411,16 @@ export interface components {
         SincronizarGruposIn: {
             /** Grupos */
             grupos?: components["schemas"]["GrupoIn"][];
+        };
+        /** SucursalBreve */
+        SucursalBreve: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
         };
         /** SucursalCreate */
         SucursalCreate: {

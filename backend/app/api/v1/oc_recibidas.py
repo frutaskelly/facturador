@@ -126,11 +126,19 @@ def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
     # para saber a dónde llevar la mercancía.
     oc.punto_entrega = (payload.get("ubicacion") or "").strip() or None
 
-    if res.cliente_id is not None and oc.punto_entrega:
-        oc.sucursal_id = cliente_match.resolver_destino(
-            db, oc.tenant_id, res.cliente_id, oc.punto_entrega,
-            perfil=str(payload.get("perfil") or ""),
-        )
+    if res.cliente_id is not None:
+        if oc.punto_entrega:
+            oc.sucursal_id = cliente_match.resolver_destino(
+                db, oc.tenant_id, res.cliente_id, oc.punto_entrega,
+                perfil=str(payload.get("perfil") or ""),
+            )
+        # Último recurso: la sucursal por defecto del grupo. Cubre el hospital
+        # nuevo y la orden que no dice a dónde va — la entrega tiene que salir
+        # de algún lado igual.
+        if oc.sucursal_id is None:
+            oc.sucursal_id = cliente_match.sucursal_del_grupo(
+                db, oc.tenant_id, str(payload.get("jid") or ""), res.cliente_id
+            )
 
     if res.cliente_id is None:
         oc.estado = "PENDIENTE"

@@ -45,6 +45,10 @@ from .producto_match import normalizar
 # resolutor recorre esta lista en orden.
 PRIORIDAD = ("RFC", "SAE", "PROYECTO", "NOMBRE")
 
+# Centinela: "no me pasaron sucursal_id" ≠ "me pasaron None". Sin esto, aprender
+# el grupo al asignar una orden borraba la sucursal por defecto de ese grupo.
+_SIN_TOCAR = object()
+
 # Sistemas que dan CONTEXTO: su clave puede pertenecer a varios clientes.
 #   WHATSAPP  → CANDIDATOS. Por el grupo de Pachuca entran EHMO y MAFAN; por el
 #               de Hidalgo, Balles y Jubran. El grupo acota la lista, no decide.
@@ -297,6 +301,20 @@ def resolver_destino(
     return resolver_sucursal_por_texto(db, cliente_id, texto)
 
 
+def sucursal_del_grupo(db: Session, tenant_id: UUID, jid: str, cliente_id: UUID):
+    """La sucursal POR DEFECTO de ese grupo para ese cliente, si se configuró.
+
+    Es el último recurso del destino: cuando el punto de entrega no resuelve
+    nada —un hospital nuevo, o una orden que no nombra a dónde va— la entrega
+    igual tiene que salir de algún lado, y lo que el grupo dice es lo más
+    cercano a la verdad que hay sin preguntarle a nadie.
+    """
+    if not jid:
+        return None
+    hit = _buscar(db, tenant_id, "WHATSAPP", jid, cliente_id)
+    return _sucursal_viva(db, hit.sucursal_id, cliente_id) if hit else None
+
+
 def resolver_sucursal_por_texto(
     db: Session, cliente_id: UUID, texto: str
 ) -> Optional[UUID]:
@@ -331,7 +349,7 @@ def aprender(
     clave: str,
     cliente_id: UUID,
     *,
-    sucursal_id: Optional[UUID] = None,
+    sucursal_id=_SIN_TOCAR,
     origen: str = "MANUAL",
     confianza: str = "CONFIRMADA",
     user_id=None,
@@ -341,6 +359,11 @@ def aprender(
     Reapuntar es deliberado: cuando un humano corrige el cruce en la bandeja, lo
     que quiere es que a partir de ahí resuelva al cliente correcto — no que
     conviva con el anterior.
+
+    `sucursal_id` omitido deja la que hubiera; pasarlo explícitamente (incluso
+    None) la cambia. La diferencia importa: en un grupo esa columna guarda su
+    sucursal POR DEFECTO, y aprender el grupo al asignar una orden no puede
+    borrarla de paso.
     """
     norm = normalizar_clave(sistema, clave)
     if not norm:
@@ -365,7 +388,8 @@ def aprender(
         if confianza == "SUGERIDA" and existing.confianza == "CONFIRMADA":
             return existing
         existing.cliente_id = cliente_id
-        existing.sucursal_id = sucursal_id
+        if sucursal_id is not _SIN_TOCAR:
+            existing.sucursal_id = sucursal_id
         existing.origen = origen
         existing.confianza = confianza
         db.flush()
@@ -377,7 +401,7 @@ def aprender(
         clave=(clave or "").strip()[:254],
         clave_normalizada=norm,
         cliente_id=cliente_id,
-        sucursal_id=sucursal_id,
+        sucursal_id=None if sucursal_id is _SIN_TOCAR else sucursal_id,
         origen=origen,
         confianza=confianza,
         created_by=user_id,
@@ -393,7 +417,8 @@ def aprender(
         existing = _existente()
         if existing is not None:
             existing.cliente_id = cliente_id
-            existing.sucursal_id = sucursal_id
+            if sucursal_id is not _SIN_TOCAR:
+                existing.sucursal_id = sucursal_id
             existing.origen = origen
             existing.confianza = confianza
             db.flush()

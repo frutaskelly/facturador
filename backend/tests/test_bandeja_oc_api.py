@@ -517,3 +517,44 @@ def test_el_almacen_se_resuelve_como_la_serie(client, env, auth_as):
     alm_suc = r.json()["id"]
     client.patch(f"/api/v1/sucursales/{env['suc']}", headers=h, json={"almacen_id": alm_suc})
     assert _crear()["almacen_id"] == alm_suc
+
+
+def test_la_sucursal_del_grupo_es_la_ultima_red(client, env, auth_as):
+    """Un hospital que nadie ha registrado, o una orden que no dice a dónde va:
+    la entrega tiene que salir de algún lado igual. Lo que diga el grupo es lo
+    más cercano a la verdad sin preguntarle a nadie."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    jid = "grupo-con-destino@g.us"
+
+    # Sin sucursal por defecto: un punto desconocido no resuelve destino.
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        jid=jid, ubicacion="HOSPITAL QUE NADIE REGISTRÓ")).json()
+    assert oc["cliente_id"] == env["ehmo"] and oc["sucursal_id"] is None
+
+    # Se le pone al grupo su sucursal por defecto para ese cliente.
+    assert _externo(client, h, "WHATSAPP", jid, env["ehmo"],
+                    sucursal_id=env["suc"]).status_code == 201
+
+    otra = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        jid=jid, ubicacion="OTRO HOSPITAL DESCONOCIDO")).json()
+    assert otra["sucursal_id"] == env["suc"]
+    assert otra["punto_entrega"] == "OTRO HOSPITAL DESCONOCIDO"   # el texto se conserva
+
+
+def test_asignar_no_borra_la_sucursal_por_defecto_del_grupo(client, env, auth_as):
+    """Aprender el grupo al asignar una orden no puede llevarse de paso su
+    sucursal por defecto — el bug que motivó el centinela en `aprender`."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    jid = "grupo-conserva@g.us"
+    _externo(client, h, "WHATSAPP", jid, env["ehmo"], sucursal_id=env["suc"])
+
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        rfc=None, ubicacion=None, jid=jid)).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "aprender": True})
+
+    wa = next(e for e in client.get("/api/v1/clientes/externos", headers=h,
+                                    params={"sistema": "WHATSAPP"}).json()
+              if e["clave"] == jid)
+    assert wa["sucursal_id"] == env["suc"]     # sigue ahí
