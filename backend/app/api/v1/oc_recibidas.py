@@ -36,7 +36,13 @@ from ...schemas.oc_recibida import (
     OCRecibidaUpdate,
 )
 from ...services import cliente_match
-from ...services.producto_match import aprender_alias, buscar, productos_activos
+from ...services.producto_match import (
+    aprender_alias,
+    buscar,
+    alias_del_tenant,
+    normalizar_catalogo,
+    productos_activos,
+)
 from ._helpers import ensure_fk, get_or_404, paginate
 
 router = APIRouter(prefix="/oc-recibidas", tags=["bandeja de OC"])
@@ -221,15 +227,23 @@ def _detalle(db: Session, oc: OCRecibida) -> dict:
     payload = oc.payload or {}
     lineas_raw = payload.get("lineas") or []
     catalogo = productos_activos(db) if lineas_raw else []
+    # Precalculado una vez para las N partidas: si no, el cruce es
+    # O(partidas × productos) normalizaciones por cada apertura de la orden.
+    norms = normalizar_catalogo(catalogo) if catalogo else {}
+    aliases = alias_del_tenant(db) if catalogo else {}
     lineas = []
     for i, ln in enumerate(lineas_raw, start=1):
         texto = str(ln.get("descripcion") or "")
-        cands = buscar(db, oc.tenant_id, texto, limit=5, prods=catalogo) if texto else []
+        cands = (
+            buscar(db, oc.tenant_id, texto, limit=5, prods=catalogo, aliases=aliases, norms=norms)
+            if texto else []
+        )
         # La CLAVE del cliente suele ser más precisa que la descripción; si
         # resuelve, va primero.
         clave = str(ln.get("clave") or "").strip()
         if clave:
-            por_clave = buscar(db, oc.tenant_id, clave, limit=3, prods=catalogo)
+            por_clave = buscar(db, oc.tenant_id, clave, limit=3, prods=catalogo,
+                               aliases=aliases, norms=norms)
             vistos = {c.producto_id for c in por_clave}
             cands = por_clave + [c for c in cands if c.producto_id not in vistos]
         lineas.append({

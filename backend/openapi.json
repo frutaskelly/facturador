@@ -416,6 +416,17 @@
       "title": "Cliente Ids",
       "type": "array"
      },
+     "mapeo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mapeo"
+     },
      "usar_ia": {
       "default": true,
       "title": "Usar Ia",
@@ -4113,6 +4124,37 @@
     "title": "HTTPValidationError",
     "type": "object"
    },
+   "ImportColumnaOut": {
+    "description": "Una columna del archivo y a qué campo del sistema se está leyendo.",
+    "properties": {
+     "campo": {
+      "default": "",
+      "title": "Campo",
+      "type": "string"
+     },
+     "encabezado": {
+      "title": "Encabezado",
+      "type": "string"
+     },
+     "indice": {
+      "title": "Indice",
+      "type": "integer"
+     },
+     "muestras": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Muestras",
+      "type": "array"
+     }
+    },
+    "required": [
+     "indice",
+     "encabezado"
+    ],
+    "title": "ImportColumnaOut",
+    "type": "object"
+   },
    "ImportErrorFila": {
     "properties": {
      "error": {
@@ -4576,11 +4618,25 @@
    },
    "ImportPreviewOut": {
     "properties": {
+     "campos_mapeables": {
+      "items": {
+       "type": "object"
+      },
+      "title": "Campos Mapeables",
+      "type": "array"
+     },
      "categorias_nuevas": {
       "items": {
        "type": "string"
       },
       "title": "Categorias Nuevas",
+      "type": "array"
+     },
+     "columnas": {
+      "items": {
+       "$ref": "#/components/schemas/ImportColumnaOut"
+      },
+      "title": "Columnas",
       "type": "array"
      },
      "esquemas_no_encontrados": {
@@ -4612,9 +4668,19 @@
       "title": "Filas Sin Esquema",
       "type": "integer"
      },
+     "filas_sin_nombre": {
+      "default": 0,
+      "title": "Filas Sin Nombre",
+      "type": "integer"
+     },
      "formato": {
       "title": "Formato",
       "type": "string"
+     },
+     "requiere_mapeo": {
+      "default": false,
+      "title": "Requiere Mapeo",
+      "type": "boolean"
      },
      "tiene_precios": {
       "default": false,

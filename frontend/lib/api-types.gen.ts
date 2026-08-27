@@ -2645,6 +2645,8 @@ export interface components {
              * @default []
              */
             cliente_ids: string[];
+            /** Mapeo */
+            mapeo?: string | null;
             /**
              * Usar Ia
              * @default true
@@ -3983,6 +3985,23 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * ImportColumnaOut
+         * @description Una columna del archivo y a qué campo del sistema se está leyendo.
+         */
+        ImportColumnaOut: {
+            /**
+             * Campo
+             * @default
+             */
+            campo: string;
+            /** Encabezado */
+            encabezado: string;
+            /** Indice */
+            indice: number;
+            /** Muestras */
+            muestras?: string[];
+        };
         /** ImportErrorFila */
         ImportErrorFila: {
             /** Error */
@@ -4143,8 +4162,12 @@ export interface components {
         };
         /** ImportPreviewOut */
         ImportPreviewOut: {
+            /** Campos Mapeables */
+            campos_mapeables?: Record<string, never>[];
             /** Categorias Nuevas */
             categorias_nuevas?: string[];
+            /** Columnas */
+            columnas?: components["schemas"]["ImportColumnaOut"][];
             /** Esquemas No Encontrados */
             esquemas_no_encontrados?: string[];
             /**
@@ -4164,8 +4187,18 @@ export interface components {
              * @default 0
              */
             filas_sin_esquema: number;
+            /**
+             * Filas Sin Nombre
+             * @default 0
+             */
+            filas_sin_nombre: number;
             /** Formato */
             formato: string;
+            /**
+             * Requiere Mapeo
+             * @default false
+             */
+            requiere_mapeo: boolean;
             /**
              * Tiene Precios
              * @default false
