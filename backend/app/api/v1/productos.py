@@ -35,12 +35,15 @@ from ...models import (
 from ...schemas.producto import (
     AliasIn,
     CandidatoOut,
+    CatalogoClienteBatchIn,
+    CatalogoClienteBatchOut,
     ImportCategoriaMatch,
     ImportColumnaOut,
     ImportErrorFila,
     ImportFilaPreview,
     ImportIn,
     ImportPreviewOut,
+    ImportProductoResultado,
     ImportResultOut,
     LineaPegadaOut,
     MatchIn,
@@ -49,8 +52,10 @@ from ...schemas.producto import (
     ProductoCreate,
     ProductoOut,
     ProductoUpdate,
+    SugerenciaCategoriaOut,
     SugerenciaEsquemaOut,
     SugerenciaSatOut,
+    SugerirCategoriaBatchIn,
     SugerirEsquemaBatchIn,
     SugerirSatBatchIn,
 )
@@ -66,8 +71,9 @@ from ...services.importar_productos import (
     parsear_plantilla,
 )
 from ...services.sat_catalogo import sugerir_batch
-from ...services.sugerir_esquema import match_categorias, sugerir_esquemas
+from ...services.sugerir_esquema import match_categorias, sugerir_categorias, sugerir_esquemas
 from ...services.producto_match import (
+    Candidato,
     alias_del_tenant,
     aprender_alias,
     buscar,
@@ -163,6 +169,51 @@ def productos_similares(
     return [ProductoOut.model_validate(r) for r in rows]
 
 
+def _cand_producto(p: Producto, score: int, origen: str) -> Candidato:
+    """Producto → candidato, para las rutas que NO pasan por `buscar` (el cruce
+    por código del archivo, y la sugerencia de IA)."""
+    return Candidato(
+        producto_id=p.id, sku=p.sku, nombre=p.nombre, score=score, origen=origen,
+        presentaciones=p.presentaciones or {},
+        presentacion_default=p.presentacion_default,
+        unidad_base=p.unidad_base,
+        categoria_id=p.categoria_id,
+        esquema_impuesto_id=p.esquema_impuesto_id,
+    )
+
+
+def _mapas_catalogo(db: Session) -> tuple[dict, dict]:
+    """id → nombre de categoría, id → código de esquema. Incluye las dadas de
+    baja: un producto puede seguir apuntando a una categoría inactiva y la
+    pantalla debe poder nombrarla."""
+    cats = {
+        c.id: c.nombre
+        for c in db.query(CategoriaProducto).filter(CategoriaProducto.deleted_at.is_(None)).all()
+    }
+    esqs = {
+        e.id: e.codigo
+        for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.deleted_at.is_(None)).all()
+    }
+    return cats, esqs
+
+
+def _candidato_out(c, cats_por_id: dict, esquemas_por_id: dict) -> CandidatoOut:
+    """Candidato → salida. La categoría y el esquema del producto existente
+    viajan SIEMPRE: quien vincula hereda los suyos, y la pantalla los muestra
+    en vez de un "Sin categoría" que engaña."""
+    return CandidatoOut(
+        producto_id=c.producto_id, sku=c.sku, nombre=c.nombre,
+        score=c.score, origen=c.origen,
+        presentaciones=c.presentaciones,
+        presentacion_default=c.presentacion_default,
+        unidad_base=c.unidad_base,
+        categoria_id=c.categoria_id,
+        categoria_nombre=(cats_por_id.get(c.categoria_id) or ""),
+        esquema_impuesto_id=c.esquema_impuesto_id,
+        esquema_codigo=(esquemas_por_id.get(c.esquema_impuesto_id) or ""),
+    )
+
+
 @router.post("/match", response_model=list[MatchResultOut])
 def match_productos(
     payload: MatchIn,
@@ -177,18 +228,15 @@ def match_productos(
     catalogo = productos_activos(db)   # una sola carga para todos los textos
     aliases = alias_del_tenant(db)     # idem: sin esto era un SELECT por texto
     norms = normalizar_catalogo(catalogo)   # y sin esto, O(textos × productos)
+    cats_por_id, esquemas_por_id = _mapas_catalogo(db)
     resultados: list[dict] = []
     sin_match: list[str] = []
     for texto in payload.textos:
         cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit, prods=catalogo, aliases=aliases, norms=norms)
-        resultados.append({"texto": texto, "candidatos": [
-            CandidatoOut(
-                producto_id=c.producto_id, sku=c.sku, nombre=c.nombre, score=c.score, origen=c.origen,
-                presentaciones=c.presentaciones, presentacion_default=c.presentacion_default,
-                unidad_base=c.unidad_base,
-            )
-            for c in cands
-        ]})
+        resultados.append({
+            "texto": texto,
+            "candidatos": [_candidato_out(c, cats_por_id, esquemas_por_id) for c in cands],
+        })
         if not cands:
             sin_match.append(texto)
 
@@ -200,11 +248,9 @@ def match_productos(
             pid = ia.get(r["texto"])
             if not r["candidatos"] and pid and pid in prods:
                 p = prods[pid]
-                r["candidatos"] = [CandidatoOut(
-                    producto_id=p.id, sku=p.sku, nombre=p.nombre, score=85, origen="ia",
-                    presentaciones=p.presentaciones or {}, presentacion_default=p.presentacion_default,
-                    unidad_base=p.unidad_base,
-                )]
+                r["candidatos"] = [
+                    _candidato_out(_cand_producto(p, 85, "ia"), cats_por_id, esquemas_por_id)
+                ]
     return resultados
 
 
@@ -227,6 +273,7 @@ def parse_pegado(
     catalogo = productos_activos(db)   # una sola carga para todas las filas
     aliases = alias_del_tenant(db)     # idem: sin esto era un SELECT por fila
     norms = normalizar_catalogo(catalogo)   # y sin esto, O(filas × productos)
+    cats_por_id, esquemas_por_id = _mapas_catalogo(db)
     resultados: list[dict] = []
     sin_match: list[str] = []
     for f in filas:
@@ -237,14 +284,7 @@ def parse_pegado(
             "cantidad": f["cantidad"],
             "precio": f["precio"],
             "presentacion": f["presentacion"],
-            "candidatos": [
-                CandidatoOut(
-                    producto_id=c.producto_id, sku=c.sku, nombre=c.nombre, score=c.score, origen=c.origen,
-                    presentaciones=c.presentaciones, presentacion_default=c.presentacion_default,
-                    unidad_base=c.unidad_base,
-                )
-                for c in cands
-            ],
+            "candidatos": [_candidato_out(c, cats_por_id, esquemas_por_id) for c in cands],
         })
         if not cands:
             sin_match.append(f["producto"])
@@ -258,11 +298,9 @@ def parse_pegado(
             pid = ia.get(r["texto"])
             if not r["candidatos"] and pid and pid in prods:
                 p = prods[pid]
-                r["candidatos"] = [CandidatoOut(
-                    producto_id=p.id, sku=p.sku, nombre=p.nombre, score=85, origen="ia",
-                    presentaciones=p.presentaciones or {}, presentacion_default=p.presentacion_default,
-                    unidad_base=p.unidad_base,
-                )]
+                r["candidatos"] = [
+                    _candidato_out(_cand_producto(p, 85, "ia"), cats_por_id, esquemas_por_id)
+                ]
     return resultados
 
 
@@ -464,12 +502,14 @@ def importar_preview(
     # cada fila para que el usuario los vea y cambie en su propia columna).
     cats_lista = db.query(CategoriaProducto).filter(CategoriaProducto.deleted_at.is_(None)).all()
     cats_por_nombre = {normalizar(c.nombre): c for c in cats_lista}
+    cats_por_id = {c.id: c.nombre for c in cats_lista}
     cats_tenant = set(cats_por_nombre)
     esquemas_lista = (
         db.query(EsquemaImpuesto)
         .filter(EsquemaImpuesto.deleted_at.is_(None), EsquemaImpuesto.activo.is_(True))
         .all()
     )
+    esquemas_por_id = {e.id: e.codigo for e in esquemas_lista}
     esquemas_por_clave: dict = {}
     for e in esquemas_lista:
         for k in (e.codigo, e.nombre):
@@ -545,6 +585,15 @@ def importar_preview(
                 sugerido = top.producto_id
         if sugerido is not None and not ya_vinculado:
             ya_vinculado = sugerido in productos_vinculados
+        # El sugerido puede venir por CÓDIGO (pasos 1 y 2) y no estar entre los
+        # candidatos, que salen del cruce por NOMBRE: es justo el caso "ROMA" ↔
+        # "JITOMATE SALADETTE". Sin él en la lista, la pantalla no sabe a qué
+        # vinculó — enseñaba "Sin categoría", no ofrecía la equivalencia de la
+        # presentación nueva y el alta terminaba con "1 MANOJO = 1 KILO".
+        if sugerido is not None and not any(c.producto_id == sugerido for c in cands):
+            prod_cod = por_id.get(sugerido)
+            if prod_cod is not None:
+                cands = [_cand_producto(prod_cod, 100, "exacto"), *cands]
 
         # Variante nueva: cruza a un producto existente pero con una unidad que
         # el producto aún no maneja ("Cilantro" KILO ← fila en MANOJO).
@@ -581,16 +630,7 @@ def importar_preview(
             unidad_sat_valida=(unidad_sat_f in unidades_ok) if unidad_sat_f else None,
             nueva_presentacion=nueva_presentacion,
             producto_id=sugerido,
-            candidatos=[
-                CandidatoOut(
-                    producto_id=c.producto_id, sku=c.sku, nombre=c.nombre,
-                    score=c.score, origen=c.origen,
-                    presentaciones=c.presentaciones,
-                    presentacion_default=c.presentacion_default,
-                    unidad_base=c.unidad_base,
-                )
-                for c in cands
-            ],
+            candidatos=[_candidato_out(c, cats_por_id, esquemas_por_id) for c in cands],
             ya_vinculado=ya_vinculado,
             duplicada_de=duplicada_de,
             precio_distinto=precio_distinto,
@@ -643,6 +683,40 @@ def importar_preview(
         filas_sin_esquema=sum(1 for f in activas if f.esquema_id is None),
         tiene_precios=any(f.precio for f in activas),
     )
+
+
+@router.post("/sugerir-categoria-batch", response_model=list[SugerenciaCategoriaOut])
+def sugerir_categoria_batch(
+    payload: SugerirCategoriaBatchIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Qué categoría le toca a cada producto NUEVO, entre las que ya usa el
+    negocio (las de /categorias). Una sola llamada de IA para todo el lote;
+    nunca inventa categorías nuevas."""
+    if payload.usar_ia:
+        enforce(f"producto-ia:{ctx.tenant_id}", 120, 3600)
+    categorias = (
+        db.query(CategoriaProducto)
+        .filter(CategoriaProducto.deleted_at.is_(None), CategoriaProducto.activo.is_(True))
+        .all()
+    )
+    if not categorias:
+        raise HTTPException(
+            status_code=422,
+            detail="No hay categorías dadas de alta para sugerir. Créalas en Categorías.",
+        )
+    productos = [
+        {"nombre": str(p.get("nombre", "")).strip(), "clave_sat": str(p.get("clave_sat", "")).strip()}
+        for p in payload.productos
+        if str(p.get("nombre", "")).strip()
+    ]
+    if not productos:
+        raise HTTPException(status_code=422, detail="Sin productos que clasificar")
+    return [
+        SugerenciaCategoriaOut(**s)
+        for s in sugerir_categorias(productos, categorias, usar_ia=payload.usar_ia)
+    ]
 
 
 @router.post("/sugerir-esquema-batch", response_model=list[SugerenciaEsquemaOut])
@@ -875,6 +949,8 @@ def _ejecutar_import(
         else:
             fase.append(obj)
 
+    resultados_filas: list[ImportProductoResultado] = []
+
     creados = vinculados = alias_guardados = precios_guardados = omitidos = 0
     categorias_creadas = presentaciones_agregadas = 0
     errores: list[ImportErrorFila] = []
@@ -885,6 +961,7 @@ def _ejecutar_import(
             continue
         antes = (creados, vinculados, alias_guardados, precios_guardados,
                  categorias_creadas, presentaciones_agregadas)
+        antes_filas = len(resultados_filas)
         try:
             with (db.begin_nested() if aislar_filas else nullcontext()):
                 unidad_fila = normalizar_unidad(fila.unidad_base or "")
@@ -894,7 +971,10 @@ def _ejecutar_import(
                 categoria_id = fila.categoria_id
                 if categoria_id is None and (fila.categoria or "").strip():
                     cat = cats_por_nombre.get(normalizar(fila.categoria))
-                    if cat is None and payload.crear_categorias:
+                    # Al vincular nunca se usa la categoría de la fila (el
+                    # producto conserva la suya), así que crearla dejaba
+                    # categorías vacías en el catálogo.
+                    if cat is None and payload.crear_categorias and fila.accion != "vincular":
                         codigo_cat = _codigo_categoria_libre(fila.categoria, codigos_cat)
                         codigos_cat.add(codigo_cat)
                         cat = CategoriaProducto(
@@ -1019,12 +1099,22 @@ def _ejecutar_import(
                         precio_row.precio_unitario = fila.precio
                     precios_guardados += 1
 
+                # El último paso usa esto para guardar el catálogo del cliente
+                # sin volver a subir el archivo.
+                resultados_filas.append(ImportProductoResultado(
+                    fila=n, producto_id=prod.id,
+                    codigo=(fila.codigo_cliente or fila.sku or "").strip(),
+                    nombre=fila.nombre.strip(),
+                    presentacion=unidad_fila or "",
+                ))
+
                 if aislar_filas:
                     db.flush()   # el savepoint de ESTA fila la aísla del resto
         except (IntegrityError, ValueError) as exc:
             # Esta fila no cuenta: se deshacen sus sumas.
             (creados, vinculados, alias_guardados, precios_guardados,
              categorias_creadas, presentaciones_agregadas) = antes
+            del resultados_filas[antes_filas:]
             detalle = str(exc)
             if isinstance(exc, IntegrityError):
                 detalle = _DUP if "uq_producto_tenant_sku" in str(exc.orig) else "Registro duplicado"
@@ -1046,7 +1136,79 @@ def _ejecutar_import(
         categorias_creadas=categorias_creadas,
         presentaciones_agregadas=presentaciones_agregadas,
         lista_id=lista_id, lista_nombre=lista_nombre_out,
+        productos=resultados_filas,
         errores=errores,
+    )
+
+
+@router.post("/catalogo-cliente-batch", response_model=CatalogoClienteBatchOut)
+def catalogo_cliente_batch(
+    payload: CatalogoClienteBatchIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Guarda de golpe el código/nombre/presentación que usan uno o varios
+    clientes para una lista de productos — el último paso de la importación,
+    cuando el usuario ya decidió de quién era la lista.
+
+    Escribe por lotes (una consulta para leer lo existente, un flush al final):
+    con 500 productos × 2 clientes, hacerlo uno por uno serían miles de viajes.
+    """
+    clientes = [get_or_404(db, Cliente, cid) for cid in payload.cliente_ids]
+    ids_prod = {i.producto_id for i in payload.items}
+    validos = {
+        p for (p,) in db.query(Producto.id)
+        .filter(Producto.id.in_(ids_prod), Producto.deleted_at.is_(None)).all()
+    }
+    previos = {
+        (pc.cliente_id, pc.producto_id): pc
+        for pc in db.query(ProductoCliente)
+        .filter(
+            ProductoCliente.cliente_id.in_([c.id for c in clientes]),
+            ProductoCliente.producto_id.in_(ids_prod),
+        )
+        .all()
+    }
+    alias_previos = alias_del_tenant(db)
+    nuevos: list = []
+    guardados = 0
+    for item in payload.items:
+        if item.producto_id not in validos:
+            continue
+        codigo = (item.codigo or "").strip() or None
+        nombre = (item.nombre or "").strip() or None
+        if not codigo and not nombre:
+            continue
+        for cliente in clientes:
+            clave = (cliente.id, item.producto_id)
+            pc = previos.get(clave)
+            if pc is None:
+                pc = ProductoCliente(
+                    id=uuid4(), tenant_id=ctx.tenant_id,
+                    cliente_id=cliente.id, producto_id=item.producto_id,
+                )
+                nuevos.append(pc)
+                previos[clave] = pc
+            pc.codigo_cliente = codigo
+            pc.nombre_cliente = nombre
+            if item.presentacion:
+                pc.presentacion = item.presentacion
+            guardados += 1
+        # El cruce aprende el nombre del cliente (una vez por producto).
+        if nombre:
+            norm_alias = normalizar(nombre)[:254]
+            if norm_alias and norm_alias not in alias_previos:
+                nuevos.append(ProductoAlias(
+                    id=uuid4(), tenant_id=ctx.tenant_id, producto_id=item.producto_id,
+                    alias=nombre[:254], alias_normalizado=norm_alias,
+                    origen="IMPORT", created_by=ctx.user_id,
+                ))
+                alias_previos[norm_alias] = item.producto_id
+    if nuevos:
+        db.add_all(nuevos)
+    db.flush()
+    return CatalogoClienteBatchOut(
+        clientes=len(clientes), productos=len(validos), guardados=guardados
     )
 
 

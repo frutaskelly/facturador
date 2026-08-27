@@ -98,6 +98,12 @@ class CandidatoOut(BaseModel):
     presentaciones: dict = {}
     presentacion_default: Optional[str] = None
     unidad_base: Optional[str] = None
+    # Lo que ya tiene el producto existente: al vincular, la fila lo hereda y
+    # la pantalla lo muestra en vez de un "Sin categoría" que engaña.
+    categoria_id: Optional[uuid.UUID] = None
+    categoria_nombre: str = ""
+    esquema_impuesto_id: Optional[uuid.UUID] = None
+    esquema_codigo: str = ""
 
 
 class MatchResultOut(BaseModel):
@@ -249,6 +255,16 @@ class ImportErrorFila(BaseModel):
     error: str
 
 
+class ImportProductoResultado(BaseModel):
+    """Qué producto quedó en cada fila: lo necesita el último paso para
+    guardar el catálogo del cliente sin volver a subir el archivo."""
+    fila: int
+    producto_id: uuid.UUID
+    codigo: str = ""          # el que traía el archivo
+    nombre: str = ""
+    presentacion: str = ""
+
+
 class ImportResultOut(BaseModel):
     creados: int
     vinculados: int
@@ -260,6 +276,8 @@ class ImportResultOut(BaseModel):
     # Lista de precios que recibió los precios (para el paso de asignación).
     lista_id: Optional[uuid.UUID] = None
     lista_nombre: Optional[str] = None
+    # Filas que sí entraron, con el producto que les corresponde.
+    productos: list[ImportProductoResultado] = Field(default_factory=list)
     errores: list[ImportErrorFila] = Field(default_factory=list)
 
 
@@ -285,12 +303,38 @@ class SugerenciaEsquemaOut(BaseModel):
     motivo: str = ""
 
 
+class SugerirCategoriaBatchIn(BaseModel):
+    productos: list[dict] = Field(min_length=1, max_length=2000)
+    # cada item: {"nombre": str, "clave_sat": str}
+    usar_ia: bool = True
+
+
+class SugerenciaCategoriaOut(BaseModel):
+    nombre: str
+    categoria_id: Optional[uuid.UUID] = None
+    categoria_nombre: str = ""
+    origen: str = ""              # "ia" | ""
+
+
 class SugerenciaSatOut(BaseModel):
     nombre: str
     clave_sat: str
     descripcion_sat: str
     unidad_sat: str
     unidad_sat_generica: str
+
+
+class CatalogoClienteBatchIn(BaseModel):
+    """Guardar de golpe el código/nombre/presentación que usan uno o varios
+    clientes para una lista de productos (el último paso de la importación)."""
+    cliente_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+    items: list[ImportProductoResultado] = Field(min_length=1, max_length=2000)
+
+
+class CatalogoClienteBatchOut(BaseModel):
+    clientes: int
+    productos: int
+    guardados: int
 
 
 # ─── Catálogo del cliente (codigo/nombre por cliente → CFDI) ─────────────────

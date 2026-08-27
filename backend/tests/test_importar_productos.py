@@ -1337,3 +1337,216 @@ def test_importar_no_escala_las_consultas_con_las_filas(client, env, auth_as):
     # 12 veces más filas no debe significar más consultas: el crecimiento tiene
     # que ser plano (unas pocas sentencias de margen por las precargas).
     assert muchas <= pocas + 6, f"{pocas} sentencias con 5 filas vs {muchas} con 60"
+
+
+# ─── El cliente se elige AL FINAL: catálogo en lote tras importar ────────────
+def test_import_reporta_producto_por_fila(client, env, auth_as):
+    """El resultado dice qué producto quedó en cada fila: es lo que necesita el
+    último paso para guardar el catálogo del cliente sin resubir el archivo."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/importar", headers=h, json={
+        "filas": [
+            {"accion": "crear", "nombre": "PRODUCTO FINAL A", "sku": "FIN-A",
+             "unidad_base": "KILO", "codigo_cliente": "FIN-A", "nombre_cliente": "PRODUCTO FINAL A"},
+            {"accion": "vincular", "producto_id": env["prod_id"], "nombre": "JITOMATE ROMA",
+             "codigo_cliente": "JIT-1", "nombre_cliente": "JITOMATE ROMA"},
+            {"accion": "omitir", "nombre": "IGNORADA"},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert len(res["productos"]) == 2          # la omitida no aparece
+    por_fila = {p["fila"]: p for p in res["productos"]}
+    assert por_fila[2]["producto_id"] == env["prod_id"]
+    assert por_fila[1]["codigo"] == "FIN-A" and por_fila[1]["presentacion"] == "KILO"
+
+
+def test_catalogo_cliente_batch(client, env, auth_as):
+    """Un solo POST guarda el código/nombre/presentación para VARIOS clientes,
+    y el cruce aprende el nombre. Es el último paso del wizard."""
+    db = SessionLocal()
+    try:
+        c2 = Cliente(tenant_id=env["tenant_id"], codigo="CFIN", legal_name="Cliente Final SA",
+                     rfc="CFI900101AA1", regimen_fiscal="601")
+        db.add(c2); db.commit()
+        c2_id = str(c2.id)
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/catalogo-cliente-batch", headers=h, json={
+        "cliente_ids": [env["cli_id"], c2_id],
+        "items": [{"fila": 1, "producto_id": env["prod_id"], "codigo": "JIT-SAD-001",
+                   "nombre": "JITOMATE ROMA", "presentacion": "KILO"}],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json() == {"clientes": 2, "productos": 1, "guardados": 2}
+
+    db = SessionLocal()
+    try:
+        pcs = db.query(ProductoCliente).filter(
+            ProductoCliente.producto_id == uuid.UUID(env["prod_id"])).all()
+        assert {str(p.cliente_id) for p in pcs} == {env["cli_id"], c2_id}
+        assert all(p.codigo_cliente == "JIT-SAD-001" and p.presentacion == "KILO" for p in pcs)
+        alias = db.query(ProductoAlias).filter(
+            ProductoAlias.tenant_id == env["tenant_id"],
+            ProductoAlias.alias_normalizado == "jitomate roma").one()
+        assert str(alias.producto_id) == env["prod_id"]
+    finally:
+        db.close()
+
+    # Repetirlo actualiza en vez de duplicar.
+    r = client.post("/api/v1/productos/catalogo-cliente-batch", headers=h, json={
+        "cliente_ids": [env["cli_id"]],
+        "items": [{"fila": 1, "producto_id": env["prod_id"], "codigo": "JIT-2",
+                   "nombre": "JITOMATE ROMA", "presentacion": "KILO"}],
+    })
+    assert r.status_code == 200
+    db = SessionLocal()
+    try:
+        pc = db.query(ProductoCliente).filter(
+            ProductoCliente.cliente_id == uuid.UUID(env["cli_id"]),
+            ProductoCliente.producto_id == uuid.UUID(env["prod_id"])).one()
+        assert pc.codigo_cliente == "JIT-2"
+    finally:
+        db.close()
+
+
+def test_catalogo_cliente_batch_no_escala_consultas(client, env, auth_as):
+    """El último paso también escribe por lotes: con cientos de productos, uno
+    por uno serían miles de viajes a la base."""
+    from sqlalchemy import event
+    from app.core.db import engine
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    imp = client.post("/api/v1/productos/importar", headers=h, json={
+        "filas": [{"accion": "crear", "nombre": f"PRODUCTO CAT {i}", "unidad_base": "KILO"}
+                  for i in range(40)],
+    }).json()
+    assert imp["creados"] == 40
+
+    sentencias: list[str] = []
+    def _contar(conn, cursor, statement, params, context, executemany):
+        sentencias.append(statement)
+    event.listen(engine, "before_cursor_execute", _contar)
+    try:
+        r = client.post("/api/v1/productos/catalogo-cliente-batch", headers=h, json={
+            "cliente_ids": [env["cli_id"]],
+            "items": [{**p, "codigo": f"C-{p['fila']}", "nombre": p["nombre"]}
+                      for p in imp["productos"]],
+        })
+    finally:
+        event.remove(engine, "before_cursor_execute", _contar)
+    assert r.status_code == 200 and r.json()["guardados"] == 40
+    assert len(sentencias) <= 15, f"{len(sentencias)} sentencias para 40 productos"
+
+
+def test_candidato_trae_categoria_y_esquema_del_producto(client, env, auth_as):
+    """Al vincular, la fila hereda la categoría y el esquema del producto que ya
+    existe — así que el candidato debe traerlos, tanto en el preview como en el
+    buscador del catálogo (/match). Sin esto la pantalla enseñaba "Sin
+    categoría" para un producto que sí la tiene."""
+    db = SessionLocal()
+    try:
+        cat = CategoriaProducto(tenant_id=env["tenant_id"], codigo="FRUVE", nombre="Fruta y verdura")
+        esq = EsquemaImpuesto(tenant_id=env["tenant_id"], codigo="IVA0", nombre="IVA 0%",
+                              iva_tasa=Decimal("0"))
+        db.add_all([cat, esq]); db.flush()
+        db.add(Producto(tenant_id=env["tenant_id"], sku="00000341", nombre="JITOMATE SALADETTE",
+                        clave_sat="50404100", unidad_sat="KGM", unidad_base="KILO",
+                        categoria_id=cat.id, esquema_impuesto_id=esq.id))
+        db.commit()
+        cat_id, esq_id = str(cat.id), str(esq.id)
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+
+    # 1) El buscador del catálogo: se teclea otro nombre y el candidato llega completo.
+    r = client.post("/api/v1/productos/match", headers=h,
+                    json={"textos": ["jitomate"], "usar_ia": False, "limit": 20})
+    assert r.status_code == 200, r.text
+    c = next(x for x in r.json()[0]["candidatos"] if x["sku"] == "00000341")
+    assert c["nombre"] == "JITOMATE SALADETTE"
+    assert c["categoria_id"] == cat_id and c["categoria_nombre"] == "Fruta y verdura"
+    assert c["esquema_impuesto_id"] == esq_id and c["esquema_codigo"] == "IVA0"
+
+    # 2) Y el preview de la importación, que es de donde sale la columna Categoría.
+    data = _xlsx([["NOMBRE", "UNIDAD"], ["JITOMATE SALADETTE", "KILO"]])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    c = next(x for x in r.json()["filas"][0]["candidatos"] if x["sku"] == "00000341")
+    assert c["categoria_nombre"] == "Fruta y verdura" and c["esquema_codigo"] == "IVA0"
+
+
+def test_vincular_no_toca_categoria_ni_esquema_del_producto(client, env, auth_as):
+    """Lo que la pantalla promete ("del producto existente") tiene que cumplirse:
+    importar una fila vinculada NO reescribe la categoría ni el esquema del
+    producto, aunque la fila traiga los suyos."""
+    db = SessionLocal()
+    try:
+        suya = CategoriaProducto(tenant_id=env["tenant_id"], codigo="FRUVE", nombre="Fruta y verdura")
+        otra = CategoriaProducto(tenant_id=env["tenant_id"], codigo="ABARR", nombre="Abarrotes")
+        esq = EsquemaImpuesto(tenant_id=env["tenant_id"], codigo="IVA0", nombre="IVA 0%",
+                              iva_tasa=Decimal("0"))
+        db.add_all([suya, otra, esq]); db.flush()
+        prod = Producto(tenant_id=env["tenant_id"], sku="00000341", nombre="JITOMATE SALADETTE",
+                        clave_sat="50404100", unidad_sat="KGM", unidad_base="KILO",
+                        categoria_id=suya.id, esquema_impuesto_id=esq.id)
+        db.add(prod); db.commit()
+        prod_id, suya_id, otra_id = str(prod.id), str(suya.id), str(otra.id)
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+
+    r = client.post("/api/v1/productos/importar", headers=h, json={"filas": [{
+        "nombre": "ROMA", "accion": "vincular", "producto_id": prod_id,
+        "unidad_base": "KILO", "categoria_id": otra_id, "esquema_impuesto_id": None,
+    }]})
+    assert r.status_code == 200, r.text
+    assert r.json()["vinculados"] == 1
+
+    db = SessionLocal()
+    try:
+        p = db.query(Producto).filter(Producto.id == uuid.UUID(prod_id)).one()
+        assert str(p.categoria_id) == suya_id, "vincular no debe cambiar de categoría"
+        assert p.esquema_impuesto_id is not None
+    finally:
+        db.close()
+
+
+def test_sugerido_por_codigo_viaja_entre_los_candidatos(client, env, auth_as):
+    """Cuando el vínculo lo resuelve el CÓDIGO del archivo y el nombre no se
+    parece en nada ('ROMA' ↔ 'JITOMATE SALADETTE'), el producto tiene que venir
+    igual en `candidatos`: de ahí saca la pantalla a qué vinculó, su categoría y
+    la equivalencia de la presentación nueva. Sin él, el alta grababa
+    '1 MANOJO = 1 KILO' en silencio."""
+    db = SessionLocal()
+    try:
+        cat = CategoriaProducto(tenant_id=env["tenant_id"], codigo="FRUVE", nombre="Fruta y verdura")
+        db.add(cat); db.flush()
+        db.add(Producto(tenant_id=env["tenant_id"], sku="1001", nombre="JITOMATE SALADETTE",
+                        clave_sat="50404100", unidad_sat="KGM", unidad_base="KILO",
+                        categoria_id=cat.id, presentaciones={"KILO": 1}))
+        db.commit()
+    finally:
+        db.close()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([["CODIGO", "NOMBRE", "UNIDAD"], ["1001", "ROMA", "MANOJO"]])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("lista.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    fila = r.json()["filas"][0]
+    assert fila["producto_id"] is not None
+    assert fila["nueva_presentacion"] is True
+    # El sugerido está entre los candidatos, con su categoría — que es lo que la
+    # pantalla enseña y lo que dispara la casilla de equivalencia.
+    elegido = next(c for c in fila["candidatos"] if c["producto_id"] == fila["producto_id"])
+    assert elegido["nombre"] == "JITOMATE SALADETTE"
+    assert elegido["categoria_nombre"] == "Fruta y verdura"
+    assert elegido["unidad_base"] == "KILO"
