@@ -4,6 +4,7 @@
 from .almacen import Almacen
 from .categoria import CategoriaProducto
 from .cliente import Cliente
+from .cliente_externo import ClienteExterno
 from .conversion import ConversionProducto
 from .esquema_impuesto import EsquemaImpuesto
 from .devolucion import Devolucion, LineaDevolucion
@@ -12,6 +13,7 @@ from .pago import Pago
 from .recibo_pago import ReciboPago, ReciboPagoFactura
 from .pos_corte import PosCorte
 from .inventario import LoteInventario, Merma, MovimientoInventario
+from .oc_recibida import OCRecibida
 from .orden_compra import LineaOrdenCompra, OrdenCompra
 from .permission import Permission
 from .precio import ListaPrecios, Precio
@@ -45,6 +47,7 @@ __all__ = [
     "ListaPrecios",
     "Precio",
     "Cliente",
+    "ClienteExterno",
     # ── Phase 4: operaciones ──
     "Proveedor",
     "Almacen",
@@ -52,6 +55,7 @@ __all__ = [
     "MovimientoInventario",
     "Merma",
     "OrdenCompra",
+    "OCRecibida",
     "LineaOrdenCompra",
     "ConversionProducto",
     "Remision",

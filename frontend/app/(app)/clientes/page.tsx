@@ -1,7 +1,7 @@
 "use client";
 
 
-import { BookOpen, Receipt, Store } from "lucide-react";
+import { BookOpen, Link2, Receipt, Store } from "lucide-react";
 
 import { CrudPage, type CrudConfig } from "@/components/crud/CrudPage";
 import { Badge } from "@/components/ui/Badge";
@@ -226,6 +226,7 @@ const config: CrudConfig<Cliente> = {
     { href: `/sucursales?cliente=${c.id}`, title: "Sucursales", icon: <Store size={16} /> },
     { href: `/clientes/${c.id}/catalogo`, title: "Catálogo", icon: <BookOpen size={16} /> },
     { href: `/clientes/${c.id}/estado-cuenta`, title: "Estado de cuenta", icon: <Receipt size={16} /> },
+    { href: `/clientes/${c.id}/equivalencias`, title: "Equivalencias", icon: <Link2 size={16} /> },
   ],
   lookups: {
     lista_precios_id: {

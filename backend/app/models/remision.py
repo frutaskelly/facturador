@@ -52,6 +52,11 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     fecha_entrega = Column(Date)
     estado = Column(REMISION_ESTADO, nullable=False, server_default="BORRADOR")
     canal = Column(String(20), nullable=False, server_default="MANUAL")
+    # Ancla de idempotencia de la ingesta automática ('WA:<jid>:<folio de OC>').
+    # UNIQUE parcial por (tenant, origen_externo): un reintento del bot tras un
+    # timeout devuelve la remisión que ya existe en vez de crear otra y quemar
+    # un folio de la serie. NULL en todo lo capturado a mano.
+    origen_externo = Column(String(120))
     subtotal = Column(Numeric(18, 4), nullable=False, server_default="0")
     descuento = Column(Numeric(18, 4), nullable=False, server_default="0")
     iva = Column(Numeric(18, 4), nullable=False, server_default="0")
