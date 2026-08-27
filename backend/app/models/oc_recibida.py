@@ -50,6 +50,9 @@ class OCRecibida(Base, TimestampMixin):
     # punto DENTRO de una (Balles y Jubran comparten los suyos). Viaja a las
     # observaciones de la remisión y de ahí a las de la factura.
     punto_entrega = Column(String(254))
+    # Clientes POSIBLES cuando el grupo no alcanza a decidir (por el de Pachuca
+    # entran EHMO y MAFAN). Es la lista corta que se le ofrece al operador.
+    candidatos = Column(JSONB)
     ambiguo = Column(Boolean, nullable=False, server_default=text("false"))
     remision_id = Column(UUID(as_uuid=True), ForeignKey("remisiones.id", ondelete="SET NULL"))
     payload = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))

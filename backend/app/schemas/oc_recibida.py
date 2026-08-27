@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .common import ORMModel
 
@@ -103,11 +103,21 @@ class OCRecibidaOut(ORMModel):
     sucursal_nombre: Optional[str] = None
     resuelto_via: Optional[str] = None
     punto_entrega: Optional[str] = None
+    # Clientes posibles según el grupo del que llegó, cuando el documento no
+    # alcanza a decidir. Vacío = no hay pista de grupo o ya se resolvió.
+    candidatos: list[uuid.UUID] = Field(default_factory=list)
     ambiguo: bool = False
     remision_id: Optional[uuid.UUID] = None
     remision_folio: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("candidatos", mode="before")
+    @classmethod
+    def _lista(cls, v):
+        """La columna es NULL mientras nadie haya calculado candidatos; para
+        quien consume la API eso es simplemente una lista vacía."""
+        return v or []
 
 
 class OCRecibidaDetailOut(OCRecibidaOut):

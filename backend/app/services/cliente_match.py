@@ -41,9 +41,15 @@ from sqlalchemy.orm import Session
 from ..models import Cliente, ClienteExterno, Sucursal
 from .producto_match import normalizar
 
-# Mayor a menor especificidad. El resolutor recorre esta lista en orden.
-# UBICACION NO está: no identifica al cliente (ver el docstring del módulo).
-PRIORIDAD = ("RFC", "SAE", "PROYECTO", "NOMBRE", "WHATSAPP")
+# Sistemas que IDENTIFICAN al cliente, de mayor a menor especificidad. El
+# resolutor recorre esta lista en orden.
+PRIORIDAD = ("RFC", "SAE", "PROYECTO", "NOMBRE")
+
+# Sistemas que dan CONTEXTO: su clave puede pertenecer a varios clientes.
+#   WHATSAPP  → CANDIDATOS. Por el grupo de Pachuca entran EHMO y MAFAN; por el
+#               de Hidalgo, Balles y Jubran. El grupo acota la lista, no decide.
+#   UBICACION → el destino de CADA cliente que descargue ahí.
+CONTEXTO = ("WHATSAPP", "UBICACION")
 
 # El RFC no se normaliza como texto libre (los espacios y guiones sí estorban,
 # pero las mayúsculas son significativas para leerlo). Se sube a mayúsculas y se
@@ -77,12 +83,25 @@ class Resolucion:
     motivo: Optional[str] = None         # por qué NO se pudo resolver
     # Todo lo que cruzó, para que la UI muestre el desacuerdo tal cual.
     coincidencias: list[dict] = field(default_factory=list)
+    # Los clientes POSIBLES cuando el grupo no alcanza a decidir. No es una
+    # respuesta a medias: es la lista corta que se le ofrece al operador en vez
+    # de dejarlo frente al padrón entero.
+    candidatos: list[UUID] = field(default_factory=list)
 
 
 def buscar_equivalencia(
-    db: Session, tenant_id: UUID, sistema: str, clave: str, *, solo_confirmadas: bool = False
+    db: Session,
+    tenant_id: UUID,
+    sistema: str,
+    clave: str,
+    *,
+    solo_confirmadas: bool = False,
+    cliente_id: Optional[UUID] = None,
 ) -> Optional[ClienteExterno]:
     """La equivalencia registrada para esa clave, o None.
+
+    Para los sistemas de CONTEXTO hay que decir de qué cliente se quiere la fila:
+    la misma clave existe una vez por cada razón social que la comparte.
 
     El filtro de `tenant_id` es explícito y NO se delega a la RLS: los scripts de
     mantenimiento abren la sesión como owner (la RLS está ENABLE, no FORCE) y sin
@@ -91,6 +110,17 @@ def buscar_equivalencia(
     norm = normalizar_clave(sistema, clave)
     if not norm:
         return None
+    q = _filtrar(db, tenant_id, sistema, norm, solo_confirmadas)
+    if sistema in CONTEXTO:
+        if cliente_id is None:
+            # Sin cliente la clave es ambigua por diseño: hay una fila por cada
+            # razón social que comparte ese grupo o ese punto de entrega.
+            return None
+        q = q.filter(ClienteExterno.cliente_id == cliente_id)
+    return q.one_or_none()
+
+
+def _filtrar(db: Session, tenant_id: UUID, sistema: str, norm: str, solo_confirmadas: bool):
     q = db.query(ClienteExterno).filter(
         ClienteExterno.tenant_id == tenant_id,
         ClienteExterno.sistema == sistema,
@@ -98,17 +128,42 @@ def buscar_equivalencia(
     )
     if solo_confirmadas:
         q = q.filter(ClienteExterno.confianza == "CONFIRMADA")
-    return q.one_or_none()
+    return q
 
 
-def _buscar(db: Session, tenant_id: UUID, sistema: str, clave: str) -> Optional[ClienteExterno]:
+def candidatos_de(db: Session, tenant_id: UUID, sistema: str, clave: str) -> list[ClienteExterno]:
+    """Todos los clientes registrados para esa clave de contexto, con vida propia.
+
+    Es lo que convierte «no sé de quién es» en «es de Balles o de Jubran».
+    """
+    norm = normalizar_clave(sistema, clave)
+    if not norm:
+        return []
+    filas = _filtrar(db, tenant_id, sistema, norm, True).all()
+    vivos = {
+        c[0]
+        for c in db.query(Cliente.id)
+        .filter(
+            Cliente.id.in_([f.cliente_id for f in filas] or [None]),
+            Cliente.deleted_at.is_(None),
+        )
+        .all()
+    }
+    return [f for f in filas if f.cliente_id in vivos]
+
+
+def _buscar(
+    db: Session, tenant_id: UUID, sistema: str, clave: str, cliente_id: Optional[UUID] = None
+) -> Optional[ClienteExterno]:
     """Equivalencia utilizable para resolver: confirmada y con cliente vivo.
 
     Un cliente borrado deja su equivalencia huérfana; si se devolviera, la orden
     quedaría marcada «lista» y reventaría al crear la remisión. Que se comporte
     como inexistente la manda a PENDIENTE, que es lo correcto.
     """
-    hit = buscar_equivalencia(db, tenant_id, sistema, clave, solo_confirmadas=True)
+    hit = buscar_equivalencia(
+        db, tenant_id, sistema, clave, solo_confirmadas=True, cliente_id=cliente_id
+    )
     if hit is None:
         return None
     vivo = (
@@ -145,6 +200,7 @@ def resolver(db: Session, tenant_id: UUID, pistas: list[Pista]) -> Resolucion:
 
     if not encontrados:
         res.motivo = "Ninguna pista del documento cruza con un cliente conocido"
+        _acotar_con_el_grupo(db, tenant_id, pistas, res)
         return res
 
     clientes = {e.cliente_id for _, e in encontrados}
@@ -161,6 +217,37 @@ def resolver(db: Session, tenant_id: UUID, pistas: list[Pista]) -> Resolucion:
     res.cliente_id = ganador.cliente_id
     res.via = sistema_ganador
     return res
+
+
+def _acotar_con_el_grupo(
+    db: Session, tenant_id: UUID, pistas: list[Pista], res: Resolucion
+) -> None:
+    """El grupo no decide, pero acota: de todo el padrón a dos nombres.
+
+    Si el grupo es de un solo cliente, tampoco decide solo — se ofrece como
+    candidato único y una persona lo confirma. Un grupo es la pista más débil que
+    hay y no vale la pena convertirla en automática.
+    """
+    for p in pistas:
+        if p.sistema.upper() != "WHATSAPP":
+            continue
+        cands = candidatos_de(db, tenant_id, "WHATSAPP", p.clave)
+        if not cands:
+            continue
+        res.candidatos = list(dict.fromkeys(c.cliente_id for c in cands))
+        nombres = [
+            n for (n,) in db.query(Cliente.legal_name)
+            .filter(Cliente.id.in_(res.candidatos))
+            .order_by(Cliente.legal_name)
+            .all()
+        ]
+        if nombres:
+            res.motivo = (
+                "El documento no dice de quién es. Por este grupo entran "
+                + " y ".join([", ".join(nombres[:-1]), nombres[-1]] if len(nombres) > 1 else nombres)
+                + ": elige cuál."
+            )
+        return
 
 
 def _sucursal_viva(db: Session, sucursal_id, cliente_id: UUID):
@@ -202,8 +289,8 @@ def resolver_destino(
     if not texto:
         return None
     clave = f"{perfil.strip().lower()}:{texto}" if perfil else texto
-    hit = _buscar(db, tenant_id, "UBICACION", clave)
-    if hit is not None and hit.cliente_id == cliente_id:
+    hit = _buscar(db, tenant_id, "UBICACION", clave, cliente_id)
+    if hit is not None:
         viva = _sucursal_viva(db, hit.sucursal_id, cliente_id)
         if viva is not None:
             return viva
@@ -260,15 +347,16 @@ def aprender(
         return None
 
     def _existente() -> Optional[ClienteExterno]:
-        return (
-            db.query(ClienteExterno)
-            .filter(
-                ClienteExterno.tenant_id == tenant_id,
-                ClienteExterno.sistema == sistema,
-                ClienteExterno.clave_normalizada == norm,
-            )
-            .one_or_none()
+        q = db.query(ClienteExterno).filter(
+            ClienteExterno.tenant_id == tenant_id,
+            ClienteExterno.sistema == sistema,
+            ClienteExterno.clave_normalizada == norm,
         )
+        # Una clave de contexto tiene una fila POR CLIENTE: sin acotar, registrar
+        # el grupo para Jubran reapuntaría el de Balles.
+        if sistema in CONTEXTO:
+            q = q.filter(ClienteExterno.cliente_id == cliente_id)
+        return q.one_or_none()
 
     existing = _existente()
     if existing is not None:

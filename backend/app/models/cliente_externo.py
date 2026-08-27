@@ -16,7 +16,7 @@ que adivinar. Único por (tenant, sistema, clave_normalizada).
 propuso solo (SUGERIDA); el resolutor únicamente usa las CONFIRMADAS, las otras
 son la bandeja de revisión.
 """
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text, UniqueConstraint, text
+from sqlalchemy import Column, DateTime, ForeignKey, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 
 from ..core.db import Base
@@ -25,14 +25,16 @@ from .base import tenant_fk, uuid_pk
 SISTEMAS = ("RFC", "SAE", "PROYECTO", "NOMBRE", "UBICACION", "WHATSAPP")
 
 
+# Sistemas que dan CONTEXTO en vez de identificar: su clave puede repetirse
+# entre clientes (Balles y Jubran comparten grupo y puntos de entrega). El resto
+# identifica, y ahí una clave apunta a un solo cliente. La unicidad son dos
+# índices parciales en la migración 0045 — no se puede expresar con
+# UniqueConstraint, por eso `__table_args__` ya no la declara.
+SISTEMAS_CONTEXTO = ("WHATSAPP", "UBICACION")
+
+
 class ClienteExterno(Base):
     __tablename__ = "cliente_externos"
-    __table_args__ = (
-        UniqueConstraint(
-            "tenant_id", "sistema", "clave_normalizada",
-            name="uq_cliente_externo_tenant_sistema_clave",
-        ),
-    )
 
     id = uuid_pk()
     tenant_id = tenant_fk()

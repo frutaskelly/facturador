@@ -336,25 +336,60 @@ def test_tenant_b_no_ve_ni_resuelve_lo_de_a(client, env, auth_as):
 
 # ─── reglas que salieron de la revisión ─────────────────────────────────────
 
-def test_el_jid_se_aprende_solo_como_sugerido(client, env, auth_as):
-    """El grupo es la pista más débil: por él entran EHMO y MAFAN. Una corrección
-    no puede volverlo decisorio, o asignaría en silencio las del otro cliente."""
+def test_el_grupo_acota_pero_no_decide(client, env, auth_as):
+    """Por un mismo grupo entran dos razones sociales —EHMO y MAFAN en Pachuca,
+    Balles y Jubran en Hidalgo—. El grupo convierte «no sé de quién es» en «es de
+    estos dos», que es lo que el operador necesita; nunca elige por su cuenta."""
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
-    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(jid="grupo@g.us")).json()
+    jid = "grupo-compartido@g.us"
+    _externo(client, h, "WHATSAPP", jid, env["balles"])
+    _externo(client, h, "WHATSAPP", jid, env["jubran"])
+
+    # El mismo grupo, dos clientes: conviven (antes el UNIQUE lo impedía).
+    registrados = client.get("/api/v1/clientes/externos", headers=h,
+                             params={"sistema": "WHATSAPP"}).json()
+    assert {e["cliente_id"] for e in registrados} == {env["balles"], env["jubran"]}
+
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        rfc=None, perfil=None, ubicacion=None, jid=jid)).json()
+    assert oc["cliente_id"] is None                     # no adivina
+    assert oc["ambiguo"] is False                       # tampoco es un conflicto
+    assert set(oc["candidatos"]) == {env["balles"], env["jubran"]}
+    assert "elige cuál" in oc["motivo"]
+    assert "BALLES" in oc["motivo"] and "JUBRAN" in oc["motivo"]
+
+
+def test_al_asignar_se_registra_el_grupo_como_candidato(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    jid = "grupo-nuevo@g.us"
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        rfc=None, perfil=None, ubicacion=None, jid=jid)).json()
+    assert oc["candidatos"] == []                       # grupo desconocido
+
     client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
-                 json={"cliente_id": env["ehmo"], "aprender": True})
+                 json={"cliente_id": env["balles"], "aprender": True})
 
-    externos = client.get("/api/v1/clientes/externos", headers=h).json()
-    wa = next(e for e in externos if e["sistema"] == "WHATSAPP")
-    assert wa["confianza"] == "SUGERIDA"
-    rfc = next(e for e in externos if e["sistema"] == "RFC")
-    assert rfc["confianza"] == "CONFIRMADA"
+    # La próxima orden de ese grupo ya llega con la lista corta — pero sigue
+    # necesitando que una persona confirme: un grupo no identifica a nadie.
+    otra = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        rfc=None, perfil=None, ubicacion=None, jid=jid)).json()
+    assert otra["cliente_id"] is None
+    assert otra["candidatos"] == [env["balles"]]
 
-    # Y por lo mismo, el JID solo no resuelve nada todavía.
-    sola = client.post("/api/v1/oc-recibidas", headers=h, json={
-        "canal": "WHATSAPP", "origen_externo": "WA:grupo@g.us:otra",
-        "jid": "grupo@g.us", "lineas": [{"descripcion": "X", "cantidad": "1"}]}).json()
-    assert sola["cliente_id"] is None
+
+def test_el_mismo_punto_de_entrega_sirve_a_dos_clientes(client, env, auth_as):
+    """Balles y Jubran descargan en el mismo lugar, cada uno con su sucursal."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    assert _externo(client, h, "UBICACION", "PROCU", env["balles"],
+                    sucursal_id=env["suc_balles"]).status_code == 201
+    assert _externo(client, h, "UBICACION", "PROCU", env["jubran"],
+                    sucursal_id=env["suc_jubran"]).status_code == 201
+
+    _externo(client, h, "NOMBRE", "JUBRAN", env["jubran"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        rfc=None, perfil=None, nombre="JUBRAN", ubicacion="PROCU")).json()
+    assert oc["cliente_id"] == env["jubran"]
+    assert oc["sucursal_id"] == env["suc_jubran"]       # la SUYA, no la de Balles
 
 
 def test_reintento_no_pisa_la_asignacion_manual(client, env, auth_as):

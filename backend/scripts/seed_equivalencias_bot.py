@@ -98,6 +98,9 @@ def main() -> None:
     ap.add_argument("--puntos", action="append", default=[], metavar="PERFIL=SUCURSAL",
                     help="a qué sucursal pertenecen los puntos de entrega de ese perfil "
                          "(p. ej. villahermosa=Tabasco). Repetible.")
+    ap.add_argument("--comparten", action="append", default=[], metavar="SLUG=CLIENTE",
+                    help="otra razón social que también entra por los grupos de ese slug "
+                         "(p. ej. balles-pachuca=JUBRAN). Repetible.")
     args = ap.parse_args()
 
     destinos = {}
@@ -106,6 +109,13 @@ def main() -> None:
             sys.exit(f"--puntos espera PERFIL=SUCURSAL, recibí «{par}»")
         perfil, suc = par.split("=", 1)
         destinos[perfil.strip().lower()] = suc.strip()
+
+    comparten = {}
+    for par in args.comparten:
+        if "=" not in par:
+            sys.exit(f"--comparten espera SLUG=CLIENTE, recibí «{par}»")
+        slug, nombre_cli = par.split("=", 1)
+        comparten[slug.strip().lower()] = nombre_cli.strip()
 
     cfg = _cargar(args.config)
     # El slug se resuelve sin scope (la RLS de `tenants` es por id); de ahí en
@@ -128,6 +138,7 @@ def main() -> None:
 
         plan: list[tuple[str, str, Cliente, str | None, str]] = []
         saltados: list[str] = []
+        por_perfil: dict[str, dict] = {}      # perfil → {clave SAE: cliente}
 
         # ── 1. perfiles: receptor (RFC), proyectos y ubicaciones ─────────────
         for perfil_id, perfil in (cfg.get("perfiles") or {}).items():
@@ -138,6 +149,7 @@ def main() -> None:
             # receptor: {"<cliente_sae>": {"nombre": ..., "rfc": ...}}
             receptores = perfil.get("receptor") or (RECEPTOR_EHMO if perfil_id == "ehmo" else {})
             del_perfil: dict[str, Cliente] = {}   # clave SAE → cliente, de ESTE perfil
+            por_perfil.setdefault(perfil_id, del_perfil)
             for clave_sae, receptor in receptores.items():
                 if not isinstance(receptor, dict):
                     continue
@@ -230,32 +242,71 @@ def main() -> None:
             if cli is None:
                 saltados.append(f"grupo «{g.get('nombre')}» → {slug}: sin cliente en el padrón")
                 continue
-            perfil_grupo = str(g.get("perfil") or "ehmo")
-            compartido = receptores_por_perfil.get(perfil_grupo, 1) > 1
-            if compartido:
-                saltados.append(
-                    f"grupo «{g.get('nombre')}»: el perfil {perfil_grupo} tiene varios "
-                    "receptores, así que el JID no identifica a un solo cliente — no se siembra"
-                )
-            else:
-                plan.append(("WHATSAPP", jid, cli, None, f"{g.get('nombre')} · {via}"))
+            # El JID se siembra SIEMPRE, como candidato. No decide —por el grupo
+            # de Pachuca entran EHMO y MAFAN, por el de Hidalgo Balles y Jubran—
+            # pero convierte «no sé de quién es» en «es de estos dos», que es lo
+            # que el operador necesita para resolverlo de un clic.
+            plan.append(("WHATSAPP", jid, cli, None, f"candidato · {g.get('nombre')}"))
             # El bot distingue BALLES de JUBRAN por el nombre IMPRESO en el PDF
             # (sheets_push.py:3607); esa palabra es la equivalencia NOMBRE.
             palabra = slug.split("-")[0]
             if via == "nombre contenido" and len(palabra) >= 4:
                 plan.append(("NOMBRE", palabra.upper(), cli, None, f"palabra en el PDF · {g.get('nombre')}"))
 
+        # Los OTROS receptores del mismo perfil también entran por ese grupo:
+        # sin esto, el grupo de Pachuca solo ofrecería EHMO y nunca MAFAN.
+        #
+        # OJO: solo si el grupo REALMENTE es de ese perfil. Los grupos de Balles
+        # no declaran `perfil` y caen al default 'ehmo', pero corren otra tubería
+        # entera — heredarles EHMO y MAFAN sería ofrecer clientes que por ahí no
+        # entran. El discriminante es que el cliente del grupo sea uno de los
+        # receptores del perfil.
+        for jid, g in grupos.items():
+            if g.get("activo") is False:
+                continue
+            propio, _ = _buscar_cliente(rows, por_rfc, por_nombre,
+                                        nombre=str(g["cliente"]).split("-")[0])
+            if propio is None:
+                continue
+            perfil_grupo = str(g.get("perfil") or "ehmo")
+            hermanos = (por_perfil.get(perfil_grupo) or {}).values()
+            if propio.id not in {c.id for c in hermanos}:
+                continue                      # el grupo no es de ese perfil
+            for cli in hermanos:
+                plan.append(("WHATSAPP", jid, cli, None,
+                             f"candidato · {g.get('nombre')}"))
+
+        # Razones sociales que comparten grupo y que la config del bot no conoce
+        # (Jubran no aparece en ningún grupo, pero entra por los de Balles).
+        for slug, nombre_cli in comparten.items():
+            cli, _ = _buscar_cliente(rows, por_rfc, por_nombre, nombre=nombre_cli)
+            if cli is None:
+                saltados.append(f"--comparten: no encuentro un cliente «{nombre_cli}»")
+                continue
+            jids = [j for j, g in grupos.items()
+                    if str(g["cliente"]) == slug and g.get("activo") is not False]
+            if not jids:
+                saltados.append(f"--comparten: ningún grupo activo con el slug «{slug}»")
+                continue
+            for jid in jids:
+                plan.append(("WHATSAPP", jid, cli, None,
+                             f"candidato · comparte los grupos de {slug}"))
+
         # ── 3. imprimir / aplicar ────────────────────────────────────────────
         vistos: set[tuple[str, str]] = set()
         escritas = 0
         for sistema, clave, cli, suc_id, nota in plan:
-            llave = (sistema, cliente_match.normalizar_clave(sistema, clave))
+            llave = (sistema, cliente_match.normalizar_clave(sistema, clave),
+                     str(cli.id) if sistema in cliente_match.CONTEXTO else "")
             if llave in vistos:
                 continue
             vistos.add(llave)
             # Una corrección hecha a mano en la bandeja MANDA sobre la config del
             # bot: volver a correr el seed no puede deshacerla en silencio.
-            previa = cliente_match.buscar_equivalencia(db, tenant.id, sistema, clave)
+            previa = cliente_match.buscar_equivalencia(
+                db, tenant.id, sistema, clave,
+                cliente_id=cli.id if sistema in cliente_match.CONTEXTO else None,
+            )
             if previa is not None and previa.origen == "MANUAL" and previa.cliente_id != cli.id:
                 saltados.append(
                     f"{sistema} «{clave}» ya está asignada a mano a otro cliente — se respeta"

@@ -6944,6 +6944,14 @@
       "title": "Canal",
       "type": "string"
      },
+     "candidatos": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Candidatos",
+      "type": "array"
+     },
      "cliente_id": {
       "anyOf": [
        {
@@ -7352,6 +7360,14 @@
      "canal": {
       "title": "Canal",
       "type": "string"
+     },
+     "candidatos": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Candidatos",
+      "type": "array"
      },
      "cliente_id": {
       "anyOf": [

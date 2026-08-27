@@ -118,6 +118,9 @@ export default function Page() {
   const [lineas, setLineas] = useState<LineaEdit[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [aDescartar, setADescartar] = useState<OCRecibida | null>(null);
+  // Con candidatos, el desplegable arranca acotado a ellos: elegir entre dos es
+  // otra cosa que buscar entre todo el padrón.
+  const [verTodos, setVerTodos] = useState(false);
 
   const reload = useCallback(() => {
     setError(false);          // un fallo transitorio no puede dejar la bandeja muerta
@@ -147,6 +150,7 @@ export default function Page() {
       setClienteSel(oc.cliente_id ?? "");
       setSucursalSel(oc.sucursal_id ?? "");
       setPuntoEntrega(oc.punto_entrega ?? "");
+      setVerTodos(!oc.candidatos?.length);
       setAlmacenSel("");
       setLineas(
         oc.lineas.map((l) => {
@@ -454,6 +458,8 @@ export default function Page() {
                   <AlertTriangle size={15} /> {abierta.motivo}
                 </span>
               </Alert>
+            ) : abierta.candidatos?.length && !abierta.cliente_id ? (
+              <Alert tone="info">{abierta.motivo}</Alert>
             ) : null}
 
             {abierta.remision_id ? (
@@ -464,19 +470,36 @@ export default function Page() {
             ) : null}
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Field label="Cliente" hint="A quién se le factura">
+              <Field
+                label="Cliente"
+                hint={
+                  abierta.candidatos?.length && !verTodos
+                    ? "Los que usan este grupo de WhatsApp"
+                    : "A quién se le factura"
+                }
+              >
                 <Select
                   value={clienteSel}
                   onChange={(e) => {
+                    if (e.target.value === "__todos__") {
+                      setVerTodos(true);
+                      return;
+                    }
                     setClienteSel(e.target.value);
                     setSucursalSel("");
                   }}
                   disabled={!canWrite || bloqueada}
                 >
                   <option value="">— Elegir —</option>
-                  {clientes.map((c) => (
+                  {(abierta.candidatos?.length && !verTodos
+                    ? clientes.filter((c) => abierta.candidatos.includes(c.id))
+                    : clientes
+                  ).map((c) => (
                     <option key={c.id} value={c.id}>{c.legal_name}</option>
                   ))}
+                  {abierta.candidatos?.length && !verTodos ? (
+                    <option value="__todos__">Ver todos los clientes…</option>
+                  ) : null}
                 </Select>
               </Field>
               <Field label="Sucursal" hint="De aquí salen la serie y la lista de precios">

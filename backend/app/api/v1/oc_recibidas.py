@@ -60,7 +60,7 @@ _PISTAS = (
     ("SAE", "clave_sae"),
     ("PROYECTO", "proyecto"),
     ("NOMBRE", "nombre"),
-    ("WHATSAPP", "jid"),
+    ("WHATSAPP", "jid"),   # no decide: aporta la lista corta de candidatos
 )
 
 
@@ -94,6 +94,10 @@ def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
     oc.resuelto_via = res.via
     oc.cliente_id = res.cliente_id
     oc.sucursal_id = None
+    # La lista corta que se le ofrece al operador cuando el grupo no alcanza a
+    # decidir (por el de Pachuca entran EHMO y MAFAN; por el de Hidalgo, Balles
+    # y Jubran). Se guarda para que la bandeja no tenga que recalcularla.
+    oc.candidatos = [str(c) for c in res.candidatos] or None
 
     # El punto de entrega (hospital, plantel) es texto del documento y va SIEMPRE
     # a las observaciones, resuelva o no una sucursal. Es lo que el equipo lee
@@ -349,10 +353,17 @@ def asignar(
             # como confirmado por una sola corrección lo volvería decisorio y
             # asignaría en silencio las órdenes del otro cliente. Queda SUGERIDA:
             # se ve en la bandeja y se confirma a mano si el grupo es de uno solo.
-            confianza = "SUGERIDA" if pista.sistema == "WHATSAPP" else "CONFIRMADA"
             cliente_match.aprender(
                 db, ctx.tenant_id, pista.sistema, pista.clave, oc.cliente_id,
-                origen="MANUAL", confianza=confianza, user_id=ctx.user_id,
+                origen="MANUAL", confianza="CONFIRMADA", user_id=ctx.user_id,
+            )
+        # El grupo se registra como CANDIDATO de este cliente: no decide, pero la
+        # próxima vez la bandeja ya ofrece la lista corta en vez del padrón entero.
+        jid = str((oc.payload or {}).get("jid") or "").strip()
+        if jid:
+            cliente_match.aprender(
+                db, ctx.tenant_id, "WHATSAPP", jid, oc.cliente_id,
+                origen="MANUAL", confianza="CONFIRMADA", user_id=ctx.user_id,
             )
 
     db.flush()

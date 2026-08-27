@@ -5377,6 +5377,8 @@ export interface components {
             archivo_url?: string | null;
             /** Canal */
             canal: string;
+            /** Candidatos */
+            candidatos?: string[];
             /** Cliente Id */
             cliente_id?: string | null;
             /** Cliente Nombre */
@@ -5488,6 +5490,8 @@ export interface components {
             archivo_url?: string | null;
             /** Canal */
             canal: string;
+            /** Candidatos */
+            candidatos?: string[];
             /** Cliente Id */
             cliente_id?: string | null;
             /** Cliente Nombre */
