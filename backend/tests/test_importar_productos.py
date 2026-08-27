@@ -1297,3 +1297,43 @@ def test_categorias_activas_para_el_selector(client, env, auth_as):
 
     # Pedir por encima del tope es un 422: la página no debe hacerlo.
     assert client.get("/api/v1/categorias?limit=500", headers=h).status_code == 422
+
+
+def test_importar_no_escala_las_consultas_con_las_filas(client, env, auth_as):
+    """El import escribe por LOTES: el número de sentencias SQL no crece con
+    las filas. Antes eran ~13 por fila (508 productos = 6,638 sentencias), que
+    contra una base en la nube se iban a minutos y morían en el timeout."""
+    from sqlalchemy import event
+    from app.core.db import engine
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+
+    def _importar(n: int) -> int:
+        sentencias: list[str] = []
+        def _contar(conn, cursor, statement, params, context, executemany):
+            sentencias.append(statement)
+        event.listen(engine, "before_cursor_execute", _contar)
+        try:
+            r = client.post("/api/v1/productos/importar", headers=h, json={
+                "cliente_ids": [env["cli_id"]],
+                "guardar_precios": True,
+                "crear_categorias": True,
+                "filas": [
+                    {"accion": "crear", "nombre": f"PRODUCTO LOTE {n}-{i}",
+                     "unidad_base": "KILO", "categoria": "CATEGORIA LOTE",
+                     "codigo_cliente": f"L{n}-{i}", "nombre_cliente": f"PRODUCTO LOTE {n}-{i}",
+                     "precio": "10.50"}
+                    for i in range(n)
+                ],
+            })
+        finally:
+            event.remove(engine, "before_cursor_execute", _contar)
+        assert r.status_code == 200, r.text
+        assert r.json()["creados"] == n
+        return len(sentencias)
+
+    pocas = _importar(5)
+    muchas = _importar(60)
+    # 12 veces más filas no debe significar más consultas: el crecimiento tiene
+    # que ser plano (unas pocas sentencias de margen por las precargas).
+    assert muchas <= pocas + 6, f"{pocas} sentencias con 5 filas vs {muchas} con 60"
