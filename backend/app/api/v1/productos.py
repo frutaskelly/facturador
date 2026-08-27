@@ -8,8 +8,10 @@ are persisted (RLS does not constrain Postgres FK checks).
 from __future__ import annotations
 
 import json
+import logging
+from contextlib import nullcontext
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func
@@ -53,7 +55,7 @@ from ...schemas.producto import (
     SugerirSatBatchIn,
 )
 from ...schemas.common import Page
-from ...services.categoria_codigo import generate_unique_codigo
+from ...services.categoria_codigo import slugify_codigo
 from ...services.importar_productos import (
     CAMPOS_MAPEABLES,
     ImportProductosError,
@@ -76,6 +78,8 @@ from ...services.producto_match import (
     sugerir_con_ia,
 )
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/productos", tags=["productos"])
 
@@ -705,6 +709,20 @@ def sugerir_sat_batch(
     return [SugerenciaSatOut(**s) for s in sugerir_batch(db, productos)]
 
 
+def _codigo_categoria_libre(nombre: str, usados: set[str]) -> str:
+    """Código de categoría único SIN consultar la base (los usados ya vienen
+    precargados). Misma regla que services/categoria_codigo."""
+    base = slugify_codigo(nombre)
+    if base not in usados:
+        return base
+    for n in range(2, 1000):
+        sufijo = str(n)
+        cand = (base[: 10 - len(sufijo)] or "CAT") + sufijo
+        if cand not in usados:
+            return cand
+    return base
+
+
 # Unidad de venta capturada → clave SAT de unidad (fallback razonable).
 _UNIDAD_A_SAT = {
     "KILO": "KGM", "GRAMO": "GRM", "LITRO": "LTR", "MILILITRO": "MLT",
@@ -720,6 +738,27 @@ def importar_productos(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
+    """Aplica el preview confirmado. Ver `_ejecutar_import`.
+
+    Se intenta en modo LOTE (un flush para todo: con 500 productos es la
+    diferencia entre 2 segundos y varios minutos contra una base en la nube).
+    Si el lote choca contra una restricción, se rehace fila por fila —dentro de
+    un savepoint, para no perder el scope de RLS de la transacción— y así se
+    puede señalar CUÁL fila falló conservando las demás."""
+    try:
+        with db.begin_nested():
+            return _ejecutar_import(db, ctx, payload, aislar_filas=False)
+    except IntegrityError as exc:
+        logger.warning("import en lote chocó, se rehace fila por fila: %s", exc)
+        # El rollback al savepoint no saca de la sesión los objetos que quedaron
+        # pendientes: sin esto, el reintento los volvería a insertar.
+        db.expunge_all()
+        return _ejecutar_import(db, ctx, payload, aislar_filas=True)
+
+
+def _ejecutar_import(
+    db: Session, ctx: AuthContext, payload: ImportIn, *, aislar_filas: bool
+) -> ImportResultOut:
     """Aplica el preview confirmado: crea productos nuevos (SKU automático),
     vincula existentes y, si la lista es de UN cliente, guarda su código/nombre
     en el catálogo del cliente (+ alias para el cruce) y opcionalmente sus
@@ -779,8 +818,62 @@ def importar_productos(
             if k:
                 esquemas_por_clave.setdefault(normalizar(k), e)
 
+    # Precargas: todo lo que el bucle consultaba POR FILA. Con 500 productos
+    # eso eran miles de viajes a la base — contra una base en la nube, minutos.
+    ids_clientes_sel = [c.id for c in clientes]
+    pc_previos: dict[tuple, ProductoCliente] = {}
+    if ids_clientes_sel:
+        for pc in (
+            db.query(ProductoCliente)
+            .filter(ProductoCliente.cliente_id.in_(ids_clientes_sel))
+            .all()
+        ):
+            pc_previos[(pc.cliente_id, pc.producto_id)] = pc
+    precios_previos: dict[tuple, Precio] = {}
+    if lista_id is not None:
+        for pr in db.query(Precio).filter(Precio.lista_id == lista_id).all():
+            precios_previos[(pr.producto_id, pr.presentacion, pr.cantidad_minima)] = pr
+    alias_previos = alias_del_tenant(db)          # {alias_normalizado: producto_id}
+    # Productos a vincular: se traen de una sola vez.
+    ids_vincular = {f.producto_id for f in payload.filas
+                    if f.accion == "vincular" and f.producto_id}
+    prods_vincular = {
+        p.id: p for p in db.query(Producto)
+        .filter(Producto.id.in_(ids_vincular), Producto.deleted_at.is_(None)).all()
+    } if ids_vincular else {}
+    # Códigos de categoría ya usados (para generar los de las nuevas sin
+    # consultar la base por cada una).
+    codigos_cat = {
+        c for (c,) in db.query(CategoriaProducto.codigo)
+        .filter(CategoriaProducto.tenant_id == ctx.tenant_id).all()
+    }
+    # Ids válidos precargados: `ensure_fk` consultaba la base DOS veces por fila
+    # y, en modo lote, no veía las categorías creadas en esta misma pasada.
+    cats_validas = {
+        c for (c,) in db.query(CategoriaProducto.id)
+        .filter(CategoriaProducto.deleted_at.is_(None)).all()
+    }
+    esquemas_validos = {
+        e for (e,) in db.query(EsquemaImpuesto.id)
+        .filter(EsquemaImpuesto.deleted_at.is_(None)).all()
+    }
+
     # SKUs secuenciales sin re-consultar el máximo en cada fila.
     siguiente_sku = _max_sku_num(db)
+
+    # En modo lote los objetos se escriben en TRES fases, porque estas tablas
+    # no declaran relationship y SQLAlchemy no deduce el orden de sus FK:
+    # categorías → productos → (catálogo del cliente, alias, precios).
+    nuevas_cats: list = []
+    nuevos_prods: list = []
+    nuevos_deps: list = []
+
+    def _nuevo(obj, fase: list) -> None:
+        """Encola el objeto en su fase (lote) o lo escribe ya (modo aislado)."""
+        if aislar_filas:
+            db.add(obj)
+        else:
+            fase.append(obj)
 
     creados = vinculados = alias_guardados = precios_guardados = omitidos = 0
     categorias_creadas = presentaciones_agregadas = 0
@@ -790,8 +883,10 @@ def importar_productos(
         if fila.accion == "omitir":
             omitidos += 1
             continue
+        antes = (creados, vinculados, alias_guardados, precios_guardados,
+                 categorias_creadas, presentaciones_agregadas)
         try:
-            with db.begin_nested():   # savepoint: una fila mala no tira el lote
+            with (db.begin_nested() if aislar_filas else nullcontext()):
                 unidad_fila = normalizar_unidad(fila.unidad_base or "")
 
                 # Categoría: id explícito → nombre del archivo (existente o
@@ -800,14 +895,15 @@ def importar_productos(
                 if categoria_id is None and (fila.categoria or "").strip():
                     cat = cats_por_nombre.get(normalizar(fila.categoria))
                     if cat is None and payload.crear_categorias:
+                        codigo_cat = _codigo_categoria_libre(fila.categoria, codigos_cat)
+                        codigos_cat.add(codigo_cat)
                         cat = CategoriaProducto(
-                            tenant_id=ctx.tenant_id,
-                            codigo=generate_unique_codigo(db, ctx.tenant_id, fila.categoria),
-                            nombre=fila.categoria.strip(),
+                            id=uuid4(), tenant_id=ctx.tenant_id,
+                            codigo=codigo_cat, nombre=fila.categoria.strip(),
                         )
-                        db.add(cat)
-                        db.flush()
+                        _nuevo(cat, nuevas_cats)
                         cats_por_nombre[normalizar(cat.nombre)] = cat
+                        cats_validas.add(cat.id)
                         categorias_creadas += 1
                     if cat is not None:
                         categoria_id = cat.id
@@ -824,11 +920,7 @@ def importar_productos(
                 if fila.accion == "vincular":
                     if fila.producto_id is None:
                         raise ValueError("Falta el producto a vincular")
-                    prod = (
-                        db.query(Producto)
-                        .filter(Producto.id == fila.producto_id, Producto.deleted_at.is_(None))
-                        .one_or_none()
-                    )
+                    prod = prods_vincular.get(fila.producto_id)
                     if prod is None:
                         raise ValueError("Producto a vincular no encontrado")
                     # Variante nueva del MISMO producto (Cilantro KILO ← MANOJO):
@@ -847,17 +939,17 @@ def importar_productos(
                         presentaciones_agregadas += 1
                     vinculados += 1
                 else:  # crear
-                    _validate_fks(
-                        db,
-                        categoria_id=categoria_id,
-                        esquema_impuesto_id=esquema_id,
-                    )
+                    if categoria_id is not None and categoria_id not in cats_validas:
+                        raise ValueError("categoria_id inválido o fuera de alcance")
+                    if esquema_id is not None and esquema_id not in esquemas_validos:
+                        raise ValueError("esquema_impuesto_id inválido o fuera de alcance")
                     unidad_base = unidad_fila or "KILO"
                     sku = (fila.sku or "").strip()
                     if not sku:
                         siguiente_sku += 1
                         sku = f"{siguiente_sku:08d}"
                     prod = Producto(
+                        id=uuid4(),   # sin RETURNING: permite INSERT por lotes
                         tenant_id=ctx.tenant_id,
                         sku=sku,
                         nombre=fila.nombre.strip().upper(),
@@ -873,8 +965,7 @@ def importar_productos(
                         codigo_barras=(fila.codigo_barras or "").strip() or None,
                         activo=fila.activo,
                     )
-                    db.add(prod)
-                    db.flush()
+                    _nuevo(prod, nuevos_prods)
                     creados += 1
 
                 # Catálogo del cliente: su código → NoIdentificacion, su nombre
@@ -884,63 +975,70 @@ def importar_productos(
                 nombre_c = (fila.nombre_cliente or "").strip() or None
                 if clientes and (codigo_c or nombre_c):
                     for cliente in clientes:
-                        pc = (
-                            db.query(ProductoCliente)
-                            .filter(
-                                ProductoCliente.cliente_id == cliente.id,
-                                ProductoCliente.producto_id == prod.id,
-                            )
-                            .one_or_none()
-                        )
+                        clave_pc = (cliente.id, prod.id)
+                        pc = pc_previos.get(clave_pc)
                         if pc is None:
                             pc = ProductoCliente(
-                                tenant_id=ctx.tenant_id,
-                                cliente_id=cliente.id,
-                                producto_id=prod.id,
+                                id=uuid4(), tenant_id=ctx.tenant_id,
+                                cliente_id=cliente.id, producto_id=prod.id,
                             )
-                            db.add(pc)
+                            _nuevo(pc, nuevos_deps)
+                            pc_previos[clave_pc] = pc
                         pc.codigo_cliente = codigo_c
                         pc.nombre_cliente = nombre_c
                         if unidad_fila:
                             pc.presentacion = unidad_fila
-                        db.flush()
                         alias_guardados += 1
                     # El cruce también aprende el nombre (una vez, es del tenant).
                     if nombre_c:
-                        aprender_alias(
-                            db, ctx.tenant_id, nombre_c, prod.id,
-                            origen="IMPORT", user_id=ctx.user_id,
-                        )
+                        norm_alias = normalizar(nombre_c)[:254]
+                        if norm_alias and norm_alias not in alias_previos:
+                            _nuevo(ProductoAlias(
+                                id=uuid4(), tenant_id=ctx.tenant_id,
+                                producto_id=prod.id, alias=nombre_c.strip()[:254],
+                                alias_normalizado=norm_alias, origen="IMPORT",
+                                created_by=ctx.user_id,
+                            ), nuevos_deps)
+                            alias_previos[norm_alias] = prod.id
 
                 # Precio → lista indicada, EN la presentación de la fila (el
                 # precio del MANOJO no es el del KILO).
                 if lista_id is not None and fila.precio is not None:
                     presentacion = unidad_fila or prod.presentacion_default or prod.unidad_base or "KILO"
-                    precio_row = (
-                        db.query(Precio)
-                        .filter(
-                            Precio.lista_id == lista_id,
-                            Precio.producto_id == prod.id,
-                            Precio.presentacion == presentacion,
-                            Precio.cantidad_minima == 1,
-                        )
-                        .one_or_none()
-                    )
+                    clave_precio = (prod.id, presentacion, 1)
+                    precio_row = precios_previos.get(clave_precio)
                     if precio_row is None:
-                        db.add(Precio(
-                            tenant_id=ctx.tenant_id, lista_id=lista_id,
+                        precio_row = Precio(
+                            id=uuid4(), tenant_id=ctx.tenant_id, lista_id=lista_id,
                             producto_id=prod.id, presentacion=presentacion,
                             precio_unitario=fila.precio, cantidad_minima=1,
-                        ))
+                        )
+                        _nuevo(precio_row, nuevos_deps)
+                        precios_previos[clave_precio] = precio_row
                     else:
                         precio_row.precio_unitario = fila.precio
-                    db.flush()
                     precios_guardados += 1
+
+                if aislar_filas:
+                    db.flush()   # el savepoint de ESTA fila la aísla del resto
         except (IntegrityError, ValueError) as exc:
+            # Esta fila no cuenta: se deshacen sus sumas.
+            (creados, vinculados, alias_guardados, precios_guardados,
+             categorias_creadas, presentaciones_agregadas) = antes
             detalle = str(exc)
             if isinstance(exc, IntegrityError):
                 detalle = _DUP if "uq_producto_tenant_sku" in str(exc.orig) else "Registro duplicado"
             errores.append(ImportErrorFila(fila=n, error=detalle))
+
+    if not aislar_filas:
+        # Tres viajes para TODO el lote, en orden de dependencia. Los INSERT de
+        # cada fase se agrupan porque los id se asignaron en Python (no hace
+        # falta RETURNING por fila). Si algo choca, el endpoint reintenta
+        # aislando cada fila para poder señalar cuál.
+        for fase in (nuevas_cats, nuevos_prods, nuevos_deps):
+            if fase:
+                db.add_all(fase)
+            db.flush()
 
     return ImportResultOut(
         creados=creados, vinculados=vinculados, alias_guardados=alias_guardados,
