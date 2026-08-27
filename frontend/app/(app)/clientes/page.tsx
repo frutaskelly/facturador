@@ -1,6 +1,7 @@
 "use client";
 
-import Link from "next/link";
+
+import { BookOpen, Receipt, Store } from "lucide-react";
 
 import { CrudPage, type CrudConfig } from "@/components/crud/CrudPage";
 import { Badge } from "@/components/ui/Badge";
@@ -27,17 +28,6 @@ const config: CrudConfig<Cliente> = {
         ? <span className="font-medium text-danger">{fmtMoney(c.saldo_actual)}</span>
         : <span className="text-muted">—</span> },
     { header: "Estado", cell: (c) => <Badge tone={c.status === "ACTIVO" ? "success" : "muted"}>{c.status}</Badge> },
-    { header: "", cell: (c) => (
-      <div className="flex gap-3 whitespace-nowrap">
-        {/* Atajo a las sucursales DE ESTE cliente (llega filtrado, sin buscarlo). */}
-        <Link href={`/sucursales?cliente=${c.id}`} onClick={(e) => e.stopPropagation()}
-          className="text-sm text-accent hover:underline">Sucursales</Link>
-        <Link href={`/clientes/${c.id}/catalogo`} onClick={(e) => e.stopPropagation()}
-          className="text-sm text-accent hover:underline">Catálogo</Link>
-        <Link href={`/clientes/${c.id}/estado-cuenta`} onClick={(e) => e.stopPropagation()}
-          className="text-sm text-accent hover:underline">Estado de cuenta</Link>
-      </div>
-    ) },
   ],
   fields: [
     { name: "codigo", label: "Código", readonly: true, hint: "Se genera automáticamente" },
@@ -230,6 +220,12 @@ const config: CrudConfig<Cliente> = {
       type: "select",
       hint: "La sucursal puede sobreescribirla; en blanco usa la predeterminada",
     },
+  ],
+  // Accesos rápidos por fila, como iconos junto a editar/eliminar.
+  rowLinks: (c) => [
+    { href: `/sucursales?cliente=${c.id}`, title: "Sucursales", icon: <Store size={16} /> },
+    { href: `/clientes/${c.id}/catalogo`, title: "Catálogo", icon: <BookOpen size={16} /> },
+    { href: `/clientes/${c.id}/estado-cuenta`, title: "Estado de cuenta", icon: <Receipt size={16} /> },
   ],
   lookups: {
     lista_precios_id: {

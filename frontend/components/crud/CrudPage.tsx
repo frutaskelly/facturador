@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -95,6 +96,12 @@ export type CrudConfig<T> = {
   toPayload: (v: FormValues) => Record<string, unknown>;
   rowLabel: (row: T) => string;
   lookups?: Record<string, Lookup>;
+  /**
+   * Accesos por fila que se pintan como ICONOS junto a editar/eliminar (en vez
+   * de enlaces de texto, que ensanchan la tabla). `title` es el tooltip y el
+   * texto para lectores de pantalla.
+   */
+  rowLinks?: (row: T) => { href: string; title: string; icon: ReactNode }[];
   /** Advertencia opcional al eliminar (impacto + alternativa). Si devuelve texto,
    * se muestra en el diálogo de confirmación antes de borrar. */
   deleteWarning?: (row: T) => Promise<string | null>;
@@ -268,17 +275,31 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
     className: "text-right w-1",
     cell: (row) => (
       <div className="flex justify-end gap-1">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            openEdit(row);
-          }}
-          aria-label="Editar"
-          className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
-        >
-          <Pencil size={16} />
-        </button>
-        {config.deletable !== false && (
+        {canWrite && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              openEdit(row);
+            }}
+            aria-label="Editar"
+            className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
+          >
+            <Pencil size={16} />
+          </button>
+        )}
+        {config.rowLinks?.(row).map((l) => (
+          <Link
+            key={l.href}
+            href={l.href}
+            onClick={(e) => e.stopPropagation()}
+            title={l.title}
+            aria-label={l.title}
+            className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
+          >
+            {l.icon}
+          </Link>
+        ))}
+        {canWrite && config.deletable !== false && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -293,7 +314,8 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
       </div>
     ),
   };
-  const columns = canWrite ? [...config.columns, actionsCol] : config.columns;
+  const columns =
+    canWrite || config.rowLinks ? [...config.columns, actionsCol] : config.columns;
 
   const from = total === 0 ? 0 : page * LIMIT + 1;
   const to = Math.min((page + 1) * LIMIT, total);
