@@ -6483,6 +6483,11 @@
       ],
       "title": "Precio"
      },
+     "presentacion_adivinada": {
+      "default": false,
+      "title": "Presentacion Adivinada",
+      "type": "boolean"
+     },
      "presentacion_sugerida": {
       "anyOf": [
        {
@@ -23412,6 +23417,23 @@
        "format": "uuid",
        "title": "Oc Id",
        "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "almacen_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Almacen Id"
       }
      },
      {

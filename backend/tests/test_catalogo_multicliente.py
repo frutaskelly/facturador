@@ -61,6 +61,17 @@ def env(db_engine):
         m = Membership(tenant_id=t.id, user_id=u.id, role_id=admin_role.id)
         db.add(m); db.flush(); created["memberships"].append(m.id)
         admin = {"sub": sub, "email": u.email, "tenant_id": t.id}
+        # Quien captura remisiones pero NO gestiona catálogo: es el alcance de
+        # la clave de conexión del bot (remision:gestionar + menu:productos).
+        capt_role = db.query(Role).filter(
+            Role.nombre == "CAPTURISTA_GOV", Role.es_preset.is_(True)
+        ).one()
+        sub_c = f"sub-mc-capt-{suffix}"
+        uc = User(email=f"mc-capt-{suffix}@t.test", auth_user_id=sub_c, full_name="capt")
+        db.add(uc); db.flush(); created["users"].append(uc.id)
+        mc = Membership(tenant_id=t.id, user_id=uc.id, role_id=capt_role.id)
+        db.add(mc); db.flush(); created["memberships"].append(mc.id)
+        capturista = {"sub": sub_c, "email": uc.email, "tenant_id": t.id}
 
         balles = Cliente(tenant_id=t.id, codigo="BA", legal_name="OPERADORA BALLES",
                          rfc="OBV191007BS1")
@@ -101,7 +112,7 @@ def env(db_engine):
         ])
         db.add(ListaAsignacion(tenant_id=t.id, lista_id=lista.id, cliente_id=balles.id))
         db.commit()
-        yield {"admin": admin, "tenant": str(t.id),
+        yield {"admin": admin, "capturista": capturista, "tenant": str(t.id),
                "balles": str(balles.id), "ehmo": str(ehmo.id), "suc_tab": str(suc_tab.id),
                "cilantro": str(cilantro.id), "serrano": str(serrano.id),
                "jalapeno": str(jalapeno.id), "alm": str(alm.id)}
@@ -368,6 +379,196 @@ def test_el_sku_interno_es_numerico_del_servidor(client, env, auth_as):
     r = client.patch(f"/api/v1/productos/{env['serrano']}", headers=h,
                      json={"sku": "00000301", "nombre": "CHILE SERRANO VERDE"})
     assert r.status_code == 200, r.text
+
+
+# ─── lo que NO puede decidir solo (hallazgos de la revisión adversarial) ─────
+
+def test_unidad_adivinada_no_es_automatica(client, env, auth_as):
+    """Sin unidad legible, la presentación se adivina — y adivinar cambia el
+    dinero: 10 MANOJO a 3.25 no es 10 KILO a 32.50."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    client.post("/api/v1/clientes/externos", headers=h, json={
+        "sistema": "RFC", "clave": "OBV191007BS1", "cliente_id": env["balles"]})
+    for unidad in (None, "REJA"):
+        oc = _oc_auto(client, h, f"WA:x:{uuid.uuid4().hex[:6]}", [
+            {"descripcion": "CILANTRO MANOJO DE 1 KG", "cantidad": "10",
+             "unidad": unidad, "clave": "CILA-FRUT-145"},
+        ])
+        assert not oc["auto"]["ok"], f"unidad={unidad} no debería ser automática"
+        assert "unidad" in oc["auto"]["motivo"]
+        assert oc["lineas"][0]["presentacion_adivinada"] is True
+
+
+def test_sin_unidad_sigue_siendo_automatico_con_una_sola_presentacion(client, env, auth_as):
+    """El freno es contra la adivinanza, no contra el carril: si el producto se
+    vende de una sola forma, no hay nada que adivinar."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    client.post("/api/v1/clientes/externos", headers=h, json={
+        "sistema": "RFC", "clave": "OBV191007BS1", "cliente_id": env["balles"]})
+    # El serrano solo tiene KILO; se le da precio en la lista negociada.
+    lista = client.get("/api/v1/listas-precios?limit=50", headers=h).json()["items"]
+    lista_balles = next(l for l in lista if l["codigo"] == "BALLES")
+    client.post(f"/api/v1/listas-precios/{lista_balles['id']}/precios", headers=h, json={
+        "producto_id": env["serrano"], "precio_unitario": "48.00", "cantidad_minima": 1})
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "chile serranito", "producto_id": env["serrano"]})
+    oc = _oc_auto(client, h, f"WA:x:{uuid.uuid4().hex[:6]}", [
+        {"descripcion": "CHILE SERRANITO", "cantidad": "5", "unidad": None},
+    ])
+    assert oc["auto"]["ok"], oc["auto"]["motivo"]
+
+
+def test_clave_ambigua_del_propio_cliente_no_decide(client, env, auth_as):
+    """Dos productos del MISMO cliente con la misma clave: la elige el orden de
+    la tabla, así que nadie decide — igual que con la clave de otro cliente."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    client.post("/api/v1/clientes/externos", headers=h, json={
+        "sistema": "RFC", "clave": "OBV191007BS1", "cliente_id": env["balles"]})
+    # El mismo código apuntando también al serrano (renumeración del cliente).
+    r = client.put(
+        f"/api/v1/clientes/{env['balles']}/catalogo/{env['serrano']}", headers=h,
+        json={"codigo_cliente": "CILA-FRUT-145", "nombre_cliente": "CHILE SERRANO"})
+    assert r.status_code in (200, 201), r.text
+    oc = _oc_auto(client, h, f"WA:x:{uuid.uuid4().hex[:6]}", [
+        {"descripcion": "CILANTRO MANOJO DE 1 KG", "cantidad": "10",
+         "unidad": "KG", "clave": "CILA-FRUT-145"},
+    ])
+    origenes = {c["origen"] for c in oc["lineas"][0]["candidatos"]}
+    assert "codigo_cliente" not in origenes, "una clave ambigua no puede cruzar al 100"
+
+
+def test_dos_productos_con_el_mismo_nombre_no_deciden(client, env, auth_as):
+    """`buscar` devuelve un 100 por cada producto que normaliza igual — a
+    propósito, para exhibir el duplicado. Eso lo resuelve un humano."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    client.post("/api/v1/clientes/externos", headers=h, json={
+        "sistema": "RFC", "clave": "OBV191007BS1", "cliente_id": env["balles"]})
+    # El duplicado que este mismo trabajo viene a evitar, pero que el catálogo
+    # ya podría arrastrar: mismo nombre normalizado, otra fila.
+    gemelo = client.post("/api/v1/productos", headers=h, json={
+        "nombre": "Cilantro", "clave_sat": "50403700",
+        "unidad_sat": "KGM", "unidad_base": "KILO",
+        "presentaciones": {"KILO": 1}, "forzar": True}).json()
+    lista = client.get("/api/v1/listas-precios?limit=50", headers=h).json()["items"]
+    lista_balles = next(l for l in lista if l["codigo"] == "BALLES")
+    client.post(f"/api/v1/listas-precios/{lista_balles['id']}/precios", headers=h, json={
+        "producto_id": gemelo["id"], "precio_unitario": "45.00", "cantidad_minima": 1})
+    oc = _oc_auto(client, h, f"WA:x:{uuid.uuid4().hex[:6]}", [
+        {"descripcion": "CILANTRO", "cantidad": "10", "unidad": "KG"},
+    ])
+    exactos = [c for c in oc["lineas"][0]["candidatos"] if c["score"] == 100]
+    assert len(exactos) == 2, "el duplicado debe verse, no esconderse"
+    assert not oc["auto"]["ok"]
+    assert "100" in oc["auto"]["motivo"]
+
+
+def test_la_clave_parecida_no_tapa_el_exacto_de_la_descripcion(client, env, auth_as):
+    """Clave 'CHILE' + descripción exacta: el prefijo sobre la clave no puede
+    desplazar al cruce exacto — es el falso positivo papa/papaya."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    client.post("/api/v1/clientes/externos", headers=h, json={
+        "sistema": "RFC", "clave": "OBV191007BS1", "cliente_id": env["balles"]})
+    oc = _oc_auto(client, h, f"WA:x:{uuid.uuid4().hex[:6]}", [
+        {"descripcion": "CHILE JALAPENO", "cantidad": "5", "unidad": "KG",
+         "clave": "CHILE"},
+    ])
+    top = oc["lineas"][0]["candidatos"][0]
+    assert top["producto_id"] == env["jalapeno"] and top["origen"] == "exacto"
+
+
+def test_la_correccion_del_humano_pisa_el_alias_del_cliente(client, env, auth_as):
+    """Un alias con alcance gana al cruzar; corregir en la bandeja tiene que
+    caer ahí, o la corrección no surte efecto nunca."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "chile verde", "producto_id": env["serrano"]})
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "chile verde", "producto_id": env["jalapeno"],
+                      "cliente_id": env["ehmo"]})
+    client.post("/api/v1/clientes/externos", headers=h, json={
+        "sistema": "RFC", "clave": "GOA180712SF5", "cliente_id": env["ehmo"]})
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json={
+        "canal": "WHATSAPP", "origen_externo": f"WA:x:{uuid.uuid4().hex[:6]}",
+        "rfc": "GOA180712SF5",
+        "lineas": [{"descripcion": "CHILE VERDE", "cantidad": "2", "unidad": "KG"}],
+    }).json()
+    # El operador corrige de vuelta al serrano (lo que dice el global).
+    r = client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision", headers=h, json={
+        "almacen_id": env["alm"],
+        "lineas": [{"producto_id": env["serrano"], "cantidad": "2",
+                    "presentacion": "KILO", "precio_unitario": "48.00",
+                    "texto_original": "CHILE VERDE"}],
+    })
+    assert r.status_code == 200, r.text
+    db = SessionLocal()
+    try:
+        alias = (
+            db.query(ProductoAlias)
+            .filter(ProductoAlias.alias_normalizado == "chile verde",
+                    ProductoAlias.cliente_id == uuid.UUID(env["ehmo"]))
+            .one()
+        )
+        assert str(alias.producto_id) == env["serrano"], "la corrección no llegó al alias del cliente"
+    finally:
+        db.close()
+
+
+def test_sin_permiso_de_catalogo_no_se_escribe_lo_que_se_timbra(client, env, auth_as):
+    """`codigo_cliente` y `nombre_cliente` son el NoIdentificacion y la
+    Descripcion del CFDI. Quien solo captura remisiones —el alcance de la clave
+    del bot— crea la remisión, pero no fija lo que se firma ante el SAT."""
+    auth_as(env["capturista"]); h = _hdr(env["capturista"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json={
+        "canal": "WHATSAPP", "origen_externo": f"WA:x:{uuid.uuid4().hex[:6]}",
+        "nombre": "GRUPO EHMO",
+        "lineas": [{"descripcion": "TEXTO DEL OCR", "cantidad": "3",
+                    "unidad": "KG", "clave": "XX-999"}],
+    }).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"]})
+    r = client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision", headers=h, json={
+        "almacen_id": env["alm"],
+        "lineas": [{"producto_id": env["serrano"], "cantidad": "3",
+                    "presentacion": "KILO", "precio_unitario": "48.00",
+                    "texto_original": "TEXTO DEL OCR", "clave": "XX-999"}],
+    })
+    assert r.status_code == 200, r.text        # la remisión SÍ se crea
+    db = SessionLocal()
+    try:
+        filas = (
+            db.query(ProductoCliente)
+            .filter(ProductoCliente.cliente_id == uuid.UUID(env["ehmo"]),
+                    ProductoCliente.producto_id == uuid.UUID(env["serrano"]))
+            .all()
+        )
+        assert not filas, "sin producto:gestionar no se escribe el catálogo del cliente"
+    finally:
+        db.close()
+
+
+def test_alias_con_sucursal_inexistente_es_422(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/alias", headers=h, json={
+        "texto": "chilito", "producto_id": env["serrano"],
+        "cliente_id": env["ehmo"], "sucursal_id": str(uuid.uuid4())})
+    assert r.status_code == 422
+
+
+def test_el_clic_respeta_el_almacen_elegido(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    client.post("/api/v1/clientes/externos", headers=h, json={
+        "sistema": "RFC", "clave": "OBV191007BS1", "cliente_id": env["balles"]})
+    oc = _oc_auto(client, h, f"WA:x:{uuid.uuid4().hex[:6]}", [
+        {"descripcion": "CILANTRO MANOJO DE 1 KG", "cantidad": "10",
+         "unidad": "KG", "clave": "CILA-FRUT-145", "precio": "32.50"},
+    ])
+    assert oc["auto"]["ok"], oc["auto"]["motivo"]
+    r = client.post(
+        f"/api/v1/oc-recibidas/{oc['id']}/crear-remision-auto?almacen_id={env['alm']}",
+        headers=h)
+    assert r.status_code == 200, r.text
+    rem = client.get(f"/api/v1/remisiones/{r.json()['remision_id']}", headers=h).json()
+    assert rem["almacen_id"] == env["alm"]
 
 
 # ─── el PDF de la remisión habla el idioma del cliente ───────────────────────

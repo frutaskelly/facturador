@@ -5435,6 +5435,11 @@ export interface components {
             numero: number;
             /** Precio */
             precio?: string | null;
+            /**
+             * Presentacion Adivinada
+             * @default false
+             */
+            presentacion_adivinada: boolean;
             /** Presentacion Sugerida */
             presentacion_sugerida?: string | null;
             /** Unidad */
@@ -12330,7 +12335,9 @@ export interface operations {
     };
     crear_remision_auto_api_v1_oc_recibidas__oc_id__crear_remision_auto_post: {
         parameters: {
-            query?: never;
+            query?: {
+                almacen_id?: string | null;
+            };
             header?: {
                 "X-Tenant-Id"?: string | null;
             };

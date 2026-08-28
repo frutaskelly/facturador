@@ -365,6 +365,31 @@ def aprender_alias(
         return existing
 
 
+def _alias_vigente_de_cliente(
+    db: Session, norm: str, cliente_id, sucursal_id
+) -> Optional[ProductoAlias]:
+    """El alias CON ALCANCE que `buscar` usaría para este documento, o None.
+
+    Misma precedencia que `alias_de_cliente`: el de la sucursal pisa al del
+    cliente. Existe para que corregir en la bandeja caiga donde el resolutor
+    va a leer — si no, la corrección se escribe en un lugar que nadie mira."""
+    if cliente_id is None:
+        return None
+    filas = (
+        db.query(ProductoAlias)
+        .filter(
+            ProductoAlias.alias_normalizado == norm,
+            ProductoAlias.cliente_id == cliente_id,
+        )
+        .all()
+    )
+    if sucursal_id is not None:
+        de_sucursal = next((a for a in filas if a.sucursal_id == sucursal_id), None)
+        if de_sucursal is not None:
+            return de_sucursal
+    return next((a for a in filas if a.sucursal_id is None), None)
+
+
 def aprender_alias_con_alcance(
     db: Session, tenant_id: UUID, texto: str, producto_id: UUID, *,
     cliente_id: Optional[UUID] = None, sucursal_id: Optional[UUID] = None,
@@ -374,7 +399,9 @@ def aprender_alias_con_alcance(
 
     - Sin alias global para ese texto → se aprende GLOBAL (le sirve a todos:
       Balles, Jubran y MAFAN comparten vocabulario gratis).
-    - Global ya apunta al MISMO producto → no hay nada que aprender.
+    - Global ya apunta al MISMO producto → no hay nada que aprender, SALVO que
+      este cliente arrastre un alias con alcance que diga otra cosa: ese es el
+      que gana al cruzar, así que la corrección tiene que caer ahí.
     - Global apunta a OTRO producto → el texto es ambiguo entre clientes: se
       aprende con alcance (cliente, y sucursal si viene) SIN tocar el global —
       el "LIMON" de Pachuca deja de pelearse con el de Villahermosa.
@@ -382,13 +409,21 @@ def aprender_alias_con_alcance(
     norm = normalizar(texto)[:254]
     if not norm:
         return None
+    # Lo que HOY resuelve para este documento: si el cliente tiene su propio
+    # alias, es el que manda en `buscar` y el que hay que corregir.
+    vigente = _alias_vigente_de_cliente(db, norm, cliente_id, sucursal_id)
+    if vigente is not None and vigente.producto_id != producto_id:
+        return aprender_alias(
+            db, tenant_id, texto, producto_id, origen=origen, user_id=user_id,
+            cliente_id=vigente.cliente_id, sucursal_id=vigente.sucursal_id,
+        )
     global_ = _alias_en_alcance(db, norm, None, None)
     if global_ is None:
         return aprender_alias(
             db, tenant_id, texto, producto_id, origen=origen, user_id=user_id
         )
     if global_.producto_id == producto_id:
-        return global_
+        return vigente if vigente is not None else global_
     if cliente_id is None:
         # Sin cliente no hay alcance posible: reapuntar el global es decisión
         # del que gestiona el catálogo, no de este helper.

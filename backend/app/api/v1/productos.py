@@ -34,6 +34,7 @@ from ...models import (
     ProductoCliente,
     SatClaveProdServ,
     SatClaveUnidad,
+    Sucursal,
 )
 from ...schemas.producto import (
     AliasIn,
@@ -329,6 +330,9 @@ def crear_alias(
     ensure_fk(db, Producto, payload.producto_id, "producto_id")
     if payload.cliente_id is not None:
         ensure_fk(db, Cliente, payload.cliente_id, "cliente_id")
+        # Sin validar la sucursal, el INSERT viola su FK dentro del savepoint de
+        # `aprender_alias` y el endpoint contestaba 201 sin haber guardado nada.
+        ensure_fk(db, Sucursal, payload.sucursal_id, "sucursal_id")
         aprender_alias(
             db, ctx.tenant_id, payload.texto, payload.producto_id,
             cliente_id=payload.cliente_id, sucursal_id=payload.sucursal_id,

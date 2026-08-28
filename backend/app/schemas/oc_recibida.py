@@ -88,6 +88,10 @@ class LineaOCRecibidaOut(BaseModel):
     # ("KILOGR AMO" → KILO); si el documento no dice, la habitual del cliente
     # para el producto sugerido. None = no se reconoció: que decida el humano.
     presentacion_sugerida: Optional[str] = None
+    # True cuando la de arriba NO salió del documento sino de lo habitual del
+    # cliente o del producto. El carril automático no acepta una adivinanza en
+    # productos con varias presentaciones: el factor cambia cantidad y precio.
+    presentacion_adivinada: bool = False
     candidatos: list[CandidatoLineaOut] = Field(default_factory=list)
 
 

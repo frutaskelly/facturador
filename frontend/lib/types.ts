@@ -684,6 +684,10 @@ export type LineaOC = {
   // ("KILOGR AMO" → KILO); si el documento no la dice, la habitual de ese
   // cliente para el producto. Null = no se reconoció: decide la persona.
   presentacion_sugerida?: string | null;
+  // True cuando la de arriba NO salió del documento sino de lo habitual del
+  // cliente o del producto: es una adivinanza, y el factor de la presentación
+  // cambia cantidad y precio.
+  presentacion_adivinada?: boolean;
   candidatos: CandidatoLinea[];
 };
 

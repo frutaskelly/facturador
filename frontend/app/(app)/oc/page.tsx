@@ -101,6 +101,42 @@ function presentacionDe(unidad: string, cand?: LineaOC["candidatos"][number]): s
   return hit ?? cand?.presentacion_default ?? claves[0] ?? "KILO";
 }
 
+/** La tabla de partidas a partir del detalle del servidor.
+ *
+ *  Vive fuera de `abrir` porque el cruce depende del CLIENTE: candidatos,
+ *  preselección y presentación se calculan contra SU catálogo y SU vocabulario.
+ *  Si el operador cambia de cliente, la tabla tiene que rehacerse — dejarla
+ *  colgada hacía que el banner dijera una cosa y la tabla otra, y la remisión
+ *  salía con el producto del cliente anterior. */
+function tablaDe(oc: OCRecibidaDetalle): LineaEdit[] {
+  return oc.lineas.map((l) => {
+    // Se preselecciona el mejor candidato solo si es un cruce fuerte (exacto o
+    // alias ya confirmado). Un difuso al 76% lo revisa la persona.
+    const fuerte = l.candidatos[0] && l.candidatos[0].score >= 96 ? l.candidatos[0] : undefined;
+    const unidad = l.unidad ?? "";
+    // El backend ya tradujo la unidad del documento (incluido el OCR partido).
+    // Se acepta solo si el producto preseleccionado de verdad la vende: una
+    // presentación que no existe entra como cantidad y precio equivocados.
+    const sugerida = l.presentacion_sugerida ?? "";
+    const vendidas = Object.keys(fuerte?.presentaciones ?? {});
+    const sirve =
+      sugerida && (!fuerte || vendidas.some((k) => k.toUpperCase() === sugerida.toUpperCase()));
+    return {
+      numero: l.numero,
+      texto: l.descripcion,
+      cantidad: String(l.cantidad ?? ""),
+      unidad,
+      clave: l.clave ?? null,
+      producto_id: fuerte ? fuerte.producto_id : "",
+      presentacion: sirve ? sugerida : presentacionDe(unidad, fuerte),
+      precio: l.precio != null ? String(l.precio) : "",
+      notas: l.notas ?? null,
+      candidatos: l.candidatos,
+      buscando: false,
+    };
+  });
+}
+
 /** Precio tecleado a la mexicana ("1,234.50" o "12,50") → decimal del backend. */
 function precioNormalizado(v: string): string {
   const t = v.trim();
@@ -174,30 +210,7 @@ export default function Page() {
       setProyectoSel(oc.proyecto_id ?? "");
       setVerTodos(!oc.candidatos?.length);
       setAlmacenSel("");
-      setLineas(
-        oc.lineas.map((l) => {
-          // Se preselecciona el mejor candidato solo si es un cruce fuerte
-          // (exacto o alias ya confirmado). Un difuso al 76% lo revisa la persona.
-          const fuerte = l.candidatos[0] && l.candidatos[0].score >= 96 ? l.candidatos[0] : undefined;
-          const unidad = l.unidad ?? "";
-          return {
-            numero: l.numero,
-            texto: l.descripcion,
-            cantidad: String(l.cantidad ?? ""),
-            unidad,
-            clave: l.clave ?? null,
-            producto_id: fuerte ? fuerte.producto_id : "",
-            // El backend ya tradujo la unidad del documento (incluido el OCR
-            // partido) y, si no la decía, usó la habitual de ese cliente. Solo
-            // se recalcula aquí cuando no vino nada.
-            presentacion: l.presentacion_sugerida ?? presentacionDe(unidad, fuerte),
-            precio: l.precio != null ? String(l.precio) : "",
-            notas: l.notas ?? null,
-            candidatos: l.candidatos,
-            buscando: false,
-          };
-        })
-      );
+      setLineas(tablaDe(oc));
     } catch {
       toast.error("No se pudo abrir la orden");
     }
@@ -231,6 +244,10 @@ export default function Page() {
       toast.error("Elige el cliente");
       return null;
     }
+    // Cambiar de cliente (o de sucursal) cambia el cruce de TODAS las partidas:
+    // el catálogo y el vocabulario son suyos.
+    const cambioDeCliente =
+      clienteSel !== (abierta.cliente_id ?? "") || sucursalSel !== (abierta.sucursal_id ?? "");
     try {
       const oc = await apiFetch<OCRecibidaDetalle>(`/api/v1/oc-recibidas/${abierta.id}`, {
         method: "PATCH",
@@ -243,6 +260,10 @@ export default function Page() {
         }),
       });
       setAbierta(oc);
+      // El cruce se recalculó contra el catálogo y el vocabulario del cliente
+      // que quedó guardado: la tabla se rehace o seguiría mostrando (y enviando)
+      // los productos del cliente anterior.
+      if (cambioDeCliente) setLineas(tablaDe(oc));
       return oc;
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo asignar");
@@ -264,6 +285,24 @@ export default function Page() {
   // Ya tiene remisión, o está descartada: nada se edita desde la bandeja.
   const bloqueada = !!abierta && (!!abierta.remision_id || abierta.estado === "DESCARTADA");
   const auto = abierta?.auto ?? null;
+
+  /** ¿El operador corrigió una partida después de que el servidor evaluó `auto`?
+   *  El botón de un clic hace POST sin cuerpo y el backend rearma las líneas
+   *  desde su propia evaluación (a propósito: el catálogo y las listas cambian).
+   *  Así que la corrección se perdería en silencio — y encima el cruce
+   *  equivocado que se acaba de corregir se reforzaría como alias. */
+  const autoDesfasado = useMemo(() => {
+    if (!auto?.ok) return false;
+    if (auto.lineas.length !== lineas.length) return true;
+    return auto.lineas.some((a) => {
+      const l = lineas.find((x) => x.numero === a.numero);
+      if (!l) return true;
+      if (l.producto_id !== a.producto_id) return true;
+      if (l.presentacion !== a.presentacion) return true;
+      const tecleado = precioNormalizado(l.precio);
+      return !!tecleado && Number(tecleado) !== Number(a.precio_unitario);
+    });
+  }, [auto, lineas]);
 
   async function crearRemision() {
     if (!abierta) return;
@@ -322,7 +361,8 @@ export default function Page() {
     setGuardando(true);
     try {
       const oc = await apiFetch<OCRecibidaDetalle>(
-        `/api/v1/oc-recibidas/${abierta.id}/crear-remision-auto`,
+        `/api/v1/oc-recibidas/${abierta.id}/crear-remision-auto` +
+          (almacenSel ? `?almacen_id=${almacenSel}` : ""),
         { method: "POST" }
       );
       toast.success(`Remisión ${oc.remision_folio ?? ""} creada en borrador`);
@@ -495,7 +535,7 @@ export default function Page() {
                 <Button variant="secondary" onClick={asignar} disabled={guardando || !clienteSel}>
                   Guardar asignación
                 </Button>
-                {auto?.ok ? (
+                {auto?.ok && !autoDesfasado ? (
                   <Button
                     variant="secondary"
                     onClick={crearRemisionAuto}
@@ -545,7 +585,12 @@ export default function Page() {
             {/* Cruzó completa por clave, alias o exacto, con precio de una lista
                 negociada: no hay nada que capturar. El desglose se muestra igual
                 —quien firma quiere ver qué va a salir antes de darle al botón. */}
-            {auto?.ok && !bloqueada ? (
+            {auto?.ok && autoDesfasado && !bloqueada ? (
+              <p className="text-xs text-muted">
+                Corregiste una partida: se crea con «Crear remisión», que respeta lo que
+                acabas de cambiar. El atajo de un clic reharía el cruce desde cero.
+              </p>
+            ) : auto?.ok && !bloqueada ? (
               <Alert tone="success">
                 <div className="font-medium">
                   Lista para remisión: las {auto.lineas.length} partidas cruzaron por clave o

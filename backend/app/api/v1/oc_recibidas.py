@@ -47,7 +47,7 @@ from ...schemas.oc_recibida import (
 from ...models import ProductoCliente
 from ...services import cliente_match
 from ...services.precios import resolver_precio
-from ...services.series import resolver_almacen
+from ...services.series import resolver_almacen, resolver_serie
 from ...services.producto_match import (
     aprender_alias_con_alcance,
     alias_de_cliente,
@@ -302,21 +302,38 @@ def _codigos_para(db: Session, cliente_id) -> tuple[dict, dict, dict]:
     """Los códigos del catálogo por cliente, listos para el cruce por clave.
 
     Devuelve (del_cliente, de_otros, presentacion_del_cliente):
-      - del_cliente: {codigo_norm: producto_id} de ESTE cliente — decide al 100.
+      - del_cliente: {codigo_norm: producto_id | None} de ESTE cliente — decide
+        al 100; None marca código ambiguo y NO decide.
       - de_otros:    {codigo_norm: producto_id | None} del resto del tenant;
         None marca código ambiguo (dos productos) y NO decide — regla PR #32.
       - presentacion_del_cliente: {producto_id: presentacion} para partidas que
         no dicen unidad: la unidad con la que ese cliente compra ese producto.
+
+    La ambigüedad se vigila en LAS DOS ramas: `producto_clientes` solo es único
+    por (tenant, cliente, producto), así que nada impide que un cliente tenga
+    el mismo código en dos productos (una renumeración suya, o un OCR que
+    recortó la clave). Sin la guarda, el ganador lo elegía el orden físico de
+    la tabla — y decidía al 100.
     """
-    del_cliente: dict[str, UUID] = {}
+    del_cliente: dict[str, object] = {}
     de_otros: dict[str, object] = {}
     pres_cliente: dict[UUID, str] = {}
-    for pc in db.query(ProductoCliente).all():
+    q = db.query(ProductoCliente)
+    if cliente_id is not None:
+        # Solo lo que este cruce puede usar: el catálogo del cliente y el de
+        # quienes comparten códigos. Sin filtro, cada apertura de OC traía la
+        # tabla entera.
+        q = q.filter(ProductoCliente.codigo_cliente.isnot(None))
+    for pc in q.all():
         cod = _norm_codigo(pc.codigo_cliente or "")
         if not cod:
             continue
         if cliente_id is not None and pc.cliente_id == cliente_id:
-            del_cliente[cod] = pc.producto_id
+            # El None es pegajoso: una tercera fila lo mantiene ambiguo.
+            if cod in del_cliente and del_cliente[cod] != pc.producto_id:
+                del_cliente[cod] = None
+            else:
+                del_cliente.setdefault(cod, pc.producto_id)
             if pc.presentacion:
                 pres_cliente[pc.producto_id] = pc.presentacion
         else:
@@ -374,18 +391,30 @@ def _detalle(db: Session, oc: OCRecibida) -> dict:
             elif cods_otros.get(cod) is not None and cods_otros[cod] in by_id:
                 exactos.append(_cand_de(by_id[cods_otros[cod]], 95, "codigo_otro_cliente"))
             por_clave = buscar(db, oc.tenant_id, clave, limit=3, prods=catalogo,
-                               aliases=aliases, aliases_cliente=aliases_cli, norms=norms)
+                               aliases=aliases, aliases_cliente=aliases_cli, norms=norms,
+                               unidad=unidad_norm)   # mismo freno papa/papaya
             vistos = {c.producto_id for c in exactos}
+            # La descripción manda cuando cruzó por vía determinista: un parecido
+            # sobre la clave (prefijo 96, difuso) jamás desplaza a un exacto o a
+            # un alias de 100 — "PAPA" como clave no puede tapar "PAPAYA MARADOL".
+            fuertes = [c for c in cands
+                       if c.origen in ("exacto", "alias") and c.producto_id not in vistos]
+            vistos |= {c.producto_id for c in fuertes}
             por_clave = [c for c in por_clave if c.producto_id not in vistos]
             vistos |= {c.producto_id for c in por_clave}
-            cands = exactos + por_clave + [c for c in cands if c.producto_id not in vistos]
+            cands = exactos + fuertes + por_clave + [
+                c for c in cands if c.producto_id not in vistos
+            ]
         top = cands[0] if cands else None
         # La presentación con la que entraría la línea: la unidad del documento;
-        # si no dice, la habitual de ese cliente para ese producto; si tampoco,
-        # la default del producto.
+        # si no dice (o dice una que no reconocemos), la habitual de ese cliente
+        # y en último caso la del producto — pero eso ES una adivinanza y se
+        # marca como tal: el factor de la presentación cambia cantidad y precio.
         pres_sugerida = unidad_norm
+        pres_adivinada = False
         if pres_sugerida is None and top is not None:
             pres_sugerida = pres_cli.get(top.producto_id) or top.presentacion_default or top.unidad_base
+            pres_adivinada = True
         lineas.append({
             "numero": i,
             "descripcion": texto,
@@ -395,6 +424,7 @@ def _detalle(db: Session, oc: OCRecibida) -> dict:
             "precio": ln.get("precio"),
             "notas": ln.get("notas"),
             "presentacion_sugerida": pres_sugerida,
+            "presentacion_adivinada": pres_adivinada,
             "candidatos": [
                 {"producto_id": c.producto_id, "sku": c.sku, "nombre": c.nombre,
                  "score": c.score, "origen": c.origen,
@@ -452,9 +482,19 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
         return no("El documento no trae partidas legibles")
 
     p = oc.payload or {}
+    # La MISMA serie con la que `create_remision` va a foliar: la del grupo si la
+    # declara y, si no, la que resuelve el backend (sucursal → cliente → default).
+    # Precificar con otra rompe la invariante que el propio create_remision
+    # declara — la serie decide el folio Y qué lista de precios aplica.
     serie_id = cliente_match.serie_del_grupo(
         db, oc.tenant_id, str(p.get("jid") or ""), oc.cliente_id, "serie_remision_id"
     )
+    if serie_id is None:
+        serie = resolver_serie(
+            db, oc.tenant_id, "REMISION",
+            sucursal_id=oc.sucursal_id, cliente_id=oc.cliente_id,
+        )
+        serie_id = serie.id if serie is not None else None
     out_lineas = []
     for ln in lineas:
         cands = ln.get("candidatos") or []
@@ -462,6 +502,19 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
         etiqueta = f"«{(ln.get('descripcion') or ln.get('clave') or '')[:60]}»"
         if top is None or top["origen"] not in _ORIGENES_DETERMINISTAS or top["score"] < 100:
             return no(f"La partida {ln['numero']} {etiqueta} no cruza por clave, alias ni exacto")
+        # `buscar` emite a PROPÓSITO un 100 por CADA producto que normaliza igual
+        # ("CILANTRO" y "Cilantro" son dos filas) para que un humano vea el
+        # duplicado. Esa ambigüedad no la puede resolver el orden del seq scan:
+        # misma regla que la clave de otro cliente, que ya no decide si es ambigua.
+        empatados = {
+            c["producto_id"] for c in cands
+            if c["score"] >= 100 and c["origen"] in _ORIGENES_DETERMINISTAS
+        }
+        if len(empatados) > 1:
+            return no(
+                f"La partida {ln['numero']} {etiqueta} cruza al 100 con "
+                f"{len(empatados)} productos distintos: elige cuál va"
+            )
         prod = by_id.get(top["producto_id"])
         pres = ln.get("presentacion_sugerida")
         presentaciones = set((prod.presentaciones or {}).keys()) | {prod.unidad_base}
@@ -469,6 +522,16 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
             return no(
                 f"La partida {ln['numero']} {etiqueta} pide una unidad "
                 f"({ln.get('unidad') or 'sin unidad'}) que el producto no vende"
+            )
+        # La presentación ADIVINADA sugiere, no decide: el documento no dijo
+        # unidad (o dijo una que no reconocemos) y el factor cambia cantidad y
+        # precio — 10 MANOJO no es 10 KILO. Si el producto se vende de una sola
+        # forma no hay nada que adivinar y la orden sigue siendo automática.
+        if ln.get("presentacion_adivinada") and len(presentaciones) > 1:
+            return no(
+                f"La partida {ln['numero']} {etiqueta} no trae una unidad que se "
+                f"reconozca ({ln.get('unidad') or 'sin unidad'}) y el producto se "
+                "vende en varias presentaciones: confírmala a mano"
             )
         res = resolver_precio(
             db,
@@ -716,11 +779,16 @@ def crear_remision(
                     cliente_id=oc.cliente_id, sucursal_id=oc.sucursal_id,
                     origen="IMPORT", user_id=ctx.user_id,
                 )
-        # La CLAVE que traía el documento se registra como código del cliente
-        # (solo si ese producto aún no tiene código para él): la próxima OC con
-        # esa clave cruza al 100 sin leer siquiera la descripción.
-        if oc.cliente_id is not None:
-            _registrar_codigos(db, ctx, oc, payload.lineas)
+    # La CLAVE que traía el documento se registra como código del cliente (solo
+    # si ese producto aún no tiene código para él): la próxima OC con esa clave
+    # cruza al 100 sin leer siquiera la descripción. Exige `producto:gestionar`
+    # —el mismo permiso que POST /productos/catalogo-cliente-batch— porque
+    # `codigo_cliente` y `nombre_cliente` SON el NoIdentificacion y la
+    # Descripcion de todos los CFDI futuros de ese cliente: dejar que los fije
+    # el texto del OCR, sin nadie del catálogo aprobándolo, es firmar ante el
+    # SAT lo que dijo una foto de WhatsApp.
+    if oc.cliente_id is not None and ctx.has("producto:gestionar"):
+        _registrar_codigos(db, ctx, oc, payload.lineas)
 
     oc.remision_id = rem.id
     oc.estado = "ASIGNADA"
@@ -775,6 +843,7 @@ def crear_remision_auto(
     oc_id: UUID,
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
+    almacen_id: Optional[UUID] = Query(default=None),
 ):
     """Un clic: la OC que cruzó COMPLETA por vías deterministas se vuelve remisión.
 
@@ -794,6 +863,9 @@ def crear_remision_auto(
             detail=auto.get("motivo") or "La orden no cruza completa por vía determinista",
         )
     payload = CrearRemisionIn(
+        # El almacén que eligió el operador en la bandeja. Vacío = la cadena de
+        # siempre (sucursal → cliente → predeterminado).
+        almacen_id=almacen_id,
         lineas=[
             LineaCrearIn(
                 producto_id=UUID(l["producto_id"]),
