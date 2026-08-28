@@ -24,16 +24,16 @@ No tener tenant no las deja iguales entre sí:
     escribe, y `anon` sigue sin poder hacer nada.
 
 Numerada 0054 y no 0053 porque `0053_alias_por_cliente` ya existe en la rama
-`claude/catalogo-productos-multicliente-c04900`. `down_revision` apunta al head
-de `origin/main` de hoy; si esa rama entra primero, hay que re-apuntarlo en el
-rebase o alembic quedará con dos cabezas.
+`claude/catalogo-productos-multicliente-c04900`, y `down_revision` cuelga de
+ella: mientras las dos apuntaban a 0052, alembic veía DOS cabezas y
+`alembic upgrade head` —el paso 2/3 de deploy.sh— salía con error 255.
 """
 from typing import Sequence, Union
 
 from alembic import op
 
 revision: str = "0054_rls_tablas_globales"
-down_revision: Union[str, None] = "0052_remision_su_pedido"
+down_revision: Union[str, None] = "0053_alias_por_cliente"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
