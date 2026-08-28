@@ -3744,6 +3744,11 @@ export interface components {
             dias_credito: number;
             /** Domicilio Fiscal */
             domicilio_fiscal?: Record<string, never>;
+            /**
+             * Espejo Sae
+             * @default false
+             */
+            espejo_sae: boolean;
             /** Forma Pago Default */
             forma_pago_default?: string | null;
             /**
@@ -3818,6 +3823,8 @@ export interface components {
             dias_credito?: number | null;
             /** Domicilio Fiscal */
             domicilio_fiscal?: Record<string, never> | null;
+            /** Espejo Sae */
+            espejo_sae?: boolean | null;
             /** Forma Pago Default */
             forma_pago_default?: string | null;
             /** Legal Name */
@@ -4696,6 +4703,11 @@ export interface components {
             } | null;
             /** Ids */
             ids: string[];
+            /**
+             * Regenerar
+             * @default false
+             */
+            regenerar: boolean;
             /**
              * Tipo
              * @default FACTURA

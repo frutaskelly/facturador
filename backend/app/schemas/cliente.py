@@ -60,11 +60,16 @@ class ClienteUpdate(BaseModel):
     almacen_id: Optional[uuid.UUID] = None
     serie_factura_id: Optional[uuid.UUID] = None
     serie_remision_id: Optional[uuid.UUID] = None
+    # Candado de la migración: mientras esté prendido, el cliente factura en
+    # SAE (aquí solo se refleja) y crear facturas nativas para él devuelve 409.
+    # Se apaga cliente por cliente en el corte (Etapa 4 del plan).
+    espejo_sae: Optional[bool] = None
 
 
 class ClienteOut(ORMModel, ClienteBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
+    espejo_sae: bool = False
     saldo_actual: Decimal
     ventas_ytd: Decimal
     ultima_venta_at: Optional[datetime] = None

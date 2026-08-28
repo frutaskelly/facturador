@@ -1054,19 +1054,20 @@ export default function RemisionesPage() {
     tipo: "FACTURA" | "PEDIDO";
     preview: ExportSaePreview | null;
     folios: Record<string, string>;
+    regenerar: boolean;
   }>(null);
   const [exportBusy, setExportBusy] = useState(false);
 
-  async function previewExportSae(tipo: "FACTURA" | "PEDIDO") {
-    setExportSae({ tipo, preview: null, folios: {} });
+  async function previewExportSae(tipo: "FACTURA" | "PEDIDO", regenerar = false) {
+    setExportSae({ tipo, preview: null, folios: {}, regenerar });
     try {
       const pv = await apiFetch<ExportSaePreview>("/api/v1/remisiones/export-sae/preview", {
         method: "POST",
-        body: JSON.stringify({ ids: selected.map((r) => r.id), tipo }),
+        body: JSON.stringify({ ids: selected.map((r) => r.id), tipo, regenerar }),
       });
       const folios: Record<string, string> = {};
       for (const s of pv.series) folios[s.serie] = s.folio_sugerido ? String(s.folio_sugerido) : "";
-      setExportSae({ tipo, preview: pv, folios });
+      setExportSae({ tipo, preview: pv, folios, regenerar });
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo preparar el export");
       setExportSae(null);
@@ -1076,7 +1077,7 @@ export default function RemisionesPage() {
   async function confirmarExportSae() {
     if (!exportSae?.preview?.ok) return;
     const folios: Record<string, number> = {};
-    if (exportSae.tipo === "FACTURA") {
+    if (exportSae.tipo === "FACTURA" && !exportSae.regenerar) {
       for (const [serie, v] of Object.entries(exportSae.folios)) {
         const n = Number(v);
         if (!(n > 0)) { toast.error(`Falta el folio inicial de la serie ${serie}`); return; }
@@ -1087,13 +1088,16 @@ export default function RemisionesPage() {
     try {
       await apiDownloadPost(
         "/api/v1/remisiones/export-sae",
-        { ids: selected.map((r) => r.id), tipo: exportSae.tipo, folios },
+        { ids: selected.map((r) => r.id), tipo: exportSae.tipo, folios,
+          regenerar: exportSae.regenerar },
         `${exportSae.tipo === "FACTURA" ? "FACTURA_massiva" : "PEDIDO_massivo"}_SAE.xls`
       );
       toast.success(
-        exportSae.tipo === "FACTURA"
-          ? "Archivo generado. Cada remisión ya quedó amparada con su folio SAE (espejo)."
-          : "Archivo de pedidos generado."
+        exportSae.regenerar
+          ? "Archivo regenerado con los folios ya estampados."
+          : exportSae.tipo === "FACTURA"
+            ? "Archivo generado. Cada remisión ya quedó amparada con su folio SAE (espejo)."
+            : "Archivo de pedidos generado."
       );
       invalidarDetalles(selected.map((r) => r.id));
       setExportSae(null);
@@ -1883,16 +1887,28 @@ export default function RemisionesPage() {
       >
         {exportSae ? (
           <div className="space-y-4">
-            <div className="w-56">
-              <Field label="Tipo de documento">
-                <Select
-                  value={exportSae.tipo}
-                  onChange={(e) => { void previewExportSae(e.target.value as "FACTURA" | "PEDIDO"); }}
-                >
-                  <option value="FACTURA">Facturas (27 columnas)</option>
-                  <option value="PEDIDO">Pedidos (22 columnas)</option>
-                </Select>
-              </Field>
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="w-56">
+                <Field label="Tipo de documento">
+                  <Select
+                    value={exportSae.tipo}
+                    onChange={(e) => { void previewExportSae(e.target.value as "FACTURA" | "PEDIDO", exportSae.regenerar); }}
+                  >
+                    <option value="FACTURA">Facturas (27 columnas)</option>
+                    <option value="PEDIDO">Pedidos (22 columnas)</option>
+                  </Select>
+                </Field>
+              </div>
+              {exportSae.tipo === "FACTURA" ? (
+                <label className="flex items-center gap-2 pb-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={exportSae.regenerar}
+                    onChange={(e) => { void previewExportSae("FACTURA", e.target.checked); }}
+                  />
+                  Regenerar un lote ya exportado (usa sus folios, no estampa de nuevo)
+                </label>
+              ) : null}
             </div>
 
             {!exportSae.preview ? (
@@ -1911,7 +1927,11 @@ export default function RemisionesPage() {
                   <span className="font-medium tabular-nums">{exportSae.preview.empresa}</span> · fecha
                   de hoy en MM/DD/YYYY (el formato que la PC de importación espera).
                 </p>
-                {exportSae.tipo === "FACTURA" ? (
+                {exportSae.tipo === "FACTURA" && exportSae.regenerar ? (
+                  <p className="text-xs text-muted">
+                    Se reproduce el archivo con los folios que cada remisión ya tiene estampados.
+                  </p>
+                ) : exportSae.tipo === "FACTURA" ? (
                   <div className="space-y-3">
                     {exportSae.preview.series.map((s) => (
                       <div key={s.serie} className="flex items-end gap-3">

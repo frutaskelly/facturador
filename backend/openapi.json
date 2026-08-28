@@ -1803,6 +1803,11 @@
       "title": "Domicilio Fiscal",
       "type": "object"
      },
+     "espejo_sae": {
+      "default": false,
+      "title": "Espejo Sae",
+      "type": "boolean"
+     },
      "forma_pago_default": {
       "anyOf": [
        {
@@ -2066,6 +2071,17 @@
        }
       ],
       "title": "Domicilio Fiscal"
+     },
+     "espejo_sae": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Espejo Sae"
      },
      "forma_pago_default": {
       "anyOf": [
@@ -4309,6 +4325,11 @@
       "minItems": 1,
       "title": "Ids",
       "type": "array"
+     },
+     "regenerar": {
+      "default": false,
+      "title": "Regenerar",
+      "type": "boolean"
      },
      "tipo": {
       "default": "FACTURA",

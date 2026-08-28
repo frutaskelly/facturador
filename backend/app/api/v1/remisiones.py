@@ -1364,6 +1364,10 @@ class ExportSaeIn(BaseModel):
     fecha: Optional[date] = None                 # default: hoy (MM/DD/YYYY en el archivo)
     # Estampar factura_sae en las remisiones del lote (el espejo se llena solo).
     estampar: bool = True
+    # Reproducir el archivo de un lote YA estampado (la descarga se puede
+    # perder después del commit de la estampa): usa los folios guardados en
+    # factura_sae y NO estampa nada de nuevo. Solo FACTURA.
+    regenerar: bool = False
 
 
 @router.post("/export-sae/preview")
@@ -1377,7 +1381,7 @@ def export_sae_preview(
     solo el primero) porque el operador corrige todo de una pasada."""
     from ...services import export_sae as svc
 
-    res, _docs = svc.preparar(db, ctx.tenant_id, body.ids, body.tipo)
+    res, _docs = svc.preparar(db, ctx.tenant_id, body.ids, body.tipo, regenerar=body.regenerar)
     return {
         "ok": res.ok, "errores": res.errores, "avisos": res.avisos,
         "empresa": res.empresa, "series": res.series, "remisiones": res.remisiones,
@@ -1399,6 +1403,7 @@ def export_sae(
     res, contenido, nombre = svc.generar(
         db, ctx.tenant_id, body.ids, body.tipo,
         folios=body.folios, fecha=body.fecha, estampar=body.estampar,
+        regenerar=body.regenerar,
     )
     if not res.ok or contenido is None:
         raise HTTPException(status_code=422, detail=" · ".join(res.errores) or "lote inválido")

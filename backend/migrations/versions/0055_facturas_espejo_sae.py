@@ -37,6 +37,10 @@ def upgrade() -> None:
         "facturas",
         sa.Column("origen", sa.String(12), nullable=False, server_default="NATIVA"),
     )
+    # Los folios de SAE son consecutivos INDEPENDIENTES por empresa (02, 03…):
+    # 'A 100' puede existir en dos empresas siendo facturas distintas. La
+    # empresa forma parte de la identidad del espejo; NULL en las nativas.
+    op.add_column("facturas", sa.Column("espejo_empresa", sa.String(4), nullable=True))
     # El listado de facturas filtra/badgea por origen; con el espejo global el
     # tenant tendrá miles de filas ESPEJO_SAE conviviendo con las nativas.
     op.create_index("ix_facturas_tenant_origen", "facturas", ["tenant_id", "origen"])
@@ -51,4 +55,5 @@ def downgrade() -> None:
     op.alter_column("lineas_factura", "producto_id", nullable=False)
     op.drop_column("clientes", "espejo_sae")
     op.drop_index("ix_facturas_tenant_origen", table_name="facturas")
+    op.drop_column("facturas", "espejo_empresa")
     op.drop_column("facturas", "origen")

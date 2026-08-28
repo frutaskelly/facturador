@@ -41,8 +41,19 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session, selectinload
 
-from ..models import Cliente, ClienteExterno, ProductoCliente, Remision
+from ..models import Cliente, ClienteExterno, Factura, ProductoCliente, Remision
 from .series import resolver_serie
+
+# La marca del espejo ("ZHGO 233") también se captura a mano (PATCH de la
+# remisión), así que el cruce tolera espacios y ceros — el mismo criterio en
+# todos los que la leen (_folio_sugerido, la colisión de folios y el espejo).
+_RE_MARCA = re.compile(r"^([A-Z]+)\s*0*(\d+)$")
+
+
+def parsear_marca(v: str) -> Optional[tuple[str, int]]:
+    """'ZHGO 0233' / 'zhgo233' → ('ZHGO', 233); None si no parece una marca."""
+    m = _RE_MARCA.match((v or "").strip().upper())
+    return (m.group(1), int(m.group(2))) if m else None
 
 # Cabeceras EXACTAS de los masivos reales (verificadas contra los .xls de
 # ~/Downloads y KnowHow_Massivos_SAE.md §1-2). Las COLxx van vacías pero DEBEN
@@ -162,16 +173,29 @@ def preparar(
     tenant_id: UUID,
     ids: list[UUID],
     tipo: str,
+    *,
+    bloquear: bool = False,
+    regenerar: bool = False,
 ) -> tuple[ResultadoPreview, list[DocExport]]:
     """Valida y resuelve todo lo que el archivo necesita. NO escribe nada.
 
     Reglas de exclusión (se reportan, no se truncan en silencio):
     - CANCELADA nunca se exporta.
+    - Una remisión YA FACTURADA NATIVAMENTE (factura del Facturador viva) jamás
+      entra al archivo: importarla en SAE emitiría un SEGUNDO CFDI real por la
+      misma venta — la regla que este sistema existe para impedir.
     - FACTURA: una remisión que YA tiene factura_sae no se re-exporta — re-subir
       un masivo a SAE crea un documento DUPLICADO con el siguiente consecutivo.
+      La excepción es `regenerar`: reproduce el archivo de un lote YA estampado
+      (la descarga se puede perder DESPUÉS del commit de la estampa) usando los
+      folios que ya viven en factura_sae, sin estampar nada de nuevo.
     - Sin clave SAE del cliente, sin serie fiscal o con partidas sin código de
       cliente: el lote entero se detiene. Un archivo a medias importado en SAE
       no se puede "completar" después sin duplicar.
+
+    `bloquear=True` (lo usa generar): FOR UPDATE sobre las remisiones — dos
+    exports simultáneos del mismo lote producirían DOS archivos válidos y dos
+    estampas last-write-wins; con el lock, el segundo espera y ve la estampa.
     """
     res = ResultadoPreview(ok=False)
     tipo = (tipo or "").upper()
@@ -181,13 +205,22 @@ def preparar(
     if not ids:
         res.errores.append("sin remisiones seleccionadas")
         return res, []
+    if regenerar and tipo != "FACTURA":
+        res.errores.append("regenerar solo aplica al export de FACTURAS")
+        return res, []
 
-    rems = (
+    q = (
         db.query(Remision)
         .options(selectinload(Remision.lineas))
         .filter(Remision.tenant_id == tenant_id, Remision.id.in_(ids), Remision.deleted_at.is_(None))
-        .all()
     )
+    if bloquear:
+        # FOR UPDATE no admite selectinload de colección en la misma query; el
+        # lock va sobre las remisiones y las líneas se cargan aparte.
+        q = db.query(Remision).filter(
+            Remision.tenant_id == tenant_id, Remision.id.in_(ids), Remision.deleted_at.is_(None)
+        ).with_for_update()
+    rems = q.all()
     encontradas = {r.id for r in rems}
     for i in ids:
         if i not in encontradas:
@@ -201,6 +234,16 @@ def preparar(
     nombres = dict(
         db.query(Cliente.id, Cliente.legal_name).filter(Cliente.id.in_(cliente_ids)).all()
     )
+    # Facturas NATIVAS vivas ligadas a estas remisiones (el candado crítico).
+    fact_ids = {r.factura_id for r in rems if r.factura_id}
+    nativas_vivas = {
+        f.id: f for f in db.query(Factura).filter(
+            Factura.id.in_(fact_ids or [None]),
+            Factura.origen != "ESPEJO_SAE",
+            Factura.estado != "CANCELADA",
+            Factura.deleted_at.is_(None),
+        )
+    } if fact_ids else {}
 
     docs: list[DocExport] = []
     empresas: set[str] = set()
@@ -211,12 +254,28 @@ def preparar(
         if rem.estado == "CANCELADA":
             res.errores.append(f"{rem.folio_interno}: está CANCELADA")
             continue
-        if tipo == "FACTURA" and rem.factura_sae:
+        nativa = nativas_vivas.get(rem.factura_id)
+        if nativa is not None:
             res.errores.append(
-                f"{rem.folio_interno}: ya está amparada por la factura SAE "
-                f"{rem.factura_sae} — re-exportarla duplicaría el documento en SAE"
+                f"{rem.folio_interno}: ya tiene la factura NATIVA {nativa.serie}{nativa.folio} "
+                f"({nativa.estado}) — exportarla a SAE emitiría un SEGUNDO CFDI por la misma venta"
             )
             continue
+        if tipo == "FACTURA" and not regenerar and rem.factura_sae:
+            res.errores.append(
+                f"{rem.folio_interno}: ya está amparada por la factura SAE "
+                f"{rem.factura_sae} — re-exportarla duplicaría el documento en SAE "
+                "(¿buscabas «regenerar el archivo»?)"
+            )
+            continue
+        if regenerar:
+            marca = parsear_marca(rem.factura_sae or "")
+            if marca is None:
+                res.errores.append(
+                    f"{rem.folio_interno}: regenerar exige que la remisión ya esté estampada "
+                    f"con su folio SAE (factura_sae = {rem.factura_sae!r})"
+                )
+                continue
         pares = claves.get(rem.cliente_facturacion_id) or []
         if not pares:
             res.errores.append(
@@ -233,8 +292,11 @@ def preparar(
         empresa, numero = pares[0]
         empresas.add(empresa)
 
+        # Una devolución total deja la línea viva con cantidad 0: SAE importaría
+        # una partida en cero cuyo CFDI el PAC rechaza. Se exportan solo las vivas.
+        vivas = [ln for ln in rem.lineas if Decimal(str(ln.cantidad_solicitada or 0)) > 0]
         sin_codigo = []
-        for ln in rem.lineas:
+        for ln in vivas:
             if (rem.cliente_facturacion_id, ln.producto_id) not in codigos:
                 sin_codigo.append(str(ln.numero_linea))
         if sin_codigo:
@@ -243,12 +305,15 @@ def preparar(
                 f"(líneas {', '.join(sin_codigo)}) — SAE rechaza claves que no están en su inventario"
             )
             continue
-        if not rem.lineas:
-            res.errores.append(f"{rem.folio_interno}: no tiene partidas")
+        if not vivas:
+            res.errores.append(f"{rem.folio_interno}: no tiene partidas con cantidad")
             continue
 
         doc = DocExport(remision=rem, cliente_sae=numero, empresa=empresa)
-        if tipo == "FACTURA":
+        if tipo == "FACTURA" and regenerar:
+            doc.serie, doc.folio = parsear_marca(rem.factura_sae)
+            series_conteo[doc.serie] = series_conteo.get(doc.serie, 0) + 1
+        elif tipo == "FACTURA":
             serie = resolver_serie(
                 db, tenant_id, "FACTURA",
                 cliente_id=rem.cliente_facturacion_id, sucursal_id=rem.sucursal_id,
@@ -258,8 +323,10 @@ def preparar(
                     f"{rem.folio_interno}: no se resuelve serie de FACTURA para {nombre_cli}"
                 )
                 continue
-            doc.serie = serie.codigo
-            series_conteo[serie.codigo] = series_conteo.get(serie.codigo, 0) + 1
+            # Normalizada: la estampa y el espejo comparan en mayúsculas — un
+            # código 'Zhgo ' con espacio dejaría marcas que nunca casan.
+            doc.serie = (serie.codigo or "").strip().upper()
+            series_conteo[doc.serie] = series_conteo.get(doc.serie, 0) + 1
         docs.append(doc)
 
     if len(empresas) > 1:
@@ -291,29 +358,40 @@ def _folio_sugerido(db: Session, tenant_id: UUID, serie: str) -> Optional[int]:
     adelantado o repetido hace fallar el import."""
     from ..models import Factura  # import local: evita ciclo en el arranque
 
-    mayor = 0
+    folios = _folios_ocupados(db, tenant_id, serie)
+    return max(folios) + 1 if folios else None
+
+
+def _folios_ocupados(db: Session, tenant_id: UUID, serie: str) -> set[int]:
+    """Todos los folios de esa serie que YA existen — en remisiones estampadas
+    (factura_sae, texto libre tolerado) y en facturas (nativas o espejo). Es la
+    base del folio sugerido Y del candado de colisión al estampar."""
+    ocupados: set[int] = set()
     filas = (
         db.query(Remision.factura_sae)
         .filter(
             Remision.tenant_id == tenant_id,
             Remision.factura_sae.isnot(None),
-            Remision.factura_sae.like(f"{serie}%"),
+            Remision.factura_sae.ilike(f"{serie}%"),
+            Remision.deleted_at.is_(None),
         )
         .all()
     )
     for (fs,) in filas:
-        m = re.match(rf"^{re.escape(serie)}\s*0*(\d+)$", (fs or "").strip())
-        if m:
-            mayor = max(mayor, int(m.group(1)))
-    tope = (
+        marca = parsear_marca(fs or "")
+        if marca and marca[0] == serie:
+            ocupados.add(marca[1])
+    for (folio,) in (
         db.query(Factura.folio)
-        .filter(Factura.tenant_id == tenant_id, Factura.serie == serie)
-        .order_by(Factura.folio.desc())
-        .first()
-    )
-    if tope:
-        mayor = max(mayor, int(tope[0]))
-    return mayor + 1 if mayor else None
+        .filter(
+            Factura.tenant_id == tenant_id,
+            Factura.serie == serie,
+            Factura.deleted_at.is_(None),
+        )
+        .all()
+    ):
+        ocupados.add(int(folio))
+    return ocupados
 
 
 def generar(
@@ -325,23 +403,29 @@ def generar(
     folios: Optional[dict[str, int]] = None,
     fecha: Optional[date] = None,
     estampar: bool = True,
+    regenerar: bool = False,
 ) -> tuple[ResultadoPreview, Optional[bytes], Optional[str]]:
     """Genera el .xls y —solo FACTURA con estampar— deja el espejo puesto:
     cada remisión del lote queda con su `factura_sae` (→ RESERVADO), que es lo
     que evita el doble export y alimenta el folio sugerido del siguiente lote.
 
     `folios` = {serie: folio_inicial} confirmados por el operador (FACTURA).
+    `regenerar` reproduce el archivo de un lote YA estampado con sus folios
+    guardados, sin estampar de nuevo (la descarga puede perderse tras el commit).
     El commit lo hace el caller (endpoint): estampa y archivo viajan juntos o
     no viaja nada.
     """
     import xlwt
 
     tipo = (tipo or "").upper()
-    res, docs = preparar(db, tenant_id, ids, tipo)
+    # FOR UPDATE: dos exports simultáneos del mismo lote verían ambos la
+    # estampa en NULL y entregarían dos archivos válidos → documentos
+    # duplicados en SAE. Con el lock, el segundo espera y ve la estampa.
+    res, docs = preparar(db, tenant_id, ids, tipo, bloquear=estampar, regenerar=regenerar)
     if not res.ok:
         return res, None, None
 
-    if tipo == "FACTURA":
+    if tipo == "FACTURA" and not regenerar:
         folios = folios or {}
         for s in res.series:
             if not folios.get(s["serie"]):
@@ -353,6 +437,22 @@ def generar(
         if not res.ok:
             return res, None, None
         contador = {s: int(n) for s, n in folios.items()}
+        # Candado de colisión: el rango a estampar no puede pisar folios que ya
+        # existen (otra remisión estampada, una factura nativa o un espejo). Dos
+        # operadores confirmando el mismo "234" la misma mañana era doble
+        # documento en SAE; ahora el segundo recibe el error con los folios.
+        for s in res.series:
+            serie = s["serie"]
+            rango = set(range(contador[serie], contador[serie] + s["remisiones"]))
+            chocan = sorted(rango & _folios_ocupados(db, tenant_id, serie))
+            if chocan:
+                res.ok = False
+                res.errores.append(
+                    f"serie {serie}: los folios {', '.join(map(str, chocan))} ya existen "
+                    "(remisión estampada o factura) — verifica el folio inicial contra SAE"
+                )
+        if not res.ok:
+            return res, None, None
 
     dia = fecha or date.today()
     f_txt = fecha_sae(dia)
@@ -375,7 +475,9 @@ def generar(
         rem = doc.remision
         cli = clientes[rem.cliente_facturacion_id]
         obs = _observacion(rem)
-        if tipo == "FACTURA":
+        if tipo == "FACTURA" and regenerar:
+            folio_txt = folio_sae(doc.serie, doc.folio)   # el folio ya estampado
+        elif tipo == "FACTURA":
             doc.folio = contador[doc.serie]
             contador[doc.serie] += 1
             folio_txt = folio_sae(doc.serie, doc.folio)
@@ -383,7 +485,9 @@ def generar(
             # PEDIDO: va la OC del cliente; SAE asigna su consecutivo al importar.
             folio_txt = (rem.su_pedido or rem.folio_interno or "").strip()
 
-        for ln in rem.lineas:
+        # Solo partidas vivas: una devolución total deja la línea con cantidad
+        # 0, y SAE importaría un concepto en cero que el PAC rechaza.
+        for ln in (x for x in rem.lineas if Decimal(str(x.cantidad_solicitada or 0)) > 0):
             clave = codigos[(rem.cliente_facturacion_id, ln.producto_id)]
             if tipo == "FACTURA":
                 vals = [folio_txt, doc.cliente_sae, f_txt, "", clave,
@@ -401,7 +505,7 @@ def generar(
                 hoja.write(fila, c, v)
             fila += 1
 
-        if tipo == "FACTURA" and estampar:
+        if tipo == "FACTURA" and estampar and not regenerar:
             rem.factura_sae = f"{doc.serie} {doc.folio}"
             if rem.estado == "BORRADOR":
                 rem.estado = "RESERVADO"

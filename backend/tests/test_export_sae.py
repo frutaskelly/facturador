@@ -188,6 +188,102 @@ def test_export_pedido_lleva_la_oc_del_cliente(client, env, auth_as):
     assert det["factura_sae"] is None
 
 
+def test_export_rechaza_colision_de_folios(client, env, auth_as):
+    """Dos operadores confirmando el mismo folio inicial la misma mañana era un
+    documento duplicado en SAE: el rango a estampar no puede pisar folios que
+    ya existen en remisiones estampadas ni en facturas."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem1 = _rem(client, h, env)
+    assert client.post("/api/v1/remisiones/export-sae", headers=h,
+                       json={"ids": [rem1["id"]], "tipo": "FACTURA",
+                             "folios": {"ZHGO": 233}}).status_code == 200
+    rem2 = _rem(client, h, env, su_pedido="24737")
+    r = client.post("/api/v1/remisiones/export-sae", headers=h,
+                    json={"ids": [rem2["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 233}})
+    assert r.status_code == 422
+    assert "233 ya existen" in r.json()["detail"]
+    det = client.get(f"/api/v1/remisiones/{rem2['id']}", headers=h).json()
+    assert det["factura_sae"] is None    # nada se estampó
+
+
+def test_export_rechaza_remision_con_factura_nativa(client, env, auth_as):
+    """El candado crítico: una remisión ya amparada por un CFDI del Facturador
+    jamás entra al archivo — importarla en SAE sería un SEGUNDO CFDI real."""
+    from app.models import Factura, Remision
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem = _rem(client, h, env)
+    db = SessionLocal()
+    try:
+        f = Factura(tenant_id=env["tenant"], serie="ZHGO", folio=900,
+                    cliente_id=env["cli"], estado="TIMBRADA", origen="NATIVA")
+        db.add(f); db.flush()
+        db.query(Remision).filter(Remision.id == rem["id"]).update(
+            {"factura_id": f.id, "estado": "FACTURADA"})
+        db.commit()
+    finally:
+        db.close()
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
+    assert pv["ok"] is False
+    assert any("NATIVA" in e for e in pv["errores"])
+
+
+def test_export_regenerar_reproduce_sin_reestampar(client, env, auth_as):
+    """La estampa se commitea antes de transmitir el archivo: si la descarga se
+    pierde, `regenerar` reproduce el .xls con los folios ya guardados."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem = _rem(client, h, env)
+    client.post("/api/v1/remisiones/export-sae", headers=h,
+                json={"ids": [rem["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 233}})
+    r = client.post("/api/v1/remisiones/export-sae", headers=h,
+                    json={"ids": [rem["id"]], "tipo": "FACTURA", "regenerar": True})
+    assert r.status_code == 200, r.text
+    hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_name("Facturas")
+    assert hoja.row(1)[0].value == "ZHGO       233"   # el folio original, no uno nuevo
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["factura_sae"] == "ZHGO 233"           # sin re-estampar
+
+
+def test_export_omite_partidas_en_cero(client, env, auth_as):
+    """Una devolución total deja la línea con cantidad 0; SAE importaría un
+    concepto en cero que el PAC rechaza — se exportan solo las vivas."""
+    from app.models import LineaRemision
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem = _rem(client, h, env, lineas=[
+        {"producto_id": env["prod"], "cantidad_solicitada": 5, "precio_unitario": 836},
+        {"producto_id": env["prod"], "cantidad_solicitada": 2, "precio_unitario": 836},
+    ])
+    db = SessionLocal()
+    try:
+        db.query(LineaRemision).filter(
+            LineaRemision.remision_id == rem["id"], LineaRemision.numero_linea == 2
+        ).update({"cantidad_solicitada": 0})
+        db.commit()
+    finally:
+        db.close()
+    r = client.post("/api/v1/remisiones/export-sae", headers=h,
+                    json={"ids": [rem["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 233}})
+    assert r.status_code == 200
+    hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_name("Facturas")
+    assert hoja.nrows == 2                            # encabezado + 1 partida viva
+
+
+def test_remision_estampada_no_se_factura_nativa(client, env, auth_as):
+    """La ventana export→import: una remisión con factura_sae ya está (o va a
+    estar en horas) amparada por un CFDI de SAE — facturarla nativa serían dos
+    CFDI reales por la misma venta."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem = _rem(client, h, env)
+    client.post("/api/v1/remisiones/export-sae", headers=h,
+                json={"ids": [rem["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 233}})
+    r = client.post("/api/v1/facturas/desde-remisiones", headers=h,
+                    json={"remision_ids": [rem["id"]]})
+    assert r.status_code == 409
+    assert "SAE" in r.json()["detail"]
+
+
 def test_partida_sin_codigo_del_cliente_detiene_el_lote(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
     db = SessionLocal()

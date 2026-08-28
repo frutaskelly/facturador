@@ -72,6 +72,10 @@ class Factura(Base, TimestampMixin, SoftDeleteMixin):
     # SAE) pero con candados: nunca llama al PAC — ni timbrar, ni cancelar,
     # ni REP. Se cancela en SAE y la sync actualiza el reflejo.
     origen = Column(String(12), nullable=False, server_default="NATIVA")
+    # Solo espejos: la empresa SAE que emitió ('02', '03'…). Los folios de SAE
+    # son consecutivos independientes POR EMPRESA, así que la empresa es parte
+    # de la identidad del reflejo. NULL en facturas nativas.
+    espejo_empresa = Column(String(4))
 
     # ── timbrado (lo llena el PAC en P6.2) ──
     estado = Column(FACTURA_ESTADO, nullable=False, server_default="BORRADOR")

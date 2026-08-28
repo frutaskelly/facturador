@@ -60,7 +60,8 @@ def env(db_engine):
         cli = Cliente(tenant_id=t.id, codigo="CL1", legal_name="DISTRIBUIDORA JUBRAN",
                       rfc="DAP250922PY2", serie_factura_id=serie_f.id,
                       serie_remision_id=serie_r.id, metodo_pago_default="PPD",
-                      forma_pago_default="99", uso_cfdi_default="G01")
+                      forma_pago_default="99", uso_cfdi_default="G01",
+                      espejo_sae=True)   # el espejo exige el candado prendido
         prod = Producto(tenant_id=t.id, sku="00000001", nombre="ACEITE 20 LT",
                         clave_sat="50151500", unidad_sat="H87")
         db.add_all([cli, prod]); db.flush()
@@ -215,6 +216,69 @@ def test_cliente_sin_equivalencia_sae_es_422(client, env, auth_as, sin_sesion):
     assert "equivalencia" in r.json()["detail"]
 
 
+def test_espejo_exige_cliente_en_espejo(client, env, auth_as, sin_sesion):
+    """Sin el candado prendido, el conector no puede sembrar reflejos — es lo
+    que impide que una clave con bug ocupe series/folios de clientes nativos."""
+    db = SessionLocal()
+    try:
+        db.query(Cliente).filter(Cliente.id == env["cli"]).update({"espejo_sae": False})
+        db.commit()
+    finally:
+        db.close()
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    r = client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=880))
+    assert r.status_code == 422
+    assert "espejo" in r.json()["detail"]
+    db = SessionLocal()
+    try:
+        db.query(Cliente).filter(Cliente.id == env["cli"]).update({"espejo_sae": True})
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_espejo_no_resucita_canceladas_ni_pisa_saldo(client, env, auth_as, sin_sesion):
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    # saldo explícito (abonos ya sincronizados) sobrevive a un backfill sin saldo
+    client.post("/api/v1/facturas/espejo", headers=hk,
+                json=_espejo(folio=810, saldo_insoluto="500.00"))
+    r = client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=810))
+    assert float(r.json()["saldo_insoluto"]) == 500.00
+    # y un retry tardío de TIMBRADA no revive una CANCELADA
+    client.post("/api/v1/facturas/espejo", headers=hk,
+                json=_espejo(folio=810, estado="CANCELADA"))
+    tardio = client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=810))
+    assert tardio.status_code == 409
+    assert "CANCELADA" in tardio.json()["detail"]
+
+
+def test_espejo_liga_estampas_de_captura_manual(client, env, auth_as, sin_sesion):
+    """Las estampas a mano ('ZHGO0820', con ceros o sin espacio) también ligan:
+    el cruce usa la misma tolerancia que el folio sugerido del export."""
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"],
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 100}]}).json()
+    client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                 json={"factura_sae": "ZHGO0820"})
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    f = client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=820)).json()
+    auth_as(env["dueno"])
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["factura_id"] == f["id"]
+    assert det["estado"] == "FACTURADA"
+
+
+def test_espejo_rechaza_otra_empresa_mismo_folio(client, env, auth_as, sin_sesion):
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=830))
+    # otra empresa con el mismo serie+folio no debe pisar el reflejo de la 02
+    r = client.post("/api/v1/facturas/espejo", headers=hk,
+                    json=_espejo(folio=830, empresa="03", cliente_sae="1"))
+    assert r.status_code in (409, 422)   # 409 empresa distinta, o 422 sin equivalencia 03:1
+
+
 def test_candados_del_espejo(client, env, auth_as, sin_sesion):
     """Cliente en espejo no factura nativo; una espejo no se cancela/sustituye
     aquí ni acepta recibos de pago (su REP lo emite SAE)."""
@@ -223,13 +287,6 @@ def test_candados_del_espejo(client, env, auth_as, sin_sesion):
     fid = r.json()["id"]
 
     auth_as(env["dueno"]); h = _hdr(env["dueno"])
-    # prender el candado del cliente
-    db = SessionLocal()
-    try:
-        db.query(Cliente).filter(Cliente.id == env["cli"]).update({"espejo_sae": True})
-        db.commit()
-    finally:
-        db.close()
 
     rem = client.post("/api/v1/remisiones", headers=h, json={
         "cliente_facturacion_id": env["cli"],
