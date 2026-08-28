@@ -110,6 +110,11 @@ class RemisionOut(ORMModel):
     factura_sae: Optional[str] = None
     # Orden de compra del cliente ("su pedido").
     su_pedido: Optional[str] = None
+    # La OC original en la bandeja de órdenes: su id y el documento con el que
+    # llegó, para abrirlo desde la lista sin ir a buscarlo.
+    oc_id: Optional[uuid.UUID] = None
+    oc_archivo_url: Optional[str] = None
+    oc_archivo_nombre: Optional[str] = None
     subtotal: Decimal
     descuento: Decimal
     iva: Decimal

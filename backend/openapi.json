@@ -12671,6 +12671,40 @@
       ],
       "title": "Notas"
      },
+     "oc_archivo_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oc Archivo Nombre"
+     },
+     "oc_archivo_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oc Archivo Url"
+     },
+     "oc_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oc Id"
+     },
      "pos_asignaciones": {
       "default": {},
       "title": "Pos Asignaciones",
@@ -12920,6 +12954,40 @@
        }
       ],
       "title": "Notas"
+     },
+     "oc_archivo_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oc Archivo Nombre"
+     },
+     "oc_archivo_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oc Archivo Url"
+     },
+     "oc_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oc Id"
      },
      "pos_asignaciones": {
       "default": {},

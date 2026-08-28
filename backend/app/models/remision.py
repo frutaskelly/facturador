@@ -105,6 +105,14 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     factura = relationship("Factura", foreign_keys=[factura_id])
     devoluciones = relationship("Devolucion", order_by="Devolucion.created_at")
 
+    # La OC original que dio origen a la remisión (bandeja de órdenes). No es
+    # una relación: se resuelve en lote en la lista y el detalle —por
+    # `remision_id` o por el folio del cliente— para no hacer una consulta por
+    # renglón contra la base en la nube.
+    oc_id = None
+    oc_archivo_url = None
+    oc_archivo_nombre = None
+
     @property
     def factura_folio(self) -> Optional[str]:
         f = self.factura
