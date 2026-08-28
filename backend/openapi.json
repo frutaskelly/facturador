@@ -501,6 +501,20 @@
     "title": "AvanzarIn",
     "type": "object"
    },
+   "Body_importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post": {
+    "properties": {
+     "archivo": {
+      "format": "binary",
+      "title": "Archivo",
+      "type": "string"
+     }
+    },
+    "required": [
+     "archivo"
+    ],
+    "title": "Body_importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post",
+    "type": "object"
+   },
    "Body_importar_preview_api_v1_productos_importar_preview_post": {
     "properties": {
      "archivo": {
@@ -14533,6 +14547,24 @@
       ],
       "title": "Serie Remision Id"
      },
+     "series_factura_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Series Factura Ids",
+      "type": "array"
+     },
+     "series_remision_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Series Remision Ids",
+      "type": "array"
+     },
      "telefono": {
       "anyOf": [
        {
@@ -14643,6 +14675,22 @@
        }
       ],
       "title": "Serie Remision Id"
+     },
+     "series_factura_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Series Factura Ids",
+      "type": "array"
+     },
+     "series_remision_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Series Remision Ids",
+      "type": "array"
      },
      "telefono": {
       "anyOf": [
@@ -14773,6 +14821,38 @@
        }
       ],
       "title": "Serie Remision Id"
+     },
+     "series_factura_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "format": "uuid",
+         "type": "string"
+        },
+        "maxItems": 20,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Series Factura Ids"
+     },
+     "series_remision_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "format": "uuid",
+         "type": "string"
+        },
+        "maxItems": 20,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Series Remision Ids"
      },
      "telefono": {
       "anyOf": [
@@ -22646,6 +22726,204 @@
      }
     ],
     "summary": "Copiar Precios",
+    "tags": [
+     "listas de precios"
+    ]
+   }
+  },
+  "/api/v1/listas-precios/{lista_id}/export": {
+   "get": {
+    "description": "El Excel de la lista (SKU | PRODUCTO | PRESENTACION | DESDE CANTIDAD |\nPRECIO): se edita y se vuelve a subir con /importar para actualizar en masa.",
+    "operationId": "exportar_lista_xlsx_api_v1_listas_precios__lista_id__export_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "lista_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Lista Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Exportar Lista Xlsx",
+    "tags": [
+     "listas de precios"
+    ]
+   }
+  },
+  "/api/v1/listas-precios/{lista_id}/importar": {
+   "post": {
+    "description": "Sube el MISMO Excel del export para actualizar en masa: PRECIO con valor\ncrea/actualiza el renglón; PRECIO vacío o 0 lo QUITA de la lista. Los SKU\ndesconocidos se reportan (los productos nuevos nacen en el wizard).",
+    "operationId": "importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "lista_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Lista Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Importar Lista Xlsx",
+    "tags": [
+     "listas de precios"
+    ]
+   }
+  },
+  "/api/v1/listas-precios/{lista_id}/pdf": {
+   "get": {
+    "operationId": "exportar_lista_pdf_api_v1_listas_precios__lista_id__pdf_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "lista_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Lista Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Exportar Lista Pdf",
     "tags": [
      "listas de precios"
     ]

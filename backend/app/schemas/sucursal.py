@@ -27,7 +27,10 @@ class SucursalBase(BaseModel):
 
 
 class SucursalCreate(SucursalBase):
-    pass
+    # Series DISPONIBLES en la sucursal (una o más; la primera de cada tipo se
+    # vuelve la default si no vino serie_factura_id/serie_remision_id).
+    series_factura_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
+    series_remision_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
 
 
 class SucursalUpdate(BaseModel):
@@ -40,11 +43,16 @@ class SucursalUpdate(BaseModel):
     almacen_id: Optional[uuid.UUID] = None
     serie_factura_id: Optional[uuid.UUID] = None
     serie_remision_id: Optional[uuid.UUID] = None
+    series_factura_ids: Optional[list[uuid.UUID]] = Field(default=None, max_length=20)
+    series_remision_ids: Optional[list[uuid.UUID]] = Field(default=None, max_length=20)
 
 
 class SucursalOut(ORMModel, SucursalBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
+    # El abanico completo de series disponibles (la default va aparte en los FK).
+    series_factura_ids: list[uuid.UUID] = Field(default_factory=list)
+    series_remision_ids: list[uuid.UUID] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
