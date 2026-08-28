@@ -212,8 +212,10 @@ def test_listado_filtra_por_fecha_de_recepcion(client, env, auth_as):
     from datetime import date, timedelta
 
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
-    client.post("/api/v1/oc-recibidas", headers=h, json=_oc())
-    hoy = date.today()
+    creada = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+    # "hoy" según el RELOJ DEL SERVIDOR (recibida_at), no date.today(): cerca de
+    # medianoche difieren y el test fallaba solo en esa ventana.
+    hoy = date.fromisoformat(creada["recibida_at"][:10])
     ayer, manana = hoy - timedelta(days=1), hoy + timedelta(days=1)
 
     def total(**qs):

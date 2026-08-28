@@ -501,6 +501,62 @@
     "title": "AvanzarIn",
     "type": "object"
    },
+   "Body_cotizar_documento_endpoint_api_v1_precios_cotizar_documento_post": {
+    "properties": {
+     "archivo": {
+      "format": "binary",
+      "title": "Archivo",
+      "type": "string"
+     },
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
+     },
+     "serie_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Id"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     }
+    },
+    "required": [
+     "archivo",
+     "cliente_id"
+    ],
+    "title": "Body_cotizar_documento_endpoint_api_v1_precios_cotizar_documento_post",
+    "type": "object"
+   },
    "Body_importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post": {
     "properties": {
      "archivo": {
@@ -25712,6 +25768,70 @@
     ]
    }
   },
+  "/api/v1/precios/cotizacion-pdf": {
+   "post": {
+    "description": "La cotización recién calculada, como PDF para mandarla. El frontend\nregresa el MISMO objeto que devolvió /cotizar-documento.",
+    "operationId": "cotizacion_pdf_endpoint_api_v1_precios_cotizacion_pdf_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "title": "Payload",
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cotizacion Pdf Endpoint",
+    "tags": [
+     "precios"
+    ]
+   }
+  },
   "/api/v1/precios/cotizar": {
    "get": {
     "operationId": "cotizar_api_v1_precios_cotizar_get",
@@ -25885,6 +26005,132 @@
      }
     ],
     "summary": "Cotizar",
+    "tags": [
+     "precios"
+    ]
+   }
+  },
+  "/api/v1/precios/cotizar-documento": {
+   "post": {
+    "description": "El «WhatsApp cotizador» en la pantalla: PDF/foto/Excel de una orden →\nla cotización de todos los renglones con los precios de ESE cliente. Lo\nque no cruza con confianza sale en `sin_cruce` para revisarse a mano.",
+    "operationId": "cotizar_documento_endpoint_api_v1_precios_cotizar_documento_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_cotizar_documento_endpoint_api_v1_precios_cotizar_documento_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cotizar Documento Endpoint",
+    "tags": [
+     "precios"
+    ]
+   }
+  },
+  "/api/v1/precios/listas-del-cliente": {
+   "get": {
+    "description": "Las listas que le aplican a un cliente (globales, por sucursal y por\nproyecto), para ofrecer sus descargas en el cotizador.",
+    "operationId": "listas_del_cliente_api_v1_precios_listas_del_cliente_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listas Del Cliente",
     "tags": [
      "precios"
     ]

@@ -2200,6 +2200,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/precios/cotizacion-pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cotizacion Pdf Endpoint
+         * @description La cotización recién calculada, como PDF para mandarla. El frontend
+         *     regresa el MISMO objeto que devolvió /cotizar-documento.
+         */
+        post: operations["cotizacion_pdf_endpoint_api_v1_precios_cotizacion_pdf_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/precios/cotizar": {
         parameters: {
             query?: never;
@@ -2209,6 +2230,49 @@ export interface paths {
         };
         /** Cotizar */
         get: operations["cotizar_api_v1_precios_cotizar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/precios/cotizar-documento": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cotizar Documento Endpoint
+         * @description El «WhatsApp cotizador» en la pantalla: PDF/foto/Excel de una orden →
+         *     la cotización de todos los renglones con los precios de ESE cliente. Lo
+         *     que no cruza con confianza sale en `sin_cruce` para revisarse a mano.
+         */
+        post: operations["cotizar_documento_endpoint_api_v1_precios_cotizar_documento_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/precios/listas-del-cliente": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Listas Del Cliente
+         * @description Las listas que le aplican a un cliente (globales, por sucursal y por
+         *     proyecto), para ofrecer sus descargas en el cotizador.
+         */
+        get: operations["listas_del_cliente_api_v1_precios_listas_del_cliente_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3307,6 +3371,25 @@ export interface components {
             nota?: string | null;
             /** Pesos */
             pesos?: components["schemas"]["PesoLineaIn"][] | null;
+        };
+        /** Body_cotizar_documento_endpoint_api_v1_precios_cotizar_documento_post */
+        Body_cotizar_documento_endpoint_api_v1_precios_cotizar_documento_post: {
+            /**
+             * Archivo
+             * Format: binary
+             */
+            archivo: string;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Proyecto Id */
+            proyecto_id?: string | null;
+            /** Serie Id */
+            serie_id?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
         };
         /** Body_importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post */
         Body_importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post: {
@@ -13515,6 +13598,41 @@ export interface operations {
             };
         };
     };
+    cotizacion_pdf_endpoint_api_v1_precios_cotizacion_pdf_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     cotizar_api_v1_precios_cotizar_get: {
         parameters: {
             query: {
@@ -13542,6 +13660,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CotizacionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cotizar_documento_endpoint_api_v1_precios_cotizar_documento_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_cotizar_documento_endpoint_api_v1_precios_cotizar_documento_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listas_del_cliente_api_v1_precios_listas_del_cliente_get: {
+        parameters: {
+            query: {
+                cliente_id: string;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
