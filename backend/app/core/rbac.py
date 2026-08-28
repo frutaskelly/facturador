@@ -48,13 +48,18 @@ _OWNER_ROLE = "OWNER"
 # Conexiones puede prometer en español lo que aquí está escrito en código.
 #   - dejar órdenes en la bandeja y convertirlas en remisión
 #   - leer clientes y productos para cruzarlas
-# Fuera, deliberadamente: cualquier cosa de CFDI, borrar, usuarios, series,
-# y `producto:gestionar` (reapuntar un alias afecta a todo el catálogo).
+#   - depositar facturas ESPEJO de SAE (factura:espejo, fase espejo de la
+#     migración 28-ago-2026): SOLO el endpoint /facturas/espejo, que jamás
+#     toca al PAC. No es factura:gestionar — la conexión sigue sin poder
+#     crear, timbrar ni cancelar facturas nativas.
+# Fuera, deliberadamente: cualquier cosa de CFDI nativo, borrar, usuarios,
+# series, y `producto:gestionar` (reapuntar un alias afecta a todo el catálogo).
 PERMISOS_CONEXION = frozenset({
     "menu:remisiones",
     "remision:gestionar",
     "menu:clientes",
     "menu:productos",
+    "factura:espejo",
 })
 
 

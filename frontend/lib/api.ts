@@ -208,6 +208,53 @@ export async function apiDownload(path: string, filename: string): Promise<void>
 }
 
 /**
+ * POST que responde un ARCHIVO (p. ej. el Excel masivo para SAE): manda el
+ * body JSON, descarga el blob y respeta el nombre que el servidor puso en
+ * Content-Disposition (trae el lote y la fecha; inventarlo aquí lo perdería).
+ */
+export async function apiDownloadPost(
+  path: string,
+  body: unknown,
+  fallbackFilename: string
+): Promise<void> {
+  const supabase = getSupabase();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const headers = new Headers({ "Content-Type": "application/json" });
+  if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+  tenantHeader(headers);
+
+  const res = await fetch(`${apiBaseUrl()}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      detail = detailToMessage((await res.json()).detail, detail);
+    } catch {
+      /* binario o vacío */
+    }
+    healStaleTenantSelection(res.status, detail);
+    throw new ApiError(res.status, detail);
+  }
+  const disp = res.headers.get("Content-Disposition") ?? "";
+  const m = /filename="?([^";]+)"?/.exec(disp);
+  const filename = m ? m[1] : fallbackFilename;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
  * Abre un archivo autenticado (p. ej. el PDF de una factura) para vista previa
  * en una pestaña. La pestaña debe abrirse ANTES del fetch (síncrona con el
  * click) para que el navegador no la bloquee como pop-up; aquí solo se le

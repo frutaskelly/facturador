@@ -9,6 +9,7 @@ fijan la serie del cliente al emitir, salvo que la sucursal o una elección manu
 las sobreescriban (ver services/series.py:resolver_serie).
 """
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Enum,
@@ -17,6 +18,7 @@ from sqlalchemy import (
     Numeric,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
@@ -74,4 +76,10 @@ class Cliente(Base, TimestampMixin, SoftDeleteMixin):
     serie_remision_id = Column(
         UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"), nullable=True
     )
+
+    # Candado de la migración (0055): mientras el cliente esté "en espejo", su
+    # facturación vive en SAE — crear facturas NATIVAS para él devuelve 409
+    # (emitir aquí Y en SAE = dos CFDI reales por la misma venta ante el SAT).
+    # El corte es POR CLIENTE: este switch se apaga cliente por cliente.
+    espejo_sae = Column(Boolean, nullable=False, server_default=text("false"))
 

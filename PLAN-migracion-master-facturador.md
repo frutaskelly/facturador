@@ -206,8 +206,13 @@ reportes y adaptación del equipo, **sin que el Facturador timbre nada**.
   `saldo_insoluto = total`; los **pagos/REP de SAE (serie ZCP, FACTG02)** se
   sincronizan como abonos sin timbrar. El estado de cuenta y la antigüedad ya
   construidos funcionan solos. (Esto absorbe la vieja D6: ya no hay backfill al corte.)
-- **Candado por cliente espejeado**: mientras el cliente esté en espejo, crear factura
-  normal (desde-remisiones / directa) para él devuelve 409.
+- **Candado por cliente espejeado** (`clientes.espejo_sae`, editable en el PATCH del
+  cliente): mientras esté prendido, crear factura normal (desde-remisiones / directa)
+  devuelve 409 — y el espejo lo EXIGE prendido para depositar reflejos. También:
+  una remisión estampada (`factura_sae`) no se factura nativa (la ventana
+  export→import), y el export rechaza remisiones con factura nativa viva. Los tres
+  sentidos del doble-CFDI quedan cerrados (endurecido tras revisión adversarial,
+  24 hallazgos confirmados y corregidos el 28-ago).
 - Al generar el export 1.3 NO se crea la factura espejo todavía: nace cuando la sync
   la ve en SAE (la verdad es SAE, no nuestro export).
 

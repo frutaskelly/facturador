@@ -14,7 +14,7 @@ from __future__ import annotations
 import html as html_mod
 import logging
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -22,6 +22,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field as PydField
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...core.config import settings
@@ -31,12 +32,14 @@ from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
     Almacen,
     Cliente,
+    ClienteExterno,
     EsquemaImpuesto,
     Factura,
     LineaFactura,
     LoteInventario,
     Merma,
     Producto,
+    ProductoCliente,
     ReciboPago,
     ReciboPagoFactura,
     Remision,
@@ -50,6 +53,7 @@ from ...schemas.factura import (
     FacturaDesdeRemisionesIn,
     FacturaDetailOut,
     FacturaDirectaIn,
+    FacturaEspejoIn,
     FacturaOut,
     SustituirIn,
     TimbrarIn,
@@ -329,6 +333,19 @@ def factura_desde_remisiones(
     clientes = {r.cliente_facturacion_id for r in rems}
     if len(clientes) != 1:
         raise HTTPException(status_code=422, detail="Todas las remisiones deben ser del mismo cliente")
+    _rechazar_cliente_en_espejo(db, next(iter(clientes)))
+    # Una remisión ESTAMPADA para SAE (factura_sae) ya está amparada —o va a
+    # estarlo en horas— por un CFDI que SAE emite. El estado no alcanza como
+    # candado: el export deja las CONFIRMADAS en CONFIRMADA, que este endpoint
+    # acepta, y en la ventana export→import se emitirían DOS CFDI reales.
+    amparadas = [r for r in rems if r.factura_sae]
+    if amparadas:
+        lista = ", ".join(f"{r.folio_interno} ({r.factura_sae})" for r in amparadas[:5])
+        raise HTTPException(
+            status_code=409,
+            detail=f"Amparadas por factura SAE: {lista} — su CFDI vive en SAE; "
+                   "si SAE la canceló, el espejo libera la remisión solo",
+        )
     # Una remisión queda "libre" para facturar si no tiene factura o si su última
     # factura fue CANCELADA (refacturación). factura_id ya no se anula al cancelar.
     linked_ids = {r.factura_id for r in rems if r.factura_id}
@@ -482,6 +499,7 @@ def factura_directa(
     Las líneas referencian productos del catálogo para tomar su clave SAT y su
     desglose fiscal."""
     cliente = get_or_404(db, Cliente, payload.cliente_id)
+    _rechazar_cliente_en_espejo(db, cliente.id, cliente=cliente)
     ensure_fk(db, Almacen, payload.almacen_id, "almacen_id")   # de dónde sale el stock
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
 
@@ -570,6 +588,260 @@ def factura_directa(
     return factura
 
 
+# ─── Espejo de SAE (fase espejo de la migración del Master) ──────────────────
+
+def _rechazar_cliente_en_espejo(db: Session, cliente_id: UUID, cliente: Cliente | None = None):
+    """Candado de la migración: un cliente `espejo_sae` factura EN SAE. Crear
+    una factura nativa para él aquí, mientras SAE también emite, son dos CFDI
+    reales por la misma venta ante el SAT. El corte quita este switch cliente
+    por cliente (Etapa 4 del plan)."""
+    cli = cliente or db.query(Cliente).filter(Cliente.id == cliente_id).one_or_none()
+    if cli is not None and cli.espejo_sae:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{cli.legal_name} está en espejo SAE: su facturación se emite en SAE "
+                   "y aquí solo se refleja. El candado se quita al cortar ese cliente.",
+        )
+
+
+def _norm_clave_sae(v: str) -> str:
+    """Misma tolerancia que el cruce por clave de la bandeja (PR #32)."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", v or "").encode("ascii", "ignore").decode("ascii")
+    return "".join(ch for ch in s.upper() if ch.isalnum() or ch == "-")
+
+
+@router.post("/espejo", response_model=FacturaDetailOut, status_code=status.HTTP_201_CREATED)
+def factura_espejo(
+    payload: FacturaEspejoIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("factura:espejo")),
+):
+    """Refleja una factura EMITIDA POR SAE como factura del Facturador.
+
+    La deposita el conector (la clave de conexión trae `factura:espejo`, que
+    SOLO abre esta puerta — nada de facturas nativas ni PAC). Es idempotente
+    por (serie, folio): re-mandarla ACTUALIZA el reflejo — así llegan las
+    cancelaciones de SAE y los backfills. Nunca consume folios propios (serie
+    y folio son los reales de SAE) y jamás toca inventario.
+
+    Además cierra el ciclo del espejo: las remisiones estampadas con este
+    folio (`factura_sae` = "SERIE FOLIO", puesto por el export masivo) quedan
+    ligadas a la factura y en FACTURADA; si SAE la cancela, se liberan para
+    re-exportarse.
+    """
+    from ...services.cliente_match import buscar_equivalencia
+
+    clave = f"{payload.empresa}:{payload.cliente_sae}"
+    equiv = buscar_equivalencia(db, ctx.tenant_id, "SAE", clave, solo_confirmadas=True)
+    if equiv is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Sin equivalencia SAE para '{clave}' (cliente_externos): "
+                   "regístrala antes de espejear a ese cliente",
+        )
+    cliente = db.query(Cliente).filter(
+        Cliente.id == equiv.cliente_id, Cliente.deleted_at.is_(None)
+    ).one_or_none()
+    if cliente is None:
+        raise HTTPException(status_code=422, detail=f"El cliente de la equivalencia '{clave}' ya no existe")
+    if not cliente.espejo_sae:
+        # El espejo solo aplica a clientes bajo el candado de la migración: es
+        # lo que garantiza que sus facturas no se dupliquen nativas Y que un
+        # conector con bug no pueda sembrar reflejos de series arbitrarias.
+        raise HTTPException(
+            status_code=422,
+            detail=f"{cliente.legal_name} no está marcado en espejo SAE — activa "
+                   "clientes.espejo_sae antes de sincronizar sus facturas",
+        )
+
+    serie = payload.serie.strip().upper()
+
+    def _buscar(for_update: bool = True):
+        q = db.query(Factura).filter(
+            Factura.tenant_id == ctx.tenant_id,
+            Factura.serie == serie,
+            Factura.folio == payload.folio,
+            Factura.deleted_at.is_(None),
+        )
+        return (q.with_for_update() if for_update else q).one_or_none()
+
+    # FOR UPDATE serializa reintentos sobre una fila EXISTENTE; para la fila
+    # inexistente (dos primeros depósitos en paralelo) la red es el savepoint
+    # de abajo + el UNIQUE (tenant, serie, folio).
+    factura = _buscar()
+    if factura is not None and factura.origen != "ESPEJO_SAE":
+        # Jamás pisar una factura nativa: si esto pasa, los folios del espejo
+        # chocan con los propios y hay que revisar la continuidad (Etapa 4).
+        raise HTTPException(
+            status_code=409,
+            detail=f"{serie}{payload.folio} ya existe como factura NATIVA — el espejo no la toca",
+        )
+    if factura is not None and (factura.espejo_empresa or payload.empresa) != payload.empresa:
+        # Los folios de SAE son consecutivos POR EMPRESA: 'A 100' de la 02 y de
+        # la 03 son facturas distintas — actualizar una con la otra las mezcla.
+        raise HTTPException(
+            status_code=409,
+            detail=f"{serie}{payload.folio} ya es reflejo de la empresa "
+                   f"{factura.espejo_empresa} — no se pisa con la {payload.empresa}",
+        )
+    if factura is not None and factura.estado == "CANCELADA" and payload.estado == "TIMBRADA":
+        # Monotonicidad: un reintento tardío del mensaje TIMBRADA no resucita
+        # un reflejo ya cancelado (las remisiones ya se liberaron). Si SAE de
+        # verdad la revivió (el SAT negó la cancelación), es revisión manual.
+        raise HTTPException(
+            status_code=409,
+            detail=f"{serie}{payload.folio} ya está CANCELADA en el espejo; "
+                   "un reflejo no regresa a TIMBRADA solo — revísalo a mano",
+        )
+
+    # Cruce de líneas: la CVE_ART de SAE contra los códigos de ESTE cliente.
+    # Ambigua (dos productos con el mismo código) no decide — igual que la bandeja.
+    codigos: dict[str, object] = {}
+    for pc in db.query(ProductoCliente).filter(
+        ProductoCliente.tenant_id == ctx.tenant_id,
+        ProductoCliente.cliente_id == cliente.id,
+        ProductoCliente.codigo_cliente.isnot(None),
+    ):
+        cod = _norm_clave_sae(pc.codigo_cliente)
+        if cod in codigos and codigos[cod] != pc.producto_id:
+            codigos[cod] = None
+        else:
+            codigos.setdefault(cod, pc.producto_id)
+    prod_ids = {v for v in codigos.values() if v}
+    productos = {
+        p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids or [None]))
+    } if prod_ids else {}
+
+    subtotal = payload.subtotal
+    if subtotal is None:
+        subtotal = sum(
+            (ln.importe if ln.importe is not None else ln.cantidad * ln.precio_unitario)
+            for ln in payload.lineas
+        )
+    total = payload.total if payload.total is not None else subtotal
+    metodo = payload.metodo_pago or cliente.metodo_pago_default or "PPD"
+
+    es_nueva = factura is None
+    if es_nueva:
+        # Dos primeros depósitos del mismo (serie, folio) en paralelo: FOR
+        # UPDATE no bloquea filas inexistentes, así que el perdedor choca con
+        # el UNIQUE. El savepoint lo absorbe y lo convierte en actualización.
+        factura = Factura(
+            tenant_id=ctx.tenant_id, serie=serie, folio=payload.folio,
+            cliente_id=cliente.id, origen="ESPEJO_SAE",
+            espejo_empresa=payload.empresa, created_by=ctx.user_id,
+        )
+        try:
+            with db.begin_nested():
+                db.add(factura)
+                db.flush()
+        except IntegrityError:
+            factura = _buscar()
+            if factura is None or factura.origen != "ESPEJO_SAE":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{serie}{payload.folio} chocó con una factura que no es espejo",
+                )
+            es_nueva = False
+
+    # La re-ingesta también corrige: si la equivalencia se reapuntó (el reflejo
+    # había caído en el cliente equivocado), el cargo se muda a su estado de
+    # cuenta en vez de quedarse callado en el del otro.
+    factura.cliente_id = cliente.id
+    factura.espejo_empresa = factura.espejo_empresa or payload.empresa
+    factura.estado = payload.estado
+    factura.uuid = payload.uuid_fiscal or factura.uuid
+    factura.fecha = payload.fecha or factura.fecha or datetime.now(timezone.utc)
+    factura.fecha_timbrado = payload.fecha or factura.fecha_timbrado
+    factura.metodo_pago = metodo
+    factura.forma_pago = payload.forma_pago or cliente.forma_pago_default or "99"
+    factura.uso_cfdi = payload.uso_cfdi or cliente.uso_cfdi_default or "G01"
+    factura.notas = payload.observaciones or factura.notas
+    factura.subtotal = subtotal
+    factura.iva_trasladado = max(Decimal("0"), Decimal(str(total)) - Decimal(str(subtotal)))
+    factura.total = total
+    if payload.estado == "CANCELADA":
+        factura.saldo_insoluto = Decimal("0")
+        factura.fecha_cancelacion = factura.fecha_cancelacion or datetime.now(timezone.utc)
+    elif payload.saldo_insoluto is not None:
+        factura.saldo_insoluto = payload.saldo_insoluto
+    elif es_nueva:
+        # Solo al CREAR: una PPD recién reflejada arranca con saldo = total.
+        # En una actualización sin saldo explícito se CONSERVA el saldo — un
+        # backfill tardío no debe pisar los abonos ya sincronizados.
+        factura.saldo_insoluto = total if metodo == "PPD" else Decimal("0")
+
+    if payload.lineas:
+        nuevas = []
+        for i, ln in enumerate(payload.lineas, start=1):
+            pid = codigos.get(_norm_clave_sae(ln.clave or "")) if ln.clave else None
+            prod = productos.get(pid) if pid else None
+            nuevas.append(LineaFactura(
+                tenant_id=ctx.tenant_id, numero_linea=i,
+                producto_id=pid if prod else None,
+                clave_prod_serv=(prod.clave_sat if prod else "01010101"),
+                clave_unidad=(prod.unidad_sat if prod else "H87"),
+                descripcion=(ln.descripcion or (prod.nombre if prod else "PARTIDA SAE"))[:1000],
+                cantidad=ln.cantidad,
+                valor_unitario=ln.precio_unitario,
+                importe=(ln.importe if ln.importe is not None else ln.cantidad * ln.precio_unitario),
+            ))
+        # Borrar ANTES de insertar: el UNIQUE (factura, numero_linea) choca si
+        # SQLAlchemy mete las líneas nuevas en el mismo flush que borra las viejas.
+        factura.lineas.clear()
+        db.flush()
+        factura.lineas.extend(nuevas)
+    db.flush()
+
+    # Ciclo del espejo con las remisiones estampadas. La marca también se
+    # captura a mano ('ZHGO331', 'ZHGO 0331'): se casan con la misma tolerancia
+    # que el folio sugerido del export, no con igualdad exacta.
+    from ...services.export_sae import parsear_marca
+
+    candidatas = (
+        db.query(Remision)
+        .filter(
+            Remision.tenant_id == ctx.tenant_id,
+            Remision.factura_sae.ilike(f"{serie}%"),
+            Remision.deleted_at.is_(None),
+        )
+        .with_for_update()
+        .all()
+    )
+    rems = [r for r in candidatas if parsear_marca(r.factura_sae or "") == (serie, payload.folio)]
+    for rem in rems:
+        if payload.estado == "TIMBRADA":
+            # Nunca pisar el vínculo con una factura NATIVA viva: si la
+            # remisión ya tiene CFDI propio, la estampa fue un error de
+            # captura — se deja intacta para que alguien la revise.
+            if rem.factura_id and rem.factura_id != factura.id:
+                otra = db.query(Factura).filter(Factura.id == rem.factura_id).one_or_none()
+                if otra is not None and otra.origen != "ESPEJO_SAE" and otra.estado != "CANCELADA":
+                    continue
+            rem.factura_id = factura.id
+            if rem.estado in ("BORRADOR", "RESERVADO", "CONFIRMADA"):
+                rem.estado = "FACTURADA"
+        else:
+            # CANCELADA en SAE → la remisión queda libre para re-exportarse.
+            # OJO con el inventario: si sus líneas traen lote (hubo salida al
+            # confirmarse), regresa a CONFIRMADA — BORRADOR significa "sin
+            # efecto en inventario" y reconfirmarla descontaría DOS veces.
+            rem.factura_sae = None
+            if rem.factura_id == factura.id:
+                con_stock = any(ln.lote_id for ln in rem.lineas)
+                if rem.estado == "FACTURADA":
+                    rem.estado = "CONFIRMADA" if con_stock else "BORRADOR"
+                elif rem.estado == "RESERVADO":
+                    rem.estado = "BORRADOR"
+            elif rem.estado == "RESERVADO":
+                rem.estado = "BORRADOR"
+
+    db.flush()
+    db.refresh(factura)
+    return factura
+
+
 @router.post("/{factura_id}/sustituir", response_model=FacturaDetailOut, status_code=status.HTTP_201_CREATED)
 def sustituir_factura(
     factura_id: UUID,
@@ -591,6 +863,13 @@ def sustituir_factura(
     # (doble clic / dos usuarios). Sin el lock ambos leerían `existente=None` y
     # crearían dos sustitutas → dos CFDI 04 sobre el mismo comprobante.
     vieja = get_or_404(db, Factura, factura_id, for_update=True)
+    if vieja.origen == "ESPEJO_SAE":
+        # Sustituir emite un CFDI nativo relacionado (04) con un comprobante que
+        # SAE emitió — la refacturación de una factura de SAE se hace en SAE.
+        raise HTTPException(
+            status_code=409,
+            detail="Esta factura es espejo de SAE: la refacturación se hace en SAE",
+        )
     if vieja.estado != "TIMBRADA":
         raise HTTPException(status_code=409, detail="Solo se sustituye una factura timbrada")
     if not (vieja.uuid or "").strip():
@@ -869,6 +1148,13 @@ def cancelar_factura(
     en producción debe ser false para que la cancelación llegue al SAT.
     """
     factura = get_or_404(db, Factura, factura_id, for_update=True)
+    if factura.origen == "ESPEJO_SAE":
+        # Cancelarla ante Facturama sería cancelar un CFDI que Facturama no
+        # emitió. Se cancela en SAE; la sync del espejo actualiza el reflejo.
+        raise HTTPException(
+            status_code=409,
+            detail="Esta factura es espejo de SAE: se cancela en SAE y el espejo se actualiza solo",
+        )
     if factura.estado != "TIMBRADA":
         raise HTTPException(status_code=409, detail="Solo se cancela una factura timbrada")
     # Sustituta(s) timbrada(s) de esta factura (refacturación con relación 04).

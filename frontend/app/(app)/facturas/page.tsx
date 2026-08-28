@@ -517,7 +517,12 @@ export default function FacturasPage() {
     { header: "Folio", cell: (f) => <span className="font-medium">{f.serie}{f.folio}</span> },
     { header: "Cliente", cell: (f) => cliName[f.cliente_id] ?? "—" },
     { header: "Fecha", cell: (f) => fmtDate(f.fecha) },
-    { header: "Estado", cell: (f) => <Badge tone={ESTADO_TONE[f.estado] ?? "muted"}>{f.estado}</Badge> },
+    { header: "Estado", cell: (f) => (
+      <div className="flex items-center gap-1.5">
+        <Badge tone={ESTADO_TONE[f.estado] ?? "muted"}>{f.estado}</Badge>
+        {f.origen === "ESPEJO_SAE" ? <Badge tone="muted">Espejo SAE</Badge> : null}
+      </div>
+    ) },
     { header: "Subtotal", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.subtotal) },
     { header: "IVA", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.iva_trasladado) },
     { header: "Total", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.total) },
@@ -531,14 +536,21 @@ export default function FacturasPage() {
       onClick: (f) => previsualizar(f), hidden: (f) => f.estado !== "TIMBRADA" },
     { id: "pdf", label: "Descargar PDF", icon: <Download size={15} />,
       onClick: (f) => { void descargar(f, "pdf"); }, hidden: (f) => f.estado !== "TIMBRADA" },
+    // El XML nativo se pide a Facturama; una espejo no tiene facturama_id (su
+    // XML vive en SAE — sincronizarlo es v2 del conector).
     { id: "xml", label: "Descargar XML", icon: <FileCode2 size={15} />,
-      onClick: (f) => { void descargar(f, "xml"); }, hidden: (f) => f.estado !== "TIMBRADA" },
+      onClick: (f) => { void descargar(f, "xml"); },
+      hidden: (f) => f.estado !== "TIMBRADA" || f.origen === "ESPEJO_SAE" },
     { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />,
       onClick: (f) => abrirEnviar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
+    // Las ESPEJO_SAE se cancelan/refacturan EN SAE (el backend lo rechaza con
+    // 409); esconder los botones evita ofrecer algo que va a rebotar.
     { id: "sustituir", label: "Sustituir (refacturar)", icon: <Replace size={15} />,
-      onClick: (f) => abrirSustituir(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
+      onClick: (f) => abrirSustituir(f),
+      hidden: (f) => !(canWrite && f.estado === "TIMBRADA" && f.origen !== "ESPEJO_SAE") },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
-      onClick: (f) => abrirCancelar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
+      onClick: (f) => abrirCancelar(f),
+      hidden: (f) => !(canWrite && f.estado === "TIMBRADA" && f.origen !== "ESPEJO_SAE") },
     { id: "descartar", label: "Descartar borrador", icon: <Trash2 size={15} />, tone: "danger",
       onClick: (f) => setToDescartar(f), hidden: (f) => !(canWrite && f.estado === "BORRADOR") },
   ];
