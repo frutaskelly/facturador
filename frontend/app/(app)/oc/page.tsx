@@ -63,11 +63,19 @@ type LineaEdit = {
   clave: string | null;
   producto_id: string;
   presentacion: string;
+  /** Las presentaciones que el producto ELEGIDO de verdad vende: son las
+   *  opciones válidas del selector. Vacío = producto sin elegir o de una sola
+   *  presentación — entonces no hay nada que escoger. */
+  presentaciones: string[];
   precio: string;
   notas: string | null;
   candidatos: LineaOC["candidatos"];
   /** El operador pidió buscar fuera de los candidatos sugeridos. */
   buscando: boolean;
+  /** Partida que el operador agregó a mano: el documento no la traía (el bot
+   *  puede saltarse un renglón). No aprende alias ni clave — no hay texto del
+   *  cliente del cual aprender. */
+  agregada: boolean;
 };
 
 /** De dónde salió el cruce de una partida, en palabras del negocio: se lee
@@ -129,10 +137,12 @@ function tablaDe(oc: OCRecibidaDetalle): LineaEdit[] {
       clave: l.clave ?? null,
       producto_id: fuerte ? fuerte.producto_id : "",
       presentacion: sirve ? sugerida : presentacionDe(unidad, fuerte),
+      presentaciones: Object.keys(fuerte?.presentaciones ?? {}),
       precio: l.precio != null ? String(l.precio) : "",
       notas: l.notas ?? null,
       candidatos: l.candidatos,
       buscando: false,
+      agregada: false,
     };
   });
 }
@@ -153,9 +163,18 @@ export default function Page() {
   const [rows, setRows] = useState<OCRecibida[] | null>(null);
   const [error, setError] = useState(false);
   const [estado, setEstado] = useState("PENDIENTE");
+  // Filtros del flujo diario: "lo de hoy de tal cliente". Cambiarlos regresa a
+  // la primera página — la posición vieja no significa nada bajo otro filtro.
+  const [clienteFiltro, setClienteFiltro] = useState("");
+  const [fechaDesde, setFechaDesde] = useState("");
+  const [fechaHasta, setFechaHasta] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
   const [proyectos, setProyectos] = useState<Proyecto[]>([]);
+
+  const LIMIT = 100;
 
   const [abierta, setAbierta] = useState<OCRecibidaDetalle | null>(null);
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
@@ -187,13 +206,19 @@ export default function Page() {
 
   const reload = useCallback(() => {
     setError(false);          // un fallo transitorio no puede dejar la bandeja muerta
-    const qs = new URLSearchParams({ limit: "200" });
+    const qs = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) });
     if (estado) qs.set("estado", estado);
     if (busca) qs.set("q", busca);
+    if (clienteFiltro) qs.set("cliente_id", clienteFiltro);
+    if (fechaDesde) qs.set("fecha_desde", fechaDesde);
+    if (fechaHasta) qs.set("fecha_hasta", fechaHasta);
     apiFetch<Page<OCRecibida>>(`/api/v1/oc-recibidas?${qs}`)
-      .then((p) => setRows(p.items))
+      .then((p) => {
+        setRows(p.items);
+        setTotal(p.total);
+      })
       .catch(() => setError(true));
-  }, [estado, busca]);
+  }, [estado, busca, clienteFiltro, fechaDesde, fechaHasta, offset]);
 
   useEffect(() => {
     reload();
@@ -310,6 +335,9 @@ export default function Page() {
       if (!l) return true;
       if (l.producto_id !== a.producto_id) return true;
       if (l.presentacion !== a.presentacion) return true;
+      // La cantidad también: el atajo de un clic rearma las líneas desde el
+      // documento y pisaría una cantidad recién corregida.
+      if (l.cantidad.trim() && Number(l.cantidad) !== Number(a.cantidad)) return true;
       const tecleado = precioNormalizado(l.precio);
       return !!tecleado && Number(tecleado) !== Number(a.precio_unitario);
     });
@@ -323,6 +351,11 @@ export default function Page() {
     }
     if (!lineas.length || sinProducto) {
       toast.error(`Faltan ${sinProducto} partida(s) por cruzar con un producto`);
+      return;
+    }
+    const sinCantidad = lineas.filter((l) => !(Number(l.cantidad) > 0)).length;
+    if (sinCantidad) {
+      toast.error(`${sinCantidad} partida(s) sin cantidad válida`);
       return;
     }
     setGuardando(true);
@@ -345,10 +378,12 @@ export default function Page() {
               presentacion: l.presentacion,
               precio_unitario: precioNormalizado(l.precio) || null,
               notas: l.notas,
-              texto_original: l.texto,
+              // Una partida agregada a mano no trae texto del cliente: no hay
+              // alias que aprender ni clave que registrar.
+              texto_original: l.agregada ? null : l.texto || null,
               // Con la clave, el backend la registra como el código de este
               // cliente para el producto: la próxima orden cruza sin adivinar.
-              clave: l.clave,
+              clave: l.agregada ? null : l.clave,
             })),
           }),
         }
@@ -504,7 +539,13 @@ export default function Page() {
         subtitle="Lo que llega por WhatsApp o correo, antes de volverse remisión"
         actions={
           <div className="w-52">
-            <Select value={estado} onChange={(e) => setEstado(e.target.value)}>
+            <Select
+              value={estado}
+              onChange={(e) => {
+                setEstado(e.target.value);
+                setOffset(0);
+              }}
+            >
               <option value="PENDIENTE">Por revisar</option>
               <option value="ASIGNADA">Ya con remisión</option>
               <option value="DESCARTADA">Descartadas</option>
@@ -514,13 +555,81 @@ export default function Page() {
         }
       />
 
+      <div className="mb-3 flex flex-wrap items-end gap-3">
+        <div className="w-64">
+          <Field label="Cliente">
+            <Select
+              value={clienteFiltro}
+              onChange={(e) => {
+                setClienteFiltro(e.target.value);
+                setOffset(0);
+              }}
+            >
+              <option value="">Todos</option>
+              {clientes.map((c) => (
+                <option key={c.id} value={c.id}>{c.legal_name}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <div className="w-40">
+          <Field label="Recibidas desde">
+            <Input
+              type="date"
+              value={fechaDesde}
+              onChange={(e) => {
+                setFechaDesde(e.target.value);
+                setOffset(0);
+              }}
+            />
+          </Field>
+        </div>
+        <div className="w-40">
+          <Field label="Hasta">
+            <Input
+              type="date"
+              value={fechaHasta}
+              onChange={(e) => {
+                setFechaHasta(e.target.value);
+                setOffset(0);
+              }}
+            />
+          </Field>
+        </div>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            const hoy = new Date().toLocaleDateString("en-CA");
+            setFechaDesde(hoy);
+            setFechaHasta(hoy);
+            setOffset(0);
+          }}
+        >
+          Hoy
+        </Button>
+        {clienteFiltro || fechaDesde || fechaHasta ? (
+          <button
+            type="button"
+            onClick={() => {
+              setClienteFiltro("");
+              setFechaDesde("");
+              setFechaHasta("");
+              setOffset(0);
+            }}
+            className="pb-2 text-sm text-accent hover:underline"
+          >
+            Limpiar filtros
+          </button>
+        ) : null}
+      </div>
+
       {busca ? (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-muted">Buscando la orden</span>
           <Badge tone="accent">{busca}</Badge>
           <button
             type="button"
-            onClick={() => { setBusca(""); setEstado("PENDIENTE"); }}
+            onClick={() => { setBusca(""); setEstado("PENDIENTE"); setOffset(0); }}
             className="text-accent hover:underline"
           >
             Quitar el filtro
@@ -540,6 +649,28 @@ export default function Page() {
         }
         onRowClick={(r) => abrir(r.id)}
       />
+
+      {total > LIMIT ? (
+        <div className="mt-3 flex items-center justify-end gap-3 text-sm">
+          <span className="text-muted tabular-nums">
+            {offset + 1}–{Math.min(offset + LIMIT, total)} de {total}
+          </span>
+          <Button
+            variant="secondary"
+            disabled={offset === 0}
+            onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+          >
+            Anteriores
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={offset + LIMIT >= total}
+            onClick={() => setOffset(offset + LIMIT)}
+          >
+            Siguientes
+          </Button>
+        </div>
+      ) : null}
 
       <Modal
         open={abierta !== null}
@@ -757,22 +888,54 @@ export default function Page() {
                       <th className="px-3 py-2 text-left">Producto del catálogo</th>
                       <th className="px-3 py-2 text-left">Presentación</th>
                       <th className="px-3 py-2 text-right">Precio</th>
+                      {canWrite && !bloqueada ? <th className="w-1 px-1 py-2" /> : null}
                     </tr>
                   </thead>
                   <tbody>
                     {lineas.map((l, i) => (
                       <tr key={l.numero} className="border-t border-border">
                         <td className="px-3 py-2">
-                          {l.texto}
+                          {l.agregada ? (
+                            <span className="text-xs italic text-muted">
+                              Agregada a mano — no venía en el documento
+                            </span>
+                          ) : (
+                            l.texto
+                          )}
                           {l.clave ? (
                             <div className="mt-0.5 text-xs text-muted">
                               Su clave: <span className="tabular-nums">{l.clave}</span>
                             </div>
                           ) : null}
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
-                          {l.cantidad}
-                          {l.unidad ? <span className="ml-1 text-xs text-muted">{l.unidad}</span> : null}
+                        <td className="px-3 py-2 text-right">
+                          {canWrite && !bloqueada ? (
+                            <div className="flex items-center justify-end gap-1">
+                              <div className="w-20">
+                                <Input
+                                  value={l.cantidad}
+                                  inputMode="decimal"
+                                  className="text-right tabular-nums"
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setLineas((prev) =>
+                                      prev.map((x, j) => (j === i ? { ...x, cantidad: v } : x))
+                                    );
+                                  }}
+                                />
+                              </div>
+                              {l.unidad ? (
+                                <span className="text-xs text-muted">{l.unidad}</span>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <span className="tabular-nums">
+                              {l.cantidad}
+                              {l.unidad ? (
+                                <span className="ml-1 text-xs text-muted">{l.unidad}</span>
+                              ) : null}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           {l.candidatos.length && !l.buscando ? (
@@ -790,18 +953,16 @@ export default function Page() {
                                   return;
                                 }
                                 setLineas((prev) =>
-                                  prev.map((x, j) =>
-                                    j === i
-                                      ? {
-                                          ...x,
-                                          producto_id: v,
-                                          presentacion: presentacionDe(
-                                            x.unidad,
-                                            x.candidatos.find((c) => c.producto_id === v)
-                                          ),
-                                        }
-                                      : x
-                                  )
+                                  prev.map((x, j) => {
+                                    if (j !== i) return x;
+                                    const cand = x.candidatos.find((c) => c.producto_id === v);
+                                    return {
+                                      ...x,
+                                      producto_id: v,
+                                      presentacion: presentacionDe(x.unidad, cand),
+                                      presentaciones: Object.keys(cand?.presentaciones ?? {}),
+                                    };
+                                  })
                                 );
                               }}
                             >
@@ -839,6 +1000,9 @@ export default function Page() {
                                                 presentacion_default: prod.presentacion_default,
                                               })
                                             : x.presentacion,
+                                          presentaciones: prod
+                                            ? Object.keys(prod.presentaciones ?? {})
+                                            : [],
                                         }
                                       : x
                                   )
@@ -848,7 +1012,26 @@ export default function Page() {
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          <span className="text-xs text-muted">{l.presentacion}</span>
+                          {canWrite && !bloqueada && l.presentaciones.length > 1 ? (
+                            // Solo con producto elegido y más de una presentación
+                            // hay algo que escoger — y escoger mal aquí es la
+                            // diferencia entre 5 cajas y 5 kilos.
+                            <Select
+                              value={l.presentacion}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setLineas((prev) =>
+                                  prev.map((x, j) => (j === i ? { ...x, presentacion: v } : x))
+                                );
+                              }}
+                            >
+                              {l.presentaciones.map((p) => (
+                                <option key={p} value={p}>{p}</option>
+                              ))}
+                            </Select>
+                          ) : (
+                            <span className="text-xs text-muted">{l.presentacion}</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right">
                           <Input
@@ -864,11 +1047,26 @@ export default function Page() {
                             }}
                           />
                         </td>
+                        {canWrite && !bloqueada ? (
+                          <td className="px-1 py-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setLineas((prev) => prev.filter((_, j) => j !== i))
+                              }
+                              className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
+                              aria-label="Quitar esta partida"
+                              title="Quitar esta partida de la remisión (el documento no cambia)"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </td>
+                        ) : null}
                       </tr>
                     ))}
                     {!lineas.length ? (
                       <tr>
-                        <td colSpan={5} className="px-3 py-6 text-center text-sm text-muted">
+                        <td colSpan={6} className="px-3 py-6 text-center text-sm text-muted">
                           El documento no trae partidas legibles.
                         </td>
                       </tr>
@@ -876,10 +1074,41 @@ export default function Page() {
                   </tbody>
                 </table>
               </div>
-              <p className="mt-2 text-xs text-muted">
-                El precio vacío lo resuelve la lista del cliente. Los kilos, las líneas y los
-                precios se pueden seguir cambiando en la remisión después de crearla.
-              </p>
+              <div className="mt-2 flex items-start justify-between gap-4">
+                <p className="text-xs text-muted">
+                  El precio vacío lo resuelve la lista del cliente. Quitar o agregar aquí decide
+                  qué lleva la remisión — el documento original no se toca.
+                </p>
+                {canWrite && !bloqueada ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      setLineas((prev) => [
+                        ...prev,
+                        {
+                          // Numeración aparte de la del documento: nunca choca
+                          // con una partida real ni con la evaluación `auto`.
+                          numero: Math.max(0, ...prev.map((x) => x.numero)) + 1000,
+                          texto: "",
+                          cantidad: "",
+                          unidad: "",
+                          clave: null,
+                          producto_id: "",
+                          presentacion: "KILO",
+                          presentaciones: [],
+                          precio: "",
+                          notas: null,
+                          candidatos: [],
+                          buscando: true,
+                          agregada: true,
+                        },
+                      ])
+                    }
+                  >
+                    Agregar partida
+                  </Button>
+                ) : null}
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted">

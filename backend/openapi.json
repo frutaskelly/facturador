@@ -23126,6 +23126,40 @@
      },
      {
       "in": "query",
+      "name": "fecha_desde",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Fecha Desde"
+      }
+     },
+     {
+      "in": "query",
+      "name": "fecha_hasta",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Fecha Hasta"
+      }
+     },
+     {
+      "in": "query",
       "name": "limit",
       "required": false,
       "schema": {
