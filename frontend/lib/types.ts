@@ -148,6 +148,9 @@ export type Sucursal = {
   almacen_id?: string | null;
   serie_factura_id?: string | null;
   serie_remision_id?: string | null;
+  // El abanico de series DISPONIBLES en la sucursal (la default va en los FK).
+  series_factura_ids?: string[];
+  series_remision_ids?: string[];
   created_at: string;
   updated_at: string;
 };

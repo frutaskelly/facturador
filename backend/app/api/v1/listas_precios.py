@@ -19,7 +19,7 @@ from datetime import date
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -369,6 +369,67 @@ def asignar_lista(
         asignados += 1
     db.flush()
     return ListaAsignarOut(default=lista.es_default, clientes_asignados=asignados)
+
+
+# ─── Excel de ida y vuelta + PDF (28-ago-2026, pedido del dueño) ────────────
+
+@router.get("/{lista_id}/export")
+def exportar_lista_xlsx(
+    lista_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """El Excel de la lista (SKU | PRODUCTO | PRESENTACION | DESDE CANTIDAD |
+    PRECIO): se edita y se vuelve a subir con /importar para actualizar en masa."""
+    from ...services import lista_export
+
+    lista = get_or_404(db, ListaPrecios, lista_id)
+    contenido = lista_export.exportar_xlsx(db, lista)
+    nombre = f"precios_{(lista.codigo or 'lista').strip()}.xlsx"
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
+
+
+@router.get("/{lista_id}/pdf")
+def exportar_lista_pdf(
+    lista_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    from ...models import Tenant
+    from ...services import lista_export
+
+    lista = get_or_404(db, ListaPrecios, lista_id)
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    contenido = lista_export.exportar_pdf(db, lista, tenant.legal_name or "")
+    nombre = f"lista_{(lista.codigo or 'precios').strip()}.pdf"
+    return Response(content=contenido, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{nombre}"'})
+
+
+@router.post("/{lista_id}/importar")
+def importar_lista_xlsx(
+    lista_id: UUID,
+    archivo: UploadFile = File(...),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Sube el MISMO Excel del export para actualizar en masa: PRECIO con valor
+    crea/actualiza el renglón; PRECIO vacío o 0 lo QUITA de la lista. Los SKU
+    desconocidos se reportan (los productos nuevos nacen en el wizard)."""
+    from ...services import lista_export
+
+    lista = get_or_404(db, ListaPrecios, lista_id)
+    data = archivo.file.read(10 * 1024 * 1024 + 1)
+    if not data or len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=422, detail="Archivo vacío o mayor a 10 MB")
+    res = lista_export.importar_xlsx(db, ctx.tenant_id, lista, data)
+    if not res.get("ok"):
+        raise HTTPException(status_code=422, detail=res.get("error"))
+    return res
 
 
 # ─── a QUIÉN se le aplica cada lista ─────────────────────────────────────────

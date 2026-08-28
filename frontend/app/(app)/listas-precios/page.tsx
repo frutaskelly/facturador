@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ListPlus, Pencil, Plus, Tag, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Download, FileText, ListPlus, Pencil, Plus, Tag, Trash2, Upload } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -13,7 +13,7 @@ import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
-import { ApiError, apiFetch } from "@/lib/api";
+import { ApiError, apiDownload, apiFetch, apiOpenInTab } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
@@ -98,6 +98,32 @@ export default function ListasPreciosPage() {
   // ── gestor de precios ──
   const [activeLista, setActiveLista] = useState<ListaPrecios | null>(null);
   const [precios, setPrecios] = useState<Precio[]>([]);
+  // Buscador del gestor de precios: con 500 renglones, sin filtro no se trabaja.
+  const [buscaPrecio, setBuscaPrecio] = useState("");
+  const importRef = useRef<HTMLInputElement>(null);
+  const [importando, setImportando] = useState(false);
+
+  async function importarExcelLista(f: File) {
+    if (!activeLista) return;
+    setImportando(true);
+    try {
+      const fd = new FormData();
+      fd.append("archivo", f);
+      const r = await apiFetch<{ actualizados: number; agregados: number; eliminados: number; sin_cambio: number; errores: string[] }>(
+        `/api/v1/listas-precios/${activeLista.id}/importar`,
+        { method: "POST", body: fd }
+      );
+      const partes = [`${r.agregados} agregados`, `${r.actualizados} actualizados`, `${r.eliminados} quitados`];
+      if (r.errores.length) partes.push(`${r.errores.length} con error (${r.errores[0]})`);
+      toast[r.errores.length ? "error" : "success"](partes.join(" · "));
+      void loadPrecios(activeLista.id);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo importar");
+    } finally {
+      setImportando(false);
+      if (importRef.current) importRef.current.value = "";
+    }
+  }
   const [loadingPrecios, setLoadingPrecios] = useState(false);
   const [nuevo, setNuevo] = useState({ producto_id: "", presentacion: "", cantidad_minima: "1", precio_unitario: "" });
 
@@ -330,12 +356,52 @@ export default function ListasPreciosPage() {
             <p className="text-xs text-muted">
               Cada renglón es un <b>tier por volumen</b>: el precio aplica a partir de “Desde cant.”. Un solo renglón = precio fijo.
             </p>
-            {canWrite && (
-              <Button variant="secondary" onClick={openCargar}>
-                <ListPlus size={14} /> Cargar productos del catálogo
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const win = window.open("", "_blank");
+                  void apiOpenInTab(`/api/v1/listas-precios/${activeLista?.id}/pdf`, win).catch((e) =>
+                    toast.error(e instanceof ApiError ? e.message : "No se pudo abrir el PDF"));
+                }}
+              >
+                <FileText size={14} /> PDF
               </Button>
-            )}
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  void apiDownload(`/api/v1/listas-precios/${activeLista?.id}/export`,
+                    `precios_${activeLista?.codigo ?? "lista"}.xlsx`).catch((e) =>
+                    toast.error(e instanceof ApiError ? e.message : "No se pudo exportar"));
+                }}
+              >
+                <Download size={14} /> Excel
+              </Button>
+              {canWrite && (
+                <Button variant="secondary" onClick={() => importRef.current?.click()} disabled={importando}>
+                  <Upload size={14} /> {importando ? "Importando…" : "Importar Excel"}
+                </Button>
+              )}
+              {canWrite && (
+                <Button variant="secondary" onClick={openCargar}>
+                  <ListPlus size={14} /> Cargar productos del catálogo
+                </Button>
+              )}
+            </div>
           </div>
+          <input
+            ref={importRef} type="file" accept=".xlsx" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void importarExcelLista(f); }}
+          />
+          <p className="text-xs text-muted">
+            El Excel baja y sube con las mismas columnas: cambia PRECIO para actualizar, agrega
+            renglones nuevos por SKU, o deja el PRECIO vacío para quitar el renglón de la lista.
+          </p>
+          <Input
+            placeholder="Buscar un producto en la lista…"
+            value={buscaPrecio}
+            onChange={(e) => setBuscaPrecio(e.target.value)}
+          />
 
           {canWrite && (
             <div className="grid grid-cols-2 items-end gap-2 rounded-lg border border-border p-3 sm:grid-cols-5">
@@ -394,7 +460,10 @@ export default function ListasPreciosPage() {
                   ) : null,
                 },
               ]}
-              rows={precios}
+              rows={buscaPrecio.trim()
+                ? precios.filter((p) =>
+                    (prodName[p.producto_id] ?? "").toLowerCase().includes(buscaPrecio.trim().toLowerCase()))
+                : precios}
               empty="Sin precios en esta lista"
             />
           )}

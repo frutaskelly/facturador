@@ -29,7 +29,7 @@ from .remision import LineaRemision, Remision
 from .role import Role
 from .role_permission import RolePermission
 from .serie import Serie
-from .sucursal import PrecioOverride, Sucursal
+from .sucursal import PrecioOverride, Sucursal, SucursalSerie
 from .tenant import Membership, Tenant, User
 
 __all__ = [

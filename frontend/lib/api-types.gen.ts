@@ -1532,6 +1532,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/listas-precios/{lista_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Exportar Lista Xlsx
+         * @description El Excel de la lista (SKU | PRODUCTO | PRESENTACION | DESDE CANTIDAD |
+         *     PRECIO): se edita y se vuelve a subir con /importar para actualizar en masa.
+         */
+        get: operations["exportar_lista_xlsx_api_v1_listas_precios__lista_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/listas-precios/{lista_id}/importar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Importar Lista Xlsx
+         * @description Sube el MISMO Excel del export para actualizar en masa: PRECIO con valor
+         *     crea/actualiza el renglón; PRECIO vacío o 0 lo QUITA de la lista. Los SKU
+         *     desconocidos se reportan (los productos nuevos nacen en el wizard).
+         */
+        post: operations["importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/listas-precios/{lista_id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Exportar Lista Pdf */
+        get: operations["exportar_lista_pdf_api_v1_listas_precios__lista_id__pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/listas-precios/{lista_id}/precios": {
         parameters: {
             query?: never;
@@ -3247,6 +3307,14 @@ export interface components {
             nota?: string | null;
             /** Pesos */
             pesos?: components["schemas"]["PesoLineaIn"][] | null;
+        };
+        /** Body_importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post */
+        Body_importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post: {
+            /**
+             * Archivo
+             * Format: binary
+             */
+            archivo: string;
         };
         /** Body_importar_preview_api_v1_productos_importar_preview_post */
         Body_importar_preview_api_v1_productos_importar_preview_post: {
@@ -8170,6 +8238,10 @@ export interface components {
             serie_factura_id?: string | null;
             /** Serie Remision Id */
             serie_remision_id?: string | null;
+            /** Series Factura Ids */
+            series_factura_ids?: string[];
+            /** Series Remision Ids */
+            series_remision_ids?: string[];
             /** Telefono */
             telefono?: string | null;
         };
@@ -8209,6 +8281,10 @@ export interface components {
             serie_factura_id?: string | null;
             /** Serie Remision Id */
             serie_remision_id?: string | null;
+            /** Series Factura Ids */
+            series_factura_ids?: string[];
+            /** Series Remision Ids */
+            series_remision_ids?: string[];
             /** Telefono */
             telefono?: string | null;
             /**
@@ -8240,6 +8316,10 @@ export interface components {
             serie_factura_id?: string | null;
             /** Serie Remision Id */
             serie_remision_id?: string | null;
+            /** Series Factura Ids */
+            series_factura_ids?: string[] | null;
+            /** Series Remision Ids */
+            series_remision_ids?: string[] | null;
             /** Telefono */
             telefono?: string | null;
         };
@@ -11988,6 +12068,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PrecioBulkResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    exportar_lista_xlsx_api_v1_listas_precios__lista_id__export_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                lista_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                lista_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    exportar_lista_pdf_api_v1_listas_precios__lista_id__pdf_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                lista_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

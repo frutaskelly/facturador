@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     Numeric,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
@@ -61,3 +62,19 @@ class PrecioOverride(Base, TimestampMixin):
     precio_unitario = Column(Numeric(18, 4), nullable=False)
     vigencia_desde = Column(Date)
     vigencia_hasta = Column(Date)
+
+
+class SucursalSerie(Base):
+    """Serie DISPONIBLE en la sucursal (migración 0056). La default sigue en
+    sucursales.serie_factura_id / serie_remision_id: esto es el ABANICO que la
+    sucursal puede usar (EHMO Pachuca: ZEHMOHOS hospitales + ZEHMOFAC costales),
+    y es lo que ofrecen los selectores de emisión."""
+    __tablename__ = "sucursal_series"
+    __table_args__ = (
+        UniqueConstraint("sucursal_id", "serie_id", name="uq_sucursal_serie"),
+    )
+
+    id = uuid_pk()
+    tenant_id = tenant_fk()
+    sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id", ondelete="CASCADE"), nullable=False, index=True)
+    serie_id = Column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="CASCADE"), nullable=False)

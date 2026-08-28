@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -110,9 +110,39 @@ export default function SucursalesPage() {
   }
 
   // ── modales de alta ──
-  const emptySuc = { nombre: "", contacto: "", telefono: "", serie_factura_id: "", serie_remision_id: "", almacen_id: "" };
+  const emptySuc = { nombre: "", contacto: "", telefono: "", serie_factura_id: "", serie_remision_id: "", almacen_id: "", series_factura_ids: [] as string[], series_remision_ids: [] as string[] };
   const [sucModal, setSucModal] = useState<{ clienteId: string } | null>(null);
   const [nuevaSuc, setNuevaSuc] = useState(emptySuc);
+  // "Basarse en una existente": el mismo punto de entrega suele repetirse entre
+  // razones sociales hermanas (Balles y Jubran comparten Pachuca) — elegirla
+  // PREFILLEA nombre/contacto/series/almacén y solo queda crear.
+  const cliName = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of clientes) map[c.id] = c.legal_name;
+    return map;
+  }, [clientes]);
+  const [todasSucs, setTodasSucs] = useState<Sucursal[]>([]);
+  const [baseSuc, setBaseSuc] = useState("");
+  useEffect(() => {
+    apiFetch<Page<Sucursal>>("/api/v1/sucursales?limit=1000")
+      .then((p) => setTodasSucs(p.items))
+      .catch(() => undefined);
+  }, []);
+  function basarseEn(id: string) {
+    setBaseSuc(id);
+    const s = todasSucs.find((x) => x.id === id);
+    if (!s) return;
+    setNuevaSuc({
+      nombre: s.nombre,
+      contacto: s.contacto ?? "",
+      telefono: s.telefono ?? "",
+      serie_factura_id: s.serie_factura_id ?? "",
+      serie_remision_id: s.serie_remision_id ?? "",
+      almacen_id: s.almacen_id ?? "",
+      series_factura_ids: (s.series_factura_ids ?? []) as string[],
+      series_remision_ids: (s.series_remision_ids ?? []) as string[],
+    });
+  }
 
   const emptyOvr = { producto_id: "", presentacion: "", sucursal_id: "", precio_unitario: "" };
   const [ovrModal, setOvrModal] = useState<{ clienteId: string } | null>(null);
@@ -128,6 +158,7 @@ export default function SucursalesPage() {
 
   function openSucModal(clienteId: string) {
     setNuevaSuc(emptySuc);
+    setBaseSuc("");
     setSucModal({ clienteId });
   }
   function openOvrModal(clienteId: string) {
@@ -147,6 +178,8 @@ export default function SucursalesPage() {
         telefono: nuevaSuc.telefono.trim() || null,
         serie_factura_id: nuevaSuc.serie_factura_id || null,
         serie_remision_id: nuevaSuc.serie_remision_id || null,
+        series_factura_ids: nuevaSuc.series_factura_ids,
+        series_remision_ids: nuevaSuc.series_remision_ids,
         almacen_id: nuevaSuc.almacen_id || null,
       });
       toast.success("Sucursal creada");
@@ -258,7 +291,7 @@ export default function SucursalesPage() {
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold">Sucursales</h3>
             {canSuc && (
-              <Button variant="secondary" onClick={() => openSucModal(cliente.id)}><Plus size={15} /> Nueva sucursal</Button>
+              <Button variant="secondary" onClick={() => openSucModal(cliente.id)}><Plus size={15} /> Agregar sucursal</Button>
             )}
           </div>
           <DataTable
@@ -315,7 +348,7 @@ export default function SucursalesPage() {
       <Modal
         open={!!sucModal}
         onClose={() => setSucModal(null)}
-        title="Nueva sucursal"
+        title="Agregar sucursal"
         footer={
           <>
             <Button variant="secondary" onClick={() => setSucModal(null)}>Cancelar</Button>
@@ -324,6 +357,21 @@ export default function SucursalesPage() {
         }
       >
         <div className="space-y-3">
+          <Field
+            label="Basarse en una sucursal existente"
+            hint="El mismo punto suele repetirse entre razones sociales hermanas: elegirlo prellena todo y solo queda crear."
+          >
+            <Select value={baseSuc} onChange={(e) => basarseEn(e.target.value)}>
+              <option value="">— Empezar en blanco —</option>
+              {todasSucs
+                .filter((s) => s.cliente_id !== sucModal?.clienteId)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.nombre}{s.codigo ? ` (${s.codigo})` : ""} · {cliName[s.cliente_id] ?? "otro cliente"}
+                  </option>
+                ))}
+            </Select>
+          </Field>
           <Field label="Nombre" required>
             <Input placeholder="Ej. Matriz Centro" value={nuevaSuc.nombre} onChange={(e) => setNuevaSuc({ ...nuevaSuc, nombre: e.target.value })} autoFocus />
           </Field>
@@ -340,19 +388,58 @@ export default function SucursalesPage() {
             <b>Listas de precios › Asignación de precios</b>, junto con las de serie y proyecto.
           </p>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Serie de factura" hint="Gana sobre la del cliente.">
-              <Select value={nuevaSuc.serie_factura_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, serie_factura_id: e.target.value })}>
-                <option value="">(usa la del cliente / default)</option>
-                {seriesFac.map((s) => <option key={s.id} value={s.id}>{s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}</option>)}
-              </Select>
+            <Field label="Series de factura" hint="Una o más. La primera palomeada es la default; gana sobre la del cliente.">
+              <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+                {seriesFac.map((s) => (
+                  <label key={s.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={nuevaSuc.series_factura_ids.includes(s.id)}
+                      onChange={(e) =>
+                        setNuevaSuc((prev) => ({
+                          ...prev,
+                          series_factura_ids: e.target.checked
+                            ? [...prev.series_factura_ids, s.id]
+                            : prev.series_factura_ids.filter((x) => x !== s.id),
+                          serie_factura_id: e.target.checked && !prev.series_factura_ids.length ? s.id
+                            : prev.serie_factura_id === s.id && !e.target.checked ? "" : prev.serie_factura_id,
+                        }))
+                      }
+                    />
+                    {s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}
+                  </label>
+                ))}
+                {!seriesFac.length ? <span className="text-xs text-muted">Sin series de factura</span> : null}
+              </div>
             </Field>
-            <Field label="Serie de remisión">
-              <Select value={nuevaSuc.serie_remision_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, serie_remision_id: e.target.value })}>
-                <option value="">(usa la del cliente / default)</option>
-                {seriesRem.map((s) => <option key={s.id} value={s.id}>{s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}</option>)}
-              </Select>
+            <Field label="Series de remisión" hint="Una o más; la primera palomeada es la default.">
+              <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+                {seriesRem.map((s) => (
+                  <label key={s.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={nuevaSuc.series_remision_ids.includes(s.id)}
+                      onChange={(e) =>
+                        setNuevaSuc((prev) => ({
+                          ...prev,
+                          series_remision_ids: e.target.checked
+                            ? [...prev.series_remision_ids, s.id]
+                            : prev.series_remision_ids.filter((x) => x !== s.id),
+                          serie_remision_id: e.target.checked && !prev.series_remision_ids.length ? s.id
+                            : prev.serie_remision_id === s.id && !e.target.checked ? "" : prev.serie_remision_id,
+                        }))
+                      }
+                    />
+                    {s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}
+                  </label>
+                ))}
+                {!seriesRem.length ? <span className="text-xs text-muted">Sin series de remisión</span> : null}
+              </div>
             </Field>
           </div>
+          <p className="text-xs text-muted">
+            Sin serie palomeada, la sucursal usa las del cliente (o la default del negocio).
+          </p>
           <Field label="Almacén" hint="De dónde sale la mercancía de esta sucursal. Gana sobre el del cliente.">
             <Select value={nuevaSuc.almacen_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, almacen_id: e.target.value })}>
               <option value="">(usa el del cliente / predeterminado)</option>
