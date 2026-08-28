@@ -268,6 +268,10 @@ export type Remision = {
   factura_sae?: string | null;
   // Orden de compra del cliente ("su pedido").
   su_pedido?: string | null;
+  // La OC original en la bandeja de órdenes y su documento.
+  oc_id?: string | null;
+  oc_archivo_url?: string | null;
+  oc_archivo_nombre?: string | null;
   factura_estado?: "BORRADOR" | "TIMBRADA" | "CANCELADA" | null;
   factura_id?: string | null;
   subtotal: string;

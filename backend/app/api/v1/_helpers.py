@@ -82,10 +82,18 @@ def flush_or_conflict(db: Session, *, detail: str = "Registro duplicado") -> Non
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
 
-def paginate(query: Query, out_model: Type[T], limit: int, offset: int) -> Page:
-    """Count the (ordered) query, then return one page mapped to `out_model`."""
+def paginate(
+    query: Query, out_model: Type[T], limit: int, offset: int, *, preparar=None
+) -> Page:
+    """Count the (ordered) query, then return one page mapped to `out_model`.
+
+    `preparar` recibe los renglones de la página ANTES de serializarlos: es el
+    lugar para resolver en UNA consulta lo que si no sería una por renglón.
+    """
     total = query.order_by(None).count()
     rows = query.offset(offset).limit(limit).all()
+    if preparar is not None:
+        preparar(rows)
     return Page[out_model](
         items=[out_model.model_validate(r) for r in rows],
         total=total,

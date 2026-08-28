@@ -7395,6 +7395,12 @@ export interface components {
             nota_entrega?: string | null;
             /** Notas */
             notas?: string | null;
+            /** Oc Archivo Nombre */
+            oc_archivo_nombre?: string | null;
+            /** Oc Archivo Url */
+            oc_archivo_url?: string | null;
+            /** Oc Id */
+            oc_id?: string | null;
             /**
              * Pos Asignaciones
              * @default {}
@@ -7477,6 +7483,12 @@ export interface components {
             nota_entrega?: string | null;
             /** Notas */
             notas?: string | null;
+            /** Oc Archivo Nombre */
+            oc_archivo_nombre?: string | null;
+            /** Oc Archivo Url */
+            oc_archivo_url?: string | null;
+            /** Oc Id */
+            oc_id?: string | null;
             /**
              * Pos Asignaciones
              * @default {}

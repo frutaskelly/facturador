@@ -41,6 +41,7 @@ from ...models import (
     LineaRemision,
     ListaPrecios,
     LoteInventario,
+    OCRecibida,
     Producto,
     ProductoCliente,
     Proyecto,
@@ -137,6 +138,33 @@ def _next_folio(db: Session, tenant_id, *, sucursal_id=None, cliente_id=None, se
     return f"R{mx + 1}"
 
 
+def _adjuntar_oc(db: Session, rems: list) -> None:
+    """Cuelga de cada remisión su OC original, en DOS consultas para toda la
+    página: la que la generó (`remision_id`) y, si no la hay, la que traiga el
+    mismo folio del cliente (las importadas del master no pasaron por la
+    bandeja, pero comparten "su pedido")."""
+    if not rems:
+        return
+    ids = [r.id for r in rems]
+    folios = {r.su_pedido for r in rems if r.su_pedido}
+    por_remision: dict = {}
+    for oc in db.query(OCRecibida).filter(OCRecibida.remision_id.in_(ids)).all():
+        por_remision.setdefault(oc.remision_id, oc)
+    por_folio: dict = {}
+    if folios:
+        for oc in db.query(OCRecibida).filter(OCRecibida.folio_externo.in_(folios)).all():
+            por_folio.setdefault(normalizar_folio(oc.folio_externo), oc)
+    for r in rems:
+        oc = por_remision.get(r.id) or (
+            por_folio.get(normalizar_folio(r.su_pedido)) if r.su_pedido else None
+        )
+        if oc is None:
+            continue
+        r.oc_id = oc.id
+        r.oc_archivo_url = oc.archivo_url
+        r.oc_archivo_nombre = oc.archivo_nombre
+
+
 @router.get("", response_model=Page[RemisionOut])
 def list_remisiones(
     estado: Optional[str] = Query(default=None, max_length=20),
@@ -162,7 +190,8 @@ def list_remisiones(
     if fecha_hasta:
         query = query.filter(Remision.fecha_remision <= fecha_hasta)
     query = query.order_by(Remision.fecha_remision.desc(), Remision.folio_interno.desc())
-    return paginate(query, RemisionOut, limit, offset)
+    return paginate(query, RemisionOut, limit, offset,
+                    preparar=lambda rows: _adjuntar_oc(db, rows))
 
 
 @router.post("", response_model=RemisionDetailOut, status_code=status.HTTP_201_CREATED)
@@ -323,6 +352,7 @@ def get_remision(
     names = dict(db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all())
     for ln in rem.lineas:
         ln.producto_nombre = names.get(ln.producto_id)
+    _adjuntar_oc(db, [rem])
     return rem
 
 
