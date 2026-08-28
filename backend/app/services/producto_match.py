@@ -38,6 +38,38 @@ def normalizar(texto: str) -> str:
     return " ".join(s.split())
 
 
+# Unidad del documento → nombre de presentación del catálogo. Cubre el OCR
+# sucio de los PDFs ("KILOGR AMO", "GARRA FON"): se compara sin espacios.
+_UNIDAD_A_PRESENTACION = {
+    "kilogramo": "KILO", "kilogramos": "KILO", "kilo": "KILO", "kilos": "KILO",
+    "kg": "KILO", "kgs": "KILO", "kgm": "KILO", "k": "KILO",
+    "pieza": "PIEZA", "piezas": "PIEZA", "pza": "PIEZA", "pzas": "PIEZA",
+    "pz": "PIEZA", "pzs": "PIEZA", "h87": "PIEZA", "unidad": "PIEZA",
+    "unidades": "PIEZA", "und": "PIEZA", "un": "PIEZA",
+    "litro": "LITRO", "litros": "LITRO", "lt": "LITRO", "lts": "LITRO", "l": "LITRO",
+    "mililitro": "MILILITRO", "mililitros": "MILILITRO", "ml": "MILILITRO",
+    "manojo": "MANOJO", "manojos": "MANOJO", "mj": "MANOJO", "mjo": "MANOJO",
+    "caja": "CAJA", "cajas": "CAJA", "cja": "CAJA", "cj": "CAJA",
+    "paquete": "PAQUETE", "paquetes": "PAQUETE", "paq": "PAQUETE", "pkg": "PAQUETE",
+    "bulto": "BULTO", "bultos": "BULTO", "costal": "COSTAL", "costales": "COSTAL",
+    "bolsa": "BOLSA", "bolsas": "BOLSA", "domo": "DOMO", "domos": "DOMO",
+    "charola": "CHAROLA", "charolas": "CHAROLA", "atado": "ATADO", "atados": "ATADO",
+    "docena": "DOCENA", "docenas": "DOCENA", "garrafon": "GARRAFON",
+    "gramo": "GRAMO", "gramos": "GRAMO", "g": "GRAMO", "gr": "GRAMO", "grs": "GRAMO",
+    "rollo": "ROLLO", "rollos": "ROLLO", "malla": "MALLA", "mallas": "MALLA",
+}
+
+
+def normalizar_unidad(texto: Optional[str]) -> Optional[str]:
+    """'KILOGR AMO' → 'KILO'; None si no se reconoce (mejor no adivinar).
+
+    El OCR parte las palabras y el catálogo de cada cliente escribe la unidad a
+    su manera; sin este puente, una OC de "5 CAJA" entraría como 5 KILO.
+    """
+    llave = normalizar(texto or "").replace(" ", "")
+    return _UNIDAD_A_PRESENTACION.get(llave)
+
+
 def _singular(token: str) -> str:
     """'acelgas' → 'acelga', 'limones' → 'limon'.
 
@@ -94,17 +126,49 @@ def productos_activos(db: Session) -> list[Producto]:
 
 
 def alias_del_tenant(db: Session) -> dict[str, UUID]:
-    """Todos los alias aprendidos del tenant: {alias_normalizado: producto_id}.
+    """Los alias GLOBALES del tenant: {alias_normalizado: producto_id}.
 
     Se carga UNA vez y se pasa a `buscar` cuando se cruzan muchos textos (la
     importación masiva resuelve cientos de filas): sin esto era un SELECT por
     fila — 508 filas = 508 viajes a la base, que contra una base en la nube
     convierte medio segundo en decenas.
+
+    Solo los globales (cliente_id NULL): las importaciones y los cruces de
+    catálogo son del tenant entero; el vocabulario privado de un cliente se
+    carga aparte con `alias_de_cliente` cuando el documento ya sabe de quién es.
     """
     return {
         a.alias_normalizado: a.producto_id
-        for a in db.query(ProductoAlias.alias_normalizado, ProductoAlias.producto_id).all()
+        for a in db.query(ProductoAlias.alias_normalizado, ProductoAlias.producto_id)
+        .filter(ProductoAlias.cliente_id.is_(None))
+        .all()
     }
+
+
+def alias_de_cliente(
+    db: Session, cliente_id: Optional[UUID], sucursal_id: Optional[UUID] = None
+) -> dict[str, UUID]:
+    """El vocabulario privado del cliente: {alias_normalizado: producto_id}.
+
+    El más específico pisa al más general al armar el dict (cliente+sucursal >
+    cliente), así `buscar` solo consulta un mapa. Vacío si no hay cliente."""
+    if cliente_id is None:
+        return {}
+    filas = (
+        db.query(ProductoAlias)
+        .filter(ProductoAlias.cliente_id == cliente_id)
+        .all()
+    )
+    out: dict[str, UUID] = {}
+    # Primero los del cliente a secas; encima, los de la sucursal del documento.
+    for a in filas:
+        if a.sucursal_id is None:
+            out[a.alias_normalizado] = a.producto_id
+    if sucursal_id is not None:
+        for a in filas:
+            if a.sucursal_id == sucursal_id:
+                out[a.alias_normalizado] = a.producto_id
+    return out
 
 
 def normalizar_catalogo(prods: list[Producto]) -> dict[UUID, tuple[str, str, list[str]]]:
@@ -134,12 +198,20 @@ def buscar(
     limit: int = 5,
     prods: Optional[list[Producto]] = None,
     aliases: Optional[dict[str, UUID]] = None,
+    aliases_cliente: Optional[dict[str, UUID]] = None,
     norms: Optional[dict[UUID, tuple[str, str, list[str]]]] = None,
+    unidad: Optional[str] = None,
 ) -> list[Candidato]:
     """Devuelve candidatos ordenados por confianza para un texto libre.
 
     `prods` permite pasar el catálogo ya cargado: /productos/match resuelve hasta
     200 textos por request y sin esto haría 200 SELECT del catálogo completo.
+
+    `aliases_cliente` (de `alias_de_cliente`) gana sobre el alias global: es el
+    vocabulario privado del cliente del documento. `unidad` (ya normalizada con
+    `normalizar_unidad`) frena el paso difuso: un parecido que ni siquiera se
+    vende en esa unidad no puede ser candidato fuerte — el clúster papa/papaya
+    demostró que la distancia de edición sola engaña en nombres cortos.
     """
     norm = normalizar(texto)
     if not norm:
@@ -166,16 +238,22 @@ def buscar(
             seen.add(p.id)
 
     # 2) alias aprendido (si apunta a un producto que aún no está incluido).
+    #    El del CLIENTE gana sobre el global: es su vocabulario privado.
     #    `aliases` precargado evita un SELECT por texto en los cruces masivos.
-    if aliases is not None:
-        alias_pid = aliases.get(norm)
-    else:
-        fila = (
-            db.query(ProductoAlias.producto_id)
-            .filter(ProductoAlias.alias_normalizado == norm)
-            .one_or_none()
-        )
-        alias_pid = fila[0] if fila is not None else None
+    alias_pid = (aliases_cliente or {}).get(norm)
+    if alias_pid is None:
+        if aliases is not None:
+            alias_pid = aliases.get(norm)
+        else:
+            fila = (
+                db.query(ProductoAlias.producto_id)
+                .filter(
+                    ProductoAlias.alias_normalizado == norm,
+                    ProductoAlias.cliente_id.is_(None),
+                )
+                .one_or_none()
+            )
+            alias_pid = fila[0] if fila is not None else None
     if alias_pid is not None and alias_pid in by_id and alias_pid not in seen:
         out.append(_cand(by_id[alias_pid], 100, "alias"))
         seen.add(alias_pid)
@@ -195,6 +273,7 @@ def buscar(
         textos = cacheado[2] if cacheado else (
             [normalizar(p.nombre)] + [normalizar(s) for s in (p.sinonimos or [])])
         score = 0
+        score_difuso = 0
         for h in textos:
             if not h:
                 continue
@@ -206,7 +285,18 @@ def buscar(
                 else:
                     fz = int(fuzz.token_set_ratio(v, h))
                     if fz >= _FUZZY_MIN:
-                        score = max(score, fz)
+                        score_difuso = max(score_difuso, fz)
+        # Freno por unidad SOLO al parecido difuso puro (typos): si la partida
+        # trae unidad y el producto ni la vende, ese parecido no puede ser
+        # fuerte — el clúster papa/papaya/papalo nació exactamente así. El
+        # prefijo/subcadena no se degrada: "CILANTRO" sigue siendo la sugerencia
+        # correcta aunque el producto aún no venda MANOJO.
+        if score_difuso and unidad:
+            pres = {(k or "").strip().upper() for k in (p.presentaciones or {})}
+            pres.add((p.unidad_base or "").strip().upper())
+            if unidad.strip().upper() not in pres:
+                score_difuso = _FUZZY_MIN - 1
+        score = max(score, score_difuso)
         if score >= _FUZZY_FLOOR:
             scored.append((p, score))
 
@@ -219,20 +309,36 @@ def buscar(
     return out[:limit]
 
 
+def _alias_en_alcance(db: Session, norm: str, cliente_id, sucursal_id) -> Optional[ProductoAlias]:
+    """El alias de ESE alcance exacto (NULL cuenta como valor), o None.
+
+    El lookup filtra por cliente/sucursal a propósito: aprender el alias de un
+    cliente jamás debe reapuntar el global — eso rompería el vocabulario de
+    todos los demás."""
+    q = db.query(ProductoAlias).filter(ProductoAlias.alias_normalizado == norm)
+    q = q.filter(ProductoAlias.cliente_id == cliente_id) if cliente_id is not None \
+        else q.filter(ProductoAlias.cliente_id.is_(None))
+    q = q.filter(ProductoAlias.sucursal_id == sucursal_id) if sucursal_id is not None \
+        else q.filter(ProductoAlias.sucursal_id.is_(None))
+    return q.one_or_none()
+
+
 def aprender_alias(
-    db: Session, tenant_id: UUID, texto: str, producto_id: UUID, *, origen: str = "MANUAL", user_id=None
+    db: Session, tenant_id: UUID, texto: str, producto_id: UUID, *,
+    origen: str = "MANUAL", user_id=None,
+    cliente_id: Optional[UUID] = None, sucursal_id: Optional[UUID] = None,
 ) -> Optional[ProductoAlias]:
-    """Guarda (o reapunta) el alias normalizado → producto. Idempotente."""
+    """Guarda (o reapunta) el alias normalizado → producto EN SU ALCANCE. Idempotente.
+
+    Sin cliente_id escribe el alias global (comportamiento histórico); con
+    cliente_id escribe/reapunta SOLO el de ese cliente (y sucursal), sin tocar
+    el global."""
     # NFKD puede ALARGAR el texto (ligaduras); sin truncar, un alias de 254
     # chars revienta la columna String(254) con DataError 500.
     norm = normalizar(texto)[:254]
     if not norm:
         return None
-    existing = (
-        db.query(ProductoAlias)
-        .filter(ProductoAlias.alias_normalizado == norm)
-        .one_or_none()
-    )
+    existing = _alias_en_alcance(db, norm, cliente_id, sucursal_id)
     if existing is not None:
         existing.producto_id = producto_id
         existing.origen = origen
@@ -241,25 +347,91 @@ def aprender_alias(
     alias = ProductoAlias(
         tenant_id=tenant_id, producto_id=producto_id, alias=texto.strip()[:254],
         alias_normalizado=norm, origen=origen, created_by=user_id,
+        cliente_id=cliente_id, sucursal_id=sucursal_id,
     )
     try:
         # Savepoint: si otro request insertó el mismo alias en paralelo, el
-        # UNIQUE (tenant, alias_normalizado) truena aquí sin tirar la transacción.
+        # índice único del alcance truena aquí sin tirar la transacción.
         with db.begin_nested():
             db.add(alias)
             db.flush()
         return alias
     except IntegrityError:
-        existing = (
-            db.query(ProductoAlias)
-            .filter(ProductoAlias.alias_normalizado == norm)
-            .one_or_none()
-        )
+        existing = _alias_en_alcance(db, norm, cliente_id, sucursal_id)
         if existing is not None:
             existing.producto_id = producto_id
             existing.origen = origen
             db.flush()
         return existing
+
+
+def _alias_vigente_de_cliente(
+    db: Session, norm: str, cliente_id, sucursal_id
+) -> Optional[ProductoAlias]:
+    """El alias CON ALCANCE que `buscar` usaría para este documento, o None.
+
+    Misma precedencia que `alias_de_cliente`: el de la sucursal pisa al del
+    cliente. Existe para que corregir en la bandeja caiga donde el resolutor
+    va a leer — si no, la corrección se escribe en un lugar que nadie mira."""
+    if cliente_id is None:
+        return None
+    filas = (
+        db.query(ProductoAlias)
+        .filter(
+            ProductoAlias.alias_normalizado == norm,
+            ProductoAlias.cliente_id == cliente_id,
+        )
+        .all()
+    )
+    if sucursal_id is not None:
+        de_sucursal = next((a for a in filas if a.sucursal_id == sucursal_id), None)
+        if de_sucursal is not None:
+            return de_sucursal
+    return next((a for a in filas if a.sucursal_id is None), None)
+
+
+def aprender_alias_con_alcance(
+    db: Session, tenant_id: UUID, texto: str, producto_id: UUID, *,
+    cliente_id: Optional[UUID] = None, sucursal_id: Optional[UUID] = None,
+    origen: str = "MANUAL", user_id=None,
+) -> Optional[ProductoAlias]:
+    """La regla del catálogo multicliente: GLOBAL por defecto, alcance en conflicto.
+
+    - Sin alias global para ese texto → se aprende GLOBAL (le sirve a todos:
+      Balles, Jubran y MAFAN comparten vocabulario gratis).
+    - Global ya apunta al MISMO producto → no hay nada que aprender, SALVO que
+      este cliente arrastre un alias con alcance que diga otra cosa: ese es el
+      que gana al cruzar, así que la corrección tiene que caer ahí.
+    - Global apunta a OTRO producto → el texto es ambiguo entre clientes: se
+      aprende con alcance (cliente, y sucursal si viene) SIN tocar el global —
+      el "LIMON" de Pachuca deja de pelearse con el de Villahermosa.
+    """
+    norm = normalizar(texto)[:254]
+    if not norm:
+        return None
+    # Lo que HOY resuelve para este documento: si el cliente tiene su propio
+    # alias, es el que manda en `buscar` y el que hay que corregir.
+    vigente = _alias_vigente_de_cliente(db, norm, cliente_id, sucursal_id)
+    if vigente is not None and vigente.producto_id != producto_id:
+        return aprender_alias(
+            db, tenant_id, texto, producto_id, origen=origen, user_id=user_id,
+            cliente_id=vigente.cliente_id, sucursal_id=vigente.sucursal_id,
+        )
+    global_ = _alias_en_alcance(db, norm, None, None)
+    if global_ is None:
+        return aprender_alias(
+            db, tenant_id, texto, producto_id, origen=origen, user_id=user_id
+        )
+    if global_.producto_id == producto_id:
+        return vigente if vigente is not None else global_
+    if cliente_id is None:
+        # Sin cliente no hay alcance posible: reapuntar el global es decisión
+        # del que gestiona el catálogo, no de este helper.
+        return None
+    return aprender_alias(
+        db, tenant_id, texto, producto_id, origen=origen, user_id=user_id,
+        cliente_id=cliente_id, sucursal_id=sucursal_id,
+    )
 
 
 # ─── IA: sinónimos regionales / typos que el difuso no alcanza ────────────────

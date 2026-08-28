@@ -680,7 +680,38 @@ export type LineaOC = {
   clave?: string | null;
   precio?: string | null;
   notas?: string | null;
+  // La unidad del documento ya traducida a una presentación del catálogo
+  // ("KILOGR AMO" → KILO); si el documento no la dice, la habitual de ese
+  // cliente para el producto. Null = no se reconoció: decide la persona.
+  presentacion_sugerida?: string | null;
+  // True cuando la de arriba NO salió del documento sino de lo habitual del
+  // cliente o del producto: es una adivinanza, y el factor de la presentación
+  // cambia cantidad y precio.
+  presentacion_adivinada?: boolean;
   candidatos: CandidatoLinea[];
+};
+
+/** Una partida que ya cruzó por vía determinista, lista para el clic. */
+export type LineaAuto = {
+  numero: number;
+  producto_id: string;
+  nombre: string;
+  presentacion: string;
+  cantidad: string;
+  precio_unitario: string;
+  precio_origen: string;
+  texto_original?: string | null;
+  clave?: string | null;
+  cruzo_por: string;
+};
+
+/** ¿La orden entera puede volverse remisión con un clic? `ok` solo cuando TODAS
+ *  las partidas cruzaron por clave del cliente, alias o exacto, con unidad
+ *  vendible y precio de lista negociada (la lista base nunca decide). */
+export type AutoRemision = {
+  ok: boolean;
+  motivo?: string | null;
+  lineas: LineaAuto[];
 };
 
 export type OCRecibida = {
@@ -713,6 +744,7 @@ export type OCRecibida = {
 export type OCRecibidaDetalle = OCRecibida & {
   payload: Record<string, unknown>;
   lineas: LineaOC[];
+  auto?: AutoRemision | null;
 };
 
 // ─── Conexiones ──────────────────────────────────────────────────────────────

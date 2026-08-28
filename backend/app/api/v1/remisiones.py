@@ -300,16 +300,53 @@ def remisiones_pdf_lote(
     if not rems:
         raise HTTPException(status_code=404, detail="No se encontraron remisiones")
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
-    prod_ids = {ln.producto_id for r in rems for ln in r.lineas}
-    nombres = dict(db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all())
+    por_rem = _nombres_para_pdf(db, rems)
     cli_ids = {r.cliente_facturacion_id for r in rems}
     clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.id.in_(cli_ids)).all()}
-    items = [(r, clientes.get(r.cliente_facturacion_id), nombres) for r in rems]
+    items = [(r, clientes.get(r.cliente_facturacion_id), por_rem[r.id]) for r in rems]
     pdf = build_remisiones_pdf(items, tenant)
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": 'inline; filename="remisiones.pdf"'},
     )
+
+
+def _nombres_para_pdf(db: Session, rems: list[Remision]) -> dict:
+    """{remision_id: {producto_id: texto impreso}} para PDFs y correos al cliente.
+
+    El documento que el cliente firma trae SU nombre y SU clave del producto
+    (producto_clientes — la misma capa que ya usa el CFDI en services/cfdi.py),
+    con el nombre interno de respaldo. Formato: "CLAVE — NOMBRE DEL CLIENTE".
+    Todo precargado en dos consultas: un lote de 200 remisiones no puede hacer
+    un SELECT por línea.
+    """
+    prod_ids = {ln.producto_id for r in rems for ln in r.lineas}
+    interno = dict(
+        db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all()
+    ) if prod_ids else {}
+    cli_ids = {r.cliente_facturacion_id for r in rems if r.cliente_facturacion_id}
+    pcs = {}
+    if cli_ids and prod_ids:
+        for pc in (
+            db.query(ProductoCliente)
+            .filter(
+                ProductoCliente.cliente_id.in_(cli_ids),
+                ProductoCliente.producto_id.in_(prod_ids),
+            )
+            .all()
+        ):
+            pcs[(pc.cliente_id, pc.producto_id)] = pc
+    out: dict = {}
+    for r in rems:
+        nombres: dict = {}
+        for ln in r.lineas:
+            pc = pcs.get((r.cliente_facturacion_id, ln.producto_id))
+            base = (pc.nombre_cliente or "").strip() if pc else ""
+            base = base or interno.get(ln.producto_id) or str(ln.producto_id)
+            codigo = (pc.codigo_cliente or "").strip() if pc else ""
+            nombres[ln.producto_id] = f"{codigo} — {base}" if codigo else base
+        out[r.id] = nombres
+    return out
 
 
 @router.get("/{rem_id}", response_model=RemisionDetailOut)
@@ -1131,9 +1168,9 @@ def enviar_remision(
     if not email_service.configured(tenant):
         raise HTTPException(status_code=503, detail="El correo no está configurado")
 
-    # Nombres de producto (como get_remision).
-    prod_ids = {ln.producto_id for ln in rem.lineas}
-    names = dict(db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all())
+    # Nombres de producto COMO LOS CONOCE EL CLIENTE (catálogo del cliente, con
+    # el interno de respaldo): el correo y su PDF los lee él, no el operador.
+    names = _nombres_para_pdf(db, [rem])[rem.id]
     for ln in rem.lineas:
         ln.producto_nombre = names.get(ln.producto_id)
 
@@ -1211,12 +1248,12 @@ def enviar_remisiones_lote(
     if not email_service.configured(tenant):
         raise HTTPException(status_code=503, detail="El correo no está configurado")
 
-    # Nombres de producto de todas las remisiones (para el cuerpo y los PDFs).
-    prod_ids = {ln.producto_id for r in rems for ln in r.lineas}
-    names = dict(db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all())
+    # Nombres de producto de todas las remisiones (para el cuerpo y los PDFs),
+    # como los conoce el cliente — es él quien recibe este correo.
+    por_rem = _nombres_para_pdf(db, rems)
     for r in rems:
         for ln in r.lineas:
-            ln.producto_nombre = names.get(ln.producto_id)
+            ln.producto_nombre = por_rem[r.id].get(ln.producto_id)
 
     cliente_nombre = cliente.legal_name if cliente else ""
     emisor_nombre = (tenant.trade_name or tenant.legal_name) if tenant else "Facturador"
@@ -1226,7 +1263,7 @@ def enviar_remisiones_lote(
     # Un PDF adjunto por remisión.
     attachments: list[tuple[str, bytes, str]] = []
     for r in rems:
-        pdf = build_remision_pdf(r, tenant, cliente, names)
+        pdf = build_remision_pdf(r, tenant, cliente, por_rem[r.id])
         folio = r.folio_interno or str(r.id)
         attachments.append((f"{folio}.pdf", pdf, "application/pdf"))
 
@@ -1258,9 +1295,9 @@ def remision_pdf(
     rem = get_or_404(db, Remision, rem_id)
     cliente = db.query(Cliente).filter(Cliente.id == rem.cliente_facturacion_id).one_or_none()
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
-    prod_ids = {ln.producto_id for ln in rem.lineas}
-    nombres = dict(db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all())
-    pdf = build_remision_pdf(rem, tenant, cliente, nombres)
+    # El papel que firma el cliente trae SU clave y SU nombre del producto
+    # (catálogo del cliente), con el interno de respaldo — igual que el CFDI.
+    pdf = build_remision_pdf(rem, tenant, cliente, _nombres_para_pdf(db, [rem])[rem.id])
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{rem.folio_interno}.pdf"'},

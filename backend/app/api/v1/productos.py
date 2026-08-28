@@ -34,6 +34,7 @@ from ...models import (
     ProductoCliente,
     SatClaveProdServ,
     SatClaveUnidad,
+    Sucursal,
 )
 from ...schemas.producto import (
     AliasIn,
@@ -320,11 +321,30 @@ def crear_alias(
     Decisión 2026-07-29 (#3): ENSEÑAR un alias nuevo lo puede hacer cualquiera
     con lectura (es el flujo natural de captura), pero RE-APUNTAR uno ya
     aprendido a otro producto exige `producto:gestionar` — cambiar lo aprendido
-    envenenaría el cruce de todo el negocio."""
+    envenenaría el cruce de todo el negocio.
+
+    Con `cliente_id` el alias es vocabulario privado de ese cliente: crear o
+    reapuntar EN ese alcance no toca el global, así que basta la lectura — es
+    exactamente el caso del bot enseñando "chile tampico"→serrano para un solo
+    cliente sin poder envenenar a los demás."""
     ensure_fk(db, Producto, payload.producto_id, "producto_id")
+    if payload.cliente_id is not None:
+        ensure_fk(db, Cliente, payload.cliente_id, "cliente_id")
+        # Sin validar la sucursal, el INSERT viola su FK dentro del savepoint de
+        # `aprender_alias` y el endpoint contestaba 201 sin haber guardado nada.
+        ensure_fk(db, Sucursal, payload.sucursal_id, "sucursal_id")
+        aprender_alias(
+            db, ctx.tenant_id, payload.texto, payload.producto_id,
+            cliente_id=payload.cliente_id, sucursal_id=payload.sucursal_id,
+            origen="MANUAL", user_id=ctx.user_id,
+        )
+        return {"ok": True}
     existente = (
         db.query(ProductoAlias)
-        .filter(ProductoAlias.alias_normalizado == normalizar(payload.texto))
+        .filter(
+            ProductoAlias.alias_normalizado == normalizar(payload.texto),
+            ProductoAlias.cliente_id.is_(None),
+        )
         .one_or_none()
     )
     if (
@@ -1212,6 +1232,13 @@ def catalogo_cliente_batch(
         .all()
     }
     alias_previos = alias_del_tenant(db)
+    # Los alias que ya tienen estos clientes, para no chocar con su índice único.
+    alias_cliente_previos = {
+        (a.cliente_id, a.alias_normalizado)
+        for a in db.query(ProductoAlias)
+        .filter(ProductoAlias.cliente_id.in_([c.id for c in clientes]))
+        .all()
+    }
     nuevos: list = []
     guardados = 0
     for item in payload.items:
@@ -1236,16 +1263,31 @@ def catalogo_cliente_batch(
             if item.presentacion:
                 pc.presentacion = item.presentacion
             guardados += 1
-        # El cruce aprende el nombre del cliente (una vez por producto).
+        # El cruce aprende el nombre del cliente: GLOBAL si el texto es nuevo
+        # (le sirve a todos); con alcance del cliente si ya apunta a OTRO
+        # producto — el mismo texto puede significar cosas distintas por cliente
+        # y el global no se pisa.
         if nombre:
             norm_alias = normalizar(nombre)[:254]
-            if norm_alias and norm_alias not in alias_previos:
+            previo = alias_previos.get(norm_alias) if norm_alias else None
+            if norm_alias and previo is None:
                 nuevos.append(ProductoAlias(
                     id=uuid4(), tenant_id=ctx.tenant_id, producto_id=item.producto_id,
                     alias=nombre[:254], alias_normalizado=norm_alias,
                     origen="IMPORT", created_by=ctx.user_id,
                 ))
                 alias_previos[norm_alias] = item.producto_id
+            elif norm_alias and previo != item.producto_id:
+                for cliente in clientes:
+                    if (cliente.id, norm_alias) in alias_cliente_previos:
+                        continue
+                    nuevos.append(ProductoAlias(
+                        id=uuid4(), tenant_id=ctx.tenant_id, producto_id=item.producto_id,
+                        cliente_id=cliente.id,
+                        alias=nombre[:254], alias_normalizado=norm_alias,
+                        origen="IMPORT", created_by=ctx.user_id,
+                    ))
+                    alias_cliente_previos.add((cliente.id, norm_alias))
     if nuevos:
         db.add_all(nuevos)
     db.flush()
@@ -1266,10 +1308,49 @@ def create_producto(
         esquema_impuesto_id=payload.esquema_impuesto_id,
     )
     data = payload.model_dump()
+    forzar = data.pop("forzar", False)
     if data.get("nombre"):
         data["nombre"] = data["nombre"].strip().upper()   # nombres siempre en mayúsculas
-    if not (data.get("sku") or "").strip():
+
+    # El SKU interno lo genera el servidor. Un SKU con guiones o letras es un
+    # código DEL CLIENTE (CILA-FRUT-145) colándose como producto nuevo — la
+    # regla del catálogo multicliente lo manda a producto_clientes, no aquí.
+    sku = (data.get("sku") or "").strip()
+    if sku and not sku.isdigit():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "El SKU interno es numérico y lo genera el servidor; los códigos "
+                "del cliente se registran en el catálogo del cliente, no como SKU"
+            ),
+        )
+    if not sku:
         data["sku"] = _next_sku(db)   # auto-generate when blank
+
+    # Detector de duplicados en el alta individual (la importación ya lo tenía):
+    # con candidato fuerte, el alta exige decidir — "es el mismo, vincular" o
+    # forzar la creación a sabiendas. Aquí es donde nacían los cilantros ×6.
+    if not forzar and data.get("nombre"):
+        cands = [
+            c for c in buscar(db, ctx.tenant_id, data["nombre"], limit=5)
+            if c.score >= 88
+        ]
+        if cands:
+            cats_por_id, esquemas_por_id = _mapas_catalogo(db)
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "mensaje": (
+                        "Ya hay productos muy parecidos en el catálogo. Vincula el "
+                        "existente o repite con forzar=true si de verdad es otro."
+                    ),
+                    "candidatos": [
+                        _candidato_out(c, cats_por_id, esquemas_por_id).model_dump(mode="json")
+                        for c in cands
+                    ],
+                },
+            )
+
     obj = Producto(**data, tenant_id=ctx.tenant_id)
     db.add(obj)
     flush_or_conflict(db, detail=_DUP)
@@ -1297,6 +1378,19 @@ def update_producto(
     data = payload.model_dump(exclude_unset=True)
     if data.get("nombre"):
         data["nombre"] = data["nombre"].strip().upper()   # nombres siempre en mayúsculas
+    # Misma regla que en el alta: el SKU interno es numérico del servidor; el
+    # código del cliente vive en producto_clientes. Solo se valida el CAMBIO —
+    # un producto viejo con SKU alfanumérico se sigue pudiendo editar (la
+    # pantalla lo reenvía tal cual al guardar el nombre).
+    nuevo_sku = (data.get("sku") or "").strip()
+    if nuevo_sku and nuevo_sku != (obj.sku or "") and not nuevo_sku.isdigit():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "El SKU interno es numérico y lo genera el servidor; los códigos "
+                "del cliente se registran en el catálogo del cliente, no como SKU"
+            ),
+        )
     if "categoria_id" in data:
         ensure_fk(db, CategoriaProducto, data["categoria_id"], "categoria_id")
     if "esquema_impuesto_id" in data:

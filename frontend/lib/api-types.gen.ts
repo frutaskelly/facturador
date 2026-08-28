@@ -1706,6 +1706,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oc-recibidas/{oc_id}/crear-remision-auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Crear Remision Auto
+         * @description Un clic: la OC que cruzó COMPLETA por vías deterministas se vuelve remisión.
+         *
+         *     La evaluación se recalcula en este momento (una guardada hace horas miente:
+         *     el catálogo y las listas cambian) y si algo dejó de cruzar responde 409 con
+         *     el motivo — el folio no se quema hasta que todo está resuelto. Las líneas
+         *     salen con el precio de la lista negociada que validó la evaluación.
+         */
+        post: operations["crear_remision_auto_api_v1_oc_recibidas__oc_id__crear_remision_auto_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/oc-recibidas/{oc_id}/descartar": {
         parameters: {
             query?: never;
@@ -2171,6 +2196,11 @@ export interface paths {
          *     con lectura (es el flujo natural de captura), pero RE-APUNTAR uno ya
          *     aprendido a otro producto exige `producto:gestionar` — cambiar lo aprendido
          *     envenenaría el cruce de todo el negocio.
+         *
+         *     Con `cliente_id` el alias es vocabulario privado de ese cliente: crear o
+         *     reapuntar EN ese alcance no toca el global, así que basta la lectura — es
+         *     exactamente el caso del bot enseñando "chile tampico"→serrano para un solo
+         *     cliente sin poder envenenar a los demás.
          */
         post: operations["crear_alias_api_v1_productos_alias_post"];
         delete?: never;
@@ -3023,11 +3053,15 @@ export interface components {
         };
         /** AliasIn */
         AliasIn: {
+            /** Cliente Id */
+            cliente_id?: string | null;
             /**
              * Producto Id
              * Format: uuid
              */
             producto_id: string;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
             /** Texto */
             texto: string;
         };
@@ -3113,6 +3147,21 @@ export interface components {
             estado?: string | null;
             /** Nombre */
             nombre?: string | null;
+        };
+        /**
+         * AutoRemisionOut
+         * @description ¿La orden entera puede volverse remisión con un clic? Y con qué líneas.
+         *
+         *     `ok` solo cuando TODAS las partidas cruzaron por clave del cliente, alias o
+         *     exacto, con unidad vendible y precio de lista negociada (no lista base).
+         */
+        AutoRemisionOut: {
+            /** Lineas */
+            lineas?: components["schemas"]["LineaAutoOut"][];
+            /** Motivo */
+            motivo?: string | null;
+            /** Ok */
+            ok: boolean;
         };
         /** AvanzarIn */
         AvanzarIn: {
@@ -5184,12 +5233,43 @@ export interface components {
             vinculados: number;
         };
         /**
+         * LineaAutoOut
+         * @description Una partida ya resuelta por vía determinista, lista para el clic.
+         */
+        LineaAutoOut: {
+            /** Cantidad */
+            cantidad: string;
+            /** Clave */
+            clave?: string | null;
+            /** Cruzo Por */
+            cruzo_por: string;
+            /** Nombre */
+            nombre: string;
+            /** Numero */
+            numero: number;
+            /** Precio Origen */
+            precio_origen: string;
+            /** Precio Unitario */
+            precio_unitario: string;
+            /** Presentacion */
+            presentacion: string;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Texto Original */
+            texto_original?: string | null;
+        };
+        /**
          * LineaCrearIn
          * @description Una partida ya resuelta a producto, lista para volverse línea de remisión.
          */
         LineaCrearIn: {
             /** Cantidad */
             cantidad: number | string;
+            /** Clave */
+            clave?: string | null;
             /** Notas */
             notas?: string | null;
             /** Precio Unitario */
@@ -5355,6 +5435,13 @@ export interface components {
             numero: number;
             /** Precio */
             precio?: string | null;
+            /**
+             * Presentacion Adivinada
+             * @default false
+             */
+            presentacion_adivinada: boolean;
+            /** Presentacion Sugerida */
+            presentacion_sugerida?: string | null;
             /** Unidad */
             unidad?: string | null;
         };
@@ -5854,6 +5941,7 @@ export interface components {
             archivo_nombre?: string | null;
             /** Archivo Url */
             archivo_url?: string | null;
+            auto?: components["schemas"]["AutoRemisionOut"] | null;
             /** Canal */
             canal: string;
             /** Candidatos */
@@ -6802,6 +6890,11 @@ export interface components {
             descripcion?: string | null;
             /** Esquema Impuesto Id */
             esquema_impuesto_id?: string | null;
+            /**
+             * Forzar
+             * @default false
+             */
+            forzar: boolean;
             /**
              * Ieps Tasa
              * @default 0
@@ -12219,6 +12312,41 @@ export interface operations {
                 "application/json": components["schemas"]["CrearRemisionIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    crear_remision_auto_api_v1_oc_recibidas__oc_id__crear_remision_auto_post: {
+        parameters: {
+            query?: {
+                almacen_id?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

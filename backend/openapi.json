@@ -79,10 +79,34 @@
    },
    "AliasIn": {
     "properties": {
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
      "producto_id": {
       "format": "uuid",
       "title": "Producto Id",
       "type": "string"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
      },
      "texto": {
       "maxLength": 254,
@@ -403,6 +427,38 @@
      }
     },
     "title": "AlmacenUpdate",
+    "type": "object"
+   },
+   "AutoRemisionOut": {
+    "description": "¿La orden entera puede volverse remisión con un clic? Y con qué líneas.\n\n`ok` solo cuando TODAS las partidas cruzaron por clave del cliente, alias o\nexacto, con unidad vendible y precio de lista negociada (no lista base).",
+    "properties": {
+     "lineas": {
+      "items": {
+       "$ref": "#/components/schemas/LineaAutoOut"
+      },
+      "title": "Lineas",
+      "type": "array"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     },
+     "ok": {
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "ok"
+    ],
+    "title": "AutoRemisionOut",
     "type": "object"
    },
    "AvanzarIn": {
@@ -5826,6 +5882,78 @@
     "title": "ImportResultOut",
     "type": "object"
    },
+   "LineaAutoOut": {
+    "description": "Una partida ya resuelta por vía determinista, lista para el clic.",
+    "properties": {
+     "cantidad": {
+      "title": "Cantidad",
+      "type": "string"
+     },
+     "clave": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave"
+     },
+     "cruzo_por": {
+      "title": "Cruzo Por",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "numero": {
+      "title": "Numero",
+      "type": "integer"
+     },
+     "precio_origen": {
+      "title": "Precio Origen",
+      "type": "string"
+     },
+     "precio_unitario": {
+      "title": "Precio Unitario",
+      "type": "string"
+     },
+     "presentacion": {
+      "title": "Presentacion",
+      "type": "string"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     },
+     "texto_original": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Texto Original"
+     }
+    },
+    "required": [
+     "numero",
+     "producto_id",
+     "nombre",
+     "presentacion",
+     "cantidad",
+     "precio_unitario",
+     "precio_origen",
+     "cruzo_por"
+    ],
+    "title": "LineaAutoOut",
+    "type": "object"
+   },
    "LineaCrearIn": {
     "description": "Una partida ya resuelta a producto, lista para volverse línea de remisión.",
     "properties": {
@@ -5840,6 +5968,18 @@
        }
       ],
       "title": "Cantidad"
+     },
+     "clave": {
+      "anyOf": [
+       {
+        "maxLength": 60,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave"
      },
      "notas": {
       "anyOf": [
@@ -6342,6 +6482,22 @@
        }
       ],
       "title": "Precio"
+     },
+     "presentacion_adivinada": {
+      "default": false,
+      "title": "Presentacion Adivinada",
+      "type": "boolean"
+     },
+     "presentacion_sugerida": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion Sugerida"
      },
      "unidad": {
       "anyOf": [
@@ -7795,6 +7951,16 @@
        }
       ],
       "title": "Archivo Url"
+     },
+     "auto": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AutoRemisionOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
      },
      "canal": {
       "title": "Canal",
@@ -10569,6 +10735,11 @@
        }
       ],
       "title": "Esquema Impuesto Id"
+     },
+     "forzar": {
+      "default": false,
+      "title": "Forzar",
+      "type": "boolean"
      },
      "ieps_tasa": {
       "anyOf": [
@@ -23233,6 +23404,88 @@
     ]
    }
   },
+  "/api/v1/oc-recibidas/{oc_id}/crear-remision-auto": {
+   "post": {
+    "description": "Un clic: la OC que cruzó COMPLETA por vías deterministas se vuelve remisión.\n\nLa evaluación se recalcula en este momento (una guardada hace horas miente:\nel catálogo y las listas cambian) y si algo dejó de cruzar responde 409 con\nel motivo — el folio no se quema hasta que todo está resuelto. Las líneas\nsalen con el precio de la lista negociada que validó la evaluación.",
+    "operationId": "crear_remision_auto_api_v1_oc_recibidas__oc_id__crear_remision_auto_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "oc_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Oc Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "almacen_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Almacen Id"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OCRecibidaDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Crear Remision Auto",
+    "tags": [
+     "bandeja de OC"
+    ]
+   }
+  },
   "/api/v1/oc-recibidas/{oc_id}/descartar": {
    "post": {
     "operationId": "descartar_api_v1_oc_recibidas__oc_id__descartar_post",
@@ -25299,7 +25552,7 @@
   },
   "/api/v1/productos/alias": {
    "post": {
-    "description": "Aprende un alias confirmado por el usuario: el próximo cruce lo resuelve solo.\n\nDecisión 2026-07-29 (#3): ENSEÑAR un alias nuevo lo puede hacer cualquiera\ncon lectura (es el flujo natural de captura), pero RE-APUNTAR uno ya\naprendido a otro producto exige `producto:gestionar` — cambiar lo aprendido\nenvenenaría el cruce de todo el negocio.",
+    "description": "Aprende un alias confirmado por el usuario: el próximo cruce lo resuelve solo.\n\nDecisión 2026-07-29 (#3): ENSEÑAR un alias nuevo lo puede hacer cualquiera\ncon lectura (es el flujo natural de captura), pero RE-APUNTAR uno ya\naprendido a otro producto exige `producto:gestionar` — cambiar lo aprendido\nenvenenaría el cruce de todo el negocio.\n\nCon `cliente_id` el alias es vocabulario privado de ese cliente: crear o\nreapuntar EN ese alcance no toca el global, así que basta la lectura — es\nexactamente el caso del bot enseñando \"chile tampico\"→serrano para un solo\ncliente sin poder envenenar a los demás.",
     "operationId": "crear_alias_api_v1_productos_alias_post",
     "parameters": [
      {

@@ -44,13 +44,17 @@ from ...schemas.oc_recibida import (
     OCRecibidaOut,
     OCRecibidaUpdate,
 )
+from ...models import ProductoCliente
 from ...services import cliente_match
-from ...services.series import resolver_almacen
+from ...services.precios import resolver_precio
+from ...services.series import resolver_almacen, resolver_serie
 from ...services.producto_match import (
-    aprender_alias,
-    buscar,
+    aprender_alias_con_alcance,
+    alias_de_cliente,
     alias_del_tenant,
+    buscar,
     normalizar_catalogo,
+    normalizar_unidad,
     productos_activos,
 )
 from ._helpers import ensure_fk, get_or_404, paginate
@@ -286,12 +290,72 @@ def listar(
     return paginate(query.order_by(OCRecibida.recibida_at.desc()), OCRecibidaOut, limit, offset)
 
 
+def _norm_codigo(v: str) -> str:
+    """'PIÑA -FRUT-350' cruza con 'PINA-FRUT-350': mayúsculas, sin acentos ni
+    espacios. Misma tolerancia que el cruce por clave del Master (PR #32)."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", v or "").encode("ascii", "ignore").decode("ascii")
+    return "".join(ch for ch in s.upper() if ch.isalnum() or ch == "-")
+
+
+def _codigos_para(db: Session, cliente_id) -> tuple[dict, dict, dict]:
+    """Los códigos del catálogo por cliente, listos para el cruce por clave.
+
+    Devuelve (del_cliente, de_otros, presentacion_del_cliente):
+      - del_cliente: {codigo_norm: producto_id | None} de ESTE cliente — decide
+        al 100; None marca código ambiguo y NO decide.
+      - de_otros:    {codigo_norm: producto_id | None} del resto del tenant;
+        None marca código ambiguo (dos productos) y NO decide — regla PR #32.
+      - presentacion_del_cliente: {producto_id: presentacion} para partidas que
+        no dicen unidad: la unidad con la que ese cliente compra ese producto.
+
+    La ambigüedad se vigila en LAS DOS ramas: `producto_clientes` solo es único
+    por (tenant, cliente, producto), así que nada impide que un cliente tenga
+    el mismo código en dos productos (una renumeración suya, o un OCR que
+    recortó la clave). Sin la guarda, el ganador lo elegía el orden físico de
+    la tabla — y decidía al 100.
+    """
+    del_cliente: dict[str, object] = {}
+    de_otros: dict[str, object] = {}
+    pres_cliente: dict[UUID, str] = {}
+    q = db.query(ProductoCliente)
+    if cliente_id is not None:
+        # Solo lo que este cruce puede usar: el catálogo del cliente y el de
+        # quienes comparten códigos. Sin filtro, cada apertura de OC traía la
+        # tabla entera.
+        q = q.filter(ProductoCliente.codigo_cliente.isnot(None))
+    for pc in q.all():
+        cod = _norm_codigo(pc.codigo_cliente or "")
+        if not cod:
+            continue
+        if cliente_id is not None and pc.cliente_id == cliente_id:
+            # El None es pegajoso: una tercera fila lo mantiene ambiguo.
+            if cod in del_cliente and del_cliente[cod] != pc.producto_id:
+                del_cliente[cod] = None
+            else:
+                del_cliente.setdefault(cod, pc.producto_id)
+            if pc.presentacion:
+                pres_cliente[pc.producto_id] = pc.presentacion
+        else:
+            if cod in de_otros and de_otros[cod] != pc.producto_id:
+                de_otros[cod] = None   # ambiguo: dos productos, nadie decide
+            else:
+                de_otros.setdefault(cod, pc.producto_id)
+    return del_cliente, de_otros, pres_cliente
+
+
 def _detalle(db: Session, oc: OCRecibida) -> dict:
     """Detalle + cruce de productos sugerido para cada partida.
 
     El cruce se calcula al vuelo (no se persiste): el catálogo cambia, y una
     sugerencia guardada hace meses miente. `productos_activos` se carga una vez
     para las N partidas en vez de una vez por partida.
+
+    Orden del cruce por partida: 1) clave en el catálogo DEL cliente (100),
+    2) la misma clave usada por otro cliente si no es ambigua (95), 3) alias del
+    cliente > alias global > exacto > difuso (con la unidad como freno del
+    difuso). `auto` resume si la orden entera cruzó por vías deterministas y
+    puede volverse remisión con un clic.
     """
     payload = oc.payload or {}
     lineas_raw = payload.get("lineas") or []
@@ -300,21 +364,57 @@ def _detalle(db: Session, oc: OCRecibida) -> dict:
     # O(partidas × productos) normalizaciones por cada apertura de la orden.
     norms = normalizar_catalogo(catalogo) if catalogo else {}
     aliases = alias_del_tenant(db) if catalogo else {}
+    aliases_cli = alias_de_cliente(db, oc.cliente_id, oc.sucursal_id) if catalogo else {}
+    cods_cli, cods_otros, pres_cli = (
+        _codigos_para(db, oc.cliente_id) if catalogo else ({}, {}, {})
+    )
+    by_id = {p.id: p for p in catalogo}
     lineas = []
     for i, ln in enumerate(lineas_raw, start=1):
         texto = str(ln.get("descripcion") or "")
+        unidad_norm = normalizar_unidad(str(ln.get("unidad") or ""))
         cands = (
-            buscar(db, oc.tenant_id, texto, limit=5, prods=catalogo, aliases=aliases, norms=norms)
+            buscar(db, oc.tenant_id, texto, limit=5, prods=catalogo, aliases=aliases,
+                   aliases_cliente=aliases_cli, norms=norms, unidad=unidad_norm)
             if texto else []
         )
-        # La CLAVE del cliente suele ser más precisa que la descripción; si
-        # resuelve, va primero.
+        # La CLAVE del cliente es lo más preciso que trae el documento. Primero
+        # exacta contra el catálogo del cliente; luego la de otro cliente (Balles
+        # y Jubran comparten claves) si no es ambigua; al final, como texto.
         clave = str(ln.get("clave") or "").strip()
         if clave:
+            cod = _norm_codigo(clave)
+            exactos = []
+            pid = cods_cli.get(cod)
+            if pid is not None and pid in by_id:
+                exactos.append(_cand_de(by_id[pid], 100, "codigo_cliente"))
+            elif cods_otros.get(cod) is not None and cods_otros[cod] in by_id:
+                exactos.append(_cand_de(by_id[cods_otros[cod]], 95, "codigo_otro_cliente"))
             por_clave = buscar(db, oc.tenant_id, clave, limit=3, prods=catalogo,
-                               aliases=aliases, norms=norms)
-            vistos = {c.producto_id for c in por_clave}
-            cands = por_clave + [c for c in cands if c.producto_id not in vistos]
+                               aliases=aliases, aliases_cliente=aliases_cli, norms=norms,
+                               unidad=unidad_norm)   # mismo freno papa/papaya
+            vistos = {c.producto_id for c in exactos}
+            # La descripción manda cuando cruzó por vía determinista: un parecido
+            # sobre la clave (prefijo 96, difuso) jamás desplaza a un exacto o a
+            # un alias de 100 — "PAPA" como clave no puede tapar "PAPAYA MARADOL".
+            fuertes = [c for c in cands
+                       if c.origen in ("exacto", "alias") and c.producto_id not in vistos]
+            vistos |= {c.producto_id for c in fuertes}
+            por_clave = [c for c in por_clave if c.producto_id not in vistos]
+            vistos |= {c.producto_id for c in por_clave}
+            cands = exactos + fuertes + por_clave + [
+                c for c in cands if c.producto_id not in vistos
+            ]
+        top = cands[0] if cands else None
+        # La presentación con la que entraría la línea: la unidad del documento;
+        # si no dice (o dice una que no reconocemos), la habitual de ese cliente
+        # y en último caso la del producto — pero eso ES una adivinanza y se
+        # marca como tal: el factor de la presentación cambia cantidad y precio.
+        pres_sugerida = unidad_norm
+        pres_adivinada = False
+        if pres_sugerida is None and top is not None:
+            pres_sugerida = pres_cli.get(top.producto_id) or top.presentacion_default or top.unidad_base
+            pres_adivinada = True
         lineas.append({
             "numero": i,
             "descripcion": texto,
@@ -323,6 +423,8 @@ def _detalle(db: Session, oc: OCRecibida) -> dict:
             "clave": ln.get("clave"),
             "precio": ln.get("precio"),
             "notas": ln.get("notas"),
+            "presentacion_sugerida": pres_sugerida,
+            "presentacion_adivinada": pres_adivinada,
             "candidatos": [
                 {"producto_id": c.producto_id, "sku": c.sku, "nombre": c.nombre,
                  "score": c.score, "origen": c.origen,
@@ -333,7 +435,140 @@ def _detalle(db: Session, oc: OCRecibida) -> dict:
         })
     out = OCRecibidaDetailOut.model_validate(oc).model_dump()
     out["lineas"] = lineas
+    out["auto"] = _auto_de(db, oc, lineas, by_id)
     return out
+
+
+def _cand_de(p: Producto, score: int, origen: str):
+    """Producto → Candidato para las rutas que no pasan por `buscar`."""
+    from ...services.producto_match import Candidato
+    return Candidato(
+        producto_id=p.id, sku=p.sku, nombre=p.nombre, score=score, origen=origen,
+        presentaciones=p.presentaciones or {},
+        presentacion_default=p.presentacion_default,
+        unidad_base=p.unidad_base,
+        categoria_id=p.categoria_id,
+        esquema_impuesto_id=p.esquema_impuesto_id,
+        clave_sat=p.clave_sat,
+        unidad_sat=p.unidad_sat,
+    )
+
+
+# Orígenes que DECIDEN solos: la clave del cliente, un alias aprendido o la
+# coincidencia exacta. El difuso y la IA sugieren pero jamás deciden — regla
+# del catálogo multicliente (el falso positivo papa/papaya es la razón).
+_ORIGENES_DETERMINISTAS = {"codigo_cliente", "alias", "exacto"}
+
+
+def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> dict:
+    """¿La orden entera puede volverse remisión sin humano? Y con qué líneas.
+
+    Reglas: cliente resuelto sin ambigüedad, TODAS las partidas cruzadas por
+    vía determinista, unidad traducible a una presentación del producto, y
+    precio que salga de una lista NEGOCIADA (no de la lista base: facturar a
+    precio no pactado es peor que preguntar). El precio del documento, si viene,
+    debe coincidir con el de la lista — discrepancia = PRECIO EN CONFLICTO.
+    """
+    def no(motivo: str) -> dict:
+        return {"ok": False, "motivo": motivo, "lineas": []}
+
+    if oc.remision_id is not None:
+        return no("Esta orden ya generó su remisión")
+    if oc.estado != "PENDIENTE":
+        return no("Solo una orden pendiente se convierte en automática")
+    if oc.cliente_id is None or oc.ambiguo:
+        return no("El cliente no está resuelto sin ambigüedad")
+    if not lineas:
+        return no("El documento no trae partidas legibles")
+
+    p = oc.payload or {}
+    # La MISMA serie con la que `create_remision` va a foliar: la del grupo si la
+    # declara y, si no, la que resuelve el backend (sucursal → cliente → default).
+    # Precificar con otra rompe la invariante que el propio create_remision
+    # declara — la serie decide el folio Y qué lista de precios aplica.
+    serie_id = cliente_match.serie_del_grupo(
+        db, oc.tenant_id, str(p.get("jid") or ""), oc.cliente_id, "serie_remision_id"
+    )
+    if serie_id is None:
+        serie = resolver_serie(
+            db, oc.tenant_id, "REMISION",
+            sucursal_id=oc.sucursal_id, cliente_id=oc.cliente_id,
+        )
+        serie_id = serie.id if serie is not None else None
+    out_lineas = []
+    for ln in lineas:
+        cands = ln.get("candidatos") or []
+        top = cands[0] if cands else None
+        etiqueta = f"«{(ln.get('descripcion') or ln.get('clave') or '')[:60]}»"
+        if top is None or top["origen"] not in _ORIGENES_DETERMINISTAS or top["score"] < 100:
+            return no(f"La partida {ln['numero']} {etiqueta} no cruza por clave, alias ni exacto")
+        # `buscar` emite a PROPÓSITO un 100 por CADA producto que normaliza igual
+        # ("CILANTRO" y "Cilantro" son dos filas) para que un humano vea el
+        # duplicado. Esa ambigüedad no la puede resolver el orden del seq scan:
+        # misma regla que la clave de otro cliente, que ya no decide si es ambigua.
+        empatados = {
+            c["producto_id"] for c in cands
+            if c["score"] >= 100 and c["origen"] in _ORIGENES_DETERMINISTAS
+        }
+        if len(empatados) > 1:
+            return no(
+                f"La partida {ln['numero']} {etiqueta} cruza al 100 con "
+                f"{len(empatados)} productos distintos: elige cuál va"
+            )
+        prod = by_id.get(top["producto_id"])
+        pres = ln.get("presentacion_sugerida")
+        presentaciones = set((prod.presentaciones or {}).keys()) | {prod.unidad_base}
+        if not pres or pres not in presentaciones:
+            return no(
+                f"La partida {ln['numero']} {etiqueta} pide una unidad "
+                f"({ln.get('unidad') or 'sin unidad'}) que el producto no vende"
+            )
+        # La presentación ADIVINADA sugiere, no decide: el documento no dijo
+        # unidad (o dijo una que no reconocemos) y el factor cambia cantidad y
+        # precio — 10 MANOJO no es 10 KILO. Si el producto se vende de una sola
+        # forma no hay nada que adivinar y la orden sigue siendo automática.
+        if ln.get("presentacion_adivinada") and len(presentaciones) > 1:
+            return no(
+                f"La partida {ln['numero']} {etiqueta} no trae una unidad que se "
+                f"reconozca ({ln.get('unidad') or 'sin unidad'}) y el producto se "
+                "vende en varias presentaciones: confírmala a mano"
+            )
+        res = resolver_precio(
+            db,
+            producto_id=prod.id,
+            presentacion=pres,
+            cantidad=Decimal(str(ln.get("cantidad") or 1)),
+            cliente_id=oc.cliente_id,
+            sucursal_id=oc.sucursal_id,
+            serie_id=serie_id,
+            proyecto_id=oc.proyecto_id,
+        )
+        if res is None:
+            return no(f"La partida {ln['numero']} {etiqueta} no tiene precio en ninguna lista")
+        if res.get("origen") == "lista_base":
+            return no(
+                f"La partida {ln['numero']} {etiqueta} solo tiene precio en la lista "
+                "base, no en una lista negociada del cliente"
+            )
+        precio_doc = ln.get("precio")
+        if precio_doc is not None and abs(Decimal(str(precio_doc)) - Decimal(res["precio"])) > Decimal("0.01"):
+            return no(
+                f"La partida {ln['numero']} {etiqueta} trae precio {precio_doc} y la "
+                f"lista dice {res['precio']}: precio en conflicto"
+            )
+        out_lineas.append({
+            "numero": ln["numero"],
+            "producto_id": str(prod.id),
+            "nombre": prod.nombre,
+            "presentacion": pres,
+            "cantidad": str(ln.get("cantidad") or 1),
+            "precio_unitario": str(res["precio"]),
+            "precio_origen": res.get("origen"),
+            "texto_original": ln.get("descripcion"),
+            "clave": ln.get("clave"),
+            "cruzo_por": top["origen"],
+        })
+    return {"ok": True, "motivo": None, "lineas": out_lineas}
 
 
 @router.get("/{oc_id}", response_model=OCRecibidaDetailOut)
@@ -531,17 +766,29 @@ def crear_remision(
     rem.origen_externo = origen
 
     # El cruce que acaba de confirmar el humano se aprende: la próxima orden que
-    # diga "JITOMATE SALADET" ya sabe a qué producto va.
-    # `producto_alias` es catálogo global del tenant: reapuntarlo afecta a TODO
-    # el que cruce productos, no solo a esta remisión. Por eso pide el permiso
-    # del catálogo y no basta con el de remisiones.
-    if ctx.has("producto:gestionar"):
+    # diga "JITOMATE SALADET" ya sabe a qué producto va. La regla de alcance
+    # protege el catálogo sola: un texto nuevo se aprende GLOBAL; un texto que
+    # ya apunta a OTRO producto se aprende solo para ESTE cliente, sin tocar el
+    # global — por eso basta poder leer productos (la conexión del bot lo tiene)
+    # y no hace falta `producto:gestionar`, que sigue reservado para reapuntar.
+    if ctx.has("producto:gestionar") or ctx.has("menu:productos"):
         for ln in payload.lineas:
             if ln.texto_original:
-                aprender_alias(
+                aprender_alias_con_alcance(
                     db, ctx.tenant_id, ln.texto_original, ln.producto_id,
+                    cliente_id=oc.cliente_id, sucursal_id=oc.sucursal_id,
                     origen="IMPORT", user_id=ctx.user_id,
                 )
+    # La CLAVE que traía el documento se registra como código del cliente (solo
+    # si ese producto aún no tiene código para él): la próxima OC con esa clave
+    # cruza al 100 sin leer siquiera la descripción. Exige `producto:gestionar`
+    # —el mismo permiso que POST /productos/catalogo-cliente-batch— porque
+    # `codigo_cliente` y `nombre_cliente` SON el NoIdentificacion y la
+    # Descripcion de todos los CFDI futuros de ese cliente: dejar que los fije
+    # el texto del OCR, sin nadie del catálogo aprobándolo, es firmar ante el
+    # SAT lo que dijo una foto de WhatsApp.
+    if oc.cliente_id is not None and ctx.has("producto:gestionar"):
+        _registrar_codigos(db, ctx, oc, payload.lineas)
 
     oc.remision_id = rem.id
     oc.estado = "ASIGNADA"
@@ -559,6 +806,79 @@ def _fecha(v) -> Optional[date]:
         return date.fromisoformat(str(v)[:10])
     except ValueError:
         return None
+
+
+def _registrar_codigos(db: Session, ctx: AuthContext, oc: OCRecibida, lineas) -> None:
+    """Guarda la clave del documento como código del cliente para su producto.
+
+    SOLO cuando el producto aún no tiene código para ese cliente: el código
+    preferido de salida (el que se imprime y timbra) no se pisa desde la
+    bandeja — eso es tarea del catálogo del cliente, con permiso de catálogo.
+    """
+    con_clave = [ln for ln in lineas if (getattr(ln, "clave", None) or "").strip()]
+    if not con_clave:
+        return
+    existentes = {
+        pc.producto_id: pc
+        for pc in db.query(ProductoCliente)
+        .filter(ProductoCliente.cliente_id == oc.cliente_id)
+        .all()
+    }
+    for ln in con_clave:
+        if ln.producto_id in existentes:
+            continue
+        db.add(ProductoCliente(
+            tenant_id=ctx.tenant_id, cliente_id=oc.cliente_id,
+            producto_id=ln.producto_id,
+            codigo_cliente=ln.clave.strip()[:50],
+            nombre_cliente=(ln.texto_original or "").strip()[:254] or None,
+            presentacion=ln.presentacion,
+        ))
+        existentes[ln.producto_id] = True  # una sola fila por producto en este lote
+    db.flush()
+
+
+@router.post("/{oc_id}/crear-remision-auto", response_model=OCRecibidaDetailOut)
+def crear_remision_auto(
+    oc_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    almacen_id: Optional[UUID] = Query(default=None),
+):
+    """Un clic: la OC que cruzó COMPLETA por vías deterministas se vuelve remisión.
+
+    La evaluación se recalcula en este momento (una guardada hace horas miente:
+    el catálogo y las listas cambian) y si algo dejó de cruzar responde 409 con
+    el motivo — el folio no se quema hasta que todo está resuelto. Las líneas
+    salen con el precio de la lista negociada que validó la evaluación.
+    """
+    from ...schemas.oc_recibida import CrearRemisionIn, LineaCrearIn
+
+    oc = get_or_404(db, OCRecibida, oc_id, soft=False, for_update=True)
+    det = _detalle(db, oc)
+    auto = det.get("auto") or {}
+    if not auto.get("ok"):
+        raise HTTPException(
+            status_code=409,
+            detail=auto.get("motivo") or "La orden no cruza completa por vía determinista",
+        )
+    payload = CrearRemisionIn(
+        # El almacén que eligió el operador en la bandeja. Vacío = la cadena de
+        # siempre (sucursal → cliente → predeterminado).
+        almacen_id=almacen_id,
+        lineas=[
+            LineaCrearIn(
+                producto_id=UUID(l["producto_id"]),
+                cantidad=Decimal(l["cantidad"]),
+                presentacion=l["presentacion"],
+                precio_unitario=Decimal(l["precio_unitario"]),
+                texto_original=(l.get("texto_original") or None),
+                clave=(l.get("clave") or None),
+            )
+            for l in auto["lineas"]
+        ],
+    )
+    return crear_remision(oc_id, payload, db=db, ctx=ctx)
 
 
 @router.post("/{oc_id}/descartar", response_model=OCRecibidaOut)

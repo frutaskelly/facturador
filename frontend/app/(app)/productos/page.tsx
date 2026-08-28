@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { FileUp, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 
+import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { candidatosDuplicados, type CandidatoDuplicado } from "@/components/CrearProductoModal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
@@ -136,6 +138,10 @@ export default function ProductosPage() {
   const [satOpciones, setSatOpciones] = useState<SatOpcion[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerText, setPickerText] = useState("");
+  // Productos del catálogo que se parecen al que se está dando de alta: el
+  // backend los manda en el 409 para poder abrir el que ya existe en vez de
+  // fabricar el segundo "cilantro".
+  const [parecidos, setParecidos] = useState<CandidatoDuplicado[]>([]);
 
   async function suggestSat() {
     if (!form) return;
@@ -169,21 +175,24 @@ export default function ProductosPage() {
   function openCreate() {
     setEditingId(null);
     setSatOpciones([]);
+    setParecidos([]);
     setForm(emptyForm());
   }
   // Alta tras el buscador: crea con el nombre ya tecleado (evita duplicados).
   function openCreateWith(nombre: string) {
     setEditingId(null);
     setSatOpciones([]);
+    setParecidos([]);
     setForm({ ...emptyForm(), nombre });
   }
   function openEdit(p: Producto) {
     setEditingId(p.id);
     setSatOpciones([]);
+    setParecidos([]);
     setForm(toForm(p));
   }
 
-  async function save() {
+  async function save(forzar = false) {
     if (!form) return;
     if (!form.nombre.trim()) {
       toast.error("El nombre es obligatorio");
@@ -221,12 +230,21 @@ export default function ProductosPage() {
         await patch(`/api/v1/productos/${editingId}`, payload);
         toast.success("Producto actualizado");
       } else {
-        await post("/api/v1/productos", payload);
+        await post("/api/v1/productos", { ...payload, forzar });
         toast.success("Producto creado");
       }
       setForm(null);
+      setParecidos([]);
       reload();
     } catch (e) {
+      // 409 con candidatos: el catálogo ya tiene algo muy parecido. No es un
+      // error que se cierre con un toast — hay que decidir entre usar el que
+      // existe o crear otro a sabiendas.
+      const dups = candidatosDuplicados(e);
+      if (dups.length) {
+        setParecidos(dups);
+        return;
+      }
       toast.error(e instanceof ApiError ? e.message : "No se pudo guardar");
     }
   }
@@ -353,14 +371,56 @@ export default function ProductosPage() {
             <Button variant="secondary" onClick={() => setForm(null)}>
               Cancelar
             </Button>
-            <Button onClick={save} disabled={saving}>
-              {saving ? "Guardando…" : "Guardar"}
-            </Button>
+            {parecidos.length ? (
+              <Button variant="secondary" onClick={() => save(true)} disabled={saving}>
+                {saving ? "Guardando…" : "Es distinto — crearlo igual"}
+              </Button>
+            ) : (
+              <Button onClick={() => save()} disabled={saving}>
+                {saving ? "Guardando…" : "Guardar"}
+              </Button>
+            )}
           </>
         }
       >
+        {form && parecidos.length ? (
+          <Alert tone="warning">
+            <div className="font-medium">
+              Esto ya podría estar en el catálogo. El mismo producto con dos nombres se
+              vuelve dos inventarios y dos precios — si es el mismo, ábrelo y ponle el
+              nombre del cliente en su catálogo.
+            </div>
+            <ul className="mt-2 space-y-1">
+              {parecidos.map((c) => (
+                <li key={c.producto_id} className="flex items-center justify-between gap-3">
+                  <span className="text-sm">
+                    {c.nombre} <span className="text-xs text-muted">({c.sku})</span>
+                  </span>
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      const full = rows.find((r) => r.id === c.producto_id);
+                      if (full) {
+                        openEdit(full);
+                        return;
+                      }
+                      try {
+                        openEdit(await apiFetch<Producto>(`/api/v1/productos/${c.producto_id}`));
+                      } catch {
+                        toast.error("No se pudo abrir el producto");
+                      }
+                    }}
+                  >
+                    Abrir el que existe
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </Alert>
+        ) : null}
+
         {form && (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
             {/* SKU — automático */}
             <div className="sm:col-span-2">
               <Field label="SKU" hint={editingId ? undefined : "Se genera automáticamente al guardar"}>

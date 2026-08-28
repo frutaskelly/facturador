@@ -40,7 +40,11 @@ export function apiBaseUrl(): string {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  /** El `detail` crudo del backend. Casi siempre basta el mensaje, pero algunos
+   *  errores traen datos con los que la pantalla PUEDE hacer algo: el 409 del
+   *  alta de productos manda los candidatos duplicados para ofrecer vincular en
+   *  vez de crear. */
+  constructor(public status: number, message: string, public detail?: unknown) {
     super(message);
     this.name = "ApiError";
   }
@@ -58,6 +62,12 @@ function detailToMessage(detail: unknown, fallback: string): string {
           : JSON.stringify(d)
       )
       .join("; ");
+  }
+  // Los errores con datos traen su texto en `mensaje`: sin esto el usuario ve
+  // el JSON completo, candidatos incluidos.
+  if (detail && typeof detail === "object") {
+    const m = (detail as { mensaje?: unknown }).mensaje;
+    if (typeof m === "string") return m;
   }
   if (detail != null) return JSON.stringify(detail);
   return fallback;
@@ -139,14 +149,16 @@ export async function apiFetch<T = unknown>(
 
   if (!res.ok) {
     let detail = res.statusText;
+    let crudo: unknown;
     try {
       const body = await res.json();
+      crudo = body.detail;
       detail = detailToMessage(body.detail, detail);
     } catch {
       /* non-JSON error body */
     }
     healStaleTenantSelection(res.status, detail);
-    throw new ApiError(res.status, detail);
+    throw new ApiError(res.status, detail, crudo);
   }
 
   if (res.status === 204) return undefined as T;
