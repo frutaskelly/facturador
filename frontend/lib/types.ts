@@ -37,6 +37,8 @@ export type Membership = {
 };
 
 export type Categoria = {
+  // cuántos productos vivos lo usan (lo calcula la lista)
+  productos?: number;
   id: string;
   tenant_id: string;
   codigo: string;
@@ -48,6 +50,8 @@ export type Categoria = {
 };
 
 export type EsquemaImpuesto = {
+  // cuántos productos vivos lo usan (lo calcula la lista)
+  productos?: number;
   id: string;
   tenant_id: string;
   codigo: string;

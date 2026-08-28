@@ -122,6 +122,9 @@ export type CrudConfig<T> = {
    * selects con etiquetas largas (p. ej. catálogos SAT) que se truncan. El
    * modal también se puede agrandar a mano desde su esquina inferior derecha. */
   wide?: boolean;
+  /** Contenido expandible por fila (clic en el renglón lo abre/cierra): p. ej.
+   * los productos de una categoría o de un esquema, con edición inline. */
+  renderExpanded?: (row: T) => ReactNode;
 };
 
 const LIMIT = 20;
@@ -296,6 +299,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
               openEdit(row);
             }}
             aria-label="Editar"
+            title="Editar"
             className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
           >
             <Pencil size={16} />
@@ -320,6 +324,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
               askDelete(row);
             }}
             aria-label="Eliminar"
+            title="Eliminar"
             className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
           >
             <Trash2 size={16} />
@@ -362,7 +367,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
         </div>
       )}
 
-      <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin resultados" storageKey={`crud-${config.basePath}`} />
+      <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin resultados" storageKey={`crud-${config.basePath}`} renderExpanded={config.renderExpanded} />
 
       <div className="mt-4 flex items-center justify-between text-sm text-muted">
         <span>

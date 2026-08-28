@@ -1,13 +1,12 @@
 "use client";
 
-// Bandeja de órdenes de compra. Todo documento que entra —WhatsApp, correo o
-// captura— aterriza aquí antes de volverse remisión: se ve de dónde vino, a qué
-// cliente se asignó y, si el sistema no pudo resolverlo, se decide a mano.
-//
-// Corregir aquí no es solo arreglar UNA orden: al asignar se guarda la
-// equivalencia, así que la próxima orden que llegue igual ya no pregunta.
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ExternalLink, FileText, Inbox, RotateCcw, Trash2 } from "lucide-react";
+// Bandeja de órdenes de compra — la LISTA. Todo documento que entra (WhatsApp,
+// correo o captura) aterriza aquí antes de volverse remisión. El DETALLE de
+// cada orden vive en su propia página a pantalla completa (/oc/[id], 28-ago):
+// es la pantalla de trabajo diaria, no un popup.
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ExternalLink, PencilLine, RotateCcw, Trash2 } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -19,143 +18,83 @@ import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
-import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
-import type { Page } from "@/lib/hooks";
-import type {
-  Almacen,
-  Cliente,
-  LineaOC,
-  OCRecibida,
-  OCRecibidaDetalle,
-  Proyecto,
-  Sucursal,
-} from "@/lib/types";
+import type { Page as PageOf } from "@/lib/hooks";
+import type { Cliente, OCRecibida, OCRecibidaDetalle } from "@/lib/types";
+import { CANAL_TONE, estadoTexto, precioNormalizado } from "./cruce";
 
 const WRITE = "remision:gestionar";
 
-const CANAL_TONE: Record<string, "accent" | "muted" | "default"> = {
-  WHATSAPP: "accent",
-  EMAIL: "default",
-  MANUAL: "muted",
-  API: "muted",
-};
+/** El vistazo rápido de una orden (slidedown de la lista): las partidas como
+ *  venían, el punto de entrega y el DOCUMENTO ORIGINAL en Drive a un clic.
+ *  Para trabajarla (cruzar, corregir, crear la remisión) está /oc/[id]. */
+function VistazoOC({ id, onAbrir }: { id: string; onAbrir: () => void }) {
+  const [d, setD] = useState<OCRecibidaDetalle | null>(null);
+  const [fallo, setFallo] = useState(false);
+  useEffect(() => {
+    apiFetch<OCRecibidaDetalle>(`/api/v1/oc-recibidas/${id}`)
+      .then(setD)
+      .catch(() => setFallo(true));
+  }, [id]);
+  if (fallo) return <p className="py-3 text-sm text-muted">No se pudo cargar el detalle.</p>;
+  if (!d) return <div className="flex justify-center py-4"><Spinner /></div>;
+  return (
+    <div className="space-y-3 py-2">
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        {d.archivo_url ? (
+          <a
+            href={d.archivo_url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 font-medium hover:bg-surface-2"
+          >
+            <ExternalLink size={15} /> Ver la OC original (Drive)
+          </a>
+        ) : (
+          <span className="text-muted">Sin documento adjunto</span>
+        )}
+        <Button onClick={onAbrir}>
+          <PencilLine size={15} /> Abrir para trabajar
+        </Button>
+        {d.punto_entrega ? <span className="text-muted">Punto de entrega: <strong className="text-foreground">{d.punto_entrega}</strong></span> : null}
+      </div>
+      {typeof d.payload?.observaciones === "string" && d.payload.observaciones ? (
+        <p className="text-sm text-muted">{d.payload.observaciones}</p>
+      ) : null}
+      <div className="overflow-x-auto">
+        <table className="w-full max-w-3xl text-sm">
+          <thead className="text-xs text-muted">
+            <tr>
+              <th className="px-2 py-1 text-left">Como venía en la orden</th>
+              <th className="px-2 py-1 text-right">Cantidad</th>
+              <th className="px-2 py-1 text-left">Unidad</th>
+              <th className="px-2 py-1 text-left">Su clave</th>
+            </tr>
+          </thead>
+          <tbody>
+            {d.lineas.map((l) => (
+              <tr key={l.numero} className="border-t border-border">
+                <td className="px-2 py-1">{l.descripcion}</td>
+                <td className="px-2 py-1 text-right tabular-nums">{l.cantidad ?? ""}</td>
+                <td className="px-2 py-1">{l.unidad ?? ""}</td>
+                <td className="px-2 py-1 tabular-nums">{l.clave ?? ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 function estadoBadge(oc: OCRecibida) {
-  if (oc.estado === "ASIGNADA")
-    return <Badge tone="success">Remisión {oc.remision_folio ?? "creada"}</Badge>;
-  if (oc.estado === "DESCARTADA") return <Badge tone="muted">Descartada</Badge>;
-  if (oc.ambiguo) return <Badge tone="danger">Ambigua</Badge>;
-  if (!oc.cliente_id) return <Badge tone="warning">Sin cliente</Badge>;
-  return <Badge tone="warning">Por revisar</Badge>;
-}
-
-/** Una partida con el producto que se le va a asignar. `producto_id` vacío =
- *  sin resolver: la remisión no se puede crear hasta que todas tengan producto. */
-type LineaEdit = {
-  numero: number;
-  texto: string;
-  cantidad: string;
-  unidad: string;
-  /** La clave que traía el documento: al confirmar se registra como el código
-   *  de ese cliente para el producto, y la próxima orden cruza al 100. */
-  clave: string | null;
-  producto_id: string;
-  presentacion: string;
-  /** Las presentaciones que el producto ELEGIDO de verdad vende: son las
-   *  opciones válidas del selector. Vacío = producto sin elegir o de una sola
-   *  presentación — entonces no hay nada que escoger. */
-  presentaciones: string[];
-  precio: string;
-  notas: string | null;
-  candidatos: LineaOC["candidatos"];
-  /** El operador pidió buscar fuera de los candidatos sugeridos. */
-  buscando: boolean;
-  /** Partida que el operador agregó a mano: el documento no la traía (el bot
-   *  puede saltarse un renglón). No aprende alias ni clave — no hay texto del
-   *  cliente del cual aprender. */
-  agregada: boolean;
-};
-
-/** De dónde salió el cruce de una partida, en palabras del negocio: se lee
- *  mejor que un porcentaje. Lo que no está aquí (difuso, IA) cae al score. */
-const ORIGEN_CRUCE: Record<string, string> = {
-  codigo_cliente: "su clave",
-  codigo_otro_cliente: "clave de otro cliente",
-  alias: "aprendido",
-  exacto: "exacto",
-};
-
-// Abreviaturas con las que los clientes escriben la unidad en sus órdenes.
-const UNIDAD_ALIAS: Record<string, string> = {
-  KG: "KILO", KGS: "KILO", KILOS: "KILO", KGM: "KILO",
-  PZ: "PIEZA", PZA: "PIEZA", PZAS: "PIEZA", PIEZAS: "PIEZA", H87: "PIEZA",
-  CJ: "CAJA", CJA: "CAJA", CAJAS: "CAJA",
-  BTO: "BULTO", BULTOS: "BULTO", COSTALES: "COSTAL",
-  LT: "LITRO", LTS: "LITRO", LITROS: "LITRO",
-  MJO: "MANOJO", MANOJOS: "MANOJO", BOLSAS: "BOLSA",
-};
-
-/** La unidad de la orden traducida a una presentación que el producto tenga.
- *  Sin coincidencia se usa la presentación default del producto — nunca se
- *  asume KILO, porque 5 CAJA registradas como 5 KILO son 95 kg de menos. */
-function presentacionDe(unidad: string, cand?: LineaOC["candidatos"][number]): string {
-  const u = (unidad || "").trim().toUpperCase();
-  const norm = UNIDAD_ALIAS[u] ?? u;
-  const mapa = cand?.presentaciones ?? {};
-  const claves = Object.keys(mapa);
-  const hit = claves.find((k) => k.toUpperCase() === norm);
-  return hit ?? cand?.presentacion_default ?? claves[0] ?? "KILO";
-}
-
-/** La tabla de partidas a partir del detalle del servidor.
- *
- *  Vive fuera de `abrir` porque el cruce depende del CLIENTE: candidatos,
- *  preselección y presentación se calculan contra SU catálogo y SU vocabulario.
- *  Si el operador cambia de cliente, la tabla tiene que rehacerse — dejarla
- *  colgada hacía que el banner dijera una cosa y la tabla otra, y la remisión
- *  salía con el producto del cliente anterior. */
-function tablaDe(oc: OCRecibidaDetalle): LineaEdit[] {
-  return oc.lineas.map((l) => {
-    // Se preselecciona el mejor candidato solo si es un cruce fuerte (exacto o
-    // alias ya confirmado). Un difuso al 76% lo revisa la persona.
-    const fuerte = l.candidatos[0] && l.candidatos[0].score >= 96 ? l.candidatos[0] : undefined;
-    const unidad = l.unidad ?? "";
-    // El backend ya tradujo la unidad del documento (incluido el OCR partido).
-    // Se acepta solo si el producto preseleccionado de verdad la vende: una
-    // presentación que no existe entra como cantidad y precio equivocados.
-    const sugerida = l.presentacion_sugerida ?? "";
-    const vendidas = Object.keys(fuerte?.presentaciones ?? {});
-    const sirve =
-      sugerida && (!fuerte || vendidas.some((k) => k.toUpperCase() === sugerida.toUpperCase()));
-    return {
-      numero: l.numero,
-      texto: l.descripcion,
-      cantidad: String(l.cantidad ?? ""),
-      unidad,
-      clave: l.clave ?? null,
-      producto_id: fuerte ? fuerte.producto_id : "",
-      presentacion: sirve ? sugerida : presentacionDe(unidad, fuerte),
-      presentaciones: Object.keys(fuerte?.presentaciones ?? {}),
-      precio: l.precio != null ? String(l.precio) : "",
-      notas: l.notas ?? null,
-      candidatos: l.candidatos,
-      buscando: false,
-      agregada: false,
-    };
-  });
-}
-
-/** Precio tecleado a la mexicana ("1,234.50" o "12,50") → decimal del backend. */
-function precioNormalizado(v: string): string {
-  const t = v.trim();
-  if (!t) return "";
-  if (t.includes(",") && !t.includes(".")) return t.replace(",", ".");
-  return t.replace(/,/g, "");
+  const b = estadoTexto(oc);
+  return <Badge tone={b.tone}>{b.texto}</Badge>;
 }
 
 export default function Page() {
+  const router = useRouter();
   const { me } = useAuth();
   const toast = useToast();
   const canWrite = can(me, WRITE);
@@ -171,26 +110,58 @@ export default function Page() {
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
   const [clientes, setClientes] = useState<Cliente[]>([]);
-  const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
-  const [proyectos, setProyectos] = useState<Proyecto[]>([]);
+  const [aDescartar, setADescartar] = useState<OCRecibida | null>(null);
 
   const LIMIT = 100;
 
-  // Resumen del día: la foto que el Master daba de un vistazo. Se calcula con
-  // el mismo endpoint de la lista (limit=1, solo el total de cada corte).
+  // Resumen del día: la foto que el Master daba de un vistazo.
   const [resumen, setResumen] = useState<{ hoy: number; pendientes: number; conRemision: number } | null>(null);
   useEffect(() => {
     const hoy = new Date().toLocaleDateString("en-CA");
-    const total = (qs: string) =>
-      apiFetch<Page<OCRecibida>>(`/api/v1/oc-recibidas?limit=1&${qs}`).then((p) => p.total);
+    const totalDe = (qs: string) =>
+      apiFetch<PageOf<OCRecibida>>(`/api/v1/oc-recibidas?limit=1&${qs}`).then((p) => p.total);
     Promise.all([
-      total(`fecha_desde=${hoy}&fecha_hasta=${hoy}`),
-      total("estado=PENDIENTE"),
-      total(`estado=ASIGNADA&fecha_desde=${hoy}&fecha_hasta=${hoy}`),
+      totalDe(`fecha_desde=${hoy}&fecha_hasta=${hoy}`),
+      totalDe("estado=PENDIENTE"),
+      totalDe(`estado=ASIGNADA&fecha_desde=${hoy}&fecha_hasta=${hoy}`),
     ])
       .then(([h, p, c]) => setResumen({ hoy: h, pendientes: p, conRemision: c }))
       .catch(() => setResumen(null));
-  }, [rows]);   // se refresca con cada recarga de la lista
+  }, [rows]);
+
+  // Deep-link desde Remisiones (?q=<folio del cliente>): busca esa OC en TODAS
+  // las etapas, no solo en las pendientes.
+  const [busca, setBusca] = useState("");
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("q");
+    if (p) { setBusca(p); setEstado(""); }
+  }, []);
+
+  const reload = useCallback(() => {
+    setError(false);          // un fallo transitorio no puede dejar la bandeja muerta
+    const qs = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) });
+    if (estado) qs.set("estado", estado);
+    if (busca) qs.set("q", busca);
+    if (clienteFiltro) qs.set("cliente_id", clienteFiltro);
+    if (fechaDesde) qs.set("fecha_desde", fechaDesde);
+    if (fechaHasta) qs.set("fecha_hasta", fechaHasta);
+    apiFetch<PageOf<OCRecibida>>(`/api/v1/oc-recibidas?${qs}`)
+      .then((p) => {
+        setRows(p.items);
+        setTotal(p.total);
+      })
+      .catch(() => setError(true));
+  }, [estado, busca, clienteFiltro, fechaDesde, fechaHasta, offset]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  useEffect(() => {
+    apiFetch<PageOf<Cliente>>("/api/v1/clientes?limit=1000")
+      .then((p) => setClientes(p.items))
+      .catch(() => undefined);
+  }, []);
 
   // Alta manual de una OC (canal MANUAL): lo que llega por teléfono o papel
   // también pasa por la bandeja — misma conciliación, mismo aprendizaje.
@@ -237,262 +208,11 @@ export default function Page() {
       toast.success("OC capturada — revisa el cruce y crea la remisión");
       setManualOpen(false);
       setManual({ cliente_id: "", folio_externo: "", punto_entrega: "", observaciones: "", lineas: [lineaVacia()] });
-      reload();
-      void abrir(oc.id);
+      router.push(`/oc/${oc.id}`);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo capturar la OC");
     } finally {
       setManualBusy(false);
-    }
-  }
-
-  const [abierta, setAbierta] = useState<OCRecibidaDetalle | null>(null);
-  const [sucursales, setSucursales] = useState<Sucursal[]>([]);
-  const [clienteSel, setClienteSel] = useState("");
-  const [sucursalSel, setSucursalSel] = useState("");
-  const [almacenSel, setAlmacenSel] = useState("");
-  // A dónde se descarga (hospital, plantel). NO es la sucursal: es un punto
-  // dentro de ella, y su texto sale impreso en la remisión y en la factura.
-  const [puntoEntrega, setPuntoEntrega] = useState("");
-  // Bajo qué negociación entra la orden. Sale de la equivalencia PROYECTO
-  // ("ehmo:HOSPITALES"); corregirlo aquí la enseña y, sobre todo, decide qué
-  // lista de precios se le cobra a la remisión.
-  const [proyectoSel, setProyectoSel] = useState("");
-  const [lineas, setLineas] = useState<LineaEdit[]>([]);
-  const [guardando, setGuardando] = useState(false);
-  const [aDescartar, setADescartar] = useState<OCRecibida | null>(null);
-  // Con candidatos, el desplegable arranca acotado a ellos: elegir entre dos es
-  // otra cosa que buscar entre todo el padrón.
-  const [verTodos, setVerTodos] = useState(false);
-
-  // Deep-link desde Remisiones (?q=<folio del cliente>): busca esa OC en TODAS
-  // las etapas, no solo en las pendientes. Se lee de window (client-only) para
-  // no forzar Suspense, igual que el ?ver= de Facturas.
-  const [busca, setBusca] = useState("");
-  useEffect(() => {
-    const p = new URLSearchParams(window.location.search).get("q");
-    if (p) { setBusca(p); setEstado(""); }
-  }, []);
-
-  const reload = useCallback(() => {
-    setError(false);          // un fallo transitorio no puede dejar la bandeja muerta
-    const qs = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) });
-    if (estado) qs.set("estado", estado);
-    if (busca) qs.set("q", busca);
-    if (clienteFiltro) qs.set("cliente_id", clienteFiltro);
-    if (fechaDesde) qs.set("fecha_desde", fechaDesde);
-    if (fechaHasta) qs.set("fecha_hasta", fechaHasta);
-    apiFetch<Page<OCRecibida>>(`/api/v1/oc-recibidas?${qs}`)
-      .then((p) => {
-        setRows(p.items);
-        setTotal(p.total);
-      })
-      .catch(() => setError(true));
-  }, [estado, busca, clienteFiltro, fechaDesde, fechaHasta, offset]);
-
-  useEffect(() => {
-    reload();
-  }, [reload]);
-
-  useEffect(() => {
-    apiFetch<Page<Cliente>>("/api/v1/clientes?limit=1000")
-      .then((p) => setClientes(p.items))
-      .catch(() => undefined);
-    apiFetch<Page<Almacen>>("/api/v1/almacenes?limit=200")
-      .then((p) => setAlmacenes(p.items))
-      .catch(() => undefined);
-    apiFetch<Page<Proyecto>>("/api/v1/proyectos?activo=true&limit=500")
-      .then((p) => setProyectos(p.items))
-      .catch(() => undefined);
-  }, []);
-
-  const abrir = useCallback(async (id: string) => {
-    try {
-      const oc = await apiFetch<OCRecibidaDetalle>(`/api/v1/oc-recibidas/${id}`);
-      setAbierta(oc);
-      setClienteSel(oc.cliente_id ?? "");
-      setSucursalSel(oc.sucursal_id ?? "");
-      setPuntoEntrega(oc.punto_entrega ?? "");
-      setProyectoSel(oc.proyecto_id ?? "");
-      setVerTodos(!oc.candidatos?.length);
-      setAlmacenSel("");
-      setLineas(tablaDe(oc));
-    } catch {
-      toast.error("No se pudo abrir la orden");
-    }
-  }, [toast]);
-
-  // Las sucursales dependen del cliente elegido, no del que traía la orden.
-  useEffect(() => {
-    if (!clienteSel) {
-      setSucursales([]);
-      return;
-    }
-    apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${clienteSel}&limit=500`)
-      .then((p) => setSucursales(p.items))
-      .catch(() => setSucursales([]));
-  }, [clienteSel]);
-
-  /** ¿El operador cambió cliente/sucursal y todavía no se ha guardado? */
-  const sinGuardar = useMemo(
-    () =>
-      !!abierta &&
-      (clienteSel !== (abierta.cliente_id ?? "") ||
-        sucursalSel !== (abierta.sucursal_id ?? "") ||
-        puntoEntrega.trim() !== (abierta.punto_entrega ?? "") ||
-        proyectoSel !== (abierta.proyecto_id ?? "")),
-    [abierta, clienteSel, sucursalSel, puntoEntrega, proyectoSel]
-  );
-
-  /** Persiste cliente/sucursal. Devuelve la OC guardada, o null si falló. */
-  async function guardarAsignacion(): Promise<OCRecibidaDetalle | null> {
-    if (!abierta || !clienteSel) {
-      toast.error("Elige el cliente");
-      return null;
-    }
-    // Cambiar de cliente (o de sucursal) cambia el cruce de TODAS las partidas:
-    // el catálogo y el vocabulario son suyos.
-    const cambioDeCliente =
-      clienteSel !== (abierta.cliente_id ?? "") || sucursalSel !== (abierta.sucursal_id ?? "");
-    try {
-      const oc = await apiFetch<OCRecibidaDetalle>(`/api/v1/oc-recibidas/${abierta.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          cliente_id: clienteSel,
-          sucursal_id: sucursalSel || null,
-          punto_entrega: puntoEntrega.trim() || null,
-          proyecto_id: proyectoSel || null,
-          aprender: true,
-        }),
-      });
-      setAbierta(oc);
-      // El cruce se recalculó contra el catálogo y el vocabulario del cliente
-      // que quedó guardado: la tabla se rehace o seguiría mostrando (y enviando)
-      // los productos del cliente anterior.
-      if (cambioDeCliente) setLineas(tablaDe(oc));
-      return oc;
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo asignar");
-      return null;
-    }
-  }
-
-  async function asignar() {
-    setGuardando(true);
-    const oc = await guardarAsignacion();
-    setGuardando(false);
-    if (oc) {
-      toast.success("Asignada — la próxima orden igual ya se resuelve sola");
-      reload();
-    }
-  }
-
-  const sinProducto = useMemo(() => lineas.filter((l) => !l.producto_id).length, [lineas]);
-  // Ya tiene remisión, o está descartada: nada se edita desde la bandeja.
-  const bloqueada = !!abierta && (!!abierta.remision_id || abierta.estado === "DESCARTADA");
-  const auto = abierta?.auto ?? null;
-
-  /** ¿El operador corrigió una partida después de que el servidor evaluó `auto`?
-   *  El botón de un clic hace POST sin cuerpo y el backend rearma las líneas
-   *  desde su propia evaluación (a propósito: el catálogo y las listas cambian).
-   *  Así que la corrección se perdería en silencio — y encima el cruce
-   *  equivocado que se acaba de corregir se reforzaría como alias. */
-  const autoDesfasado = useMemo(() => {
-    if (!auto?.ok) return false;
-    if (auto.lineas.length !== lineas.length) return true;
-    return auto.lineas.some((a) => {
-      const l = lineas.find((x) => x.numero === a.numero);
-      if (!l) return true;
-      if (l.producto_id !== a.producto_id) return true;
-      if (l.presentacion !== a.presentacion) return true;
-      // La cantidad también: el atajo de un clic rearma las líneas desde el
-      // documento y pisaría una cantidad recién corregida.
-      if (l.cantidad.trim() && Number(l.cantidad) !== Number(a.cantidad)) return true;
-      const tecleado = precioNormalizado(l.precio);
-      return !!tecleado && Number(tecleado) !== Number(a.precio_unitario);
-    });
-  }, [auto, lineas]);
-
-  async function crearRemision() {
-    if (!abierta) return;
-    if (!clienteSel) {
-      toast.error("Asigna primero el cliente");
-      return;
-    }
-    if (!lineas.length || sinProducto) {
-      toast.error(`Faltan ${sinProducto} partida(s) por cruzar con un producto`);
-      return;
-    }
-    const sinCantidad = lineas.filter((l) => !(Number(l.cantidad) > 0)).length;
-    if (sinCantidad) {
-      toast.error(`${sinCantidad} partida(s) sin cantidad válida`);
-      return;
-    }
-    setGuardando(true);
-    try {
-      // La remisión se crea con el cliente y la sucursal PERSISTIDOS, no con los
-      // del Select. Si el operador los cambió y no guardó, se guarda aquí antes
-      // — si no, la remisión saldría a nombre del cliente anterior y con la serie
-      // equivocada, quemando un folio que no se recupera.
-      if (sinGuardar && !(await guardarAsignacion())) return;
-
-      const oc = await apiFetch<OCRecibidaDetalle>(
-        `/api/v1/oc-recibidas/${abierta.id}/crear-remision`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            almacen_id: almacenSel || null,
-            lineas: lineas.map((l) => ({
-              producto_id: l.producto_id,
-              cantidad: l.cantidad,
-              presentacion: l.presentacion,
-              precio_unitario: precioNormalizado(l.precio) || null,
-              notas: l.notas,
-              // Una partida agregada a mano no trae texto del cliente: no hay
-              // alias que aprender ni clave que registrar.
-              texto_original: l.agregada ? null : l.texto || null,
-              // Con la clave, el backend la registra como el código de este
-              // cliente para el producto: la próxima orden cruza sin adivinar.
-              clave: l.agregada ? null : l.clave,
-            })),
-          }),
-        }
-      );
-      toast.success(`Remisión ${oc.remision_folio ?? ""} creada en borrador`);
-      setAbierta(null);
-      reload();
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo crear la remisión");
-    } finally {
-      setGuardando(false);
-    }
-  }
-
-  /** La orden que cruzó COMPLETA por vías deterministas se vuelve remisión sin
-   *  capturar nada. El backend revalida en ese instante —el catálogo y las
-   *  listas cambian— y responde 409 con el motivo si algo dejó de cruzar, así
-   *  que aquí no hay que revisar nada de nuevo: solo mostrar lo que diga. */
-  async function crearRemisionAuto() {
-    if (!abierta) return;
-    setGuardando(true);
-    try {
-      const oc = await apiFetch<OCRecibidaDetalle>(
-        `/api/v1/oc-recibidas/${abierta.id}/crear-remision-auto` +
-          (almacenSel ? `?almacen_id=${almacenSel}` : ""),
-        { method: "POST" }
-      );
-      toast.success(`Remisión ${oc.remision_folio ?? ""} creada en borrador`);
-      setAbierta(null);
-      reload();
-    } catch (e) {
-      toast.error(
-        e instanceof ApiError ? e.message : "La orden ya no cruza completa; revísala a mano"
-      );
-      // El motivo pudo cambiar desde que se abrió: se recarga el detalle para
-      // que la pantalla diga la verdad de ahora.
-      abrir(abierta.id);
-    } finally {
-      setGuardando(false);
     }
   }
 
@@ -559,6 +279,17 @@ export default function Page() {
       cell: (r) =>
         canWrite ? (
           <div className="flex justify-end gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                router.push(`/oc/${r.id}`);
+              }}
+              className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
+              aria-label="Abrir para trabajar"
+              title="Abrir para trabajar"
+            >
+              <PencilLine size={16} />
+            </button>
             {r.archivo_url ? (
               <a
                 href={r.archivo_url}
@@ -732,7 +463,10 @@ export default function Page() {
               ? "Nada por revisar. Las órdenes que lleguen por WhatsApp o correo aparecen aquí."
               : "Sin órdenes en este estado."
         }
-        onRowClick={(r) => abrir(r.id)}
+        rowKey={(r) => r.id}
+        renderExpanded={(r) => (
+          <VistazoOC id={r.id} onAbrir={() => router.push(`/oc/${r.id}`)} />
+        )}
       />
 
       {total > LIMIT ? (
@@ -756,467 +490,6 @@ export default function Page() {
           </Button>
         </div>
       ) : null}
-
-      <Modal
-        open={abierta !== null}
-        onClose={() => setAbierta(null)}
-        title={
-          abierta
-            ? `OC ${abierta.folio_externo || "sin folio"} · ${abierta.canal}`
-            : ""
-        }
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setAbierta(null)}>Cerrar</Button>
-            {canWrite && abierta && !abierta.remision_id && abierta.estado === "DESCARTADA" ? (
-              <Button onClick={() => reabrir(abierta).then(() => abrir(abierta.id))}>
-                Reabrir
-              </Button>
-            ) : null}
-            {canWrite && abierta && !abierta.remision_id && abierta.estado !== "DESCARTADA" ? (
-              <>
-                <Button variant="secondary" onClick={asignar} disabled={guardando || !clienteSel}>
-                  Guardar asignación
-                </Button>
-                {auto?.ok && !autoDesfasado ? (
-                  <Button
-                    variant="secondary"
-                    onClick={crearRemisionAuto}
-                    disabled={guardando || sinGuardar}
-                    title={
-                      sinGuardar
-                        ? "Guarda la asignación: esto se calculó con el cliente anterior"
-                        : undefined
-                    }
-                  >
-                    Crear remisión de un clic
-                  </Button>
-                ) : null}
-                <Button onClick={crearRemision} disabled={guardando}>
-                  {guardando ? "Creando…" : "Crear remisión"}
-                </Button>
-              </>
-            ) : null}
-          </>
-        }
-      >
-        {abierta ? (
-          <div className="space-y-5">
-            {abierta.estado === "DESCARTADA" ? (
-              <Alert tone="warning">
-                Orden descartada. Reábrela para poder asignarla — asignar desde aquí
-                registraría equivalencias de un documento que ya se dio por bueno descartar.
-              </Alert>
-            ) : null}
-            {abierta.ambiguo ? (
-              <Alert tone="warning">
-                <span className="inline-flex items-center gap-1.5">
-                  <AlertTriangle size={15} /> {abierta.motivo}
-                </span>
-              </Alert>
-            ) : abierta.candidatos?.length && !abierta.cliente_id ? (
-              <Alert tone="info">{abierta.motivo}</Alert>
-            ) : null}
-
-            {abierta.remision_id ? (
-              <Alert tone="success">
-                Esta orden ya generó la remisión <strong>{abierta.remision_folio}</strong>. Los
-                cambios de kilos, líneas y precios se hacen en la remisión.
-              </Alert>
-            ) : null}
-
-            {/* Cruzó completa por clave, alias o exacto, con precio de una lista
-                negociada: no hay nada que capturar. El desglose se muestra igual
-                —quien firma quiere ver qué va a salir antes de darle al botón. */}
-            {auto?.ok && autoDesfasado && !bloqueada ? (
-              <p className="text-xs text-muted">
-                Corregiste una partida: se crea con «Crear remisión», que respeta lo que
-                acabas de cambiar. El atajo de un clic reharía el cruce desde cero.
-              </p>
-            ) : auto?.ok && !bloqueada ? (
-              <Alert tone="success">
-                <div className="font-medium">
-                  Lista para remisión: las {auto.lineas.length} partidas cruzaron por clave o
-                  vocabulario aprendido, y todas traen precio de la lista del cliente.
-                </div>
-                <ul className="mt-2 space-y-0.5 text-xs">
-                  {auto.lineas.map((l) => (
-                    <li key={l.numero} className="tabular-nums">
-                      {l.cantidad} {l.presentacion} · {l.nombre}
-                      {" · "}
-                      {Number(l.precio_unitario).toLocaleString("es-MX", {
-                        style: "currency",
-                        currency: "MXN",
-                      })}
-                      <span className="ml-1 text-muted">
-                        ({ORIGEN_CRUCE[l.cruzo_por] ?? l.cruzo_por})
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                {sinGuardar ? (
-                  <div className="mt-2 text-xs">
-                    Guarda primero la asignación: esto se calculó con el cliente que ya estaba.
-                  </div>
-                ) : null}
-              </Alert>
-            ) : auto?.motivo && !bloqueada && abierta.cliente_id ? (
-              // Por qué NO es automática. Es diagnóstico útil, no un error: dice
-              // exactamente qué partida hay que revisar.
-              <p className="text-xs text-muted">Revisión a mano: {auto.motivo}</p>
-            ) : null}
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Field
-                label="Cliente"
-                hint={
-                  abierta.candidatos?.length && !verTodos
-                    ? "Los que usan este grupo de WhatsApp"
-                    : "A quién se le factura"
-                }
-              >
-                <Select
-                  value={clienteSel}
-                  onChange={(e) => {
-                    if (e.target.value === "__todos__") {
-                      setVerTodos(true);
-                      return;
-                    }
-                    setClienteSel(e.target.value);
-                    setSucursalSel("");
-                  }}
-                  disabled={!canWrite || bloqueada}
-                >
-                  <option value="">— Elegir —</option>
-                  {(abierta.candidatos?.length && !verTodos
-                    ? clientes.filter((c) => abierta.candidatos.includes(c.id))
-                    : clientes
-                  ).map((c) => (
-                    <option key={c.id} value={c.id}>{c.legal_name}</option>
-                  ))}
-                  {abierta.candidatos?.length && !verTodos ? (
-                    <option value="__todos__">Ver todos los clientes…</option>
-                  ) : null}
-                </Select>
-              </Field>
-              <Field label="Sucursal" hint="De aquí salen la serie y el almacén">
-                <Select
-                  value={sucursalSel}
-                  onChange={(e) => setSucursalSel(e.target.value)}
-                  disabled={!canWrite || !clienteSel || bloqueada}
-                >
-                  <option value="">— Sin sucursal —</option>
-                  {sucursales.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.codigo ? `${s.codigo} · ${s.nombre}` : s.nombre}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field
-                label="Punto de entrega"
-                hint="A dónde se descarga. Sale impreso en la remisión y en la factura."
-              >
-                <Input
-                  value={puntoEntrega}
-                  onChange={(e) => setPuntoEntrega(e.target.value)}
-                  disabled={!canWrite || bloqueada}
-                  placeholder="HOSPITAL JUAN GRAHAM"
-                />
-              </Field>
-              <Field
-                label="Proyecto"
-                hint="La negociación bajo la que entra: decide qué lista de precios se cobra."
-              >
-                <Select
-                  value={proyectoSel}
-                  onChange={(e) => setProyectoSel(e.target.value)}
-                  disabled={!canWrite || bloqueada}
-                >
-                  <option value="">— Sin proyecto —</option>
-                  {proyectos
-                    .filter((p) => !p.cliente_id || !clienteSel || p.cliente_id === clienteSel)
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>{p.nombre}</option>
-                    ))}
-                </Select>
-              </Field>
-              <Field label="Almacén de salida">
-                <Select
-                  value={almacenSel}
-                  onChange={(e) => setAlmacenSel(e.target.value)}
-                  disabled={!canWrite || bloqueada}
-                >
-                  <option value="">— Sin almacén —</option>
-                  {almacenes.map((a) => (
-                    <option key={a.id} value={a.id}>{a.nombre}</option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Partidas del documento</h3>
-                {sinProducto ? (
-                  <span className="text-xs text-amber-700">
-                    {sinProducto} sin cruzar con un producto
-                  </span>
-                ) : null}
-              </div>
-              <div className="overflow-x-auto rounded-lg border border-border">
-                <table className="w-full text-sm">
-                  <thead className="bg-surface-2 text-xs text-muted">
-                    <tr>
-                      <th className="px-3 py-2 text-left">Como venía en la orden</th>
-                      <th className="px-3 py-2 text-right">Cantidad</th>
-                      <th className="px-3 py-2 text-left">Producto del catálogo</th>
-                      <th className="px-3 py-2 text-left">Presentación</th>
-                      <th className="px-3 py-2 text-right">Precio</th>
-                      {canWrite && !bloqueada ? <th className="w-1 px-1 py-2" /> : null}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lineas.map((l, i) => (
-                      <tr key={l.numero} className="border-t border-border">
-                        <td className="px-3 py-2">
-                          {l.agregada ? (
-                            <span className="text-xs italic text-muted">
-                              Agregada a mano — no venía en el documento
-                            </span>
-                          ) : (
-                            l.texto
-                          )}
-                          {l.clave ? (
-                            <div className="mt-0.5 text-xs text-muted">
-                              Su clave: <span className="tabular-nums">{l.clave}</span>
-                            </div>
-                          ) : null}
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          {canWrite && !bloqueada ? (
-                            <div className="flex items-center justify-end gap-1">
-                              <div className="w-20">
-                                <Input
-                                  value={l.cantidad}
-                                  inputMode="decimal"
-                                  className="text-right tabular-nums"
-                                  onChange={(e) => {
-                                    const v = e.target.value;
-                                    setLineas((prev) =>
-                                      prev.map((x, j) => (j === i ? { ...x, cantidad: v } : x))
-                                    );
-                                  }}
-                                />
-                              </div>
-                              {l.unidad ? (
-                                <span className="text-xs text-muted">{l.unidad}</span>
-                              ) : null}
-                            </div>
-                          ) : (
-                            <span className="tabular-nums">
-                              {l.cantidad}
-                              {l.unidad ? (
-                                <span className="ml-1 text-xs text-muted">{l.unidad}</span>
-                              ) : null}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {l.candidatos.length && !l.buscando ? (
-                            <Select
-                              value={l.producto_id}
-                              disabled={!canWrite || bloqueada}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (v === "__buscar__") {
-                                  setLineas((prev) =>
-                                    prev.map((x, j) =>
-                                      j === i ? { ...x, buscando: true, producto_id: "" } : x
-                                    )
-                                  );
-                                  return;
-                                }
-                                setLineas((prev) =>
-                                  prev.map((x, j) => {
-                                    if (j !== i) return x;
-                                    const cand = x.candidatos.find((c) => c.producto_id === v);
-                                    return {
-                                      ...x,
-                                      producto_id: v,
-                                      presentacion: presentacionDe(x.unidad, cand),
-                                      presentaciones: Object.keys(cand?.presentaciones ?? {}),
-                                    };
-                                  })
-                                );
-                              }}
-                            >
-                              <option value="">— Sin cruzar —</option>
-                              {l.candidatos.map((c) => (
-                                <option key={c.producto_id} value={c.producto_id}>
-                                  {c.nombre} ({c.sku}) ·{" "}
-                                  {ORIGEN_CRUCE[c.origen] ?? `${c.score}%`}
-                                </option>
-                              ))}
-                              <option value="__buscar__">Buscar otro producto…</option>
-                            </Select>
-                          ) : (
-                            // Sin candidatos, o el operador pidió buscar: el cruce
-                            // difuso deja fuera productos que sí existen, y sin esto
-                            // la orden se quedaba bloqueada para siempre.
-                            <ProductoCombobox
-                              label={l.texto}
-                              placeholder="Buscar en el catálogo…"
-                              onSelect={(prod) =>
-                                setLineas((prev) =>
-                                  prev.map((x, j) =>
-                                    j === i
-                                      ? {
-                                          ...x,
-                                          producto_id: prod ? prod.producto_id : "",
-                                          presentacion: prod
-                                            ? presentacionDe(x.unidad, {
-                                                producto_id: prod.producto_id,
-                                                sku: prod.sku,
-                                                nombre: prod.nombre,
-                                                score: 100,
-                                                origen: "manual",
-                                                presentaciones: prod.presentaciones,
-                                                presentacion_default: prod.presentacion_default,
-                                              })
-                                            : x.presentacion,
-                                          presentaciones: prod
-                                            ? Object.keys(prod.presentaciones ?? {})
-                                            : [],
-                                        }
-                                      : x
-                                  )
-                                )
-                              }
-                            />
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {canWrite && !bloqueada && l.presentaciones.length > 1 ? (
-                            // Solo con producto elegido y más de una presentación
-                            // hay algo que escoger — y escoger mal aquí es la
-                            // diferencia entre 5 cajas y 5 kilos.
-                            <Select
-                              value={l.presentacion}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setLineas((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, presentacion: v } : x))
-                                );
-                              }}
-                            >
-                              {l.presentaciones.map((p) => (
-                                <option key={p} value={p}>{p}</option>
-                              ))}
-                            </Select>
-                          ) : (
-                            <span className="text-xs text-muted">{l.presentacion}</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <Input
-                            value={l.precio}
-                            disabled={!canWrite || bloqueada}
-                            placeholder="lista"
-                            className="text-right"
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setLineas((prev) =>
-                                prev.map((x, j) => (j === i ? { ...x, precio: v } : x))
-                              );
-                            }}
-                          />
-                        </td>
-                        {canWrite && !bloqueada ? (
-                          <td className="px-1 py-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setLineas((prev) => prev.filter((_, j) => j !== i))
-                              }
-                              className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
-                              aria-label="Quitar esta partida"
-                              title="Quitar esta partida de la remisión (el documento no cambia)"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </td>
-                        ) : null}
-                      </tr>
-                    ))}
-                    {!lineas.length ? (
-                      <tr>
-                        <td colSpan={6} className="px-3 py-6 text-center text-sm text-muted">
-                          El documento no trae partidas legibles.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-              <div className="mt-2 flex items-start justify-between gap-4">
-                <p className="text-xs text-muted">
-                  El precio vacío lo resuelve la lista del cliente. Quitar o agregar aquí decide
-                  qué lleva la remisión — el documento original no se toca.
-                </p>
-                {canWrite && !bloqueada ? (
-                  <Button
-                    variant="secondary"
-                    onClick={() =>
-                      setLineas((prev) => [
-                        ...prev,
-                        {
-                          // Numeración aparte de la del documento: nunca choca
-                          // con una partida real ni con la evaluación `auto`.
-                          numero: Math.max(0, ...prev.map((x) => x.numero)) + 1000,
-                          texto: "",
-                          cantidad: "",
-                          unidad: "",
-                          clave: null,
-                          producto_id: "",
-                          presentacion: "KILO",
-                          presentaciones: [],
-                          precio: "",
-                          notas: null,
-                          candidatos: [],
-                          buscando: true,
-                          agregada: true,
-                        },
-                      ])
-                    }
-                  >
-                    Agregar partida
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted">
-              <span className="inline-flex items-center gap-1">
-                <Inbox size={13} /> {abierta.origen_externo}
-              </span>
-              {abierta.archivo_nombre ? (
-                <span className="inline-flex items-center gap-1">
-                  <FileText size={13} />
-                  {abierta.archivo_url ? (
-                    <a href={abierta.archivo_url} target="_blank" rel="noreferrer" className="hover:underline">
-                      {abierta.archivo_nombre}
-                    </a>
-                  ) : (
-                    abierta.archivo_nombre
-                  )}
-                </span>
-              ) : null}
-              {abierta.resuelto_via ? <span>Resuelto por {abierta.resuelto_via}</span> : null}
-            </div>
-          </div>
-        ) : null}
-      </Modal>
 
       <Modal
         open={manualOpen}

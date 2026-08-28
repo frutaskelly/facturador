@@ -289,6 +289,30 @@ def test_asignacion_gana_la_mas_especifica(client, env, auth_as):
     assert float(con_proy["precio"]) == 24.0 and con_proy["origen"] == "lista_proyecto"
 
 
+def test_lista_parcial_cae_a_la_siguiente_negociacion(client, env, auth_as):
+    """Una lista negociada puede ser PARCIAL (la del proyecto DIF trae solo lo
+    pactado para DIF): si no trae el producto, el precio correcto es el de la
+    siguiente asignación que aplique (la del cliente), NO la lista base."""
+    auth_as(env["admin"]); h = _hdr(env["admin"]); pid = env["aguacate"]
+    ehmo, listas, serie, proyecto = _crear_escenario(client, h, env)
+
+    # lista del PROYECTO vacía para este producto (solo existe la lista, sin precios)
+    vacia = client.post("/api/v1/listas-precios", headers=h,
+                        json={"codigo": "PARCIAL", "nombre": "Proyecto parcial"}).json()["id"]
+    for lista, dims in (("GLOBAL", {"cliente_id": ehmo}),):
+        assert client.post("/api/v1/asignaciones-precios", headers=h,
+                           json={"lista_id": listas[lista], **dims}).status_code == 201
+    assert client.post("/api/v1/asignaciones-precios", headers=h,
+                       json={"lista_id": vacia, "cliente_id": ehmo,
+                             "proyecto_id": proyecto["id"]}).status_code == 201
+
+    r = _cot(client, h, pid, cliente_id=ehmo, proyecto_id=proyecto["id"])
+    # el proyecto ganó la especificidad, pero su lista no trae el producto:
+    # cae a la negociación del cliente (30.0), no a la lista base
+    assert float(r["precio"]) == 30.0
+    assert r["origen"] == "lista_cliente"
+
+
 def test_simular_dice_que_asignacion_ganaria(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
     ehmo, listas, serie, proyecto = _crear_escenario(client, h, env)

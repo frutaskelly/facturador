@@ -3498,6 +3498,11 @@ export interface components {
             /** Nombre */
             nombre: string;
             /**
+             * Productos
+             * @default 0
+             */
+            productos: number;
+            /**
              * Tenant Id
              * Format: uuid
              */
@@ -4609,6 +4614,11 @@ export interface components {
             iva_tasa: string;
             /** Nombre */
             nombre: string;
+            /**
+             * Productos
+             * @default 0
+             */
+            productos: number;
             /**
              * Retencion Isr Tasa
              * @default 0
@@ -13470,6 +13480,7 @@ export interface operations {
             query?: {
                 q?: string | null;
                 categoria_id?: string | null;
+                esquema_impuesto_id?: string | null;
                 activo?: boolean | null;
                 limit?: number;
                 offset?: number;

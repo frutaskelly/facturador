@@ -1,6 +1,7 @@
 "use client";
 
 import { CrudPage, type CrudConfig } from "@/components/crud/CrudPage";
+import { ProductosDelGrupo } from "@/components/ProductosDelGrupo";
 import { Badge } from "@/components/ui/Badge";
 import type { EsquemaImpuesto } from "@/lib/types";
 
@@ -21,8 +22,12 @@ const config: CrudConfig<EsquemaImpuesto> = {
     { header: "IVA", cell: (e) => `${pct(e.iva_tasa)}%`, className: "text-right" },
     { header: "IEPS", cell: (e) => `${pct(e.ieps_tasa)}%`, className: "text-right" },
     { header: "Exento", cell: (e) => (e.iva_exento ? "Sí" : "No") },
+    { header: "Productos", className: "text-right tabular-nums",
+      cell: (e) => (e.productos ? e.productos : <span className="text-muted">0</span>) },
     { header: "Estado", cell: (e) => <Badge tone={e.activo ? "success" : "muted"}>{e.activo ? "Activo" : "Inactivo"}</Badge> },
   ],
+  // Clic en el renglón: los productos que usan el esquema, editables ahí mismo.
+  renderExpanded: (e) => <ProductosDelGrupo filtro={{ esquema_impuesto_id: e.id }} canWrite />,
   // Los 8 esquemas por defecto (mismos de Aspel SAE). Se siembran solos al dar
   // de alta la empresa; esto sirve para reponerlos si se borraron.
   // TASAS REALES: los nombres 4/5/7/8 dicen "+ N% IEPS", pero hoy ningún
