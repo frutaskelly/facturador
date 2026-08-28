@@ -758,6 +758,9 @@ def crear_remision(
         almacen_id=almacen_id,
         fecha_remision=payload.fecha_remision,
         fecha_entrega=payload.fecha_entrega or _fecha(p.get("fecha_entrega")),
+        # El número de la OC ES «su pedido»: la referencia con la que el cliente
+        # concilia. Sin esto solo vivía enterrado en las notas.
+        su_pedido=folio[:30] or None,
         canal="API",
         notas=notas or None,
         nota_entrega=oc.punto_entrega,
