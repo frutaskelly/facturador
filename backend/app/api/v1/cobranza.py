@@ -244,6 +244,15 @@ def crear_recibo(
         )
         if f is None or f.cliente_id != cliente.id:
             raise HTTPException(status_code=422, detail="Una factura no pertenece al cliente")
+        if f.origen == "ESPEJO_SAE":
+            # Su REP lo emite SAE (serie ZCP); registrarle un recibo aquí y
+            # timbrarlo sería un segundo complemento de pago ante el SAT. Los
+            # abonos de las facturas espejo llegan por la sync del conector.
+            raise HTTPException(
+                status_code=422,
+                detail=f"{f.serie}{f.folio} es espejo de SAE: su pago se registra en SAE "
+                       "y el espejo lo refleja",
+            )
         if f.estado != "TIMBRADA" or f.metodo_pago != "PPD":
             raise HTTPException(status_code=422, detail=f"La factura {f.serie}{f.folio} no es una PPD timbrada")
         saldo_ant = Decimal(f.saldo_insoluto)

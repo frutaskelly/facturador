@@ -1348,3 +1348,63 @@ def delete_remision(
     rem.deleted_at = func.now()
     db.flush()
     return None
+
+
+# ─── Export masivo para SAE (fase espejo de la migración) ────────────────────
+# El Facturador genera el archivo que Aspel importa; el layout y las trampas
+# (fechas MM/DD, relleno del folio, claves del cliente) viven en
+# services/export_sae.py. El folio inicial de cada serie lo CONFIRMA el
+# operador (regla D1 del plan): aquí solo se sugiere.
+
+class ExportSaeIn(BaseModel):
+    ids: list[UUID] = PydField(min_length=1)
+    tipo: str = "FACTURA"                        # FACTURA | PEDIDO
+    # {serie: folio_inicial} confirmados por el operador. Solo FACTURA.
+    folios: Optional[dict[str, int]] = None
+    fecha: Optional[date] = None                 # default: hoy (MM/DD/YYYY en el archivo)
+    # Estampar factura_sae en las remisiones del lote (el espejo se llena solo).
+    estampar: bool = True
+
+
+@router.post("/export-sae/preview")
+def export_sae_preview(
+    body: ExportSaeIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Valida el lote y sugiere folios SIN generar nada: la pantalla muestra
+    esto antes de que el operador confirme. Los errores llegan completos (no
+    solo el primero) porque el operador corrige todo de una pasada."""
+    from ...services import export_sae as svc
+
+    res, _docs = svc.preparar(db, ctx.tenant_id, body.ids, body.tipo)
+    return {
+        "ok": res.ok, "errores": res.errores, "avisos": res.avisos,
+        "empresa": res.empresa, "series": res.series, "remisiones": res.remisiones,
+    }
+
+
+@router.post("/export-sae")
+def export_sae(
+    body: ExportSaeIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Genera el .xls masivo. En FACTURA, además estampa `factura_sae` en cada
+    remisión del lote (→ RESERVADO): eso es lo que impide re-exportarla por
+    accidente (un re-import duplica el documento en SAE) y lo que prellena el
+    folio del siguiente lote. Estampa y archivo viajan en la misma transacción."""
+    from ...services import export_sae as svc
+
+    res, contenido, nombre = svc.generar(
+        db, ctx.tenant_id, body.ids, body.tipo,
+        folios=body.folios, fecha=body.fecha, estampar=body.estampar,
+    )
+    if not res.ok or contenido is None:
+        raise HTTPException(status_code=422, detail=" · ".join(res.errores) or "lote inválido")
+    db.flush()
+    return Response(
+        content=contenido,
+        media_type="application/vnd.ms-excel",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )

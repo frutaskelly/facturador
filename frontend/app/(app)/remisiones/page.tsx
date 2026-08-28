@@ -19,7 +19,7 @@ import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
-import { ApiError, apiFetch, apiOpenInTab } from "@/lib/api";
+import { ApiError, apiDownloadPost, apiFetch, apiOpenInTab } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
@@ -1041,6 +1041,71 @@ export default function RemisionesPage() {
     });
   }
 
+  // ── Export masivo para SAE (fase espejo de la migración) ──
+  // El Facturador genera el .xls que Aspel importa. El preview valida el lote
+  // completo y sugiere el folio; el operador CONFIRMA el folio inicial contra
+  // SAE (regla D1 del plan) porque un folio ya usado hace fallar el import.
+  type ExportSaePreview = {
+    ok: boolean; errores: string[]; avisos: string[];
+    empresa: string | null; remisiones: number;
+    series: { serie: string; remisiones: number; folio_sugerido: number | null }[];
+  };
+  const [exportSae, setExportSae] = useState<null | {
+    tipo: "FACTURA" | "PEDIDO";
+    preview: ExportSaePreview | null;
+    folios: Record<string, string>;
+  }>(null);
+  const [exportBusy, setExportBusy] = useState(false);
+
+  async function previewExportSae(tipo: "FACTURA" | "PEDIDO") {
+    setExportSae({ tipo, preview: null, folios: {} });
+    try {
+      const pv = await apiFetch<ExportSaePreview>("/api/v1/remisiones/export-sae/preview", {
+        method: "POST",
+        body: JSON.stringify({ ids: selected.map((r) => r.id), tipo }),
+      });
+      const folios: Record<string, string> = {};
+      for (const s of pv.series) folios[s.serie] = s.folio_sugerido ? String(s.folio_sugerido) : "";
+      setExportSae({ tipo, preview: pv, folios });
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo preparar el export");
+      setExportSae(null);
+    }
+  }
+
+  async function confirmarExportSae() {
+    if (!exportSae?.preview?.ok) return;
+    const folios: Record<string, number> = {};
+    if (exportSae.tipo === "FACTURA") {
+      for (const [serie, v] of Object.entries(exportSae.folios)) {
+        const n = Number(v);
+        if (!(n > 0)) { toast.error(`Falta el folio inicial de la serie ${serie}`); return; }
+        folios[serie] = n;
+      }
+    }
+    setExportBusy(true);
+    try {
+      await apiDownloadPost(
+        "/api/v1/remisiones/export-sae",
+        { ids: selected.map((r) => r.id), tipo: exportSae.tipo, folios },
+        `${exportSae.tipo === "FACTURA" ? "FACTURA_massiva" : "PEDIDO_massivo"}_SAE.xls`
+      );
+      toast.success(
+        exportSae.tipo === "FACTURA"
+          ? "Archivo generado. Cada remisión ya quedó amparada con su folio SAE (espejo)."
+          : "Archivo de pedidos generado."
+      );
+      invalidarDetalles(selected.map((r) => r.id));
+      setExportSae(null);
+      clearSelection();
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo generar el archivo");
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
   // Confirma un lote de remisiones. Devuelve cuántas se confirmaron, cuáles
   // fallaron por falta de existencia (para ofrecer sobregiro) y cuántas por otro
   // motivo.
@@ -1747,6 +1812,15 @@ export default function RemisionesPage() {
                 <X size={16} /> Cancelar ({cancelablesSel.length})
               </Button>
             )}
+            {canWrite && (
+              <Button
+                variant="secondary"
+                onClick={() => { void previewExportSae("FACTURA"); }}
+                disabled={bulkBusy || exportBusy}
+              >
+                <FileText size={16} /> Exportar a SAE ({selected.length})
+              </Button>
+            )}
           </div>
           <button
             type="button"
@@ -1790,6 +1864,97 @@ export default function RemisionesPage() {
         message={`No hay existencia suficiente para confirmar ${negStock?.folio}. ¿Deseas remisionar de todas formas? El inventario quedará en negativo (sobregiro).`}
         confirmLabel="Remisionar sin existencias" confirmVariant="primary"
         onConfirm={confirmarNegativo} onClose={() => setNegStock(null)} loading={saving} />
+
+      {/* ── Export masivo para SAE (remisiones → Aspel) ── */}
+      <Modal
+        open={exportSae !== null}
+        onClose={() => setExportSae(null)}
+        title="Exportar a SAE"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setExportSae(null)}>Cerrar</Button>
+            {exportSae?.preview?.ok ? (
+              <Button onClick={() => { void confirmarExportSae(); }} disabled={exportBusy}>
+                {exportBusy ? "Generando…" : "Generar archivo"}
+              </Button>
+            ) : null}
+          </>
+        }
+      >
+        {exportSae ? (
+          <div className="space-y-4">
+            <div className="w-56">
+              <Field label="Tipo de documento">
+                <Select
+                  value={exportSae.tipo}
+                  onChange={(e) => { void previewExportSae(e.target.value as "FACTURA" | "PEDIDO"); }}
+                >
+                  <option value="FACTURA">Facturas (27 columnas)</option>
+                  <option value="PEDIDO">Pedidos (22 columnas)</option>
+                </Select>
+              </Field>
+            </div>
+
+            {!exportSae.preview ? (
+              <div className="flex justify-center py-6"><Spinner /></div>
+            ) : !exportSae.preview.ok ? (
+              <Alert tone="danger">
+                <div className="font-medium">El lote no se puede exportar así:</div>
+                <ul className="mt-1 list-disc pl-5 text-sm">
+                  {exportSae.preview.errores.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              </Alert>
+            ) : (
+              <>
+                <p className="text-sm">
+                  {exportSae.preview.remisiones} remisión(es) · empresa SAE{" "}
+                  <span className="font-medium tabular-nums">{exportSae.preview.empresa}</span> · fecha
+                  de hoy en MM/DD/YYYY (el formato que la PC de importación espera).
+                </p>
+                {exportSae.tipo === "FACTURA" ? (
+                  <div className="space-y-3">
+                    {exportSae.preview.series.map((s) => (
+                      <div key={s.serie} className="flex items-end gap-3">
+                        <div className="w-40">
+                          <Field label={`Folio inicial ${s.serie}`} hint={`${s.remisiones} factura(s)`}>
+                            <Input
+                              inputMode="numeric"
+                              value={exportSae.folios[s.serie] ?? ""}
+                              onChange={(e) =>
+                                setExportSae((prev) =>
+                                  prev ? { ...prev, folios: { ...prev.folios, [s.serie]: e.target.value } } : prev
+                                )
+                              }
+                            />
+                          </Field>
+                        </div>
+                        {s.folio_sugerido ? (
+                          <span className="pb-2 text-xs text-muted">
+                            sugerido: {s.folio_sugerido} (del espejo)
+                          </span>
+                        ) : (
+                          <span className="pb-2 text-xs text-muted">
+                            sin historial — tómalo de SAE
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                    <Alert tone="info">
+                      Confirma el folio inicial contra SAE antes de generar: un folio ya usado hace
+                      fallar la importación. Al generar, cada remisión queda amparada con su folio
+                      («Factura SAE», espejo) y ya no se puede re-exportar por accidente.
+                    </Alert>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted">
+                    El pedido lleva la OC del cliente como folio; SAE asigna su consecutivo al importar.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        ) : null}
+      </Modal>
 
       {/* ── Importación masiva (SAE → remisiones) ── */}
       <input

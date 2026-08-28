@@ -338,6 +338,9 @@ export type Factura = {
   iva_trasladado: string;
   total: string;
   saldo_insoluto: string;
+  // NATIVA = emitida aquí; ESPEJO_SAE = reflejo de una factura emitida por SAE
+  // (fase espejo de la migración): nunca se timbra/cancela/sustituye aquí.
+  origen: "NATIVA" | "ESPEJO_SAE";
   estado: "BORRADOR" | "TIMBRADA" | "CANCELADA";
   uuid?: string | null;
   fecha_timbrado?: string | null;

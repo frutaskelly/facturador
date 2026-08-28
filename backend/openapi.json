@@ -4268,6 +4268,60 @@
     "title": "ExistenciaRow",
     "type": "object"
    },
+   "ExportSaeIn": {
+    "properties": {
+     "estampar": {
+      "default": true,
+      "title": "Estampar",
+      "type": "boolean"
+     },
+     "fecha": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha"
+     },
+     "folios": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "type": "integer"
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Folios"
+     },
+     "ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "minItems": 1,
+      "title": "Ids",
+      "type": "array"
+     },
+     "tipo": {
+      "default": "FACTURA",
+      "title": "Tipo",
+      "type": "string"
+     }
+    },
+    "required": [
+     "ids"
+    ],
+    "title": "ExportSaeIn",
+    "type": "object"
+   },
    "FacturaDesdeRemisionesIn": {
     "properties": {
      "agrupar_productos": {
@@ -4487,6 +4541,11 @@
       ],
       "title": "Notas"
      },
+     "origen": {
+      "default": "NATIVA",
+      "title": "Origen",
+      "type": "string"
+     },
      "pdf_url": {
       "anyOf": [
        {
@@ -4703,6 +4762,168 @@
     "title": "FacturaDirectaIn",
     "type": "object"
    },
+   "FacturaEspejoIn": {
+    "description": "Reflejo de una factura EMITIDA POR SAE (fase espejo de la migración).\n\nIdempotente por (serie, folio): re-mandarla actualiza el reflejo (estado,\nUUID, totales) — así es como llegan las cancelaciones de SAE. Nunca toca\nal PAC ni consume folios propios: serie y folio son los REALES de SAE.",
+    "properties": {
+     "cliente_sae": {
+      "maxLength": 10,
+      "title": "Cliente Sae",
+      "type": "string"
+     },
+     "empresa": {
+      "maxLength": 4,
+      "title": "Empresa",
+      "type": "string"
+     },
+     "estado": {
+      "default": "TIMBRADA",
+      "pattern": "^(TIMBRADA|CANCELADA)$",
+      "title": "Estado",
+      "type": "string"
+     },
+     "fecha": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha"
+     },
+     "folio": {
+      "exclusiveMinimum": 0.0,
+      "title": "Folio",
+      "type": "integer"
+     },
+     "forma_pago": {
+      "anyOf": [
+       {
+        "maxLength": 5,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Forma Pago"
+     },
+     "lineas": {
+      "items": {
+       "$ref": "#/components/schemas/LineaFacturaEspejoIn"
+      },
+      "title": "Lineas",
+      "type": "array"
+     },
+     "metodo_pago": {
+      "anyOf": [
+       {
+        "maxLength": 5,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Metodo Pago"
+     },
+     "observaciones": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Observaciones"
+     },
+     "saldo_insoluto": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Saldo Insoluto"
+     },
+     "serie": {
+      "maxLength": 10,
+      "title": "Serie",
+      "type": "string"
+     },
+     "subtotal": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Subtotal"
+     },
+     "total": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Total"
+     },
+     "uso_cfdi": {
+      "anyOf": [
+       {
+        "maxLength": 5,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uso Cfdi"
+     },
+     "uuid_fiscal": {
+      "anyOf": [
+       {
+        "maxLength": 36,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uuid Fiscal"
+     }
+    },
+    "required": [
+     "empresa",
+     "serie",
+     "folio",
+     "cliente_sae"
+    ],
+    "title": "FacturaEspejoIn",
+    "type": "object"
+   },
    "FacturaOut": {
     "properties": {
      "cliente_id": {
@@ -4813,6 +5034,11 @@
        }
       ],
       "title": "Notas"
+     },
+     "origen": {
+      "default": "NATIVA",
+      "title": "Origen",
+      "type": "string"
      },
      "pdf_url": {
       "anyOf": [
@@ -6125,6 +6351,74 @@
     "title": "LineaFacturaDirectaIn",
     "type": "object"
    },
+   "LineaFacturaEspejoIn": {
+    "description": "Una partida tal como SAE la facturó. `clave` es la CVE_ART de SAE: si\ncruza con producto_clientes se liga al producto; si no, la línea se guarda\nigual con su descripción — el espejo no pierde renglones.",
+    "properties": {
+     "cantidad": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Cantidad"
+     },
+     "clave": {
+      "anyOf": [
+       {
+        "maxLength": 30,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave"
+     },
+     "descripcion": {
+      "maxLength": 1000,
+      "title": "Descripcion",
+      "type": "string"
+     },
+     "importe": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Importe"
+     },
+     "precio_unitario": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Precio Unitario"
+     }
+    },
+    "required": [
+     "descripcion",
+     "cantidad",
+     "precio_unitario"
+    ],
+    "title": "LineaFacturaEspejoIn",
+    "type": "object"
+   },
    "LineaFacturaOut": {
     "properties": {
      "cantidad": {
@@ -6187,9 +6481,16 @@
       "type": "string"
      },
      "producto_id": {
-      "format": "uuid",
-      "title": "Producto Id",
-      "type": "string"
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
      },
      "ret_isr_importe": {
       "title": "Ret Isr Importe",
@@ -6206,7 +6507,6 @@
     },
     "required": [
      "numero_linea",
-     "producto_id",
      "clave_prod_serv",
      "clave_unidad",
      "descripcion",
@@ -20615,6 +20915,71 @@
     ]
    }
   },
+  "/api/v1/facturas/espejo": {
+   "post": {
+    "description": "Refleja una factura EMITIDA POR SAE como factura del Facturador.\n\nLa deposita el conector (la clave de conexión trae `factura:espejo`, que\nSOLO abre esta puerta — nada de facturas nativas ni PAC). Es idempotente\npor (serie, folio): re-mandarla ACTUALIZA el reflejo — así llegan las\ncancelaciones de SAE y los backfills. Nunca consume folios propios (serie\ny folio son los reales de SAE) y jamás toca inventario.\n\nAdemás cierra el ciclo del espejo: las remisiones estampadas con este\nfolio (`factura_sae` = \"SERIE FOLIO\", puesto por el export masivo) quedan\nligadas a la factura y en FACTURADA; si SAE la cancela, se liberan para\nre-exportarse.",
+    "operationId": "factura_espejo_api_v1_facturas_espejo_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/FacturaEspejoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FacturaDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Factura Espejo",
+    "tags": [
+     "facturas"
+    ]
+   }
+  },
   "/api/v1/facturas/pdf": {
    "get": {
     "description": "PDF de varias facturas (una por página) para imprimir/guardar en lote.\nDefinido ANTES de /{factura_id} para que la ruta estática gane.",
@@ -27618,6 +27983,132 @@
      }
     ],
     "summary": "Enviar Remisiones Lote",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
+  "/api/v1/remisiones/export-sae": {
+   "post": {
+    "description": "Genera el .xls masivo. En FACTURA, además estampa `factura_sae` en cada\nremisión del lote (→ RESERVADO): eso es lo que impide re-exportarla por\naccidente (un re-import duplica el documento en SAE) y lo que prellena el\nfolio del siguiente lote. Estampa y archivo viajan en la misma transacción.",
+    "operationId": "export_sae_api_v1_remisiones_export_sae_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ExportSaeIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Export Sae",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
+  "/api/v1/remisiones/export-sae/preview": {
+   "post": {
+    "description": "Valida el lote y sugiere folios SIN generar nada: la pantalla muestra\nesto antes de que el operador confirme. Los errores llegan completos (no\nsolo el primero) porque el operador corrige todo de una pasada.",
+    "operationId": "export_sae_preview_api_v1_remisiones_export_sae_preview_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ExportSaeIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Export Sae Preview",
     "tags": [
      "remisiones"
     ]

@@ -66,6 +66,13 @@ class Factura(Base, TimestampMixin, SoftDeleteMixin):
     # con cada abono/REP). PUE / no-PPD quedan en 0. Base del estado de cuenta.
     saldo_insoluto = Column(Numeric(18, 4), nullable=False, server_default="0")
 
+    # De dónde nació (migración 0055): 'NATIVA' = emitida por el Facturador;
+    # 'ESPEJO_SAE' = reflejo de una factura que SAE emitió (fase espejo de la
+    # migración). El espejo es un registro fiscal REAL (serie/folio/UUID de
+    # SAE) pero con candados: nunca llama al PAC — ni timbrar, ni cancelar,
+    # ni REP. Se cancela en SAE y la sync actualiza el reflejo.
+    origen = Column(String(12), nullable=False, server_default="NATIVA")
+
     # ── timbrado (lo llena el PAC en P6.2) ──
     estado = Column(FACTURA_ESTADO, nullable=False, server_default="BORRADOR")
     uuid = Column(String(36))
@@ -108,7 +115,11 @@ class LineaFactura(Base):
     tenant_id = tenant_fk()
     factura_id = Column(UUID(as_uuid=True), ForeignKey("facturas.id", ondelete="CASCADE"), nullable=False, index=True)
     numero_linea = Column(SmallInteger, nullable=False)
-    producto_id = Column(UUID(as_uuid=True), ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
+    # NULABLE desde 0055 SOLO por las facturas espejo de SAE: una línea puede
+    # traer una CVE_ART que el catálogo aún no conoce y se guarda igual (con su
+    # descripción). Las facturas NATIVAS siempre llegan con producto — lo
+    # exigen sus schemas de entrada, no este modelo.
+    producto_id = Column(UUID(as_uuid=True), ForeignKey("productos.id", ondelete="RESTRICT"), nullable=True)
 
     clave_prod_serv = Column(String(8), nullable=False)
     clave_unidad = Column(String(3), nullable=False)

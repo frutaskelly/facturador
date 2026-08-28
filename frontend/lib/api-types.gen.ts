@@ -1168,6 +1168,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/facturas/espejo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Factura Espejo
+         * @description Refleja una factura EMITIDA POR SAE como factura del Facturador.
+         *
+         *     La deposita el conector (la clave de conexión trae `factura:espejo`, que
+         *     SOLO abre esta puerta — nada de facturas nativas ni PAC). Es idempotente
+         *     por (serie, folio): re-mandarla ACTUALIZA el reflejo — así llegan las
+         *     cancelaciones de SAE y los backfills. Nunca consume folios propios (serie
+         *     y folio son los reales de SAE) y jamás toca inventario.
+         *
+         *     Además cierra el ciclo del espejo: las remisiones estampadas con este
+         *     folio (`factura_sae` = "SERIE FOLIO", puesto por el export masivo) quedan
+         *     ligadas a la factura y en FACTURADA; si SAE la cancela, se liberan para
+         *     re-exportarse.
+         */
+        post: operations["factura_espejo_api_v1_facturas_espejo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/facturas/pdf": {
         parameters: {
             query?: never;
@@ -2586,6 +2617,51 @@ export interface paths {
          *     recibe un único correo con todas sus remisiones.
          */
         post: operations["enviar_remisiones_lote_api_v1_remisiones_enviar_lote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/remisiones/export-sae": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export Sae
+         * @description Genera el .xls masivo. En FACTURA, además estampa `factura_sae` en cada
+         *     remisión del lote (→ RESERVADO): eso es lo que impide re-exportarla por
+         *     accidente (un re-import duplica el documento en SAE) y lo que prellena el
+         *     folio del siguiente lote. Estampa y archivo viajan en la misma transacción.
+         */
+        post: operations["export_sae_api_v1_remisiones_export_sae_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/remisiones/export-sae/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export Sae Preview
+         * @description Valida el lote y sugiere folios SIN generar nada: la pantalla muestra
+         *     esto antes de que el operador confirme. Los errores llegan completos (no
+         *     solo el primero) porque el operador corrige todo de una pasada.
+         */
+        post: operations["export_sae_preview_api_v1_remisiones_export_sae_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4605,6 +4681,27 @@ export interface components {
             /** Valor */
             valor: string;
         };
+        /** ExportSaeIn */
+        ExportSaeIn: {
+            /**
+             * Estampar
+             * @default true
+             */
+            estampar: boolean;
+            /** Fecha */
+            fecha?: string | null;
+            /** Folios */
+            folios?: {
+                [key: string]: number;
+            } | null;
+            /** Ids */
+            ids: string[];
+            /**
+             * Tipo
+             * @default FACTURA
+             */
+            tipo: string;
+        };
         /** FacturaDesdeRemisionesIn */
         FacturaDesdeRemisionesIn: {
             /**
@@ -4685,6 +4782,11 @@ export interface components {
             motivo_cancelacion?: string | null;
             /** Notas */
             notas?: string | null;
+            /**
+             * Origen
+             * @default NATIVA
+             */
+            origen: string;
             /** Pdf Url */
             pdf_url?: string | null;
             /** Ret Isr */
@@ -4754,6 +4856,49 @@ export interface components {
             /** Uso Cfdi */
             uso_cfdi?: string | null;
         };
+        /**
+         * FacturaEspejoIn
+         * @description Reflejo de una factura EMITIDA POR SAE (fase espejo de la migración).
+         *
+         *     Idempotente por (serie, folio): re-mandarla actualiza el reflejo (estado,
+         *     UUID, totales) — así es como llegan las cancelaciones de SAE. Nunca toca
+         *     al PAC ni consume folios propios: serie y folio son los REALES de SAE.
+         */
+        FacturaEspejoIn: {
+            /** Cliente Sae */
+            cliente_sae: string;
+            /** Empresa */
+            empresa: string;
+            /**
+             * Estado
+             * @default TIMBRADA
+             */
+            estado: string;
+            /** Fecha */
+            fecha?: string | null;
+            /** Folio */
+            folio: number;
+            /** Forma Pago */
+            forma_pago?: string | null;
+            /** Lineas */
+            lineas?: components["schemas"]["LineaFacturaEspejoIn"][];
+            /** Metodo Pago */
+            metodo_pago?: string | null;
+            /** Observaciones */
+            observaciones?: string | null;
+            /** Saldo Insoluto */
+            saldo_insoluto?: number | string | null;
+            /** Serie */
+            serie: string;
+            /** Subtotal */
+            subtotal?: number | string | null;
+            /** Total */
+            total?: number | string | null;
+            /** Uso Cfdi */
+            uso_cfdi?: string | null;
+            /** Uuid Fiscal */
+            uuid_fiscal?: string | null;
+        };
         /** FacturaOut */
         FacturaOut: {
             /**
@@ -4802,6 +4947,11 @@ export interface components {
             motivo_cancelacion?: string | null;
             /** Notas */
             notas?: string | null;
+            /**
+             * Origen
+             * @default NATIVA
+             */
+            origen: string;
             /** Pdf Url */
             pdf_url?: string | null;
             /** Ret Isr */
@@ -5320,6 +5470,24 @@ export interface components {
              */
             producto_id: string;
         };
+        /**
+         * LineaFacturaEspejoIn
+         * @description Una partida tal como SAE la facturó. `clave` es la CVE_ART de SAE: si
+         *     cruza con producto_clientes se liga al producto; si no, la línea se guarda
+         *     igual con su descripción — el espejo no pierde renglones.
+         */
+        LineaFacturaEspejoIn: {
+            /** Cantidad */
+            cantidad: number | string;
+            /** Clave */
+            clave?: string | null;
+            /** Descripcion */
+            descripcion: string;
+            /** Importe */
+            importe?: number | string | null;
+            /** Precio Unitario */
+            precio_unitario: number | string;
+        };
         /** LineaFacturaOut */
         LineaFacturaOut: {
             /** Cantidad */
@@ -5348,11 +5516,8 @@ export interface components {
             numero_linea: number;
             /** Objeto Imp */
             objeto_imp: string;
-            /**
-             * Producto Id
-             * Format: uuid
-             */
-            producto_id: string;
+            /** Producto Id */
+            producto_id?: string | null;
             /** Ret Isr Importe */
             ret_isr_importe: string;
             /** Ret Iva Importe */
@@ -11044,6 +11209,41 @@ export interface operations {
             };
         };
     };
+    factura_espejo_api_v1_facturas_espejo_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FacturaEspejoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FacturaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     facturas_pdf_lote_api_v1_facturas_pdf_get: {
         parameters: {
             query: {
@@ -14268,6 +14468,76 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["EnviarRemisionesLoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_sae_api_v1_remisiones_export_sae_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportSaeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_sae_preview_api_v1_remisiones_export_sae_preview_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportSaeIn"];
             };
         };
         responses: {

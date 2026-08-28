@@ -81,9 +81,51 @@ class FacturaDirectaIn(BaseModel):
     lineas: List[LineaFacturaDirectaIn] = Field(min_length=1)
 
 
+class LineaFacturaEspejoIn(BaseModel):
+    """Una partida tal como SAE la facturó. `clave` es la CVE_ART de SAE: si
+    cruza con producto_clientes se liga al producto; si no, la línea se guarda
+    igual con su descripción — el espejo no pierde renglones."""
+    clave: Optional[str] = Field(default=None, max_length=30)
+    descripcion: str = Field(max_length=1000)
+    cantidad: Decimal = Field(gt=0)
+    precio_unitario: Decimal = Field(ge=0)
+    importe: Optional[Decimal] = Field(default=None, ge=0)
+
+
+class FacturaEspejoIn(BaseModel):
+    """Reflejo de una factura EMITIDA POR SAE (fase espejo de la migración).
+
+    Idempotente por (serie, folio): re-mandarla actualiza el reflejo (estado,
+    UUID, totales) — así es como llegan las cancelaciones de SAE. Nunca toca
+    al PAC ni consume folios propios: serie y folio son los REALES de SAE.
+    """
+    empresa: str = Field(max_length=4)              # empresa SAE ("02")
+    serie: str = Field(max_length=10)
+    folio: int = Field(gt=0)
+    # El cliente llega como su número en SAE; se resuelve con la equivalencia
+    # 'empresa:numero' de cliente_externos (la misma que usa el export).
+    cliente_sae: str = Field(max_length=10)
+    fecha: Optional[datetime] = None
+    estado: str = Field(default="TIMBRADA", pattern="^(TIMBRADA|CANCELADA)$")
+    uuid_fiscal: Optional[str] = Field(default=None, max_length=36)   # CFDI02.UUID
+    metodo_pago: Optional[str] = Field(default=None, max_length=5)
+    forma_pago: Optional[str] = Field(default=None, max_length=5)
+    uso_cfdi: Optional[str] = Field(default=None, max_length=5)
+    observaciones: Optional[str] = None
+    # Totales COMO LOS REPORTA SAE (la verdad es SAE; no se recalculan aquí).
+    subtotal: Optional[Decimal] = Field(default=None, ge=0)
+    total: Optional[Decimal] = Field(default=None, ge=0)
+    # Saldo real de la PPD si la sync lo conoce; sin él, una TIMBRADA PPD
+    # arranca con saldo = total (igual que una nativa recién timbrada).
+    saldo_insoluto: Optional[Decimal] = Field(default=None, ge=0)
+    lineas: List[LineaFacturaEspejoIn] = Field(default_factory=list)
+
+
 class LineaFacturaOut(ORMModel):
     numero_linea: int
-    producto_id: uuid.UUID
+    # Nulo SOLO en líneas de facturas espejo cuya clave SAE no cruzó con el
+    # catálogo (la descripción viaja igual).
+    producto_id: Optional[uuid.UUID] = None
     clave_prod_serv: str
     clave_unidad: str
     descripcion: str
@@ -125,6 +167,9 @@ class FacturaOut(ORMModel):
     ret_isr: Decimal
     total: Decimal
     saldo_insoluto: Decimal = Decimal("0")
+    # 'NATIVA' | 'ESPEJO_SAE' — el espejo se badgea en la lista y tiene
+    # candados (nunca PAC).
+    origen: str = "NATIVA"
     estado: str
     uuid: Optional[str] = None
     fecha_timbrado: Optional[datetime] = None
