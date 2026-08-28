@@ -6,52 +6,51 @@ Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: bas
 
 | | |
 |---|---|
-| Rama base | `main` @ `47bf1dd` — igual que `origin/main` |
+| Rama base | `main` @ `d7a3500` — igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
-| Worktrees | 1 · `code-audit-best-practices-39c101` (rama `claude/oc-original-en-remisiones`) |
+| Worktrees | ninguno |
+| PRs abiertos | ninguno |
 
-`Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon — por eso ese
-worktree aparece registrado bajo esa ruta.
+`Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
 
 ## Deploy
 
-**Al día y verificado.** El 28-ago se corrió `./deploy.sh`: la construcción salió de caché
-porque las imágenes ya traían el código, alembic no encontró migraciones por aplicar, y los
-contenedores se recrearon. Se comprobó dentro de la imagen del backend que están `0053`
-(PR #34) y `0054` (PR #35).
+**En vivo y verificado** en https://facturador.mx. Se comprobó **dentro de la imagen** del
+backend que trae `oc_archivo_url` (PR #33) y las migraciones `0053` (#34) y `0054` (#35).
 
-Nota sobre la frescura: comparar la fecha de la imagen contra la del último commit da un falso
-positivo aquí — las imágenes se construyeron **25 segundos antes** de que se fusionaran #34 y
-#35, así que "parecen" atrasadas sin estarlo. Para saberlo de verdad hay que mirar el
-contenido de la imagen, no la marca de tiempo.
+⚠️ **La marca de tiempo de la imagen no sirve para saber si el deploy está al día.** El 28-ago
+las imágenes se construyeron 25 segundos antes de que se fusionaran dos PRs y "parecían"
+atrasadas sin estarlo; el `landing` lleva desde el 20-ago sin reconstruirse simplemente porque
+su contexto de build no ha cambiado. Para saberlo de verdad hay que mirar el contenido de la
+imagen, no su fecha.
 
-La imagen del `landing` es del 20-ago y no se reconstruyó: su contexto de build no ha cambiado
-desde entonces. Tampoco es un atraso.
+**La puerta de `deploy.sh` bloquea si el checkout no coincide con GitHub** — incluidos archivos
+sin rastrear. Por eso este `docs/ESTADO.md` va commiteado: si se deja suelto, cada deploy se
+detiene.
 
-## Lo que se limpió hoy
+## Base de datos local
 
-Se podaron 2 worktrees ya fusionados y 5 ramas locales sin trabajo propio:
-`catalogo-productos-multicliente-c04900` (PR #34), `silly-jang-a3f64e` (PR #35),
-`bandeja-oc-en-curso`, `code-audit-best-practices-39c101`, `multi-empresa-account-4105fd`,
-`remote-control-c86a4e`.
+`smartsupplyv2-postgres-1` (dev, `127.0.0.1:5434`, volumen `smartsupplyv2_pgdata`, 6 bases,
+153 MB). El 28-ago estaba corriendo desde
+`.claude/worktrees/worktree-price-lists-schema-348ec1`, **una ruta ya borrada**: seguía
+sirviendo pero nadie podía reconstruirla. Se reapuntó al `docker-compose.yml` de esta carpeta
+con `--force-recreate` (mismo proyecto `smartsupplyv2` → mismo volumen, datos intactos).
+Respaldo `pg_dumpall` de esa fecha en `~/Documents/Claude/pgdump_smartsupplyv2_2026-08-28.sql`.
+
+Producción **no** usa esta base: el `deploy.sh` migra contra Supabase.
+
+## Lo que se limpió el 28-ago
+
+Podados 3 worktrees fusionados y 7 ramas locales sin trabajo propio (PRs #32 a #35).
 
 Cuidado al verificar "ya fusionado": los PRs entran con **squash**, así que los commits de la
-rama nunca aparecen en `main` por SHA y `git cherry` los marca como pendientes. Hay que
-comparar el **contenido** de los archivos (`git rev-parse <rama>:<archivo>` contra
-`origin/main:<archivo>`), no los SHAs ni el conteo de commits.
+rama nunca aparecen en `main` por SHA — `rev-list --count`, `git cherry` y el `diff` de tres
+puntos los tres mienten. Lo que decide es comparar el **contenido** de los archivos, el
+`headRefOid` del PR contra el tip local, o el **patch-id** cuando se sospecha trabajo duplicado
+(así se confirmó que `worktree-remisiones-localhost-41a283` no tenía nada perdido: su commit
+extra tenía el mismo patch-id `ff9089b9` que el del PR #33).
 
 ## Pendientes
 
-1. **PR #33 abierto y mergeable** — "Abrir la OC original desde la lista de remisiones", rama
-   `claude/oc-original-en-remisiones`. Ya está todo subido; solo falta que lo fusiones. Su
-   worktree se dejó en pie a propósito.
-2. **Rama `claude/worktree-remisiones-localhost-41a283` sin worktree y sin revisar.** Su PR #32
-   se fusionó el 27-ago, pero la cabeza local (`3e2a2d41`) **no coincide** con la que se
-   fusionó (`a6edec17`): tiene 6 commits más allá de lo que entró. No se borró. Hay que
-   revisar si eso es trabajo que falta o basura de un rebase.
-3. **Contenedor `smartsupplyv2-postgres-1` huérfano.** Corre desde
-   `.claude/worktrees/worktree-price-lists-schema-348ec1`, **una ruta que ya no existe**: el
-   worktree se borró y el contenedor siguió vivo. Sigue sirviendo, pero nadie puede
-   reconstruirlo desde ahí. Hay que repuntarlo a un compose de este checkout antes de que
-   alguien lo reinicie.
+Ninguno.
