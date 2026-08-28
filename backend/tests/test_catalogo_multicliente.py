@@ -363,6 +363,11 @@ def test_el_sku_interno_es_numerico_del_servidor(client, env, auth_as):
     r = client.patch(f"/api/v1/productos/{env['serrano']}", headers=h,
                      json={"sku": "CHIL-ESPE-041"})
     assert r.status_code == 422
+    # Reenviar el MISMO sku no es cambiarlo: guardar el nombre de un producto
+    # viejo con clave alfanumérica no puede tronar (la pantalla lo reenvía tal cual).
+    r = client.patch(f"/api/v1/productos/{env['serrano']}", headers=h,
+                     json={"sku": "00000301", "nombre": "CHILE SERRANO VERDE"})
+    assert r.status_code == 200, r.text
 
 
 # ─── el PDF de la remisión habla el idioma del cliente ───────────────────────

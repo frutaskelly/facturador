@@ -58,6 +58,9 @@ type LineaEdit = {
   texto: string;
   cantidad: string;
   unidad: string;
+  /** La clave que traía el documento: al confirmar se registra como el código
+   *  de ese cliente para el producto, y la próxima orden cruza al 100. */
+  clave: string | null;
   producto_id: string;
   presentacion: string;
   precio: string;
@@ -65,6 +68,15 @@ type LineaEdit = {
   candidatos: LineaOC["candidatos"];
   /** El operador pidió buscar fuera de los candidatos sugeridos. */
   buscando: boolean;
+};
+
+/** De dónde salió el cruce de una partida, en palabras del negocio: se lee
+ *  mejor que un porcentaje. Lo que no está aquí (difuso, IA) cae al score. */
+const ORIGEN_CRUCE: Record<string, string> = {
+  codigo_cliente: "su clave",
+  codigo_otro_cliente: "clave de otro cliente",
+  alias: "aprendido",
+  exacto: "exacto",
 };
 
 // Abreviaturas con las que los clientes escriben la unidad en sus órdenes.
@@ -173,8 +185,12 @@ export default function Page() {
             texto: l.descripcion,
             cantidad: String(l.cantidad ?? ""),
             unidad,
+            clave: l.clave ?? null,
             producto_id: fuerte ? fuerte.producto_id : "",
-            presentacion: presentacionDe(unidad, fuerte),
+            // El backend ya tradujo la unidad del documento (incluido el OCR
+            // partido) y, si no la decía, usó la habitual de ese cliente. Solo
+            // se recalcula aquí cuando no vino nada.
+            presentacion: l.presentacion_sugerida ?? presentacionDe(unidad, fuerte),
             precio: l.precio != null ? String(l.precio) : "",
             notas: l.notas ?? null,
             candidatos: l.candidatos,
@@ -247,6 +263,7 @@ export default function Page() {
   const sinProducto = useMemo(() => lineas.filter((l) => !l.producto_id).length, [lineas]);
   // Ya tiene remisión, o está descartada: nada se edita desde la bandeja.
   const bloqueada = !!abierta && (!!abierta.remision_id || abierta.estado === "DESCARTADA");
+  const auto = abierta?.auto ?? null;
 
   async function crearRemision() {
     if (!abierta) return;
@@ -279,6 +296,9 @@ export default function Page() {
               precio_unitario: precioNormalizado(l.precio) || null,
               notas: l.notas,
               texto_original: l.texto,
+              // Con la clave, el backend la registra como el código de este
+              // cliente para el producto: la próxima orden cruza sin adivinar.
+              clave: l.clave,
             })),
           }),
         }
@@ -288,6 +308,33 @@ export default function Page() {
       reload();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo crear la remisión");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  /** La orden que cruzó COMPLETA por vías deterministas se vuelve remisión sin
+   *  capturar nada. El backend revalida en ese instante —el catálogo y las
+   *  listas cambian— y responde 409 con el motivo si algo dejó de cruzar, así
+   *  que aquí no hay que revisar nada de nuevo: solo mostrar lo que diga. */
+  async function crearRemisionAuto() {
+    if (!abierta) return;
+    setGuardando(true);
+    try {
+      const oc = await apiFetch<OCRecibidaDetalle>(
+        `/api/v1/oc-recibidas/${abierta.id}/crear-remision-auto`,
+        { method: "POST" }
+      );
+      toast.success(`Remisión ${oc.remision_folio ?? ""} creada en borrador`);
+      setAbierta(null);
+      reload();
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError ? e.message : "La orden ya no cruza completa; revísala a mano"
+      );
+      // El motivo pudo cambiar desde que se abrió: se recarga el detalle para
+      // que la pantalla diga la verdad de ahora.
+      abrir(abierta.id);
     } finally {
       setGuardando(false);
     }
@@ -448,6 +495,20 @@ export default function Page() {
                 <Button variant="secondary" onClick={asignar} disabled={guardando || !clienteSel}>
                   Guardar asignación
                 </Button>
+                {auto?.ok ? (
+                  <Button
+                    variant="secondary"
+                    onClick={crearRemisionAuto}
+                    disabled={guardando || sinGuardar}
+                    title={
+                      sinGuardar
+                        ? "Guarda la asignación: esto se calculó con el cliente anterior"
+                        : undefined
+                    }
+                  >
+                    Crear remisión de un clic
+                  </Button>
+                ) : null}
                 <Button onClick={crearRemision} disabled={guardando}>
                   {guardando ? "Creando…" : "Crear remisión"}
                 </Button>
@@ -479,6 +540,42 @@ export default function Page() {
                 Esta orden ya generó la remisión <strong>{abierta.remision_folio}</strong>. Los
                 cambios de kilos, líneas y precios se hacen en la remisión.
               </Alert>
+            ) : null}
+
+            {/* Cruzó completa por clave, alias o exacto, con precio de una lista
+                negociada: no hay nada que capturar. El desglose se muestra igual
+                —quien firma quiere ver qué va a salir antes de darle al botón. */}
+            {auto?.ok && !bloqueada ? (
+              <Alert tone="success">
+                <div className="font-medium">
+                  Lista para remisión: las {auto.lineas.length} partidas cruzaron por clave o
+                  vocabulario aprendido, y todas traen precio de la lista del cliente.
+                </div>
+                <ul className="mt-2 space-y-0.5 text-xs">
+                  {auto.lineas.map((l) => (
+                    <li key={l.numero} className="tabular-nums">
+                      {l.cantidad} {l.presentacion} · {l.nombre}
+                      {" · "}
+                      {Number(l.precio_unitario).toLocaleString("es-MX", {
+                        style: "currency",
+                        currency: "MXN",
+                      })}
+                      <span className="ml-1 text-muted">
+                        ({ORIGEN_CRUCE[l.cruzo_por] ?? l.cruzo_por})
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {sinGuardar ? (
+                  <div className="mt-2 text-xs">
+                    Guarda primero la asignación: esto se calculó con el cliente que ya estaba.
+                  </div>
+                ) : null}
+              </Alert>
+            ) : auto?.motivo && !bloqueada && abierta.cliente_id ? (
+              // Por qué NO es automática. Es diagnóstico útil, no un error: dice
+              // exactamente qué partida hay que revisar.
+              <p className="text-xs text-muted">Revisión a mano: {auto.motivo}</p>
             ) : null}
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -593,7 +690,14 @@ export default function Page() {
                   <tbody>
                     {lineas.map((l, i) => (
                       <tr key={l.numero} className="border-t border-border">
-                        <td className="px-3 py-2">{l.texto}</td>
+                        <td className="px-3 py-2">
+                          {l.texto}
+                          {l.clave ? (
+                            <div className="mt-0.5 text-xs text-muted">
+                              Su clave: <span className="tabular-nums">{l.clave}</span>
+                            </div>
+                          ) : null}
+                        </td>
                         <td className="px-3 py-2 text-right tabular-nums">
                           {l.cantidad}
                           {l.unidad ? <span className="ml-1 text-xs text-muted">{l.unidad}</span> : null}
@@ -632,7 +736,8 @@ export default function Page() {
                               <option value="">— Sin cruzar —</option>
                               {l.candidatos.map((c) => (
                                 <option key={c.producto_id} value={c.producto_id}>
-                                  {c.nombre} ({c.sku}) · {c.score}%
+                                  {c.nombre} ({c.sku}) ·{" "}
+                                  {ORIGEN_CRUCE[c.origen] ?? `${c.score}%`}
                                 </option>
                               ))}
                               <option value="__buscar__">Buscar otro producto…</option>

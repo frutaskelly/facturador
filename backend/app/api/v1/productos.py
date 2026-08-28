@@ -1375,8 +1375,11 @@ def update_producto(
     if data.get("nombre"):
         data["nombre"] = data["nombre"].strip().upper()   # nombres siempre en mayúsculas
     # Misma regla que en el alta: el SKU interno es numérico del servidor; el
-    # código del cliente vive en producto_clientes.
-    if (data.get("sku") or "").strip() and not data["sku"].strip().isdigit():
+    # código del cliente vive en producto_clientes. Solo se valida el CAMBIO —
+    # un producto viejo con SKU alfanumérico se sigue pudiendo editar (la
+    # pantalla lo reenvía tal cual al guardar el nombre).
+    nuevo_sku = (data.get("sku") or "").strip()
+    if nuevo_sku and nuevo_sku != (obj.sku or "") and not nuevo_sku.isdigit():
         raise HTTPException(
             status_code=422,
             detail=(
