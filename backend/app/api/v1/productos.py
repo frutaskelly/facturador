@@ -140,6 +140,7 @@ def _similar_filter(query, term: str):
 def list_productos(
     q: Optional[str] = Query(default=None, max_length=254),
     categoria_id: Optional[UUID] = Query(default=None),
+    esquema_impuesto_id: Optional[UUID] = Query(default=None),
     activo: Optional[bool] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
@@ -151,6 +152,8 @@ def list_productos(
         query = _similar_filter(query, q.strip())
     if categoria_id is not None:
         query = query.filter(Producto.categoria_id == categoria_id)
+    if esquema_impuesto_id is not None:
+        query = query.filter(Producto.esquema_impuesto_id == esquema_impuesto_id)
     if activo is not None:
         query = query.filter(Producto.activo.is_(activo))
     query = query.order_by(Producto.nombre.asc())

@@ -14,7 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import CategoriaProducto
+from ...models import CategoriaProducto, Producto
 from ...schemas.categoria import CategoriaCreate, CategoriaOut, CategoriaUpdate
 from ...schemas.common import Page
 from ...services.categoria_codigo import generate_unique_codigo
@@ -45,7 +45,21 @@ def list_categorias(
     if activo is not None:
         query = query.filter(CategoriaProducto.activo.is_(activo))
     query = query.order_by(CategoriaProducto.nombre.asc())
-    return paginate(query, CategoriaOut, limit, offset)
+
+    def _con_conteo(rows):
+        # Cuántos productos VIVOS cuelgan de cada categoría de la página — en
+        # una consulta, no una por renglón.
+        ids = [r.id for r in rows]
+        conteo = dict(
+            db.query(Producto.categoria_id, func.count(Producto.id))
+            .filter(Producto.categoria_id.in_(ids or [None]), Producto.deleted_at.is_(None))
+            .group_by(Producto.categoria_id)
+            .all()
+        ) if ids else {}
+        for r in rows:
+            r.productos = conteo.get(r.id, 0)
+
+    return paginate(query, CategoriaOut, limit, offset, preparar=_con_conteo)
 
 
 @router.post("", response_model=CategoriaOut, status_code=status.HTTP_201_CREATED)

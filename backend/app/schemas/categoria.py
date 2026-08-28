@@ -31,5 +31,7 @@ class CategoriaOut(ORMModel, CategoriaBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
     codigo: str
+    # Cuántos productos vivos usan la categoría (lo calcula la lista).
+    productos: int = 0
     created_at: datetime
     updated_at: datetime

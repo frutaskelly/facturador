@@ -99,6 +99,36 @@ def resolver_asignacion(
     ).first()
 
 
+def resolver_asignaciones(
+    db: Session,
+    *,
+    cliente_id: Optional[UUID] = None,
+    sucursal_id: Optional[UUID] = None,
+    serie_id: Optional[UUID] = None,
+    proyecto_id: Optional[UUID] = None,
+    fecha: Optional[date] = None,
+) -> list[ListaAsignacion]:
+    """TODOS los renglones que aplican, del más al menos específico.
+
+    Existe porque las listas negociadas pueden ser PARCIALES: la del proyecto
+    DIF trae solo lo pactado para DIF. Si el producto no está ahí, el precio
+    correcto es el de la siguiente negociación que aplique (la lista del
+    cliente), no la lista base del negocio — que es menos específica que
+    cualquier renglón coincidente.
+    """
+    fecha = fecha or date.today()
+    q = db.query(ListaAsignacion).filter(
+        or_(ListaAsignacion.cliente_id.is_(None), ListaAsignacion.cliente_id == cliente_id),
+        or_(ListaAsignacion.sucursal_id.is_(None), ListaAsignacion.sucursal_id == sucursal_id),
+        or_(ListaAsignacion.serie_id.is_(None), ListaAsignacion.serie_id == serie_id),
+        or_(ListaAsignacion.proyecto_id.is_(None), ListaAsignacion.proyecto_id == proyecto_id),
+    )
+    q = _vigente(q, ListaAsignacion, fecha)
+    return q.order_by(
+        ListaAsignacion.especificidad.desc(), ListaAsignacion.created_at.desc()
+    ).all()
+
+
 def origen_de(a: ListaAsignacion) -> str:
     """Cómo se le llama en pantalla al renglón que ganó: por su dimensión más
     específica, que es la que el vendedor reconoce ("es el precio del proyecto")."""
@@ -212,13 +242,14 @@ def resolver_precio(
         p = _resolver(lambda pr, cant: _precio_lista(db, lista_id, producto_id, pr, cant, fecha))
         if p is not None:
             return {"precio": p, "origen": "lista_forzada", "lista_id": str(lista_id)}
-    # 4. la asignación que coincide en las dimensiones más específicas
-    asignacion = resolver_asignacion(
+    # 4. las asignaciones que coinciden, en CASCADA de especificidad: una lista
+    #    negociada puede ser parcial (la del proyecto trae solo lo pactado); si
+    #    no trae el producto, aplica la siguiente negociación — no la lista base.
+    for asignacion in resolver_asignaciones(
         db, cliente_id=cliente_id, sucursal_id=sucursal_id,
         serie_id=serie_id, proyecto_id=proyecto_id, fecha=fecha,
-    )
-    if asignacion is not None:
-        p = _resolver(lambda pr, cant: _precio_lista(db, asignacion.lista_id, producto_id, pr, cant, fecha))
+    ):
+        p = _resolver(lambda pr, cant, _l=asignacion.lista_id: _precio_lista(db, _l, producto_id, pr, cant, fecha))
         if p is not None:
             return {
                 "precio": p,

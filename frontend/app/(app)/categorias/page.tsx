@@ -1,6 +1,7 @@
 "use client";
 
 import { CrudPage, type CrudConfig } from "@/components/crud/CrudPage";
+import { ProductosDelGrupo } from "@/components/ProductosDelGrupo";
 import { Badge } from "@/components/ui/Badge";
 import type { Categoria } from "@/lib/types";
 
@@ -14,8 +15,12 @@ const config: CrudConfig<Categoria> = {
   columns: [
     { header: "Código", cell: (c) => <span className="font-medium">{c.codigo}</span> },
     { header: "Nombre", cell: (c) => c.nombre },
+    { header: "Productos", className: "text-right tabular-nums",
+      cell: (c) => (c.productos ? c.productos : <span className="text-muted">0</span>) },
     { header: "Estado", cell: (c) => <Badge tone={c.activo ? "success" : "muted"}>{c.activo ? "Activo" : "Inactivo"}</Badge> },
   ],
+  // Clic en el renglón: los productos de la categoría, editables ahí mismo.
+  renderExpanded: (c) => <ProductosDelGrupo filtro={{ categoria_id: c.id }} canWrite />,
   // Catálogo sugerido para distribución de alimentos: el usuario solo palomea
   // lo que usa, en vez de teclear una por una. La descripción es opcional.
   suggestions: {

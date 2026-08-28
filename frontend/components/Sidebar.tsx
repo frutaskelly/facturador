@@ -65,7 +65,14 @@ export function Sidebar({ me }: { me: Me }) {
         )}
 
         {NAV.map((section) => {
-          const items = section.items.filter((it) => can(me, it.perm) && canAny(me, it.anyPerm));
+          // Lo favorito se MUDA a Favoritos (no se duplica): al quitarlo de ahí
+          // vuelve solo a su sección original. Petición del dueño, 28-ago.
+          const items = section.items.filter(
+            (it) =>
+              can(me, it.perm) &&
+              canAny(me, it.anyPerm) &&
+              !(hydrated && isFavorite(it.href))
+          );
           if (items.length === 0) return null;
           return (
             <div key={section.section} className="mt-5 first:mt-2">

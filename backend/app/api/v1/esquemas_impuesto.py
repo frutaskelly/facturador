@@ -13,7 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import EsquemaImpuesto
+from ...models import EsquemaImpuesto, Producto
 from ...schemas.esquema_impuesto import (
     EsquemaImpuestoCreate,
     EsquemaImpuestoOut,
@@ -62,7 +62,19 @@ def list_esquemas(
     if activo is not None:
         query = query.filter(EsquemaImpuesto.activo.is_(activo))
     query = query.order_by(EsquemaImpuesto.codigo.asc())
-    return paginate(query, EsquemaImpuestoOut, limit, offset)
+
+    def _con_conteo(rows):
+        ids = [r.id for r in rows]
+        conteo = dict(
+            db.query(Producto.esquema_impuesto_id, func.count(Producto.id))
+            .filter(Producto.esquema_impuesto_id.in_(ids or [None]), Producto.deleted_at.is_(None))
+            .group_by(Producto.esquema_impuesto_id)
+            .all()
+        ) if ids else {}
+        for r in rows:
+            r.productos = conteo.get(r.id, 0)
+
+    return paginate(query, EsquemaImpuestoOut, limit, offset, preparar=_con_conteo)
 
 
 @router.post("", response_model=EsquemaImpuestoOut, status_code=status.HTTP_201_CREATED)

@@ -1051,6 +1051,11 @@
       "title": "Nombre",
       "type": "string"
      },
+     "productos": {
+      "default": 0,
+      "title": "Productos",
+      "type": "integer"
+     },
      "tenant_id": {
       "format": "uuid",
       "title": "Tenant Id",
@@ -4013,6 +4018,11 @@
       "maxLength": 120,
       "title": "Nombre",
       "type": "string"
+     },
+     "productos": {
+      "default": 0,
+      "title": "Productos",
+      "type": "integer"
      },
      "retencion_isr_tasa": {
       "default": "0",
@@ -25885,6 +25895,23 @@
         }
        ],
        "title": "Categoria Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "esquema_impuesto_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Esquema Impuesto Id"
       }
      },
      {

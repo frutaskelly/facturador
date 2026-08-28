@@ -48,5 +48,7 @@ class EsquemaImpuestoUpdate(BaseModel):
 class EsquemaImpuestoOut(ORMModel, EsquemaImpuestoBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
+    # Cuántos productos vivos usan el esquema (lo calcula la lista).
+    productos: int = 0
     created_at: datetime
     updated_at: datetime
