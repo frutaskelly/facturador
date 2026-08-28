@@ -43,7 +43,12 @@ class ProductoBase(BaseModel):
 
 class ProductoCreate(ProductoBase):
     # SKU is optional on create — leave blank to auto-generate an 8-digit code.
+    # Si viene, debe ser numérico: los códigos del cliente (CILA-FRUT-145) van
+    # al catálogo del cliente, nunca al SKU interno.
     sku: Optional[str] = Field(default=None, max_length=50)
+    # Sin `forzar`, el alta truena con 409 si el catálogo ya tiene un candidato
+    # fuerte con ese nombre — el detector de duplicados deja de ser opcional.
+    forzar: bool = False
 
 
 class ProductoUpdate(BaseModel):
@@ -130,6 +135,11 @@ class LineaPegadaOut(BaseModel):
 class AliasIn(BaseModel):
     texto: str = Field(min_length=1, max_length=254)
     producto_id: uuid.UUID
+    # Alcance opcional: con cliente (y sucursal) el alias es vocabulario privado
+    # de ese cliente y NO toca el global — el "LIMON" de un cliente deja de
+    # pelearse con el de otro.
+    cliente_id: Optional[uuid.UUID] = None
+    sucursal_id: Optional[uuid.UUID] = None
 
 
 # ─── Importación masiva (plantilla o lista de precios con IA) ────────────────

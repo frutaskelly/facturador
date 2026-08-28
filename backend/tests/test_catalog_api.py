@@ -127,7 +127,7 @@ def test_tomador_can_read_productos_but_not_manage(client, env, auth_as):
     r = client.post(
         "/api/v1/productos",
         headers=h,
-        json={"sku": "X1", "nombre": "X", "clave_sat": "01010101", "unidad_sat": "KGM"},
+        json={"sku": "91000001", "nombre": "X", "clave_sat": "01010101", "unidad_sat": "KGM"},
     )
     assert r.status_code == 403
 
@@ -193,7 +193,7 @@ def test_producto_with_valid_and_invalid_fk(client, env, auth_as):
         "/api/v1/productos",
         headers=h,
         json={
-            "sku": "P1", "nombre": "Prod 1", "clave_sat": "01010101",
+            "sku": "91000011", "nombre": "Prod 1", "clave_sat": "01010101",
             "unidad_sat": "KGM", "categoria_id": cat["id"],
         },
     )
@@ -205,7 +205,7 @@ def test_producto_with_valid_and_invalid_fk(client, env, auth_as):
         "/api/v1/productos",
         headers=h,
         json={
-            "sku": "P2", "nombre": "Prod 2", "clave_sat": "01010101",
+            "sku": "91000012", "nombre": "Prod 2", "clave_sat": "01010101",
             "unidad_sat": "KGM", "categoria_id": str(uuid.uuid4()),
         },
     )
@@ -218,7 +218,7 @@ def test_nested_precios_crud(client, env, auth_as):
 
     prod = client.post(
         "/api/v1/productos", headers=h,
-        json={"sku": "P9", "nombre": "Prod 9", "clave_sat": "01010101", "unidad_sat": "KGM"},
+        json={"sku": "91000019", "nombre": "Prod 9", "clave_sat": "01010101", "unidad_sat": "KGM"},
     ).json()
     lista = client.post("/api/v1/listas-precios", headers=h, json={"codigo": "L1", "nombre": "Lista 1"}).json()
 
@@ -267,7 +267,7 @@ def test_cross_tenant_fk_is_rejected(client, env, auth_as):
         "/api/v1/productos",
         headers=_hdr(env["admin_b"]),
         json={
-            "sku": "BP", "nombre": "B prod", "clave_sat": "01010101",
+            "sku": "91000020", "nombre": "B prod", "clave_sat": "01010101",
             "unidad_sat": "KGM", "categoria_id": cat["id"],
         },
     )
@@ -460,7 +460,7 @@ def test_producto_update_swaps_and_clears_fk(client, env, auth_as):
     cat2 = client.post("/api/v1/categorias", headers=h, json={"codigo": "C2", "nombre": "Dos"}).json()
     prod = client.post(
         "/api/v1/productos", headers=h,
-        json={"sku": "PU", "nombre": "Prod U", "clave_sat": "01010101",
+        json={"sku": "91000030", "nombre": "Prod U", "clave_sat": "01010101",
               "unidad_sat": "KGM", "categoria_id": cat1["id"]},
     ).json()
     assert prod["categoria_id"] == cat1["id"]
@@ -481,9 +481,12 @@ def test_producto_update_swaps_and_clears_fk(client, env, auth_as):
 def test_producto_duplicate_sku_conflicts(client, env, auth_as):
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
-    body = {"sku": "DUP", "nombre": "Uno", "clave_sat": "01010101", "unidad_sat": "KGM"}
+    body = {"sku": "91000040", "nombre": "Uno", "clave_sat": "01010101", "unidad_sat": "KGM"}
     assert client.post("/api/v1/productos", headers=h, json=body).status_code == 201
-    assert client.post("/api/v1/productos", headers=h, json=body).status_code == 409
+    # Mismo SKU con otro nombre: el 409 viene del UNIQUE de SKU, no del
+    # detector de duplicados por nombre.
+    body2 = dict(body, nombre="Dos")
+    assert client.post("/api/v1/productos", headers=h, json=body2).status_code == 409
 
 
 def test_producto_soft_delete(client, env, auth_as):
@@ -491,7 +494,7 @@ def test_producto_soft_delete(client, env, auth_as):
     h = _hdr(env["admin_a"])
     prod = client.post(
         "/api/v1/productos", headers=h,
-        json={"sku": "DEL", "nombre": "Borrar", "clave_sat": "01010101", "unidad_sat": "KGM"},
+        json={"sku": "91000050", "nombre": "Borrar", "clave_sat": "01010101", "unidad_sat": "KGM"},
     ).json()
     assert client.get("/api/v1/productos", headers=h).json()["total"] == 1
     assert client.delete(f"/api/v1/productos/{prod['id']}", headers=h).status_code == 204
@@ -504,19 +507,19 @@ def test_producto_list_filters(client, env, auth_as):
     h = _hdr(env["admin_a"])
     cat = client.post("/api/v1/categorias", headers=h, json={"codigo": "FIL", "nombre": "Fil"}).json()
     client.post("/api/v1/productos", headers=h, json={
-        "sku": "MANZANA", "nombre": "Manzana roja", "clave_sat": "01010101",
+        "sku": "91000061", "nombre": "Manzana roja", "clave_sat": "01010101",
         "unidad_sat": "KGM", "categoria_id": cat["id"], "activo": True})
     client.post("/api/v1/productos", headers=h, json={
-        "sku": "PERA", "nombre": "Pera verde", "clave_sat": "01010101",
+        "sku": "91000062", "nombre": "Pera verde", "clave_sat": "01010101",
         "unidad_sat": "KGM", "activo": False})
 
     # q matches name OR sku.
     r = client.get("/api/v1/productos", headers=h, params={"q": "manzana"})
-    assert r.json()["total"] == 1 and r.json()["items"][0]["sku"] == "MANZANA"
+    assert r.json()["total"] == 1 and r.json()["items"][0]["sku"] == "91000061"
 
     # categoria_id filter.
     r = client.get("/api/v1/productos", headers=h, params={"categoria_id": cat["id"]})
-    assert r.json()["total"] == 1 and r.json()["items"][0]["sku"] == "MANZANA"
+    assert r.json()["total"] == 1 and r.json()["items"][0]["sku"] == "91000061"
 
     # activo filter.
     assert client.get("/api/v1/productos", headers=h, params={"activo": "false"}).json()["total"] == 1
@@ -527,7 +530,7 @@ def test_producto_missing_required_field_422(client, env, auth_as):
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
     # Missing clave_sat / unidad_sat (both required for CFDI 4.0).
-    r = client.post("/api/v1/productos", headers=h, json={"sku": "X", "nombre": "X"})
+    r = client.post("/api/v1/productos", headers=h, json={"sku": "91000070", "nombre": "X"})
     assert r.status_code == 422
 
 
@@ -579,7 +582,7 @@ def test_precio_update_and_tier_conflict(client, env, auth_as):
     h = _hdr(env["admin_a"])
     prod = client.post(
         "/api/v1/productos", headers=h,
-        json={"sku": "PP", "nombre": "Prod P", "clave_sat": "01010101", "unidad_sat": "KGM"},
+        json={"sku": "91000080", "nombre": "Prod P", "clave_sat": "01010101", "unidad_sat": "KGM"},
     ).json()
     lista = client.post("/api/v1/listas-precios", headers=h, json={"codigo": "L1", "nombre": "Lista 1"}).json()
 
@@ -607,7 +610,7 @@ def test_precio_wrong_lista_is_404(client, env, auth_as):
     h = _hdr(env["admin_a"])
     prod = client.post(
         "/api/v1/productos", headers=h,
-        json={"sku": "PW", "nombre": "Prod W", "clave_sat": "01010101", "unidad_sat": "KGM"},
+        json={"sku": "91000090", "nombre": "Prod W", "clave_sat": "01010101", "unidad_sat": "KGM"},
     ).json()
     l1 = client.post("/api/v1/listas-precios", headers=h, json={"codigo": "L1", "nombre": "L1"}).json()
     l2 = client.post("/api/v1/listas-precios", headers=h, json={"codigo": "L2", "nombre": "L2"}).json()
@@ -643,7 +646,7 @@ def test_producto_peso_variable_and_fiscal_fields(client, env, auth_as):
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
     r = client.post("/api/v1/productos", headers=h, json={
-        "sku": "SANDIA", "nombre": "Sandía", "clave_sat": "50360000", "unidad_sat": "KGM",
+        "sku": "91000101", "nombre": "Sandía", "clave_sat": "50360000", "unidad_sat": "KGM",
         "unidad_base": "KILO", "presentaciones": {"KILO": 1, "PIEZA": 8},
         "peso_variable": True, "codigo_barras": "7501234567890", "contenido_litros": "0.6"})
     assert r.status_code == 201, r.text
@@ -654,7 +657,7 @@ def test_producto_peso_variable_and_fiscal_fields(client, env, auth_as):
 
     # defaults: omitting them → peso_variable False, the rest null
     r2 = client.post("/api/v1/productos", headers=h, json={
-        "sku": "ARROZ", "nombre": "Arroz", "clave_sat": "50100000", "unidad_sat": "H87"})
+        "sku": "91000102", "nombre": "Arroz", "clave_sat": "50100000", "unidad_sat": "H87"})
     body = r2.json()
     assert body["peso_variable"] is False
     assert body["codigo_barras"] is None and body["contenido_litros"] is None
@@ -696,7 +699,7 @@ def test_sku_autogenerated_when_blank(client, env, auth_as):
     assert sku1.isdigit() and len(sku1) == 8
     # next one increments
     r2 = client.post("/api/v1/productos", headers=h, json={
-        "nombre": "Sin SKU 2", "clave_sat": "01010101", "unidad_sat": "KGM"})
+        "nombre": "Papel aluminio", "clave_sat": "01010101", "unidad_sat": "KGM"})
     assert int(r2.json()["sku"]) == int(sku1) + 1
 
 
@@ -704,19 +707,19 @@ def test_search_matches_sinonimos(client, env, auth_as):
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
     client.post("/api/v1/productos", headers=h, json={
-        "sku": "JIT", "nombre": "Jitomate", "clave_sat": "50420000", "unidad_sat": "KGM",
+        "sku": "91000110", "nombre": "Jitomate", "clave_sat": "50420000", "unidad_sat": "KGM",
         "sinonimos": ["tomate saladette", "guaje"]})
     # q matches a synonym, not just nombre/sku
     r = client.get("/api/v1/productos", headers=h, params={"q": "saladette"})
-    assert r.json()["total"] == 1 and r.json()["items"][0]["sku"] == "JIT"
+    assert r.json()["total"] == 1 and r.json()["items"][0]["sku"] == "91000110"
 
 
 def test_similares_endpoint(client, env, auth_as):
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
     client.post("/api/v1/productos", headers=h, json={
-        "sku": "LECH", "nombre": "Lechuga romana", "clave_sat": "50430000", "unidad_sat": "H87",
+        "sku": "91000120", "nombre": "Lechuga romana", "clave_sat": "50430000", "unidad_sat": "H87",
         "sinonimos": ["lechuga orejona"]})
     r = client.get("/api/v1/productos/similares", headers=h, params={"nombre": "lechuga"})
     assert r.status_code == 200
-    assert any(p["sku"] == "LECH" for p in r.json())
+    assert any(p["sku"] == "91000120" for p in r.json())

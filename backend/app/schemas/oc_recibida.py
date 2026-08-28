@@ -84,7 +84,35 @@ class LineaOCRecibidaOut(BaseModel):
     clave: Optional[str] = None
     precio: Optional[Decimal] = None
     notas: Optional[str] = None
+    # La unidad del documento ya traducida a presentación del catálogo
+    # ("KILOGR AMO" → KILO); si el documento no dice, la habitual del cliente
+    # para el producto sugerido. None = no se reconoció: que decida el humano.
+    presentacion_sugerida: Optional[str] = None
     candidatos: list[CandidatoLineaOut] = Field(default_factory=list)
+
+
+class LineaAutoOut(BaseModel):
+    """Una partida ya resuelta por vía determinista, lista para el clic."""
+    numero: int
+    producto_id: uuid.UUID
+    nombre: str
+    presentacion: str
+    cantidad: Decimal
+    precio_unitario: Decimal
+    precio_origen: str
+    texto_original: Optional[str] = None
+    clave: Optional[str] = None
+    cruzo_por: str
+
+
+class AutoRemisionOut(BaseModel):
+    """¿La orden entera puede volverse remisión con un clic? Y con qué líneas.
+
+    `ok` solo cuando TODAS las partidas cruzaron por clave del cliente, alias o
+    exacto, con unidad vendible y precio de lista negociada (no lista base)."""
+    ok: bool
+    motivo: Optional[str] = None
+    lineas: list[LineaAutoOut] = Field(default_factory=list)
 
 
 class OCRecibidaOut(ORMModel):
@@ -126,6 +154,7 @@ class OCRecibidaOut(ORMModel):
 class OCRecibidaDetailOut(OCRecibidaOut):
     payload: dict = Field(default_factory=dict)
     lineas: list[LineaOCRecibidaOut] = Field(default_factory=list)
+    auto: Optional[AutoRemisionOut] = None
 
 
 class LineaCrearIn(BaseModel):
@@ -137,6 +166,9 @@ class LineaCrearIn(BaseModel):
     notas: Optional[str] = None
     # Texto original de la partida: si viene, se aprende como alias del producto.
     texto_original: Optional[str] = Field(default=None, max_length=254)
+    # Clave del documento: si viene y el producto no tiene código para este
+    # cliente, se registra en su catálogo — la próxima OC cruza al 100 por clave.
+    clave: Optional[str] = Field(default=None, max_length=60)
 
 
 class CrearRemisionIn(BaseModel):
