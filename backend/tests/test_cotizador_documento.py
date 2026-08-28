@@ -53,6 +53,8 @@ def env(db_engine):
                           precio_unitario=Decimal(precio), cantidad_minima=1))
         db.add(Precio(tenant_id=tid, lista_id=negociada.id, producto_id=aguacate.id, presentacion="KILO",
                       precio_unitario=Decimal("22"), cantidad_minima=1))
+        db.add(Precio(tenant_id=tid, lista_id=negociada.id, producto_id=limon.id, presentacion="KILO",
+                      precio_unitario=Decimal("20"), cantidad_minima=1))
 
         cli = Cliente(tenant_id=tid, codigo="C1", legal_name="Cliente Uno SA", rfc="XAXX010101000")
         db.add(cli); db.flush()
@@ -106,7 +108,7 @@ def test_cruce_precio_y_totales(client, env, auth_as, monkeypatch):
     r = _cotizar(client, env, monkeypatch, [
         # cruza exacto por nombre → lista negociada del cliente ($22)
         {"descripcion": "AGUACATE", "cantidad": Decimal("10"), "unidad": "KG", "clave": None},
-        # la descripción no dice nada, pero la CLAVE del cliente decide → limón base $18
+        # la descripción no dice nada, pero la CLAVE del cliente decide → limón negociado $20
         {"descripcion": "PRODUCTO 77 DEL CONTRATO", "cantidad": Decimal("5"), "unidad": None, "clave": "P-77"},
         # nada parecido en el catálogo → sin_cruce, NO se cotiza a ciegas
         {"descripcion": "TORNILLOS GALVANIZADOS 3/4", "cantidad": Decimal("2"), "unidad": "CAJA", "clave": None},
@@ -123,10 +125,34 @@ def test_cruce_precio_y_totales(client, env, auth_as, monkeypatch):
     assert agu["origen_precio"] == "lista_cliente"
     lim = por_prod[env["limon"]]
     assert lim["cruce"] == "su clave"
-    assert float(lim["precio_unitario"]) == 18.0
-    # subtotal = 10×22 + 5×18
-    assert float(cot["subtotal"]) == 310.0
+    assert float(lim["precio_unitario"]) == 20.0
+    # subtotal = 10×22 + 5×20
+    assert float(cot["subtotal"]) == 320.0
     assert cot["sin_precio"] == 0
+
+
+def test_fuera_de_lista_no_se_cotiza(client, env, auth_as, monkeypatch):
+    """Regla del dueño (29-ago-2026): con cliente que TIENE lista negociada,
+    un producto que cruza pero NO está en ella no se cotiza a precio base —
+    sale reportado con su motivo."""
+    db = SessionLocal()
+    try:
+        db.query(Precio).filter(
+            Precio.producto_id == uuid.UUID(env["limon"]),
+            Precio.lista_id == uuid.UUID(env["negociada"]),
+        ).delete()
+        db.commit()
+    finally:
+        db.close()
+    auth_as(env["admin"])
+    cot = _cotizar(client, env, monkeypatch, [
+        {"descripcion": "LIMON SIN SEMILLA", "cantidad": Decimal("5"), "unidad": "KG", "clave": "P-77"},
+        {"descripcion": "AGUACATE", "cantidad": Decimal("1"), "unidad": "KG", "clave": None},
+    ]).json()
+    assert len(cot["lineas"]) == 1                       # solo el aguacate
+    assert len(cot["sin_cruce"]) == 1
+    assert "no está en la lista" in cot["sin_cruce"][0]["motivo"]
+    assert float(cot["subtotal"]) == 22.0
 
 
 def test_sin_precio_no_suma(client, env, auth_as, monkeypatch):

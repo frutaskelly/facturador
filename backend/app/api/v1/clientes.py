@@ -61,6 +61,9 @@ def list_clientes(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     query = db.query(Cliente).filter(Cliente.deleted_at.is_(None))
+    if ctx.cliente_scope:
+        # Candado del portal: el usuario solo ve SUS clientes.
+        query = query.filter(Cliente.id.in_(ctx.cliente_scope))
     if q:
         like = f"%{q}%"
         query = query.filter(
@@ -350,6 +353,8 @@ def get_cliente(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
+    if not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return get_or_404(db, Cliente, cliente_id)
 
 
@@ -386,7 +391,7 @@ def update_cliente(
 def delete_cliente(
     cliente_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("cliente:eliminar")),
 ):
     obj = get_or_404(db, Cliente, cliente_id)
     obj.deleted_at = func.now()

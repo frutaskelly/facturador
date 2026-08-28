@@ -120,7 +120,7 @@ def update_esquema(
 def delete_esquema(
     esquema_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("esquema_impuesto:eliminar")),
 ):
     obj = get_or_404(db, EsquemaImpuesto, esquema_id)
     obj.deleted_at = func.now()

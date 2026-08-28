@@ -28,11 +28,11 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
-from ..models import Cliente, EsquemaImpuesto, Producto, ProductoCliente
+from ..models import Cliente, EsquemaImpuesto, Precio, PrecioOverride, Producto, ProductoCliente, Sucursal
 from . import producto_match
 from .fiscal import calcular_linea_producto
 from .importar_productos import _MIME_POR_EXT, _tabla_a_texto
-from .precios import resolver_precio
+from .precios import listas_asignadas_a_cliente, resolver_precio
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +159,41 @@ def _presentacion_para(prod: Producto, unidad: str, preferida: Optional[str]) ->
     return hit or prod.presentacion_default or prod.unidad_base or (pres[0] if pres else "KILO")
 
 
+def productos_cotizables(db: Session, tenant_id: UUID, cliente_id: UUID) -> Optional[set[UUID]]:
+    """Los productos que ESTE cliente puede cotizar (regla del dueño,
+    29-ago-2026: "únicamente se puede cotizar los productos que estén en la
+    lista de precios del cliente").
+
+    = los que tienen precio en sus listas negociadas, más los que tienen
+    precio especial (override) del cliente o de sus sucursales. None cuando el
+    cliente NO tiene negociación alguna: compra a lista base y no hay lista
+    propia que lo limite.
+    """
+    listas = listas_asignadas_a_cliente(db, cliente_id)
+    ids: set[UUID] = set()
+    if listas:
+        ids.update(
+            p for (p,) in db.query(Precio.producto_id)
+            .filter(Precio.tenant_id == tenant_id, Precio.lista_id.in_(listas))
+            .distinct()
+        )
+    sucs = [s for (s,) in db.query(Sucursal.id).filter(
+        Sucursal.tenant_id == tenant_id, Sucursal.cliente_id == cliente_id,
+        Sucursal.deleted_at.is_(None))]
+    from sqlalchemy import or_ as _or
+    ovr = db.query(PrecioOverride.producto_id).filter(
+        PrecioOverride.tenant_id == tenant_id,
+        _or(
+            PrecioOverride.cliente_id == cliente_id,
+            PrecioOverride.sucursal_id.in_(sucs or [None]),
+        ),
+    ).distinct()
+    overrides = {p for (p,) in ovr}
+    if not listas and not overrides:
+        return None
+    return ids | overrides
+
+
 def cotizar_documento(
     db: Session,
     tenant_id: UUID,
@@ -197,6 +232,9 @@ def cotizar_documento(
     por_id = {p.id: p for p in prods}
     esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(
         EsquemaImpuesto.tenant_id == tenant_id, EsquemaImpuesto.deleted_at.is_(None))}
+    # Solo se cotiza lo que está en la lista del cliente (None = sin negociación,
+    # todo el catálogo a lista base).
+    permitidos = productos_cotizables(db, tenant_id, cliente_id)
 
     lineas, sin_cruce = [], []
     subtotal = iva = ieps = Decimal("0")
@@ -222,6 +260,17 @@ def cotizar_documento(
                     "candidatos": [{"nombre": c.nombre, "score": c.score} for c in cands[:3]],
                 })
                 continue
+
+        if permitidos is not None and prod.id not in permitidos:
+            # Cruza, pero NO está en la lista del cliente: no se cotiza a
+            # precio base a escondidas — se reporta tal cual.
+            sin_cruce.append({
+                "descripcion": pt["descripcion"], "cantidad": str(pt["cantidad"]),
+                "unidad": pt["unidad"], "clave": pt["clave"],
+                "candidatos": [],
+                "motivo": f"{prod.nombre} no está en la lista de precios del cliente",
+            })
+            continue
 
         presentacion = _presentacion_para(prod, pt["unidad"], presentacion_cliente.get(prod.id))
         cot = resolver_precio(

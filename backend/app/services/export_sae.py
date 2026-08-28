@@ -175,7 +175,6 @@ def preparar(
     tipo: str,
     *,
     bloquear: bool = False,
-    regenerar: bool = False,
 ) -> tuple[ResultadoPreview, list[DocExport]]:
     """Valida y resuelve todo lo que el archivo necesita. NO escribe nada.
 
@@ -184,18 +183,22 @@ def preparar(
     - Una remisión YA FACTURADA NATIVAMENTE (factura del Facturador viva) jamás
       entra al archivo: importarla en SAE emitiría un SEGUNDO CFDI real por la
       misma venta — la regla que este sistema existe para impedir.
-    - FACTURA: una remisión que YA tiene factura_sae no se re-exporta — re-subir
-      un masivo a SAE crea un documento DUPLICADO con el siguiente consecutivo.
-      La excepción es `regenerar`: reproduce el archivo de un lote YA estampado
-      (la descarga se puede perder DESPUÉS del commit de la estampa) usando los
-      folios que ya viven en factura_sae, sin estampar nada de nuevo.
+    - FACTURA: una remisión con `factura_sae` (el espejo confirmó su factura, o
+      alguien capturó la marca a mano) no se re-exporta — re-subir un masivo a
+      SAE crea un documento DUPLICADO con el siguiente consecutivo.
     - Sin clave SAE del cliente, sin serie fiscal o con partidas sin código de
       cliente: el lote entero se detiene. Un archivo a medias importado en SAE
       no se puede "completar" después sin duplicar.
 
-    `bloquear=True` (lo usa generar): FOR UPDATE sobre las remisiones — dos
-    exports simultáneos del mismo lote producirían DOS archivos válidos y dos
-    estampas last-write-wins; con el lock, el segundo espera y ve la estampa.
+    El export NO estampa folios: el folio del archivo es una PROPUESTA y la
+    verdad la pone el espejo cuando la factura existe en SAE (regla del dueño,
+    29-ago-2026: "no asignar series sin que el SAE lo confirme" — pasó con un
+    archivo que nunca se subió y quedó ZHGO 588 fantasma). Un export previo
+    sin factura confirmada se reporta como AVISO, no bloquea.
+
+    `bloquear=True` (lo usa generar): FOR UPDATE sobre las remisiones, para que
+    dos exports simultáneos del mismo lote se serialicen y el segundo vea el
+    `export_sae_at` del primero en su aviso.
     """
     res = ResultadoPreview(ok=False)
     tipo = (tipo or "").upper()
@@ -204,9 +207,6 @@ def preparar(
         return res, []
     if not ids:
         res.errores.append("sin remisiones seleccionadas")
-        return res, []
-    if regenerar and tipo != "FACTURA":
-        res.errores.append("regenerar solo aplica al export de FACTURAS")
         return res, []
 
     q = (
@@ -261,21 +261,20 @@ def preparar(
                 f"({nativa.estado}) — exportarla a SAE emitiría un SEGUNDO CFDI por la misma venta"
             )
             continue
-        if tipo == "FACTURA" and not regenerar and rem.factura_sae:
+        if tipo == "FACTURA" and rem.factura_sae:
             res.errores.append(
                 f"{rem.folio_interno}: ya está amparada por la factura SAE "
-                f"{rem.factura_sae} — re-exportarla duplicaría el documento en SAE "
-                "(¿buscabas «regenerar el archivo»?)"
+                f"{rem.factura_sae} — re-exportarla duplicaría el documento en SAE"
             )
             continue
-        if regenerar:
-            marca = parsear_marca(rem.factura_sae or "")
-            if marca is None:
-                res.errores.append(
-                    f"{rem.folio_interno}: regenerar exige que la remisión ya esté estampada "
-                    f"con su folio SAE (factura_sae = {rem.factura_sae!r})"
-                )
-                continue
+        if tipo == "FACTURA" and rem.export_sae_at is not None:
+            # No bloquea: el archivo anterior pudo no subirse nunca (caso real).
+            # Pero si SÍ se importó, re-exportar duplica — el operador decide.
+            res.avisos.append(
+                f"{rem.folio_interno}: ya salió en un archivo el "
+                f"{rem.export_sae_at:%d-%b %H:%M} y el espejo aún no confirma su factura "
+                "— si aquel archivo SÍ se importó en SAE, no la re-exportes"
+            )
         pares = claves.get(rem.cliente_facturacion_id) or []
         if not pares:
             res.errores.append(
@@ -310,10 +309,7 @@ def preparar(
             continue
 
         doc = DocExport(remision=rem, cliente_sae=numero, empresa=empresa)
-        if tipo == "FACTURA" and regenerar:
-            doc.serie, doc.folio = parsear_marca(rem.factura_sae)
-            series_conteo[doc.serie] = series_conteo.get(doc.serie, 0) + 1
-        elif tipo == "FACTURA":
+        if tipo == "FACTURA":
             serie = resolver_serie(
                 db, tenant_id, "FACTURA",
                 cliente_id=rem.cliente_facturacion_id, sucursal_id=rem.sucursal_id,
@@ -402,30 +398,26 @@ def generar(
     *,
     folios: Optional[dict[str, int]] = None,
     fecha: Optional[date] = None,
-    estampar: bool = True,
-    regenerar: bool = False,
 ) -> tuple[ResultadoPreview, Optional[bytes], Optional[str]]:
-    """Genera el .xls y —solo FACTURA con estampar— deja el espejo puesto:
-    cada remisión del lote queda con su `factura_sae` (→ RESERVADO), que es lo
-    que evita el doble export y alimenta el folio sugerido del siguiente lote.
+    """Genera el .xls (Excel 97-2004, el único formato que SAE importa).
+
+    NO estampa folios en las remisiones: el folio del archivo es la PROPUESTA
+    que el operador confirmó contra SAE, y `factura_sae` lo pone el ESPEJO
+    cuando la factura de verdad existe (o una captura manual). Solo se marca
+    `export_sae_at` como rastro para avisar de un doble export.
 
     `folios` = {serie: folio_inicial} confirmados por el operador (FACTURA).
-    `regenerar` reproduce el archivo de un lote YA estampado con sus folios
-    guardados, sin estampar de nuevo (la descarga puede perderse tras el commit).
-    El commit lo hace el caller (endpoint): estampa y archivo viajan juntos o
-    no viaja nada.
+    El commit lo hace el caller (endpoint).
     """
     import xlwt
+    from datetime import datetime, timezone
 
     tipo = (tipo or "").upper()
-    # FOR UPDATE: dos exports simultáneos del mismo lote verían ambos la
-    # estampa en NULL y entregarían dos archivos válidos → documentos
-    # duplicados en SAE. Con el lock, el segundo espera y ve la estampa.
-    res, docs = preparar(db, tenant_id, ids, tipo, bloquear=estampar, regenerar=regenerar)
+    res, docs = preparar(db, tenant_id, ids, tipo, bloquear=True)
     if not res.ok:
         return res, None, None
 
-    if tipo == "FACTURA" and not regenerar:
+    if tipo == "FACTURA":
         folios = folios or {}
         for s in res.series:
             if not folios.get(s["serie"]):
@@ -475,9 +467,7 @@ def generar(
         rem = doc.remision
         cli = clientes[rem.cliente_facturacion_id]
         obs = _observacion(rem)
-        if tipo == "FACTURA" and regenerar:
-            folio_txt = folio_sae(doc.serie, doc.folio)   # el folio ya estampado
-        elif tipo == "FACTURA":
+        if tipo == "FACTURA":
             doc.folio = contador[doc.serie]
             contador[doc.serie] += 1
             folio_txt = folio_sae(doc.serie, doc.folio)
@@ -505,10 +495,10 @@ def generar(
                 hoja.write(fila, c, v)
             fila += 1
 
-        if tipo == "FACTURA" and estampar and not regenerar:
-            rem.factura_sae = f"{doc.serie} {doc.folio}"
-            if rem.estado == "BORRADOR":
-                rem.estado = "RESERVADO"
+        if tipo == "FACTURA":
+            # Solo el RASTRO del export (para el aviso de doble export). El folio
+            # NO se estampa: factura_sae lo pone el espejo cuando SAE confirma.
+            rem.export_sae_at = datetime.now(timezone.utc)
 
     buf = io.BytesIO()
     libro.save(buf)

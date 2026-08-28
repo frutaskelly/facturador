@@ -181,6 +181,9 @@ def list_remisiones(
         .options(joinedload(Remision.factura))
         .filter(Remision.deleted_at.is_(None))
     )
+    if ctx.cliente_scope:
+        # Candado del portal: solo documentos de SUS clientes.
+        query = query.filter(Remision.cliente_facturacion_id.in_(ctx.cliente_scope))
     if estado:
         query = query.filter(Remision.estado == estado)
     if cliente_id is not None:
@@ -323,9 +326,12 @@ def remisiones_pdf_lote(
         raise HTTPException(status_code=422, detail="Sin remisiones para imprimir")
     if len(id_list) > 200:
         raise HTTPException(status_code=422, detail="Máximo 200 remisiones por PDF")
-    rems = db.query(Remision).filter(
+    q = db.query(Remision).filter(
         Remision.id.in_(id_list), Remision.deleted_at.is_(None)
-    ).order_by(Remision.folio_interno).all()
+    )
+    if ctx.cliente_scope:
+        q = q.filter(Remision.cliente_facturacion_id.in_(ctx.cliente_scope))
+    rems = q.order_by(Remision.folio_interno).all()
     if not rems:
         raise HTTPException(status_code=404, detail="No se encontraron remisiones")
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
@@ -385,6 +391,8 @@ def get_remision(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     rem = get_or_404(db, Remision, rem_id)
+    if not ctx.cliente_permitido(rem.cliente_facturacion_id):
+        raise HTTPException(status_code=404, detail="Remisión no encontrada")
     prod_ids = {ln.producto_id for ln in rem.lineas}
     names = dict(db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all())
     for ln in rem.lineas:
@@ -1323,6 +1331,8 @@ def remision_pdf(
 ):
     """PDF de la remisión (mismo diseño que la factura, marcado NO FISCAL)."""
     rem = get_or_404(db, Remision, rem_id)
+    if not ctx.cliente_permitido(rem.cliente_facturacion_id):
+        raise HTTPException(status_code=404, detail="Remisión no encontrada")
     cliente = db.query(Cliente).filter(Cliente.id == rem.cliente_facturacion_id).one_or_none()
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
     # El papel que firma el cliente trae SU clave y SU nombre del producto
@@ -1338,7 +1348,7 @@ def remision_pdf(
 def delete_remision(
     rem_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("remision:eliminar")),
 ):
     rem = get_or_404(db, Remision, rem_id)
     if rem.estado == "FACTURADA":
@@ -1362,12 +1372,6 @@ class ExportSaeIn(BaseModel):
     # {serie: folio_inicial} confirmados por el operador. Solo FACTURA.
     folios: Optional[dict[str, int]] = None
     fecha: Optional[date] = None                 # default: hoy (MM/DD/YYYY en el archivo)
-    # Estampar factura_sae en las remisiones del lote (el espejo se llena solo).
-    estampar: bool = True
-    # Reproducir el archivo de un lote YA estampado (la descarga se puede
-    # perder después del commit de la estampa): usa los folios guardados en
-    # factura_sae y NO estampa nada de nuevo. Solo FACTURA.
-    regenerar: bool = False
 
 
 @router.post("/export-sae/preview")
@@ -1381,7 +1385,7 @@ def export_sae_preview(
     solo el primero) porque el operador corrige todo de una pasada."""
     from ...services import export_sae as svc
 
-    res, _docs = svc.preparar(db, ctx.tenant_id, body.ids, body.tipo, regenerar=body.regenerar)
+    res, _docs = svc.preparar(db, ctx.tenant_id, body.ids, body.tipo)
     return {
         "ok": res.ok, "errores": res.errores, "avisos": res.avisos,
         "empresa": res.empresa, "series": res.series, "remisiones": res.remisiones,
@@ -1394,16 +1398,15 @@ def export_sae(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
-    """Genera el .xls masivo. En FACTURA, además estampa `factura_sae` en cada
-    remisión del lote (→ RESERVADO): eso es lo que impide re-exportarla por
-    accidente (un re-import duplica el documento en SAE) y lo que prellena el
-    folio del siguiente lote. Estampa y archivo viajan en la misma transacción."""
+    """Genera el .xls masivo (Excel 97-2004). NO estampa folios: los del
+    archivo son la propuesta confirmada por el operador, y `factura_sae` lo
+    pone el ESPEJO cuando la factura de verdad existe en SAE — un archivo que
+    nunca se sube ya no deja folios fantasma en las remisiones."""
     from ...services import export_sae as svc
 
     res, contenido, nombre = svc.generar(
         db, ctx.tenant_id, body.ids, body.tipo,
-        folios=body.folios, fecha=body.fecha, estampar=body.estampar,
-        regenerar=body.regenerar,
+        folios=body.folios, fecha=body.fecha,
     )
     if not res.ok or contenido is None:
         raise HTTPException(status_code=422, detail=" · ".join(res.errores) or "lote inválido")

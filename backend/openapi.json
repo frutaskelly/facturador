@@ -3216,6 +3216,21 @@
    },
    "CrearUsuarioIn": {
     "properties": {
+     "cliente_scope": {
+      "anyOf": [
+       {
+        "items": {
+         "format": "uuid",
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Scope"
+     },
      "email": {
       "maxLength": 254,
       "minLength": 3,
@@ -3348,6 +3363,37 @@
      "created_at"
     ],
     "title": "DevolucionOut",
+    "type": "object"
+   },
+   "EmpresaAccesoIn": {
+    "properties": {
+     "acceso": {
+      "title": "Acceso",
+      "type": "boolean"
+     },
+     "role_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Role Id"
+     },
+     "tenant_id": {
+      "format": "uuid",
+      "title": "Tenant Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "tenant_id",
+     "acceso"
+    ],
+    "title": "EmpresaAccesoIn",
     "type": "object"
    },
    "EmpresaColorIn": {
@@ -4366,11 +4412,6 @@
    },
    "ExportSaeIn": {
     "properties": {
-     "estampar": {
-      "default": true,
-      "title": "Estampar",
-      "type": "boolean"
-     },
      "fecha": {
       "anyOf": [
        {
@@ -4405,11 +4446,6 @@
       "minItems": 1,
       "title": "Ids",
       "type": "array"
-     },
-     "regenerar": {
-      "default": false,
-      "title": "Regenerar",
-      "type": "boolean"
      },
      "tipo": {
       "default": "FACTURA",
@@ -7943,6 +7979,21 @@
       "title": "Active",
       "type": "boolean"
      },
+     "cliente_scope": {
+      "anyOf": [
+       {
+        "items": {
+         "format": "uuid",
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Scope"
+     },
      "created_at": {
       "format": "date-time",
       "title": "Created At",
@@ -8043,6 +8094,21 @@
        }
       ],
       "title": "Active"
+     },
+     "cliente_scope": {
+      "anyOf": [
+       {
+        "items": {
+         "format": "uuid",
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Scope"
      },
      "role_id": {
       "anyOf": [
@@ -23698,6 +23764,140 @@
     ]
    }
   },
+  "/api/v1/memberships/{membership_id}/empresas": {
+   "get": {
+    "description": "Las empresas del grupo y a cuáles entra el usuario de esta membresía.",
+    "operationId": "empresas_del_usuario_api_v1_memberships__membership_id__empresas_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "membership_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Membership Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Empresas Del Usuario",
+    "tags": [
+     "membresías"
+    ]
+   },
+   "put": {
+    "description": "Da o quita el acceso del usuario a UNA empresa del grupo.\n\nGuards: la empresa debe ser del grupo, el caller debe poder administrar\nusuarios EN ESA empresa, nadie toca sus propias membresías, y el rol OWNER\nsolo lo otorga/quita un OWNER de esa empresa (anti-toma de control).",
+    "operationId": "asignar_empresa_api_v1_memberships__membership_id__empresas_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "membership_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Membership Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EmpresaAccesoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Asignar Empresa",
+    "tags": [
+     "membresías"
+    ]
+   }
+  },
   "/api/v1/memberships/{membership_id}/password": {
    "post": {
     "operationId": "cambiar_password_api_v1_memberships__membership_id__password_post",
@@ -26383,6 +26583,92 @@
     ]
    }
   },
+  "/api/v1/precios/productos-cotizables": {
+   "get": {
+    "description": "Buscador del cotizador: SOLO productos que están en la lista de precios\ndel cliente (regla del dueño). Sin negociación propia, busca en todo el\ncatálogo (su lista es la base).",
+    "operationId": "productos_cotizables_endpoint_api_v1_precios_productos_cotizables_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "default": "",
+       "maxLength": 120,
+       "title": "Q",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 20,
+       "maximum": 50,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Productos Cotizables Endpoint",
+    "tags": [
+     "precios"
+    ]
+   }
+  },
   "/api/v1/productos": {
    "get": {
     "operationId": "list_productos_api_v1_productos_get",
@@ -28562,7 +28848,7 @@
   },
   "/api/v1/remisiones/export-sae": {
    "post": {
-    "description": "Genera el .xls masivo. En FACTURA, además estampa `factura_sae` en cada\nremisión del lote (→ RESERVADO): eso es lo que impide re-exportarla por\naccidente (un re-import duplica el documento en SAE) y lo que prellena el\nfolio del siguiente lote. Estampa y archivo viajan en la misma transacción.",
+    "description": "Genera el .xls masivo (Excel 97-2004). NO estampa folios: los del\narchivo son la propuesta confirmada por el operador, y `factura_sae` lo\npone el ESPEJO cuando la factura de verdad existe en SAE — un archivo que\nnunca se sube ya no deja folios fantasma en las remisiones.",
     "operationId": "export_sae_api_v1_remisiones_export_sae_post",
     "parameters": [
      {

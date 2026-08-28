@@ -13,7 +13,7 @@ import unicodedata
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -70,6 +70,8 @@ def list_proyectos(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     query = db.query(Proyecto).filter(Proyecto.deleted_at.is_(None))
+    if ctx.cliente_scope:
+        query = query.filter(Proyecto.cliente_id.in_(ctx.cliente_scope))
     if cliente_id is not None:
         # Los proyectos del grupo (sin dueño) aplican a cualquier cliente, así
         # que también salen al filtrar por uno.
@@ -89,7 +91,10 @@ def get_proyecto(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    return get_or_404(db, Proyecto, proyecto_id)
+    obj = get_or_404(db, Proyecto, proyecto_id)
+    if not ctx.cliente_permitido(obj.cliente_id):
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    return obj
 
 
 @router.post("", response_model=ProyectoOut, status_code=status.HTTP_201_CREATED)

@@ -97,6 +97,8 @@ def list_sucursales(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     query = db.query(Sucursal).filter(Sucursal.deleted_at.is_(None))
+    if ctx.cliente_scope:
+        query = query.filter(Sucursal.cliente_id.in_(ctx.cliente_scope))
     if cliente_id is not None:
         query = query.filter(Sucursal.cliente_id == cliente_id)
     query = query.order_by(Sucursal.nombre.asc())
@@ -110,6 +112,8 @@ def get_sucursal(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     obj = get_or_404(db, Sucursal, sucursal_id)
+    if not ctx.cliente_permitido(obj.cliente_id):
+        raise HTTPException(status_code=404, detail="Sucursal no encontrada")
     _con_series(db, [obj])
     return obj
 

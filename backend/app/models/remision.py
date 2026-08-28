@@ -16,6 +16,7 @@ AI/multichannel ingestion + government-contract links (cut from v2).
 from sqlalchemy import (
     Column,
     Date,
+    DateTime,
     Enum,
     ForeignKey,
     Numeric,
@@ -80,7 +81,12 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     factura_id = Column(UUID(as_uuid=True), ForeignKey("facturas.id", ondelete="SET NULL"))
     # Folio de la factura que ampara esta remisión en SAE ("ZHGO 233"). Es de
     # OTRO sistema: texto libre, sin FK. Tenerlo pone la remisión en RESERVADO.
+    # Lo escribe el ESPEJO (cuando la factura existe en SAE) o una captura
+    # manual — nunca el export masivo, cuyo archivo puede no subirse jamás.
     factura_sae = Column(String(30))
+    # Última vez que salió en un archivo masivo para SAE (rastro para avisar
+    # de un doble export). NO implica que la factura exista.
+    export_sae_at = Column(DateTime(timezone=True))
     # "Su pedido": la ORDEN DE COMPRA del cliente ("24478"), con la que él
     # reconoce el documento. Texto libre: es un folio de su sistema, no del nuestro.
     su_pedido = Column(String(30))

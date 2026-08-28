@@ -49,7 +49,7 @@ export const NAV: NavSection[] = [
       { label: "Listas de precios", href: "/listas-precios", perm: "menu:listas_precios", icon: Tag },
       { label: "Asignación de precios", href: "/asignaciones-precios", perm: "menu:listas_precios", icon: Target },
       { label: "Proyectos", href: "/proyectos", perm: "menu:clientes", icon: Briefcase },
-      { label: "Cotizador", href: "/cotizador", perm: "menu:listas_precios", icon: Calculator },
+      { label: "Cotizador", href: "/cotizador", perm: "menu:cotizador", icon: Calculator },
     ],
   },
   {
@@ -61,7 +61,7 @@ export const NAV: NavSection[] = [
       { label: "Almacenes", href: "/almacenes", perm: "menu:inventario", icon: Warehouse },
       { label: "Compras", href: "/compras", perm: "menu:compras", icon: ShoppingCart },
       { label: "Proveedores", href: "/proveedores", perm: "menu:compras", icon: Truck },
-      { label: "Bandeja de órdenes", href: "/oc", perm: "menu:remisiones", icon: Inbox },
+      { label: "Bandeja de órdenes", href: "/oc", perm: "menu:oc", icon: Inbox },
       { label: "Remisiones", href: "/remisiones", perm: "menu:remisiones", icon: FileText },
       { label: "Facturas", href: "/facturas", perm: "menu:facturas", icon: Receipt },
       { label: "Cobranza (REP)", href: "/cobranza", perm: "menu:facturas", icon: HandCoins },

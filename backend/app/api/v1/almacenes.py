@@ -115,7 +115,7 @@ def delete_almacen(
     almacen_id: UUID,
     force: bool = Query(default=False, description="Eliminar aunque tenga inventario (riesgoso)"),
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("almacen:eliminar")),
 ):
     obj = get_or_404(db, Almacen, almacen_id)
     # Guard: no permitir eliminar un almacén con existencias — desconectaría el

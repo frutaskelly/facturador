@@ -108,7 +108,7 @@ def update_conversion(
 def delete_conversion(
     conversion_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("conversion:eliminar")),
 ):
     obj = get_or_404(db, ConversionProducto, conversion_id)
     db.delete(obj)

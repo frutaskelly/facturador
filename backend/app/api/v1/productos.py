@@ -1409,7 +1409,7 @@ def update_producto(
 def delete_producto(
     producto_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("producto:eliminar")),
 ):
     obj = get_or_404(db, Producto, producto_id)
     obj.deleted_at = func.now()

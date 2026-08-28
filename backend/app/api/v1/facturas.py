@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import html as html_mod
 import logging
+import re
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -21,7 +22,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field as PydField
-from sqlalchemy import func
+from sqlalchemy import func, true as sa_true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -257,6 +258,9 @@ def list_facturas(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     query = db.query(Factura).filter(Factura.deleted_at.is_(None))
+    if ctx.cliente_scope:
+        # Candado del portal: solo facturas de SUS clientes.
+        query = query.filter(Factura.cliente_id.in_(ctx.cliente_scope))
     if estado:
         query = query.filter(Factura.estado == estado)
     if cliente_id is not None:
@@ -289,6 +293,7 @@ def facturas_pdf_lote(
     facturas = (
         db.query(Factura)
         .filter(Factura.id.in_(id_list), Factura.deleted_at.is_(None))
+        .filter(Factura.cliente_id.in_(ctx.cliente_scope) if ctx.cliente_scope else sa_true())
         .order_by(Factura.serie, Factura.folio)
         .all()
     )
@@ -308,7 +313,10 @@ def get_factura(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    return get_or_404(db, Factura, factura_id)
+    factura = get_or_404(db, Factura, factura_id)
+    if not ctx.cliente_permitido(factura.cliente_id):
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    return factura
 
 
 @router.post("/desde-remisiones", response_model=FacturaDetailOut, status_code=status.HTTP_201_CREATED)
@@ -604,6 +612,31 @@ def _rechazar_cliente_en_espejo(db: Session, cliente_id: UUID, cliente: Cliente 
         )
 
 
+_RE_OC_OBS = re.compile(r"\bOC[\s:]+([A-Z0-9][A-Z0-9\-\/\.]*)")
+
+
+def _norm_oc(v: Optional[str]) -> Optional[str]:
+    """SAE escribe la OC con ceros a la izquierda ('0000024646') y el
+    Facturador la guarda limpia ('24646'): se comparan sin ceros. Un folio
+    alfanumérico (DI-32MAF) se compara tal cual, en mayúsculas."""
+    v = (v or "").strip().upper()
+    if not v:
+        return None
+    return (v.lstrip("0") or "0") if v.isdigit() else v
+
+
+def _extraer_oc(observaciones: Optional[str]) -> Optional[str]:
+    """'OC 0000024736 ENTREGA CEDIS' → '24736'; 'OC DI-32MAF …' → 'DI-32MAF'.
+
+    Es la MISMA llave que escribe el export masivo en la Observación de SAE
+    (services/export_sae._observacion) y la que el resto del ecosistema
+    (bot, Master) usa para conciliar. Solo la primera: una obs con dos OC es
+    ambigua y no decide.
+    """
+    m = _RE_OC_OBS.search((observaciones or "").upper())
+    return _norm_oc(m.group(1)) if m else None
+
+
 def _norm_clave_sae(v: str) -> str:
     """Misma tolerancia que el cruce por clave de la bandeja (PR #32)."""
     import unicodedata
@@ -810,6 +843,40 @@ def factura_espejo(
         .all()
     )
     rems = [r for r in candidatas if parsear_marca(r.factura_sae or "") == (serie, payload.folio)]
+
+    # Segundo camino (el normal desde que el export NO estampa): la factura de
+    # SAE trae "OC <su pedido>" en sus observaciones — la misma llave que el
+    # export escribió. Si UNA remisión de ese cliente, sin factura y con ese
+    # su_pedido espera, esta factura es la suya. Con dos candidatas no se
+    # adivina: se deja para la estampa manual.
+    if payload.estado == "TIMBRADA" and not rems:
+        oc = _extraer_oc(payload.observaciones)
+        if oc:
+            libres = (
+                db.query(Remision)
+                .filter(
+                    Remision.tenant_id == ctx.tenant_id,
+                    Remision.cliente_facturacion_id == cliente.id,
+                    Remision.factura_sae.is_(None),
+                    Remision.estado.in_(("BORRADOR", "CONFIRMADA")),
+                    Remision.su_pedido.isnot(None),
+                    Remision.deleted_at.is_(None),
+                )
+                .with_for_update()
+                .all()
+            )
+            match = [r for r in libres if _norm_oc(r.su_pedido) == oc]
+            if len(match) == 1 and not (
+                match[0].factura_id and db.query(Factura.id).filter(
+                    Factura.id == match[0].factura_id,
+                    Factura.origen != "ESPEJO_SAE",
+                    Factura.estado != "CANCELADA",
+                    Factura.deleted_at.is_(None),
+                ).first()
+            ):
+                match[0].factura_sae = f"{serie} {payload.folio}"
+                rems = match
+
     for rem in rems:
         if payload.estado == "TIMBRADA":
             # Nunca pisar el vínculo con una factura NATIVA viva: si la
@@ -847,7 +914,7 @@ def sustituir_factura(
     factura_id: UUID,
     payload: SustituirIn = Body(default=SustituirIn()),
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("factura:cancelar")),
 ):
     """Crea la factura SUSTITUTA (refacturación) de una timbrada: una copia
     verbatim en BORRADOR, ligada a la vieja con la relación CFDI "04" (Sustitución
@@ -1140,7 +1207,7 @@ def cancelar_factura(
     factura_id: UUID,
     payload: CancelarFacturaIn,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("factura:cancelar")),
 ):
     """Cancela el CFDI ante el PAC y libera sus remisiones.
 
@@ -1269,7 +1336,7 @@ def cancelar_factura(
 def descartar_factura(
     factura_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("factura:eliminar")),
 ):
     """Descarta una factura en BORRADOR (nunca timbrada) y regresa sus remisiones
     a CONFIRMADA para poder refacturarlas.
@@ -1314,6 +1381,8 @@ def descargar_xml(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     factura = get_or_404(db, Factura, factura_id)
+    if not ctx.cliente_permitido(factura.cliente_id):
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
     xml = _xml_de(factura)
     if not xml:
         raise HTTPException(status_code=404, detail="La factura no tiene XML (¿no está timbrada?)")
@@ -1328,6 +1397,8 @@ def descargar_pdf(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     factura = get_or_404(db, Factura, factura_id)
+    if not ctx.cliente_permitido(factura.cliente_id):
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
     cliente = db.query(Cliente).filter(Cliente.id == factura.cliente_id).one_or_none()
     pdf = build_factura_pdf(factura, tenant, cliente)

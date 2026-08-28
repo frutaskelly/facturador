@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
-import { Eye, Lock, Pencil, Plus, Shield, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, Lock, Pencil, Plus, Shield, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -39,11 +39,91 @@ const RECURSO_LABEL: Record<string, string> = {
   compra: "Compras",
   conversion: "Conversiones",
   remision: "Remisiones",
+  factura: "Facturas",
+  serie: "Series de folios",
   pedido: "Pedidos (POS)",
   devolucion: "Devoluciones (POS)",
   role: "Roles",
   membership: "Usuarios / Membresías",
+  menu: "Menús",
 };
+
+// ── Matriz de permisos por pantalla ──
+// Cada celda controla un GRUPO de permission ids: marcar la casilla los pone
+// todos, desmarcarla los quita todos. Se agrupan porque separarlos en la UI
+// (p. ej. inventario:gestionar vs almacen:gestionar) solo confunde: para el
+// operador es una sola pantalla. Lo que no aparece aquí vive en "Permisos
+// avanzados" para que ningún permiso quede ineditable.
+type MatrixRow = { pantalla: string; ver: string[]; editar: string[]; borrar: string[]; borrarTitle?: string };
+const MATRIX: MatrixRow[] = [
+  { pantalla: "Dashboard", ver: ["menu:dashboard"], editar: [], borrar: [] },
+  { pantalla: "Bandeja de órdenes", ver: ["menu:oc"], editar: ["remision:gestionar"], borrar: [] },
+  { pantalla: "Remisiones", ver: ["menu:remisiones"], editar: ["remision:gestionar"], borrar: ["remision:eliminar"] },
+  {
+    pantalla: "Facturas",
+    ver: ["menu:facturas"],
+    editar: ["factura:gestionar"],
+    borrar: ["factura:eliminar", "factura:cancelar"],
+    borrarTitle: "Eliminar borradores y cancelar timbradas",
+  },
+  { pantalla: "Cotizador", ver: ["menu:cotizador"], editar: [], borrar: [] },
+  {
+    pantalla: "Clientes (incluye sucursales y proyectos)",
+    ver: ["menu:clientes"],
+    editar: ["cliente:gestionar"],
+    borrar: ["cliente:eliminar"],
+  },
+  { pantalla: "Productos", ver: ["menu:productos"], editar: ["producto:gestionar"], borrar: ["producto:eliminar"] },
+  {
+    pantalla: "Categorías",
+    ver: ["menu:productos.categorias"],
+    editar: ["categoria:gestionar"],
+    borrar: ["categoria:eliminar"],
+  },
+  {
+    pantalla: "Esquemas de impuesto",
+    ver: ["menu:esquemas_impuesto"],
+    editar: ["esquema_impuesto:gestionar"],
+    borrar: ["esquema_impuesto:eliminar"],
+  },
+  {
+    pantalla: "Listas de precios",
+    ver: ["menu:listas_precios"],
+    editar: ["lista_precios:gestionar"],
+    borrar: ["lista_precios:eliminar"],
+  },
+  {
+    pantalla: "Inventario y almacenes",
+    ver: ["menu:inventario"],
+    editar: ["inventario:gestionar", "almacen:gestionar"],
+    borrar: ["almacen:eliminar"],
+  },
+  {
+    pantalla: "Compras y proveedores",
+    ver: ["menu:compras"],
+    editar: ["compra:gestionar", "proveedor:gestionar"],
+    borrar: ["proveedor:eliminar"],
+  },
+  {
+    pantalla: "Conversiones",
+    ver: ["menu:conversiones"],
+    editar: ["conversion:gestionar"],
+    borrar: ["conversion:eliminar"],
+  },
+  { pantalla: "Series de folios", ver: ["menu:series"], editar: ["serie:gestionar"], borrar: ["serie:eliminar"] },
+  { pantalla: "Ajustes · Empresa", ver: ["menu:ajustes.empresa"], editar: [], borrar: [] },
+  { pantalla: "Ajustes · Facturación", ver: ["menu:ajustes.facturacion"], editar: [], borrar: [] },
+  {
+    pantalla: "Ajustes · Usuarios",
+    ver: ["menu:ajustes.usuarios"],
+    editar: ["membership:gestionar"],
+    borrar: ["membership:eliminar"],
+  },
+  { pantalla: "Ajustes · Roles", ver: ["menu:ajustes.roles"], editar: ["role:gestionar"], borrar: ["role:eliminar"] },
+];
+
+/** Todos los permission ids referenciados por la matriz (para excluirlos de "avanzados"). */
+const MATRIX_IDS = new Set(MATRIX.flatMap((r) => [...r.ver, ...r.editar, ...r.borrar]));
 
 export default function RolesPage() {
   const { me } = useAuth();
@@ -56,24 +136,30 @@ export default function RolesPage() {
   const roles = rolesRes.data ?? [];
   const perms = permsRes.data ?? [];
 
-  // Split the catalog into module-visibility (menu:*) and grouped actions.
-  const { modules, actionGroups } = useMemo(() => {
-    const modules = perms
-      .filter((p) => p.recurso === "menu")
-      .sort((a, b) => a.accion.localeCompare(b.accion));
+  // La matriz solo ofrece permisos que EXISTEN en el catálogo del backend
+  // (mandar un id desconocido rompe el guardado), y todo lo que la matriz no
+  // cubre (POS, espejo, CRM…) se agrupa aparte para que siga siendo editable.
+  const { matrixRows, advancedGroups } = useMemo(() => {
+    const catalogIds = new Set(perms.map((p) => p.id));
+    const matrixRows = MATRIX.map((r) => ({
+      ...r,
+      ver: r.ver.filter((id) => catalogIds.has(id)),
+      editar: r.editar.filter((id) => catalogIds.has(id)),
+      borrar: r.borrar.filter((id) => catalogIds.has(id)),
+    }));
     const byRecurso: Record<string, Permission[]> = {};
     for (const p of perms) {
-      if (p.recurso === "menu") continue;
+      if (MATRIX_IDS.has(p.id)) continue;
       (byRecurso[p.recurso] ??= []).push(p);
     }
-    const actionGroups = Object.entries(byRecurso)
+    const advancedGroups = Object.entries(byRecurso)
       .map(([recurso, items]) => ({
         recurso,
         label: RECURSO_LABEL[recurso] ?? humanize(recurso),
         items: items.sort((a, b) => a.accion.localeCompare(b.accion)),
       }))
       .sort((a, b) => a.label.localeCompare(b.label));
-    return { modules, actionGroups };
+    return { matrixRows, advancedGroups };
   }, [perms]);
 
   const [open, setOpen] = useState(false);
@@ -83,6 +169,7 @@ export default function RolesPage() {
   const [nombre, setNombre] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [advOpen, setAdvOpen] = useState(false);
   const [toDelete, setToDelete] = useState<Role | null>(null);
 
   function openNew() {
@@ -91,6 +178,7 @@ export default function RolesPage() {
     setNombre("");
     setDescripcion("");
     setSelected(new Set());
+    setAdvOpen(false);
     setOpen(true);
   }
 
@@ -100,6 +188,7 @@ export default function RolesPage() {
     setNombre(role.nombre);
     setDescripcion(role.descripcion ?? "");
     setSelected(new Set());
+    setAdvOpen(false);
     setOpen(true);
     setLoadingDetail(true);
     try {
@@ -118,6 +207,23 @@ export default function RolesPage() {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }
+
+  // Una celda de la matriz controla VARIOS ids a la vez. Se muestra marcada si
+  // hay AL MENOS uno (un rol viejo con permisos parciales no debe verse "sin
+  // nada"); al hacer clic se normaliza: con algo → quitar todos, sin nada →
+  // poner todos.
+  function toggleGroup(ids: string[]) {
+    if (readOnly || ids.length === 0) return;
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const some = ids.some((id) => next.has(id));
+      for (const id of ids) {
+        if (some) next.delete(id);
+        else next.add(id);
+      }
       return next;
     });
   }
@@ -276,42 +382,80 @@ export default function RolesPage() {
             </div>
           ) : (
             <>
-              <PermSection title="Módulos visibles" hint="Qué secciones puede abrir el rol">
-                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
-                  {modules.map((p) => (
-                    <PermCheck
-                      key={p.id}
-                      label={humanize(p.accion)}
-                      checked={selected.has(p.id)}
-                      disabled={readOnly}
-                      onChange={() => toggle(p.id)}
-                    />
-                  ))}
+              <PermSection
+                title="Permisos por pantalla"
+                hint="Ver abre la pantalla; Editar permite crear y modificar; Borrar permite eliminar"
+              >
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-left text-xs uppercase text-muted">
+                      <tr>
+                        <th className="px-2 py-1.5">Pantalla</th>
+                        <th className="w-16 px-2 py-1.5 text-center">Ver</th>
+                        <th className="w-16 px-2 py-1.5 text-center">Editar</th>
+                        <th className="w-16 px-2 py-1.5 text-center">Borrar</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {matrixRows.map((r) => (
+                        <tr key={r.pantalla} className="border-t border-border">
+                          <td className="px-2 py-1.5">{r.pantalla}</td>
+                          <MatrixCell ids={r.ver} selected={selected} disabled={readOnly} onToggle={toggleGroup} />
+                          <MatrixCell ids={r.editar} selected={selected} disabled={readOnly} onToggle={toggleGroup} />
+                          <MatrixCell
+                            ids={r.borrar}
+                            title={r.borrarTitle}
+                            selected={selected}
+                            disabled={readOnly}
+                            onToggle={toggleGroup}
+                          />
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </PermSection>
 
-              <PermSection title="Acciones" hint="Qué operaciones puede ejecutar el rol">
-                <div className="space-y-3">
-                  {actionGroups.map((g) => (
-                    <div key={g.recurso}>
-                      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">
-                        {g.label}
+              {/* Todo permiso del catálogo que la matriz no cubre (POS, espejo,
+                  CRM…) sigue editable aquí; si no, quedaría huérfano. */}
+              <div className="rounded-lg border border-border">
+                <button
+                  type="button"
+                  onClick={() => setAdvOpen((v) => !v)}
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold hover:bg-surface-2"
+                >
+                  {advOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  Permisos avanzados
+                  <span className="text-xs font-normal text-muted">
+                    (POS y otros permisos que no aparecen en la tabla)
+                  </span>
+                </button>
+                {advOpen && (
+                  <div className="space-y-3 border-t border-border p-3">
+                    {advancedGroups.length === 0 && (
+                      <div className="text-sm text-muted">No hay permisos adicionales.</div>
+                    )}
+                    {advancedGroups.map((g) => (
+                      <div key={g.recurso}>
+                        <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">
+                          {g.label}
+                        </div>
+                        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                          {g.items.map((p) => (
+                            <PermCheck
+                              key={p.id}
+                              label={p.descripcion ?? humanize(p.accion)}
+                              checked={selected.has(p.id)}
+                              disabled={readOnly}
+                              onChange={() => toggle(p.id)}
+                            />
+                          ))}
+                        </div>
                       </div>
-                      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
-                        {g.items.map((p) => (
-                          <PermCheck
-                            key={p.id}
-                            label={p.descripcion ?? humanize(p.accion)}
-                            checked={selected.has(p.id)}
-                            disabled={readOnly}
-                            onChange={() => toggle(p.id)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </PermSection>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -338,6 +482,34 @@ function PermSection({ title, hint, children }: { title: string; hint: string; c
       </div>
       {children}
     </div>
+  );
+}
+
+/** Celda de la matriz: una casilla que controla un grupo de permission ids. */
+function MatrixCell({
+  ids,
+  title,
+  selected,
+  disabled,
+  onToggle,
+}: {
+  ids: string[];
+  title?: string;
+  selected: Set<string>;
+  disabled: boolean;
+  onToggle: (ids: string[]) => void;
+}) {
+  if (ids.length === 0) {
+    return <td className="px-2 py-1.5 text-center text-muted">—</td>;
+  }
+  return (
+    <td className="px-2 py-1.5 text-center" title={title}>
+      <Checkbox
+        checked={ids.some((id) => selected.has(id))}
+        disabled={disabled}
+        onChange={() => onToggle(ids)}
+      />
+    </td>
   );
 }
 

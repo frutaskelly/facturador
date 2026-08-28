@@ -9,10 +9,11 @@ brand-new users is an operator/provisioning flow, not exposed here.
 """
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
 from ...core.db import get_db
@@ -64,6 +65,27 @@ def _es_owner_en_alguna_empresa(db: Session, user_id) -> bool:
     ) is not None
 
 
+def _validar_scope(db: Session, tenant_id, ids) -> Optional[list]:
+    """El candado por cliente solo acepta clientes VIVOS de ESTE tenant.
+    Lista vacía o None = sin candado (se guarda NULL, no [])."""
+    from ...models import Cliente
+
+    if not ids:
+        return None
+    ids = list(dict.fromkeys(ids))
+    vivos = {
+        c for (c,) in db.query(Cliente.id).filter(
+            Cliente.tenant_id == tenant_id,
+            Cliente.id.in_(ids),
+            Cliente.deleted_at.is_(None),
+        )
+    }
+    malos = [str(i) for i in ids if i not in vivos]
+    if malos:
+        raise HTTPException(422, f"Clientes inexistentes en el candado: {', '.join(malos)}")
+    return ids
+
+
 def _m_out(m: Membership) -> MembershipOut:
     out = MembershipOut.model_validate(m)
     out.user_email = m.user.email if m.user else None
@@ -112,6 +134,8 @@ def update_membership(
     # a un OWNER ni otorgar el rol OWNER — eso es transferir el control.
     _guard_owner(db, ctx, m, "modificar")
     data = payload.model_dump(exclude_unset=True)
+    if "cliente_scope" in data:
+        data["cliente_scope"] = _validar_scope(db, ctx.tenant_id, data["cliente_scope"])
     if "role_id" in data:
         # RLS: role must be a preset or one of this tenant's custom roles.
         ensure_fk(db, Role, data["role_id"], "role_id")
@@ -133,7 +157,7 @@ def update_membership(
 def delete_membership(
     membership_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("membership:eliminar")),
 ):
     m = get_or_404(db, Membership, membership_id)
     if m.user_id == ctx.user_id:
@@ -191,7 +215,10 @@ def crear_usuario(
         db.add(user)
         db.flush()
 
-    m = Membership(tenant_id=ctx.tenant_id, user_id=user.id, role_id=payload.role_id, active=True)
+    m = Membership(
+        tenant_id=ctx.tenant_id, user_id=user.id, role_id=payload.role_id, active=True,
+        cliente_scope=_validar_scope(db, ctx.tenant_id, payload.cliente_scope),
+    )
     db.add(m)
     db.commit()
     db.refresh(m)
@@ -264,3 +291,170 @@ def cambiar_password(
     except supabase_admin.SupabaseAdminError as exc:
         raise HTTPException(502, f"No se pudo cambiar la contraseña: {exc}")
     return _m_out(m)
+
+
+# ─── Empresas del grupo por usuario ──────────────────────────────────────────
+# "En usuarios debemos asignar las empresas que pueden entrar" (dueño,
+# 29-ago-2026). Una empresa = un tenant del grupo; el acceso = una membresía.
+# Corre sobre get_db (sin GUC de RLS) con filtros explícitos, igual que
+# crear_usuario/cambiar_password: son operaciones deliberadamente cross-tenant
+# DENTRO del grupo, con el guard de administración por empresa destino.
+
+def _grupo_ids(db: Session, tenant_id) -> list:
+    """Los tenants VIVOS del grupo del tenant actual (raíz + hijas)."""
+    actual = db.query(Tenant).filter(Tenant.id == tenant_id).one()
+    root_id = actual.parent_tenant_id or actual.id
+    return [
+        t for (t,) in db.query(Tenant.id).filter(
+            Tenant.deleted_at.is_(None),
+            (Tenant.id == root_id) | (Tenant.parent_tenant_id == root_id),
+        )
+    ]
+
+
+def _admin_en(db: Session, ctx: AuthContext, tenant_id) -> bool:
+    """¿El caller administra usuarios EN ESA empresa? En la actual ya lo dijo
+    require_permission; en otra, se resuelve su membresía+rol de allá."""
+    if tenant_id == ctx.tenant_id:
+        return ctx.is_owner or ctx.has(_WRITE)
+    m = (
+        db.query(Membership)
+        .join(Role, Role.id == Membership.role_id)
+        .filter(
+            Membership.tenant_id == tenant_id,
+            Membership.user_id == ctx.user_id,
+            Membership.active.is_(True),
+        )
+        .one_or_none()
+    )
+    if m is None:
+        return False
+    if _es_owner_preset(m.role):
+        return True
+    from ...models import RolePermission
+
+    return db.query(RolePermission).filter(
+        RolePermission.role_id == m.role_id,
+        RolePermission.permission_id == _WRITE,
+    ).first() is not None
+
+
+class EmpresaAccesoIn(BaseModel):
+    tenant_id: UUID
+    acceso: bool
+    role_id: Optional[UUID] = None
+
+
+@router.get("/{membership_id}/empresas")
+def empresas_del_usuario(
+    membership_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Las empresas del grupo y a cuáles entra el usuario de esta membresía."""
+    m = (
+        db.query(Membership)
+        .filter(Membership.id == membership_id, Membership.tenant_id == ctx.tenant_id)
+        .one_or_none()
+    )
+    if m is None:
+        raise HTTPException(404, "Membership no encontrada")
+    grupo = _grupo_ids(db, ctx.tenant_id)
+    tenants = {t.id: t for t in db.query(Tenant).filter(Tenant.id.in_(grupo))}
+    suyas = {
+        mm.tenant_id: mm for mm in db.query(Membership)
+        .options(joinedload(Membership.role))
+        .filter(Membership.user_id == m.user_id, Membership.tenant_id.in_(grupo))
+    }
+    out = []
+    for tid in grupo:
+        t = tenants[tid]
+        mm = suyas.get(tid)
+        out.append({
+            "tenant_id": str(tid),
+            "nombre": t.trade_name or t.legal_name,
+            "rfc": t.rfc,
+            "es_actual": tid == ctx.tenant_id,
+            "puedo_administrar": _admin_en(db, ctx, tid),
+            "tiene_acceso": mm is not None and mm.active,
+            "membership_id": str(mm.id) if mm else None,
+            "role_id": str(mm.role_id) if mm else None,
+            "role_nombre": (mm.role.nombre if mm and mm.role else None),
+        })
+    return {"user_email": m.user.email if m.user else None, "empresas": out}
+
+
+@router.put("/{membership_id}/empresas")
+def asignar_empresa(
+    membership_id: UUID,
+    payload: EmpresaAccesoIn,
+    db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Da o quita el acceso del usuario a UNA empresa del grupo.
+
+    Guards: la empresa debe ser del grupo, el caller debe poder administrar
+    usuarios EN ESA empresa, nadie toca sus propias membresías, y el rol OWNER
+    solo lo otorga/quita un OWNER de esa empresa (anti-toma de control).
+    """
+    m = (
+        db.query(Membership)
+        .filter(Membership.id == membership_id, Membership.tenant_id == ctx.tenant_id)
+        .one_or_none()
+    )
+    if m is None:
+        raise HTTPException(404, "Membership no encontrada")
+    if m.user_id == ctx.user_id:
+        raise HTTPException(409, "No puedes modificar tus propios accesos")
+    if payload.tenant_id not in _grupo_ids(db, ctx.tenant_id):
+        raise HTTPException(422, "Esa empresa no es de tu grupo")
+    if not _admin_en(db, ctx, payload.tenant_id):
+        raise HTTPException(403, "No administras usuarios en esa empresa")
+
+    existente = (
+        db.query(Membership)
+        .filter(Membership.tenant_id == payload.tenant_id, Membership.user_id == m.user_id)
+        .one_or_none()
+    )
+    # ¿El caller es OWNER en la empresa DESTINO? (para los guards de OWNER)
+    caller_owner_alla = (
+        db.query(Membership)
+        .join(Role, Role.id == Membership.role_id)
+        .filter(
+            Membership.tenant_id == payload.tenant_id,
+            Membership.user_id == ctx.user_id,
+            Membership.active.is_(True),
+            Role.es_preset.is_(True), Role.nombre == "OWNER",
+        ).first()
+    ) is not None or (payload.tenant_id == ctx.tenant_id and ctx.is_owner)
+
+    if not payload.acceso:
+        if existente is None:
+            return {"ok": True}
+        rol_exist = db.query(Role).filter(Role.id == existente.role_id).one_or_none()
+        if _es_owner_preset(rol_exist) and not caller_owner_alla:
+            raise HTTPException(403, "Solo un OWNER de esa empresa puede quitar a un OWNER")
+        db.delete(existente)
+        db.commit()
+        invalidate_auth_cache()
+        return {"ok": True}
+
+    role_id = payload.role_id or (existente.role_id if existente else None)
+    if role_id is None:
+        raise HTTPException(422, "Indica el rol con el que entra a esa empresa")
+    rol = db.query(Role).filter(Role.id == role_id).one_or_none()
+    if rol is None or (rol.tenant_id is not None and rol.tenant_id != payload.tenant_id):
+        raise HTTPException(422, "Rol inválido para esa empresa")
+    if _es_owner_preset(rol) and not caller_owner_alla:
+        raise HTTPException(403, "Solo un OWNER de esa empresa puede otorgar el rol OWNER")
+    if existente is not None:
+        rol_previo = db.query(Role).filter(Role.id == existente.role_id).one_or_none()
+        if _es_owner_preset(rol_previo) and not caller_owner_alla:
+            raise HTTPException(403, "Solo un OWNER de esa empresa puede modificar a un OWNER")
+        existente.role_id = role_id
+        existente.active = True
+    else:
+        db.add(Membership(tenant_id=payload.tenant_id, user_id=m.user_id, role_id=role_id, active=True))
+    db.commit()
+    invalidate_auth_cache()
+    return {"ok": True}
