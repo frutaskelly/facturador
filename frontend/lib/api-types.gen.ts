@@ -12172,6 +12172,8 @@ export interface operations {
                 cliente_id?: string | null;
                 sin_cliente?: boolean;
                 q?: string | null;
+                fecha_desde?: string | null;
+                fecha_hasta?: string | null;
                 limit?: number;
                 offset?: number;
             };

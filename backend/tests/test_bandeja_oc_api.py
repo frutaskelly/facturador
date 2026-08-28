@@ -206,6 +206,24 @@ def test_ingesta_es_idempotente(client, env, auth_as):
     assert total == 1
 
 
+def test_listado_filtra_por_fecha_de_recepcion(client, env, auth_as):
+    """El flujo diario es "lo que llegó hoy": el rango va sobre recibida_at y
+    `fecha_hasta` es INCLUSIVO — "hasta el 28" no puede dejar fuera la tarde."""
+    from datetime import date, timedelta
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc())
+    hoy = date.today()
+    ayer, manana = hoy - timedelta(days=1), hoy + timedelta(days=1)
+
+    def total(**qs):
+        return client.get("/api/v1/oc-recibidas", headers=h, params=qs).json()["total"]
+
+    assert total(fecha_desde=str(hoy), fecha_hasta=str(hoy)) == 1   # inclusivo
+    assert total(fecha_hasta=str(ayer)) == 0                        # antes de que llegara
+    assert total(fecha_desde=str(manana)) == 0                      # todavía no existe
+
+
 def test_pistas_contradictorias_no_eligen_cliente(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])

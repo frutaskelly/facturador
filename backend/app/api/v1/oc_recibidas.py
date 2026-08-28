@@ -16,7 +16,7 @@ permisos nuevos ni una migración de catálogo.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -266,6 +266,10 @@ def listar(
     cliente_id: Optional[UUID] = Query(default=None),
     sin_cliente: bool = Query(default=False),
     q: Optional[str] = Query(default=None, max_length=254),
+    # Rango sobre la fecha de RECEPCIÓN (no la del documento): es como el
+    # operador piensa la bandeja — "lo que llegó hoy", "lo de esta semana".
+    fecha_desde: Optional[date] = Query(default=None),
+    fecha_hasta: Optional[date] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_tenant_db),
@@ -287,6 +291,12 @@ def listar(
             | OCRecibida.remitente.ilike(like)
             | OCRecibida.archivo_nombre.ilike(like)
         )
+    if fecha_desde:
+        query = query.filter(OCRecibida.recibida_at >= fecha_desde)
+    if fecha_hasta:
+        # Inclusivo: "hasta el 28" incluye todo el día 28, por eso el < al día
+        # siguiente en vez de un <= que dejaría fuera la tarde.
+        query = query.filter(OCRecibida.recibida_at < fecha_hasta + timedelta(days=1))
     return paginate(query.order_by(OCRecibida.recibida_at.desc()), OCRecibidaOut, limit, offset)
 
 
