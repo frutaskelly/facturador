@@ -128,13 +128,24 @@ export default function Page() {
   // otra cosa que buscar entre todo el padrón.
   const [verTodos, setVerTodos] = useState(false);
 
+  // Deep-link desde Remisiones (?q=<folio del cliente>): busca esa OC en TODAS
+  // las etapas, no solo en las pendientes. Se lee de window (client-only) para
+  // no forzar Suspense, igual que el ?ver= de Facturas.
+  const [busca, setBusca] = useState("");
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("q");
+    if (p) { setBusca(p); setEstado(""); }
+  }, []);
+
   const reload = useCallback(() => {
     setError(false);          // un fallo transitorio no puede dejar la bandeja muerta
-    const qs = estado ? `?estado=${estado}&limit=200` : "?limit=200";
-    apiFetch<Page<OCRecibida>>(`/api/v1/oc-recibidas${qs}`)
+    const qs = new URLSearchParams({ limit: "200" });
+    if (estado) qs.set("estado", estado);
+    if (busca) qs.set("q", busca);
+    apiFetch<Page<OCRecibida>>(`/api/v1/oc-recibidas?${qs}`)
       .then((p) => setRows(p.items))
       .catch(() => setError(true));
-  }, [estado]);
+  }, [estado, busca]);
 
   useEffect(() => {
     reload();
@@ -416,13 +427,29 @@ export default function Page() {
         }
       />
 
+      {busca ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted">Buscando la orden</span>
+          <Badge tone="accent">{busca}</Badge>
+          <button
+            type="button"
+            onClick={() => { setBusca(""); setEstado("PENDIENTE"); }}
+            className="text-accent hover:underline"
+          >
+            Quitar el filtro
+          </button>
+        </div>
+      ) : null}
+
       <DataTable
         columns={columns}
         rows={rows}
         empty={
-          estado === "PENDIENTE"
-            ? "Nada por revisar. Las órdenes que lleguen por WhatsApp o correo aparecen aquí."
-            : "Sin órdenes en este estado."
+          busca
+            ? `Ninguna orden con el folio ${busca}. La remisión se importó de Excel, así que su OC puede no haber pasado por la bandeja.`
+            : estado === "PENDIENTE"
+              ? "Nada por revisar. Las órdenes que lleguen por WhatsApp o correo aparecen aquí."
+              : "Sin órdenes en este estado."
         }
         onRowClick={(r) => abrir(r.id)}
       />

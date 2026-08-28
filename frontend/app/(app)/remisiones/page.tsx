@@ -1419,13 +1419,13 @@ export default function RemisionesPage() {
       onClick: (r) => { void abrirDevolucion(r); },
       hidden: (r) => !(canWrite && r.estado === "CONFIRMADA") },
     { id: "oc", label: "Ver la OC original", icon: <FileSearch size={15} />,
+      // Siempre visible: si se escondiera cuando no hay OC, la acción
+      // aparecería y desaparecería por renglón y no habría manera de ir a
+      // buscarla. Sin documento, lleva a la bandeja filtrada por ese folio.
       onClick: (r) => {
-        // El documento con el que llegó la orden; si la OC está en la bandeja
-        // pero sin archivo, al menos se abre la bandeja para encontrarla.
-        if (r.oc_archivo_url) window.open(r.oc_archivo_url, "_blank", "noopener");
-        else router.push("/oc");
-      },
-      hidden: (r) => !r.oc_id && !r.oc_archivo_url },
+        if (r.oc_archivo_url) { window.open(r.oc_archivo_url, "_blank", "noopener"); return; }
+        router.push(r.su_pedido ? `/oc?q=${encodeURIComponent(r.su_pedido)}` : "/oc");
+      } },
     { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => { void imprimirRemision(r); } },
     { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />, onClick: enviarRemision,
       hidden: () => !canWrite },
