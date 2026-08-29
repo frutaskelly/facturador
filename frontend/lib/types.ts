@@ -29,6 +29,8 @@ export type Membership = {
   role_id: string;
   active: boolean;
   acceso_todas_sucursales: boolean;
+  // null/[] = sin límite; con ids, el usuario SOLO ve datos de esos clientes.
+  cliente_scope?: string[] | null;
   created_at: string;
   updated_at: string;
   user_email?: string | null;

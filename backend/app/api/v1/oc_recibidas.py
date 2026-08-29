@@ -61,7 +61,11 @@ from ._helpers import ensure_fk, get_or_404, paginate
 
 router = APIRouter(prefix="/oc-recibidas", tags=["bandeja de OC"])
 
-_READ = "menu:remisiones"
+# Su propio menú desde 0057: compartir permiso con remisiones dejaba la
+# bandeja (órdenes de TODOS los clientes) a la vista de cualquier rol que
+# solo debía ver remisiones. Los roles con menu:remisiones lo recibieron en
+# la migración; la conexión del bot lo trae en PERMISOS_CONEXION.
+_READ = "menu:oc"
 _WRITE = "remision:gestionar"
 
 # Sistema de equivalencia ← campo del payload de ingesta.
@@ -276,6 +280,9 @@ def listar(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     query = db.query(OCRecibida)
+    if ctx.cliente_scope:
+        # Candado del portal: solo órdenes de SUS clientes.
+        query = query.filter(OCRecibida.cliente_id.in_(ctx.cliente_scope))
     if estado:
         query = query.filter(OCRecibida.estado == estado.upper())
     if canal:
@@ -587,7 +594,10 @@ def detalle(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    return _detalle(db, get_or_404(db, OCRecibida, oc_id, soft=False))
+    oc = get_or_404(db, OCRecibida, oc_id, soft=False)
+    if not ctx.cliente_permitido(oc.cliente_id):
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+    return _detalle(db, oc)
 
 
 @router.patch("/{oc_id}", response_model=OCRecibidaDetailOut)

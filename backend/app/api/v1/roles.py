@@ -160,7 +160,7 @@ def set_role_permissions(
 def delete_role(
     role_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("role:eliminar")),
 ):
     role = get_or_404(db, Role, role_id)
     _editable_or_403(role, ctx)

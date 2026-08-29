@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, Up
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ...core.rbac import AuthContext, get_tenant_db, require_permission
+from ...core.rbac import AuthContext, get_auth_context, get_tenant_db, require_permission
 from ...models import (
     Cliente,
     ListaAsignacion,
@@ -125,7 +125,7 @@ def update_lista(
 def delete_lista(
     lista_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("lista_precios:eliminar")),
 ):
     obj = get_or_404(db, ListaPrecios, lista_id)
     obj.deleted_at = func.now()
@@ -373,16 +373,41 @@ def asignar_lista(
 
 # ─── Excel de ida y vuelta + PDF (28-ago-2026, pedido del dueño) ────────────
 
+def _ctx_descarga(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    """Descargas de la lista: además del lector normal (menu:listas_precios),
+    el usuario del PORTAL (menu:cotizador con candado por cliente) puede bajar
+    las listas QUE LE APLICAN — la verificación por lista va en _lista_descargable."""
+    if ctx.has(_READ):
+        return ctx
+    if ctx.cliente_scope and ctx.has("menu:cotizador"):
+        return ctx
+    raise HTTPException(status_code=403, detail="Sin permiso para descargar listas de precios")
+
+
+def _lista_descargable_o_403(db: Session, ctx: AuthContext, lista_id: UUID) -> None:
+    """Para el usuario con candado: la lista debe estar asignada a alguno de
+    SUS clientes. Un lector normal baja cualquiera (como siempre)."""
+    if not ctx.cliente_scope or ctx.has(_READ):
+        return
+    from ...services.precios import listas_asignadas_a_cliente
+
+    for cid in ctx.cliente_scope:
+        if lista_id in listas_asignadas_a_cliente(db, cid):
+            return
+    raise HTTPException(status_code=403, detail="Esa lista no es de tus clientes")
+
+
 @router.get("/{lista_id}/export")
 def exportar_lista_xlsx(
     lista_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_READ)),
+    ctx: AuthContext = Depends(_ctx_descarga),
 ):
     """El Excel de la lista (SKU | PRODUCTO | PRESENTACION | DESDE CANTIDAD |
     PRECIO): se edita y se vuelve a subir con /importar para actualizar en masa."""
     from ...services import lista_export
 
+    _lista_descargable_o_403(db, ctx, lista_id)
     lista = get_or_404(db, ListaPrecios, lista_id)
     contenido = lista_export.exportar_xlsx(db, lista)
     nombre = f"precios_{(lista.codigo or 'lista').strip()}.xlsx"
@@ -397,14 +422,15 @@ def exportar_lista_xlsx(
 def exportar_lista_pdf(
     lista_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_READ)),
+    ctx: AuthContext = Depends(_ctx_descarga),
 ):
     from ...models import Tenant
     from ...services import lista_export
 
+    _lista_descargable_o_403(db, ctx, lista_id)
     lista = get_or_404(db, ListaPrecios, lista_id)
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
-    contenido = lista_export.exportar_pdf(db, lista, tenant.legal_name or "")
+    contenido = lista_export.exportar_pdf(db, lista, tenant)
     nombre = f"lista_{(lista.codigo or 'precios').strip()}.pdf"
     return Response(content=contenido, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{nombre}"'})

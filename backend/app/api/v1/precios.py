@@ -26,9 +26,58 @@ from ._helpers import ensure_fk, get_or_404, paginate
 
 router = APIRouter(prefix="/precios", tags=["precios"])
 
-_READ_COTIZAR = "menu:productos"
+# El cotizador tiene su propio menú desde 0057: es la pantalla que se le da al
+# OPERADOR DEL CLIENTE, y colgarlo de menu:productos/listas arrastraba el
+# catálogo completo. Los roles internos recibieron menu:cotizador en la
+# migración; el rol PORTAL CLIENTE solo trae este.
+_READ_COTIZAR = "menu:cotizador"
 _READ_OVR = "menu:listas_precios"
 _WRITE_OVR = "lista_precios:gestionar"
+
+
+@router.get("/productos-cotizables")
+def productos_cotizables_endpoint(
+    cliente_id: UUID = Query(...),
+    q: str = Query(default="", max_length=120),
+    limit: int = Query(default=20, ge=1, le=50),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ_COTIZAR)),
+):
+    """Buscador del cotizador: SOLO productos que están en la lista de precios
+    del cliente (regla del dueño). Sin negociación propia, busca en todo el
+    catálogo (su lista es la base)."""
+    from ...services.cotizador import productos_cotizables
+
+    if not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
+    permitidos = productos_cotizables(db, ctx.tenant_id, cliente_id)
+    query = db.query(Producto).filter(
+        Producto.tenant_id == ctx.tenant_id,
+        Producto.deleted_at.is_(None),
+        Producto.activo.is_(True),
+    )
+    if permitidos is not None:
+        if not permitidos:
+            return {"items": [], "limitado": True}
+        query = query.filter(Producto.id.in_(permitidos))
+    term = (q or "").strip()
+    if term:
+        like = f"%{term}%"
+        from sqlalchemy import or_ as _or
+        query = query.filter(_or(Producto.nombre.ilike(like), Producto.sku.ilike(like)))
+    filas = query.order_by(Producto.nombre).limit(limit).all()
+    return {
+        "limitado": permitidos is not None,
+        "items": [
+            {
+                "producto_id": str(p.id), "sku": p.sku, "nombre": p.nombre,
+                "presentaciones": p.presentaciones or {},
+                "presentacion_default": p.presentacion_default,
+                "unidad_base": p.unidad_base,
+            }
+            for p in filas
+        ],
+    }
 
 
 @router.post("/cotizar-documento")
@@ -47,6 +96,8 @@ def cotizar_documento_endpoint(
     from ...core.ratelimit import enforce
     from ...services import cotizador
 
+    if not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
     enforce(f"cotizador-ia:{ctx.tenant_id}", 60, 3600)
     data = archivo.file.read(10 * 1024 * 1024 + 1)
     if not data or len(data) > 10 * 1024 * 1024:
@@ -71,9 +122,15 @@ def cotizacion_pdf_endpoint(
     regresa el MISMO objeto que devolvió /cotizar-documento."""
     from ...services import cotizador
 
+    if ctx.cliente_scope:
+        try:
+            cid = UUID(str(payload.get("cliente_id") or ""))
+        except ValueError:
+            cid = None
+        if not ctx.cliente_permitido(cid):
+            raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
-    contenido = cotizador.cotizacion_pdf(
-        str(payload.get("cliente_nombre") or ""), tenant.legal_name or "", payload)
+    contenido = cotizador.cotizacion_pdf(tenant, payload)
     return Response(content=contenido, media_type="application/pdf",
                     headers={"Content-Disposition": 'inline; filename="cotizacion.pdf"'})
 
@@ -88,6 +145,8 @@ def listas_del_cliente(
     proyecto), para ofrecer sus descargas en el cotizador."""
     from ...models import ListaPrecios, Proyecto
 
+    if not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
     filas = resolver_asignaciones(db, cliente_id=cliente_id)
     proys = {str(r.proyecto_id) for r in filas if r.proyecto_id}
     # también las de los proyectos del cliente, aunque el documento no traiga proyecto
@@ -126,6 +185,8 @@ def cotizar(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ_COTIZAR)),
 ):
+    if ctx.cliente_scope and not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
     res = resolver_precio(
         db, producto_id=producto_id, presentacion=presentacion, cantidad=cantidad,
         cliente_id=cliente_id, sucursal_id=sucursal_id,

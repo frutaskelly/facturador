@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Calculator, Download, FileText, FileUp } from "lucide-react";
 
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
@@ -11,6 +11,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Tabs } from "@/components/ui/Tabs";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiDownload, apiDownloadPost, apiFetch } from "@/lib/api";
+import { can, useAuth } from "@/lib/auth";
 import { fmtMoney } from "@/lib/format";
 import { useResource, type Page } from "@/lib/hooks";
 import type { Cliente, Cotizacion, Proyecto, Serie, Sucursal } from "@/lib/types";
@@ -52,6 +53,9 @@ type SinCruce = {
   unidad: string | null;
   clave: string | null;
   candidatos: { nombre: string; score: number }[];
+  // Presente cuando el producto SÍ existe pero no se puede cotizar (p. ej. no
+  // está en la lista de precios del cliente); entonces no vienen candidatos.
+  motivo?: string | null;
 };
 type CotDoc = {
   cliente_id: string;
@@ -69,8 +73,153 @@ type ListaDelCliente = { lista_id: string; nombre: string; alcance: string };
 
 const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv";
 
+// Lo que devuelve GET /precios/productos-cotizables (mismo shape que ProductoPick).
+type ProductoCotizable = {
+  producto_id: string;
+  sku: string;
+  nombre: string;
+  presentaciones: Record<string, number>;
+  presentacion_default?: string | null;
+  unidad_base?: string | null;
+};
+
+const INPUT_BASE =
+  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
+
+/**
+ * Buscador acotado a la lista de precios del cliente: los usuarios de portal
+ * (cliente_scope) no deben ver el catálogo completo ni precios ajenos, así que
+ * en vez del ProductoCombobox general se consulta productos-cotizables.
+ */
+function CotizableCombobox({
+  clienteId,
+  onSelect,
+}: {
+  clienteId: string;
+  onSelect: (p: ProductoPick | null) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<ProductoCotizable[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [hi, setHi] = useState(0);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => setHi(0), [items]);
+
+  useEffect(() => {
+    if (!open) return;
+    const t = q.trim();
+    if (t.length < 1) {
+      setItems([]);
+      return;
+    }
+    let active = true;
+    setLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const r = await apiFetch<{ limitado: boolean; items: ProductoCotizable[] }>(
+          `/api/v1/precios/productos-cotizables?cliente_id=${clienteId}&q=${encodeURIComponent(t)}&limit=10`,
+        );
+        if (active) setItems(r.items);
+      } catch {
+        if (active) setItems([]);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }, 250);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [q, open, clienteId]);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  function pick(it: ProductoCotizable) {
+    onSelect({
+      producto_id: it.producto_id,
+      sku: it.sku,
+      nombre: it.nombre,
+      presentaciones: it.presentaciones,
+      presentacion_default: it.presentacion_default,
+      unidad_base: it.unidad_base,
+    });
+    setQ(it.nombre);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={boxRef} className="relative">
+      <input
+        className={INPUT_BASE}
+        aria-label="Buscar producto en la lista del cliente"
+        value={q}
+        placeholder="Buscar en la lista del cliente…"
+        onChange={(e) => {
+          setQ(e.target.value);
+          setOpen(true);
+          onSelect(null); // limpia la selección mientras escribe
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setOpen(true);
+            setHi((h) => Math.min(h + 1, Math.max(items.length - 1, 0)));
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHi((h) => Math.max(h - 1, 0));
+          } else if (e.key === "Enter") {
+            // Con búsqueda en vuelo, items es de la consulta ANTERIOR: elegir
+            // con Enter tomaría un producto que no corresponde a lo tecleado.
+            if (!loading && items[hi]) {
+              e.preventDefault();
+              pick(items[hi]);
+            }
+          } else if (e.key === "Escape") setOpen(false);
+        }}
+      />
+      {open && q.trim().length >= 1 && (
+        <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-border bg-surface shadow-lg">
+          {loading && <div className="px-3 py-2 text-sm text-muted">Buscando…</div>}
+          {!loading && items.length === 0 && (
+            <div className="px-3 py-2 text-sm text-muted">
+              Sin coincidencias en la lista de precios del cliente.
+            </div>
+          )}
+          {!loading &&
+            items.map((it, i) => (
+              <button
+                key={it.producto_id}
+                type="button"
+                onClick={() => pick(it)}
+                onMouseEnter={() => setHi(i)}
+                className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${
+                  i === hi ? "bg-accent/10" : "hover:bg-surface-2"
+                }`}
+              >
+                <span>
+                  <span className="font-medium">{it.nombre}</span>
+                  <span className="ml-2 text-xs text-muted">{it.sku}</span>
+                </span>
+              </button>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CotizadorPage() {
   const toast = useToast();
+  const { me } = useAuth();
 
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=200");
   const clientes = clientesRes.data?.items ?? [];
@@ -119,6 +268,11 @@ export default function CotizadorPage() {
     setProyectoId("");
     setCotDoc(null);
     setListas(null);
+    // El producto elegido puede no estar en la lista del nuevo cliente: se
+    // descarta junto con su cotización para no enseñar un precio ajeno.
+    setProd(null);
+    setPresentacion("");
+    setCotRes(null);
     if (!clienteId) {
       setSucursales([]);
       return;
@@ -137,7 +291,12 @@ export default function CotizadorPage() {
           setListas(l.listas);
         }
       } catch (e) {
-        if (active) toast.error(e instanceof ApiError ? e.message : "No se pudo cargar el cliente");
+        if (active) {
+          toast.error(e instanceof ApiError ? e.message : "No se pudo cargar el cliente");
+          // null significa "cargando": si se quedara así, la pestaña de listas
+          // enseñaría un spinner eterno tras el error.
+          setListas([]);
+        }
       }
     })();
     return () => {
@@ -361,11 +520,18 @@ export default function CotizadorPage() {
                 {cotDoc.sin_cruce.map((s, i) => (
                   <li key={i}>
                     <b>{s.descripcion}</b> — {s.cantidad} {s.unidad ?? ""}
-                    {s.candidatos.length > 0 && (
-                      <span className="text-muted">
-                        {" "}
-                        · ¿quizá {s.candidatos.map((c) => c.nombre).join(", ")}?
-                      </span>
+                    {/* Con motivo el producto SÍ se identificó pero no es cotizable
+                        (p. ej. fuera de la lista del cliente): sugerir candidatos
+                        confundiría. */}
+                    {s.motivo ? (
+                      <span className="text-muted"> — {s.motivo}</span>
+                    ) : (
+                      s.candidatos.length > 0 && (
+                        <span className="text-muted">
+                          {" "}
+                          · ¿quizá {s.candidatos.map((c) => c.nombre).join(", ")}?
+                        </span>
+                      )
                     )}
                   </li>
                 ))}
@@ -382,7 +548,21 @@ export default function CotizadorPage() {
       <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-4">
         <div className="sm:col-span-2">
           <label className="mb-1 block text-sm font-medium text-foreground">Producto</label>
-          <ProductoCombobox onSelect={onPickProducto} />
+          {clienteId ? (
+            <>
+              {/* key: al cambiar de cliente el combobox se reinicia (texto y resultados). */}
+              <CotizableCombobox key={clienteId} clienteId={clienteId} onSelect={onPickProducto} />
+              <span className="mt-1 block text-xs text-muted">
+                Solo productos de la lista de precios del cliente.
+              </span>
+            </>
+          ) : can(me, "menu:productos") ? (
+            <ProductoCombobox onSelect={onPickProducto} />
+          ) : (
+            <div className="rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-muted">
+              Elige un cliente para buscar en su lista de precios.
+            </div>
+          )}
         </div>
         <Field label="Presentación">
           <Select

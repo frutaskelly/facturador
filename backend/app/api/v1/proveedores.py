@@ -106,7 +106,7 @@ def update_proveedor(
 def delete_proveedor(
     proveedor_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("proveedor:eliminar")),
 ):
     obj = get_or_404(db, Proveedor, proveedor_id)
     obj.deleted_at = func.now()

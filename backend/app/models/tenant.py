@@ -20,7 +20,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import deferred, relationship
 
 from ..core.db import Base
@@ -96,6 +96,10 @@ class Membership(Base, TimestampMixin):
     role_id = Column(
         UUID(as_uuid=True), ForeignKey("roles.id"), nullable=False, index=True
     )
+    # Candado por cliente (portal): lista de clientes.id a los que esta
+    # membresía se limita. NULL/[] = sin límite. Se aplica como filtro
+    # explícito en los endpoints (RLS solo aísla por tenant).
+    cliente_scope = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
     acceso_todas_sucursales = Column(
         Boolean, nullable=False, server_default="false"
     )

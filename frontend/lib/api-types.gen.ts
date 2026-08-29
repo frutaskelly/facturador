@@ -243,14 +243,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Resolver Cliente
-         * @description Cruza las pistas de un documento (RFC, proyecto, nombre, ubicación, grupo)
-         *     contra las equivalencias registradas. No escribe nada.
-         *
-         *     Si las pistas se contradicen devuelve `ambiguo=true` y NO elige cliente:
-         *     adivinar aquí significaría facturarle a la empresa equivocada.
-         */
+        /** Resolver Cliente */
         post: operations["resolver_cliente_api_v1_clientes_resolver_post"];
         delete?: never;
         options?: never;
@@ -1706,6 +1699,34 @@ export interface paths {
         patch: operations["update_membership_api_v1_memberships__membership_id__patch"];
         trace?: never;
     };
+    "/api/v1/memberships/{membership_id}/empresas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Empresas Del Usuario
+         * @description Las empresas del grupo y a cuáles entra el usuario de esta membresía.
+         */
+        get: operations["empresas_del_usuario_api_v1_memberships__membership_id__empresas_get"];
+        /**
+         * Asignar Empresa
+         * @description Da o quita el acceso del usuario a UNA empresa del grupo.
+         *
+         *     Guards: la empresa debe ser del grupo, el caller debe poder administrar
+         *     usuarios EN ESA empresa, nadie toca sus propias membresías, y el rol OWNER
+         *     solo lo otorga/quita un OWNER de esa empresa (anti-toma de control).
+         */
+        put: operations["asignar_empresa_api_v1_memberships__membership_id__empresas_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/memberships/{membership_id}/password": {
         parameters: {
             query?: never;
@@ -2316,6 +2337,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/precios/productos-cotizables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Productos Cotizables Endpoint
+         * @description Buscador del cotizador: SOLO productos que están en la lista de precios
+         *     del cliente (regla del dueño). Sin negociación propia, busca en todo el
+         *     catálogo (su lista es la base).
+         */
+        get: operations["productos_cotizables_endpoint_api_v1_precios_productos_cotizables_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos": {
         parameters: {
             query?: never;
@@ -2758,10 +2801,10 @@ export interface paths {
         put?: never;
         /**
          * Export Sae
-         * @description Genera el .xls masivo. En FACTURA, además estampa `factura_sae` en cada
-         *     remisión del lote (→ RESERVADO): eso es lo que impide re-exportarla por
-         *     accidente (un re-import duplica el documento en SAE) y lo que prellena el
-         *     folio del siguiente lote. Estampa y archivo viajan en la misma transacción.
+         * @description Genera el .xls masivo (Excel 97-2004). NO estampa folios: los del
+         *     archivo son la propuesta confirmada por el operador, y `factura_sae` lo
+         *     pone el ESPEJO cuando la factura de verdad existe en SAE — un archivo que
+         *     nunca se sube ya no deja folios fantasma en las remisiones.
          */
         post: operations["export_sae_api_v1_remisiones_export_sae_post"];
         delete?: never;
@@ -4354,6 +4397,8 @@ export interface components {
         };
         /** CrearUsuarioIn */
         CrearUsuarioIn: {
+            /** Cliente Scope */
+            cliente_scope?: string[] | null;
             /** Email */
             email: string;
             /** Full Name */
@@ -4402,6 +4447,18 @@ export interface components {
             lineas: components["schemas"]["LineaDevolucionOut"][];
             /** Motivo */
             motivo?: string | null;
+        };
+        /** EmpresaAccesoIn */
+        EmpresaAccesoIn: {
+            /** Acceso */
+            acceso: boolean;
+            /** Role Id */
+            role_id?: string | null;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
         };
         /**
          * EmpresaColorIn
@@ -4851,11 +4908,6 @@ export interface components {
         };
         /** ExportSaeIn */
         ExportSaeIn: {
-            /**
-             * Estampar
-             * @default true
-             */
-            estampar: boolean;
             /** Fecha */
             fecha?: string | null;
             /** Folios */
@@ -4864,11 +4916,6 @@ export interface components {
             } | null;
             /** Ids */
             ids: string[];
-            /**
-             * Regenerar
-             * @default false
-             */
-            regenerar: boolean;
             /**
              * Tipo
              * @default FACTURA
@@ -6142,6 +6189,8 @@ export interface components {
             acceso_todas_sucursales: boolean;
             /** Active */
             active: boolean;
+            /** Cliente Scope */
+            cliente_scope?: string[] | null;
             /**
              * Created At
              * Format: date-time
@@ -6185,6 +6234,8 @@ export interface components {
             acceso_todas_sucursales?: boolean | null;
             /** Active */
             active?: boolean | null;
+            /** Cliente Scope */
+            cliente_scope?: string[] | null;
             /** Role Id */
             role_id?: string | null;
         };
@@ -12615,6 +12666,76 @@ export interface operations {
             };
         };
     };
+    empresas_del_usuario_api_v1_memberships__membership_id__empresas_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                membership_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    asignar_empresa_api_v1_memberships__membership_id__empresas_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                membership_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmpresaAccesoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     cambiar_password_api_v1_memberships__membership_id__password_post: {
         parameters: {
             query?: never;
@@ -13832,6 +13953,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    productos_cotizables_endpoint_api_v1_precios_productos_cotizables_get: {
+        parameters: {
+            query: {
+                cliente_id: string;
+                q?: string;
+                limit?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
             };
             /** @description Validation Error */
             422: {

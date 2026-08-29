@@ -1,5 +1,5 @@
 """Export masivo para SAE (fase espejo): layout exacto, folios con relleno,
-estampado del espejo (factura_sae → RESERVADO), y los candados que evitan
+rastro del export (export_sae_at, SIN estampar folios), y los candados que evitan
 duplicar documentos en SAE (re-export, cliente sin clave, partida sin código)."""
 import io
 import uuid
@@ -56,6 +56,7 @@ def env(db_engine):
 
         cli = Cliente(tenant_id=t.id, codigo="CL1", legal_name="OPERADORA BALLES",
                       rfc="OBV191007BS1", serie_factura_id=serie_f.id,
+                      espejo_sae=True,   # el export FACTURA lo exige (29-ago)
                       serie_remision_id=serie_r.id, metodo_pago_default="PPD",
                       forma_pago_default="99", uso_cfdi_default="G01")
         prod = Producto(tenant_id=t.id, sku="00000001", nombre="ACEITE 20 LT",
@@ -142,22 +143,34 @@ def test_export_factura_layout_y_espejo(client, env, auth_as):
     assert fila[21:24] == ["PPD", "99", "G01"]
     assert fila[26].startswith("OC 24736")      # la llave de conciliación
 
-    # el espejo quedó puesto: factura_sae + RESERVADO
+    # NO estampó nada: el folio del archivo es una propuesta, la verdad la
+    # pone el espejo cuando la factura existe en SAE (regla del 29-ago-2026).
     det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
-    assert det["factura_sae"] == "ZHGO 233"
-    assert det["estado"] == "RESERVADO"
+    assert det["factura_sae"] is None
+    assert det["estado"] == "BORRADOR"
 
-    # candado: re-exportarla duplicaría el documento en SAE
-    r2 = client.post("/api/v1/remisiones/export-sae", headers=h,
-                     json={"ids": [rem["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 234}})
-    assert r2.status_code == 422
-    assert "ZHGO 233" in r2.json()["detail"]
-
-    # y el folio sugerido del siguiente lote sale del espejo
-    rem2 = _rem(client, h, env, su_pedido="24737")
+    # re-exportar está PERMITIDO (el archivo pudo no subirse nunca), con aviso
     pv2 = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                      json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
+    assert pv2["ok"] is True
+    assert any("ya salió en un archivo" in a for a in pv2["avisos"])
+    r2 = client.post("/api/v1/remisiones/export-sae", headers=h,
+                     json={"ids": [rem["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 233}})
+    assert r2.status_code == 200
+
+    # cuando la factura SE CONFIRMA (espejo o captura manual), ahí sí: candado
+    client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                 json={"factura_sae": "ZHGO 233"})
+    r3 = client.post("/api/v1/remisiones/export-sae", headers=h,
+                     json={"ids": [rem["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 234}})
+    assert r3.status_code == 422
+    assert "ZHGO 233" in r3.json()["detail"]
+
+    # y el folio sugerido del siguiente lote sale de la marca confirmada
+    rem2 = _rem(client, h, env, su_pedido="24737")
+    pv3 = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
                       json={"ids": [rem2["id"]], "tipo": "FACTURA"}).json()
-    assert pv2["series"][0]["folio_sugerido"] == 234
+    assert pv3["series"][0]["folio_sugerido"] == 234
 
 
 def test_export_factura_sin_folio_es_422(client, env, auth_as):
@@ -189,14 +202,13 @@ def test_export_pedido_lleva_la_oc_del_cliente(client, env, auth_as):
 
 
 def test_export_rechaza_colision_de_folios(client, env, auth_as):
-    """Dos operadores confirmando el mismo folio inicial la misma mañana era un
-    documento duplicado en SAE: el rango a estampar no puede pisar folios que
-    ya existen en remisiones estampadas ni en facturas."""
+    """El rango propuesto no puede pisar folios que YA existen — en marcas
+    confirmadas (espejo/captura manual) o en facturas. Las propuestas de un
+    export anterior ya NO reservan folios (pueden no haberse subido nunca)."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
     rem1 = _rem(client, h, env)
-    assert client.post("/api/v1/remisiones/export-sae", headers=h,
-                       json={"ids": [rem1["id"]], "tipo": "FACTURA",
-                             "folios": {"ZHGO": 233}}).status_code == 200
+    client.patch(f"/api/v1/remisiones/{rem1['id']}", headers=h,
+                 json={"factura_sae": "ZHGO 233"})
     rem2 = _rem(client, h, env, su_pedido="24737")
     r = client.post("/api/v1/remisiones/export-sae", headers=h,
                     json={"ids": [rem2["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 233}})
@@ -229,20 +241,22 @@ def test_export_rechaza_remision_con_factura_nativa(client, env, auth_as):
     assert any("NATIVA" in e for e in pv["errores"])
 
 
-def test_export_regenerar_reproduce_sin_reestampar(client, env, auth_as):
-    """La estampa se commitea antes de transmitir el archivo: si la descarga se
-    pierde, `regenerar` reproduce el .xls con los folios ya guardados."""
+def test_export_repetido_avisa_pero_no_bloquea(client, env, auth_as):
+    """Un archivo exportado puede no subirse nunca a SAE (pasó con ZHGO 588):
+    re-exportar debe ser posible. El rastro export_sae_at genera el AVISO para
+    que el operador no re-importe por accidente lo que sí subió."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
     rem = _rem(client, h, env)
     client.post("/api/v1/remisiones/export-sae", headers=h,
                 json={"ids": [rem["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 233}})
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
+    assert pv["ok"] is True and any("ya salió" in a for a in pv["avisos"])
     r = client.post("/api/v1/remisiones/export-sae", headers=h,
-                    json={"ids": [rem["id"]], "tipo": "FACTURA", "regenerar": True})
+                    json={"ids": [rem["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 240}})
     assert r.status_code == 200, r.text
     hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_name("Facturas")
-    assert hoja.row(1)[0].value == "ZHGO       233"   # el folio original, no uno nuevo
-    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
-    assert det["factura_sae"] == "ZHGO 233"           # sin re-estampar
+    assert hoja.row(1)[0].value == "ZHGO       240"
 
 
 def test_export_omite_partidas_en_cero(client, env, auth_as):
@@ -271,13 +285,13 @@ def test_export_omite_partidas_en_cero(client, env, auth_as):
 
 
 def test_remision_estampada_no_se_factura_nativa(client, env, auth_as):
-    """La ventana export→import: una remisión con factura_sae ya está (o va a
-    estar en horas) amparada por un CFDI de SAE — facturarla nativa serían dos
+    """Una remisión con factura_sae (confirmada por el espejo o capturada a
+    mano) ya está amparada por un CFDI de SAE — facturarla nativa serían dos
     CFDI reales por la misma venta."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
     rem = _rem(client, h, env)
-    client.post("/api/v1/remisiones/export-sae", headers=h,
-                json={"ids": [rem["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 233}})
+    client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                 json={"factura_sae": "ZHGO 233"})
     r = client.post("/api/v1/facturas/desde-remisiones", headers=h,
                     json={"remision_ids": [rem["id"]]})
     assert r.status_code == 409
@@ -303,3 +317,78 @@ def test_partida_sin_codigo_del_cliente_detiene_el_lote(client, env, auth_as):
                      json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
     assert pv["ok"] is False
     assert any("sin código del cliente" in e for e in pv["errores"])
+
+
+def test_empresa_sae_se_decide_por_sucursal(client, env, auth_as):
+    """Un cliente con clave en DOS empresas SAE (EHMO: 02 Pachuca y 03
+    Villahermosa): la equivalencia CON sucursal decide para las remisiones de
+    esa sucursal; las demás caen a la genérica (sin sucursal). Solo si nada
+    decide, el lote se detiene."""
+    from app.models import ClienteExterno, Sucursal
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suc = Sucursal(tenant_id=env["tenant"], cliente_id=env["cli"], nombre="Tabasco")
+        db.add(suc); db.flush()
+        db.add(ClienteExterno(tenant_id=env["tenant"], sistema="SAE", clave="03:1",
+                              clave_normalizada="03 1", cliente_id=env["cli"],
+                              sucursal_id=suc.id, origen="MANUAL", confianza="CONFIRMADA"))
+        db.commit()
+        suc_id = str(suc.id)
+    finally:
+        db.close()
+
+    # sin sucursal → cae a la genérica 02
+    rem_02 = _rem(client, h, env)
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem_02["id"]], "tipo": "PEDIDO"}).json()
+    assert pv["ok"] is True, pv
+    assert pv["empresa"] == "02"
+
+    # sucursal Tabasco → la 03
+    rem_03 = _rem(client, h, env, su_pedido="9901", sucursal_id=suc_id)
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem_03["id"]], "tipo": "PEDIDO"}).json()
+    assert pv["ok"] is True, pv
+    assert pv["empresa"] == "03"
+
+    # y mezclarlas sigue deteniendo el lote (SAE importa por empresa)
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem_02["id"], rem_03["id"]], "tipo": "PEDIDO"}).json()
+    assert pv["ok"] is False
+    assert any("mezcla empresas" in e for e in pv["errores"])
+
+
+def test_folio_sugerido_continua_tras_un_export_sin_confirmar(client, env, auth_as):
+    """Dos lotes seguidos NO deben proponer el mismo rango: el folio PROPUESTO
+    por un export reciente (aún sin factura confirmada) alimenta el sugerido
+    del siguiente — sin estampar nada como factura."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem1 = _rem(client, h, env)
+    client.post("/api/v1/remisiones/export-sae", headers=h,
+                json={"ids": [rem1["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 500}})
+    det = client.get(f"/api/v1/remisiones/{rem1['id']}", headers=h).json()
+    assert det["factura_sae"] is None            # sigue sin factura
+    rem2 = _rem(client, h, env, su_pedido="24990")
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem2["id"]], "tipo": "FACTURA"}).json()
+    assert pv["series"][0]["folio_sugerido"] == 501
+
+
+def test_export_factura_exige_cliente_en_espejo(client, env, auth_as):
+    from app.models import Cliente as _C
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem = _rem(client, h, env)
+    db = SessionLocal()
+    try:
+        db.query(_C).filter(_C.id == env["cli"]).update({"espejo_sae": False})
+        db.commit()
+        pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                         json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
+        assert pv["ok"] is False
+        assert any("espejo SAE" in e for e in pv["errores"])
+    finally:
+        db.query(_C).filter(_C.id == env["cli"]).update({"espejo_sae": True})
+        db.commit(); db.close()

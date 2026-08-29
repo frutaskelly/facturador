@@ -129,6 +129,18 @@ def resolver_asignaciones(
     ).all()
 
 
+def listas_asignadas_a_cliente(db: Session, cliente_id: UUID, fecha: Optional[date] = None) -> set[UUID]:
+    """Las listas negociadas CON ese cliente, por cualquier dimensión.
+
+    En los datos reales toda negociación lleva cliente_id (a veces además
+    sucursal o proyecto), así que basta ese filtro. Vacío = el cliente compra
+    a lista base (sin negociación propia).
+    """
+    q = db.query(ListaAsignacion.lista_id).filter(ListaAsignacion.cliente_id == cliente_id)
+    q = _vigente(q, ListaAsignacion, fecha or date.today())
+    return {lid for (lid,) in q.all()}
+
+
 def origen_de(a: ListaAsignacion) -> str:
     """Cómo se le llama en pantalla al renglón que ganó: por su dimensión más
     específica, que es la que el vendedor reconoce ("es el precio del proyecto")."""

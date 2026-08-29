@@ -108,7 +108,7 @@ def update_categoria(
 def delete_categoria(
     categoria_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("categoria:eliminar")),
 ):
     obj = get_or_404(db, CategoriaProducto, categoria_id)
     obj.deleted_at = func.now()

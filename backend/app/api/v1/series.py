@@ -185,7 +185,7 @@ def update_serie(
 def delete_serie(
     serie_id: UUID,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("serie:eliminar")),
 ):
     obj = get_or_404(db, Serie, serie_id, soft=False)
     if obj.folio_actual and obj.folio_actual > 0:

@@ -58,39 +58,25 @@ def exportar_xlsx(db: Session, lista: ListaPrecios) -> bytes:
     return buf.getvalue()
 
 
-def exportar_pdf(db: Session, lista: ListaPrecios, tenant_nombre: str) -> bytes:
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import letter
+def exportar_pdf(db: Session, lista: ListaPrecios, tenant) -> bytes:
+    """La lista con el MEMBRETE del negocio (layout Smart Supply, 29-ago-2026):
+    logo + datos fiscales, tabla azul con zebra y folio de página."""
+    from .reporte_pdf import CELDA, construir, membrete, tabla_reporte
     from reportlab.lib.units import mm
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
-    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph
 
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=letter, topMargin=14 * mm, bottomMargin=14 * mm,
-                            leftMargin=14 * mm, rightMargin=14 * mm,
-                            title=f"Lista de precios · {lista.nombre}")
-    styles = getSampleStyleSheet()
-    partes = [
-        Paragraph(tenant_nombre, styles["Title"]),
-        Paragraph(f"Lista de precios — {lista.nombre}", styles["Heading2"]),
-    ]
-    data = [["Producto", "Presentación", "Precio"]]
+    filas = []
     for _sku, nombre, pres, cant, precio in _filas(db, lista):
         etiqueta = pres if cant in (1, Decimal("1")) else f"{pres} (desde {cant})"
-        data.append([nombre, etiqueta, f"${Decimal(precio):,.2f}"])
-    tabla = Table(data, colWidths=[110 * mm, 35 * mm, 30 * mm], repeatRows=1)
-    tabla.setStyle(TableStyle([
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.75, colors.black),
-        ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor("#DDDDDD")),
-        ("ALIGN", (2, 0), (2, -1), "RIGHT"),
-        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-    ]))
-    partes.append(tabla)
-    doc.build(partes)
-    return buf.getvalue()
+        filas.append([Paragraph(nombre, CELDA), etiqueta, f"${Decimal(precio):,.2f}"])
+    partes = membrete(tenant, "Lista de precios",
+                      f"{lista.nombre} · {len(filas)} productos")
+    partes.append(tabla_reporte(
+        ["Producto", "Presentación", "Precio"], filas,
+        [108 * mm, 38 * mm, 32 * mm], num_cols=(2,),
+    ))
+    return construir(f"Lista de precios · {lista.nombre}", partes)
+
 
 
 def importar_xlsx(db: Session, tenant_id: UUID, lista: ListaPrecios, data: bytes) -> dict:

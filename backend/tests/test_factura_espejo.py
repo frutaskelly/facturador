@@ -270,6 +270,54 @@ def test_espejo_liga_estampas_de_captura_manual(client, env, auth_as, sin_sesion
     assert det["estado"] == "FACTURADA"
 
 
+def test_espejo_liga_por_oc_sin_estampa_previa(client, env, auth_as, sin_sesion):
+    """El camino NORMAL desde que el export no estampa: la factura de SAE trae
+    "OC <su pedido>" en observaciones; si UNA remisión libre del cliente espera
+    con ese su_pedido, se estampa y queda FACTURADA. Con dos candidatas no se
+    adivina. Y la cancelación en SAE la libera de vuelta."""
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "su_pedido": "77413",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    f = client.post("/api/v1/facturas/espejo", headers=hk,
+                    json=_espejo(folio=910, observaciones="OC 0000077413 ENTREGA CEDIS")).json()
+    auth_as(env["dueno"])
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["factura_sae"] == "ZHGO 910"
+    assert det["factura_id"] == f["id"]
+    assert det["estado"] == "FACTURADA"
+
+    # SAE la cancela → la remisión queda libre para re-exportarse
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk,
+                json=_espejo(folio=910, estado="CANCELADA",
+                             observaciones="OC 77413 ENTREGA CEDIS"))
+    auth_as(env["dueno"])
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["factura_sae"] is None
+    assert det["estado"] == "BORRADOR"
+
+
+def test_espejo_no_adivina_con_dos_remisiones_misma_oc(client, env, auth_as, sin_sesion):
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    ids = []
+    for _ in range(2):
+        ids.append(client.post("/api/v1/remisiones", headers=h, json={
+            "cliente_facturacion_id": env["cli"], "su_pedido": "88550",
+            "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                        "precio_unitario": 10}]}).json()["id"])
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk,
+                json=_espejo(folio=911, observaciones="OC 88550"))
+    auth_as(env["dueno"])
+    for rid in ids:
+        det = client.get(f"/api/v1/remisiones/{rid}", headers=h).json()
+        assert det["factura_sae"] is None      # ambigua: la estampa es manual
+
+
 def test_espejo_rechaza_otra_empresa_mismo_folio(client, env, auth_as, sin_sesion):
     hk = _clave_bot(client, env, auth_as, sin_sesion)
     client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=830))

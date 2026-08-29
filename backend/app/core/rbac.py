@@ -55,6 +55,7 @@ _OWNER_ROLE = "OWNER"
 # Fuera, deliberadamente: cualquier cosa de CFDI nativo, borrar, usuarios,
 # series, y `producto:gestionar` (reapuntar un alias afecta a todo el catálogo).
 PERMISOS_CONEXION = frozenset({
+    "menu:oc",            # la bandeja de órdenes es SU puerta de entrada
     "menu:remisiones",
     "remision:gestionar",
     "menu:clientes",
@@ -93,9 +94,20 @@ class AuthContext:
     permissions: set[str]
     memberships: list[TenantMembershipView] = field(default_factory=list)
     conexion_id: Optional[UUID] = None      # de qué conexión vino, si vino de una
+    # Candado por CLIENTE de la membresía (portal de cliente): si trae ids, el
+    # usuario solo ve documentos/precios de ESOS clientes. Es independiente de
+    # los permisos —OWNER brinca permisos, pero el scope se respeta igual— y
+    # cada endpoint lo aplica como filtro explícito.
+    cliente_scope: Optional[list[UUID]] = None
 
     def has(self, permission: str) -> bool:
         return self.is_owner or permission in self.permissions
+
+    def cliente_permitido(self, cliente_id: Optional[UUID]) -> bool:
+        """¿Este cliente está dentro del candado? Sin candado, todo pasa."""
+        if not self.cliente_scope:
+            return True
+        return cliente_id is not None and cliente_id in self.cliente_scope
 
 
 # ─── User resolution (auth user <sub> → local users row) ─────────────────────
@@ -315,6 +327,7 @@ def get_auth_context(
             is_owner=is_owner,
             permissions=perms,
             memberships=views,
+            cliente_scope=list(chosen.cliente_scope) if chosen.cliente_scope else None,
         )
     finally:
         db.close()

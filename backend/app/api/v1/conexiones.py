@@ -212,6 +212,10 @@ def probar(
     pantalla con el botón «Probar conexión». Pide un permiso que TODA conexión
     tiene, así que sirve para ambas identidades.
     """
+    if ctx.cliente_scope:
+        # Un usuario con candado por cliente (portal) no toca la conexión del bot.
+        raise HTTPException(status_code=403, detail="Tu usuario no administra conexiones")
+
     t = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one_or_none()
     if ctx.conexion_id is not None:
         return PruebaOut(
@@ -243,6 +247,9 @@ def sincronizar_grupos(
     Los grupos que dejaron de reportarse NO se borran —se marcan inactivos— para
     no perder el historial de las órdenes que ya entraron por ahí.
     """
+    if ctx.cliente_scope:
+        # Un usuario con candado por cliente (portal) no toca la conexión del bot.
+        raise HTTPException(status_code=403, detail="Tu usuario no administra conexiones")
     vistos = set()
     for g in payload.grupos:
         vistos.add(g.jid)
