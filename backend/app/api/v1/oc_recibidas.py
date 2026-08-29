@@ -649,6 +649,16 @@ def asignar(
         oc.punto_entrega = (data["punto_entrega"] or "").strip() or None
     if "motivo" in data:
         oc.motivo = data["motivo"]
+    elif (
+        oc.sucursal_id is not None
+        and oc.motivo
+        and "sucursal" in oc.motivo.lower()
+    ):
+        # El motivo es lo que la bandeja le enseña al operador. Si decía «falta
+        # decir a qué sucursal pertenece X» y la sucursal acaba de asignarse,
+        # dejarlo ahí manda a revisar algo que ya está resuelto (pasó con 33
+        # órdenes el 29-ago). Se limpia solo cuando la causa desapareció.
+        oc.motivo = None
     oc.updated_by = ctx.user_id
 
     if payload.aprender and oc.cliente_id is not None:

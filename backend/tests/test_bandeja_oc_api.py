@@ -624,3 +624,33 @@ def test_la_serie_del_grupo_sobrevive_a_aprender(client, env, auth_as):
                                     params={"sistema": "WHATSAPP"}).json()
               if e["clave"] == jid)
     assert wa["serie_remision_id"] == propia["id"]
+
+
+def test_asignar_sucursal_limpia_el_motivo_viejo(client, env, auth_as):
+    """El motivo es lo que la bandeja le enseña al operador: si decía «falta la
+    sucursal» y la sucursal ya se asignó, dejarlo manda a revisar algo resuelto."""
+    from app.core.db import SessionLocal
+    from app.models import OCRecibida
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+    suc_id = env["suc"]          # sucursal de EHMO, del fixture
+
+    db = SessionLocal()
+    try:
+        db.query(OCRecibida).filter(OCRecibida.id == uuid.UUID(oc["id"])).update(
+            {"motivo": "Falta decir a qué sucursal pertenece «APAN»"})
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                     json={"cliente_id": env["ehmo"], "sucursal_id": suc_id})
+    assert r.status_code == 200, r.text
+    assert r.json()["motivo"] is None
+
+    # un motivo que NO habla de la sucursal se respeta (no es la causa resuelta)
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"motivo": "revisar precios con el cliente"})
+    r = client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h, json={"sucursal_id": suc_id})
+    assert r.json()["motivo"] == "revisar precios con el cliente"
