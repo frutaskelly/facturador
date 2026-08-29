@@ -366,3 +366,25 @@ def test_la_conexion_sigue_sin_poder_facturar_nativo(client, env, auth_as, sin_s
     r = client.post("/api/v1/facturas/desde-remisiones", headers=hk,
                     json={"remision_ids": [str(uuid.uuid4())]})
     assert r.status_code == 403
+
+
+def test_resumen_del_espejo_para_conciliar(client, env, auth_as, sin_sesion):
+    """El conector verifica SU trabajo con la clave del espejo: folios, totales
+    y estados de una serie — sin ganar lectura de toda la facturación."""
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=940))
+    client.post("/api/v1/facturas/espejo", headers=hk,
+                json=_espejo(folio=941, estado="CANCELADA"))
+
+    r = client.get("/api/v1/facturas/espejo/resumen", headers=hk,
+                   params={"empresa": "02", "serie": "ZHGO"})
+    assert r.status_code == 200, r.text
+    por_folio = {f["folio"]: f for f in r.json()["folios"]}
+    assert por_folio[940]["estado"] == "TIMBRADA"
+    assert float(por_folio[940]["total"]) == 969.76
+    assert por_folio[941]["estado"] == "CANCELADA"
+    assert float(por_folio[941]["saldo"]) == 0          # cancelada no debe deuda
+
+    # otra empresa con la misma serie NO se mezcla (folios consecutivos por empresa)
+    assert client.get("/api/v1/facturas/espejo/resumen", headers=hk,
+                      params={"empresa": "03", "serie": "ZHGO"}).json()["total_facturas"] == 0
