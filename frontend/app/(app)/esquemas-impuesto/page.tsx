@@ -16,6 +16,7 @@ const config: CrudConfig<EsquemaImpuesto> = {
   newLabel: "Nuevo esquema de impuesto",
   basePath: "/api/v1/esquemas-impuesto",
   writePerm: "esquema_impuesto:gestionar",
+  deletePerm: "esquema_impuesto:eliminar",
   columns: [
     { header: "Código", cell: (e) => <span className="font-medium">{e.codigo}</span> },
     { header: "Nombre", cell: (e) => e.nombre },

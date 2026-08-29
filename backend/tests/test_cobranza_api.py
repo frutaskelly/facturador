@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
+from app.core.rbac import invalidate_auth_cache
 from app.main import app
 from app.models import Cliente, Factura, Membership, Role, Tenant, User
 
@@ -30,17 +31,31 @@ def env(db_engine):
                         tier="PRINCIPAL", status="ACTIVE")
         db.add(tenant); db.flush(); created["t"].append(tenant.id)
         role = db.query(Role).filter(Role.nombre == "ADMIN", Role.es_preset.is_(True)).one()
-        sub = f"sub-cob-{suffix}"
-        u = User(email=f"cob-{suffix}@t.test", auth_user_id=sub, full_name="admin")
-        db.add(u); db.flush(); created["u"].append(u.id)
-        m = Membership(tenant_id=tenant.id, user_id=u.id, role_id=role.id)
-        db.add(m); db.flush(); created["m"].append(m.id)
         cli = Cliente(tenant_id=tenant.id, codigo="COBC", legal_name="Cliente Cobranza",
                       rfc="XAXX010101000", regimen_fiscal="601", uso_cfdi_default="G03",
                       dias_credito=30, limite_credito=Decimal("100000"))
-        db.add(cli); db.flush()
+        # El segundo cliente existe solo para probar el candado: es "el de otro".
+        otro = Cliente(tenant_id=tenant.id, codigo="COBO", legal_name="Cliente Ajeno",
+                       rfc="XEXX010101000", regimen_fiscal="601", uso_cfdi_default="G03",
+                       dias_credito=15)
+        db.add_all([cli, otro]); db.flush()
+
+        def _user(label, scope=None):
+            sub = f"sub-{label}-{suffix}"
+            u = User(email=f"{label}-{suffix}@t.test", auth_user_id=sub, full_name=label)
+            db.add(u); db.flush(); created["u"].append(u.id)
+            m = Membership(tenant_id=tenant.id, user_id=u.id, role_id=role.id,
+                           cliente_scope=scope)
+            db.add(m); db.flush(); created["m"].append(m.id)
+            return {"sub": sub, "email": u.email, "tenant_id": tenant.id}
+
+        admin = _user("cob")
+        # Mismos permisos, pero amarrado a un cliente: el candado es de la
+        # membresía, no del rol.
+        atado = _user("cobscope", scope=[cli.id])
         db.commit()
-        yield {"sub": sub, "email": u.email, "tenant_id": tenant.id, "cli": str(cli.id)}
+        invalidate_auth_cache()
+        yield {**admin, "cli": str(cli.id), "otro": str(otro.id), "atado": atado}
     finally:
         for tb in _PURGE:
             for tid in created["t"]:
@@ -52,12 +67,26 @@ def env(db_engine):
         for tid in created["t"]:
             db.query(Tenant).filter(Tenant.id == tid).delete()
         db.commit(); db.close()
+        invalidate_auth_cache()
+
+
+def _como(usuario):
+    app.dependency_overrides[get_principal] = lambda: Principal(
+        auth_user_id=usuario["sub"], email=usuario["email"], role="authenticated",
+        claims={"sub": usuario["sub"]})
 
 
 @pytest.fixture
 def auth(env):
-    app.dependency_overrides[get_principal] = lambda: Principal(
-        auth_user_id=env["sub"], email=env["email"], role="authenticated", claims={"sub": env["sub"]})
+    _como(env)
+    yield
+    app.dependency_overrides.pop(get_principal, None)
+
+
+@pytest.fixture
+def auth_atado(env):
+    """Sesión del usuario amarrado al cliente `cli` (candado por cliente)."""
+    _como(env["atado"])
     yield
     app.dependency_overrides.pop(get_principal, None)
 
@@ -260,3 +289,71 @@ def test_candado_factura_ppd_con_rep(client, env, auth, fake_pac, monkeypatch):
     ok = client.post(f"/api/v1/facturas/{fid}/cancelar", headers=h, json={})
     assert ok.status_code == 200, ok.text
     assert ok.json()["estado"] == "CANCELADA"
+
+
+# ── Estado de cuenta en PDF y por correo (corte de la migración) ─────────────
+def _configura_correo(env):
+    """Deja SMTP utilizable en el tenant: `configured()` exige host+user+pass."""
+    db = SessionLocal()
+    try:
+        t = db.query(Tenant).filter(Tenant.id == env["tenant_id"]).one()
+        t.config = {**(t.config or {}), "email": {
+            "host": "smtp.test", "port": 587, "username": "envios@t.test",
+            "password": "secreto", "from_name": "COB SA"}}
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_estado_cuenta_pdf(client, env, auth):
+    _factura_ppd_timbrada(env, total=1000, dias_atras=10, folio=30)
+    _factura_ppd_timbrada(env, total=2000, dias_atras=100, folio=31)
+    r = client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli']}/pdf", headers=_h(env))
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:4] == b"%PDF"
+
+    # Sin cargos también sale (el cliente al corriente recibe su hoja en cero).
+    vacio = client.get(f"/api/v1/cobranza/estado-cuenta/{env['otro']}/pdf", headers=_h(env))
+    assert vacio.status_code == 200 and vacio.content[:4] == b"%PDF"
+
+
+def test_enviar_estado_cuenta_adjunta_el_pdf(client, env, auth, monkeypatch):
+    from app.services import email as email_service
+
+    _configura_correo(env)
+    _factura_ppd_timbrada(env, total=1500, dias_atras=45, folio=32)
+    enviado = {}
+
+    def _fake_send(cfg, to, subject, html, attachments=None, reply_to=None):
+        enviado.update({"to": to, "subject": subject, "html": html, "adj": attachments})
+
+    monkeypatch.setattr(email_service, "send_email", _fake_send)
+    r = client.post(f"/api/v1/cobranza/estado-cuenta/{env['cli']}/enviar", headers=_h(env),
+                    json={"to": ["cobranza@cliente.mx"], "mensaje": "Buen día"})
+    assert r.status_code == 200, r.text
+    assert enviado["to"] == ["cobranza@cliente.mx"]
+    assert "Estado de cuenta" in enviado["subject"]
+    assert len(enviado["adj"]) == 1
+    nombre, contenido, mime = enviado["adj"][0]
+    assert nombre.endswith(".pdf") and mime == "application/pdf"
+    assert contenido[:4] == b"%PDF"
+
+    # Correo inválido: no llega al header To del SMTP.
+    malo = client.post(f"/api/v1/cobranza/estado-cuenta/{env['cli']}/enviar", headers=_h(env),
+                       json={"to": ["no-es-correo"]})
+    assert malo.status_code == 422
+
+
+def test_estado_cuenta_respeta_el_candado_por_cliente(client, env, auth_atado):
+    """El usuario amarrado ve lo suyo; lo ajeno responde 404 por las tres
+    puertas (JSON, PDF y correo), no solo por la del JSON."""
+    h = _h(env)
+    assert client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli']}/pdf", headers=h).status_code == 200
+
+    assert client.get(f"/api/v1/cobranza/estado-cuenta/{env['otro']}", headers=h).status_code == 404
+    assert client.get(f"/api/v1/cobranza/estado-cuenta/{env['otro']}/pdf", headers=h).status_code == 404
+    ajeno = client.post(f"/api/v1/cobranza/estado-cuenta/{env['otro']}/enviar", headers=h,
+                        json={"to": ["quien@sea.mx"]})
+    # 404 aunque el correo del tenant ni siquiera esté configurado: el candado va primero.
+    assert ajeno.status_code == 404

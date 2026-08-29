@@ -3766,6 +3766,48 @@
     "title": "EmpresaUpdate",
     "type": "object"
    },
+   "EnviarEstadoCuentaIn": {
+    "properties": {
+     "asunto": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Asunto"
+     },
+     "mensaje": {
+      "anyOf": [
+       {
+        "maxLength": 2000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mensaje"
+     },
+     "to": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "To",
+      "type": "array"
+     }
+    },
+    "required": [
+     "to"
+    ],
+    "title": "EnviarEstadoCuentaIn",
+    "type": "object"
+   },
    "EnviarFacturaIn": {
     "properties": {
      "mensaje": {
@@ -14299,6 +14341,54 @@
     "title": "SerieCreate",
     "type": "object"
    },
+   "SerieFolioSugerido": {
+    "description": "En qué folio dejar la serie al cortar un cliente de SAE.\n\n`sugerido` es None cuando la serie no tiene facturas espejo: no hay dato de\nSAE con el cual proponer nada y mover el contador a ciegas rompería la\nconsecutividad.",
+    "properties": {
+     "facturas_espejo": {
+      "title": "Facturas Espejo",
+      "type": "integer"
+     },
+     "folio_actual": {
+      "title": "Folio Actual",
+      "type": "integer"
+     },
+     "folio_espejo_max": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Folio Espejo Max"
+     },
+     "serie": {
+      "title": "Serie",
+      "type": "string"
+     },
+     "sugerido": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sugerido"
+     }
+    },
+    "required": [
+     "serie",
+     "folio_actual",
+     "folio_espejo_max",
+     "sugerido",
+     "facturas_espejo"
+    ],
+    "title": "SerieFolioSugerido",
+    "type": "object"
+   },
    "SerieOut": {
     "properties": {
      "activa": {
@@ -17645,6 +17735,180 @@
      }
     ],
     "summary": "Estado Cuenta",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/estado-cuenta/{cliente_id}/enviar": {
+   "post": {
+    "description": "Manda el estado de cuenta en PDF por el SMTP del tenant.\n\nAl cortar un cliente de SAE deja de llegarle el estado de cuenta que hoy\nmanda Aspel; este endpoint es el reemplazo. Pide `_WRITE` (no `_READ`) como\nel resto de los envíos: usa el correo del negocio hacia afuera, y eso no es\nuna lectura.",
+    "operationId": "enviar_estado_cuenta_api_v1_cobranza_estado_cuenta__cliente_id__enviar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Fecha de corte (default hoy)",
+      "in": "query",
+      "name": "corte",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Fecha de corte (default hoy)",
+       "title": "Corte"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EnviarEstadoCuentaIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Enviar Estado Cuenta",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/estado-cuenta/{cliente_id}/pdf": {
+   "get": {
+    "description": "El estado de cuenta en PDF, listo para mandárselo al cliente.",
+    "operationId": "estado_cuenta_pdf_api_v1_cobranza_estado_cuenta__cliente_id__pdf_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Fecha de corte (default hoy)",
+      "in": "query",
+      "name": "corte",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Fecha de corte (default hoy)",
+       "title": "Corte"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Estado Cuenta Pdf",
     "tags": [
      "cobranza"
     ]
@@ -30973,6 +31237,71 @@
      }
     ],
     "summary": "Update Serie",
+    "tags": [
+     "series"
+    ]
+   }
+  },
+  "/api/v1/series/{serie_id}/folio-sugerido": {
+   "get": {
+    "description": "En qué folio dejar la serie al cortar un cliente de SAE.\n\nConvención del contador: `consumir_folio` incrementa ANTES de asignar\n(`UPDATE … folio_actual + 1 RETURNING`), así que `folio_actual` guarda el\nÚLTIMO folio emitido, no el siguiente. Para que el primer CFDI propio salga\njusto después del último que emitió SAE, `folio_actual` debe quedar EN ese\núltimo: por eso `sugerido` es el máximo de las espejo tal cual, SIN sumarle\nuno. Un +1 aquí saltaría un folio y el SAT vería un hueco en la serie.\n\nEl máximo sale de las facturas espejo (origen='ESPEJO_SAE'), que son los\nCFDI que SAE ya timbró con esta serie. Solo aplica a series de FACTURA: en\nuna de remisión o de pago el código podría coincidir con el de una serie\nfiscal y la sugerencia movería un contador que nada tiene que ver.",
+    "operationId": "folio_sugerido_api_v1_series__serie_id__folio_sugerido_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "serie_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Serie Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SerieFolioSugerido"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Folio Sugerido",
     "tags": [
      "series"
     ]

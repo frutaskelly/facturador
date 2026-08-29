@@ -15,7 +15,13 @@ from sqlalchemy.orm import Session
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import Factura, Remision, Serie
 from ...schemas.common import Page
-from ...schemas.serie import SerieCreate, SerieOut, SeriePairCreate, SerieUpdate
+from ...schemas.serie import (
+    SerieCreate,
+    SerieFolioSugerido,
+    SerieOut,
+    SeriePairCreate,
+    SerieUpdate,
+)
 from ...services.series import resolver_serie
 from ._helpers import flush_or_conflict, get_or_404, paginate
 
@@ -109,6 +115,50 @@ def get_serie(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     return get_or_404(db, Serie, serie_id, soft=False)
+
+
+@router.get("/{serie_id}/folio-sugerido", response_model=SerieFolioSugerido)
+def folio_sugerido(
+    serie_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """En qué folio dejar la serie al cortar un cliente de SAE.
+
+    Convención del contador: `consumir_folio` incrementa ANTES de asignar
+    (`UPDATE … folio_actual + 1 RETURNING`), así que `folio_actual` guarda el
+    ÚLTIMO folio emitido, no el siguiente. Para que el primer CFDI propio salga
+    justo después del último que emitió SAE, `folio_actual` debe quedar EN ese
+    último: por eso `sugerido` es el máximo de las espejo tal cual, SIN sumarle
+    uno. Un +1 aquí saltaría un folio y el SAT vería un hueco en la serie.
+
+    El máximo sale de las facturas espejo (origen='ESPEJO_SAE'), que son los
+    CFDI que SAE ya timbró con esta serie. Solo aplica a series de FACTURA: en
+    una de remisión o de pago el código podría coincidir con el de una serie
+    fiscal y la sugerencia movería un contador que nada tiene que ver.
+    """
+    serie = get_or_404(db, Serie, serie_id, soft=False)
+    espejo_max = None
+    espejo_n = 0
+    if serie.tipo_documento == "FACTURA":
+        # El espejo guarda la serie de SAE normalizada a mayúsculas (POST
+        # /facturas/espejo), así que el código de la serie se compara igual.
+        espejo_n, espejo_max = (
+            db.query(func.count(Factura.id), func.max(Factura.folio))
+            .filter(
+                Factura.origen == "ESPEJO_SAE",
+                Factura.serie == (serie.codigo or "").strip().upper(),
+                Factura.deleted_at.is_(None),
+            )
+            .one()
+        )
+    return SerieFolioSugerido(
+        serie=serie.codigo,
+        folio_actual=serie.folio_actual or 0,
+        folio_espejo_max=int(espejo_max) if espejo_max is not None else None,
+        sugerido=int(espejo_max) if espejo_max is not None else None,
+        facturas_espejo=espejo_n,
+    )
 
 
 @router.post("", response_model=SerieOut, status_code=status.HTTP_201_CREATED)

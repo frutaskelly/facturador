@@ -22,6 +22,8 @@ import { useToast } from "@/components/ui/Toast";
 import type { Categoria, EsquemaImpuesto, Producto } from "@/lib/types";
 
 const WRITE = "producto:gestionar";
+// Borrar un producto es un permiso aparte de gestionarlo (producto:eliminar).
+const DELETE = "producto:eliminar";
 
 // Unidades base más comunes (unidad interna de inventario).
 const UNIDADES_BASE = [
@@ -112,6 +114,7 @@ export default function ProductosPage() {
   const toast = useToast();
   const { post, patch, del, loading: saving } = useMutation();
   const canWrite = can(me, WRITE);
+  const canDelete = can(me, DELETE);
 
   const categoriasRes = useResource<Page<Categoria>>("/api/v1/categorias?limit=200");
   const categorias = categoriasRes.data?.items ?? [];
@@ -274,28 +277,32 @@ export default function ProductosPage() {
       header: "",
       className: "text-right w-1",
       cell: (p) =>
-        canWrite ? (
+        canWrite || canDelete ? (
           <div className="flex justify-end gap-1">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                openEdit(p);
-              }}
-              className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
-              aria-label="Editar"
-            >
-              <Pencil size={16} />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setToDelete(p);
-              }}
-              className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
-              aria-label="Eliminar"
-            >
-              <Trash2 size={16} />
-            </button>
+            {canWrite && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openEdit(p);
+                }}
+                className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
+                aria-label="Editar"
+              >
+                <Pencil size={16} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setToDelete(p);
+                }}
+                className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
+                aria-label="Eliminar"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
           </div>
         ) : null,
     },

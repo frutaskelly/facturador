@@ -48,15 +48,14 @@ def _bucket(dias_vencida: int) -> str:
     return "d90_mas"
 
 
-@router.get("/estado-cuenta/{cliente_id}")
-def estado_cuenta(
-    cliente_id: UUID,
-    corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
-    db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_READ)),
-):
-    """Estado de cuenta de un cliente: sus facturas PPD timbradas con saldo
-    pendiente + antigüedad de saldos por fecha de vencimiento."""
+def _armar_estado_cuenta(
+    db: Session, ctx: AuthContext, cliente_id: UUID, corte: date | None
+) -> dict:
+    """El cálculo del estado de cuenta, uno solo para el JSON, el PDF y el correo.
+
+    Incluye el candado por cliente: el 404 tiene que salir igual por las tres
+    puertas, o el portal se lleva por PDF lo que no puede ver por JSON.
+    """
     if not ctx.cliente_permitido(cliente_id):
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     cliente = get_or_404(db, Cliente, cliente_id)
@@ -109,6 +108,146 @@ def estado_cuenta(
         "antiguedad": antiguedad,
         "facturas": docs,
     }
+
+
+@router.get("/estado-cuenta/{cliente_id}")
+def estado_cuenta(
+    cliente_id: UUID,
+    corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Estado de cuenta de un cliente: sus facturas PPD timbradas con saldo
+    pendiente + antigüedad de saldos por fecha de vencimiento."""
+    return _armar_estado_cuenta(db, ctx, cliente_id, corte)
+
+
+_ANTIGUEDAD_ETIQUETAS = (
+    ("por_vencer", "Por vencer"), ("d1_30", "1 a 30"), ("d31_60", "31 a 60"),
+    ("d61_90", "61 a 90"), ("d90_mas", "Más de 90"),
+)
+
+
+def _estado_cuenta_pdf(tenant, datos: dict) -> bytes:
+    """El estado de cuenta con el membrete del negocio (layout de reportes)."""
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, Spacer
+
+    from ...services.reporte_pdf import construir, membrete, tabla_reporte
+
+    def _pesos(v) -> str:
+        return f"${Decimal(v or 0):,.2f}"
+
+    filas = [
+        [f"{d['serie']}{d['folio']}", f"{d['fecha']:%d/%m/%Y}", f"{d['vencimiento']:%d/%m/%Y}",
+         _pesos(d["total"]), _pesos(d["saldo_insoluto"])]
+        for d in datos["facturas"]
+    ]
+    totales = [["", "", "", "Saldo total", _pesos(datos["saldo_total"])]]
+    dias = datos["dias_credito"]
+    partes = membrete(
+        tenant, "Estado de cuenta",
+        f"{datos['cliente_nombre']} · al {datos['corte']:%d/%m/%Y} · "
+        f"{dias} días de crédito",
+    )
+    partes.append(tabla_reporte(
+        ["Factura", "Fecha", "Vence", "Total", "Saldo"],
+        filas + totales,
+        [46 * mm, 30 * mm, 30 * mm, 38 * mm, 38 * mm],
+        num_cols=(3, 4), filas_totales=len(totales),
+    ))
+    partes.append(Spacer(1, 8 * mm))
+    partes.append(Paragraph("Antigüedad de saldos", getSampleStyleSheet()["Heading4"]))
+    antiguedad = datos["antiguedad"]
+    partes.append(tabla_reporte(
+        [etiqueta for _clave, etiqueta in _ANTIGUEDAD_ETIQUETAS],
+        [[_pesos(antiguedad[clave]) for clave, _etiqueta in _ANTIGUEDAD_ETIQUETAS]],
+        [36.4 * mm] * 5, num_cols=(0, 1, 2, 3, 4),
+    ))
+    return construir("Estado de cuenta", partes)
+
+
+def _nombre_estado_cuenta(datos: dict) -> str:
+    """Nombra el archivo por la fecha de corte y no por el cliente: el nombre
+    viaja en el header Content-Disposition, y un acento ahí (media razón social
+    mexicana los trae) lo rompe en el navegador."""
+    return f"estado-cuenta-{datos['corte']:%Y%m%d}"
+
+
+@router.get("/estado-cuenta/{cliente_id}/pdf")
+def estado_cuenta_pdf(
+    cliente_id: UUID,
+    corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """El estado de cuenta en PDF, listo para mandárselo al cliente."""
+    from fastapi import Response
+
+    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte)
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    pdf = _estado_cuenta_pdf(tenant, datos)
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{_nombre_estado_cuenta(datos)}.pdf"'},
+    )
+
+
+class EnviarEstadoCuentaIn(BaseModel):
+    to: list[str] = Field(min_length=1, max_length=20)
+    asunto: Optional[str] = Field(default=None, max_length=200)
+    mensaje: Optional[str] = Field(default=None, max_length=2000)
+
+
+@router.post("/estado-cuenta/{cliente_id}/enviar")
+def enviar_estado_cuenta(
+    cliente_id: UUID,
+    payload: EnviarEstadoCuentaIn,
+    corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Manda el estado de cuenta en PDF por el SMTP del tenant.
+
+    Al cortar un cliente de SAE deja de llegarle el estado de cuenta que hoy
+    manda Aspel; este endpoint es el reemplazo. Pide `_WRITE` (no `_READ`) como
+    el resto de los envíos: usa el correo del negocio hacia afuera, y eso no es
+    una lectura.
+    """
+    import html as html_mod
+
+    from ...services import email as email_service
+    from .remisiones import _validar_destinatarios
+
+    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte)
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    if not email_service.configured(tenant):
+        raise HTTPException(status_code=503, detail="Configura una cuenta de correo en Ajustes › Correo")
+    destinatarios = _validar_destinatarios(payload.to)
+
+    pdf = _estado_cuenta_pdf(tenant, datos)
+    nombre = _nombre_estado_cuenta(datos)
+    asunto = (payload.asunto or "").strip() or f"Estado de cuenta al {datos['corte']:%d/%m/%Y}"
+    # html.escape en todo dato dinámico: sin esto un mensaje o un nombre de
+    # cliente con HTML se inyecta tal cual en el correo saliente.
+    mensaje_html = f"<p>{html_mod.escape(payload.mensaje)}</p>" if payload.mensaje else ""
+    n = len(datos["facturas"])
+    html = (
+        f"{mensaje_html}"
+        f"<p>Adjunto el estado de cuenta de <strong>{html_mod.escape(datos['cliente_nombre'] or '')}</strong>"
+        f" al {datos['corte']:%d/%m/%Y}.</p>"
+        f"<p>Saldo total: <strong>${Decimal(datos['saldo_total']):,.2f}</strong>"
+        f" en {n} {'factura' if n == 1 else 'facturas'} por cobrar.</p>"
+    )
+    try:
+        email_service.send_email(
+            email_service.smtp_config(tenant), destinatarios, asunto, html,
+            attachments=[(f"{nombre}.pdf", pdf, "application/pdf")],
+        )
+    except Exception as exc:  # noqa: BLE001 — el motivo del SMTP se muestra tal cual
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "to": ", ".join(destinatarios)}
 
 
 # ─── Recibos de Pago (REP) — registrar + timbrar ─────────────────────────────

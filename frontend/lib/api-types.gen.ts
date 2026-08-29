@@ -358,6 +358,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cobranza/estado-cuenta/{cliente_id}/enviar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enviar Estado Cuenta
+         * @description Manda el estado de cuenta en PDF por el SMTP del tenant.
+         *
+         *     Al cortar un cliente de SAE deja de llegarle el estado de cuenta que hoy
+         *     manda Aspel; este endpoint es el reemplazo. Pide `_WRITE` (no `_READ`) como
+         *     el resto de los envíos: usa el correo del negocio hacia afuera, y eso no es
+         *     una lectura.
+         */
+        post: operations["enviar_estado_cuenta_api_v1_cobranza_estado_cuenta__cliente_id__enviar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/estado-cuenta/{cliente_id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estado Cuenta Pdf
+         * @description El estado de cuenta en PDF, listo para mandárselo al cliente.
+         */
+        get: operations["estado_cuenta_pdf_api_v1_cobranza_estado_cuenta__cliente_id__pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cobranza/recibos-pago": {
         parameters: {
             query?: never;
@@ -3236,6 +3281,38 @@ export interface paths {
         patch: operations["update_serie_api_v1_series__serie_id__patch"];
         trace?: never;
     };
+    "/api/v1/series/{serie_id}/folio-sugerido": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Folio Sugerido
+         * @description En qué folio dejar la serie al cortar un cliente de SAE.
+         *
+         *     Convención del contador: `consumir_folio` incrementa ANTES de asignar
+         *     (`UPDATE … folio_actual + 1 RETURNING`), así que `folio_actual` guarda el
+         *     ÚLTIMO folio emitido, no el siguiente. Para que el primer CFDI propio salga
+         *     justo después del último que emitió SAE, `folio_actual` debe quedar EN ese
+         *     último: por eso `sugerido` es el máximo de las espejo tal cual, SIN sumarle
+         *     uno. Un +1 aquí saltaría un folio y el SAT vería un hueco en la serie.
+         *
+         *     El máximo sale de las facturas espejo (origen='ESPEJO_SAE'), que son los
+         *     CFDI que SAE ya timbró con esta serie. Solo aplica a series de FACTURA: en
+         *     una de remisión o de pago el código podría coincidir con el de una serie
+         *     fiscal y la sugerencia movería un contador que nada tiene que ver.
+         */
+        get: operations["folio_sugerido_api_v1_series__serie_id__folio_sugerido_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sucursales": {
         parameters: {
             query?: never;
@@ -4711,6 +4788,15 @@ export interface components {
             regimen_fiscal_sat: string;
             /** Rfc */
             rfc: string;
+        };
+        /** EnviarEstadoCuentaIn */
+        EnviarEstadoCuentaIn: {
+            /** Asunto */
+            asunto?: string | null;
+            /** Mensaje */
+            mensaje?: string | null;
+            /** To */
+            to: string[];
         };
         /** EnviarFacturaIn */
         EnviarFacturaIn: {
@@ -8260,6 +8346,26 @@ export interface components {
             /** Vigencia Hasta */
             vigencia_hasta?: string | null;
         };
+        /**
+         * SerieFolioSugerido
+         * @description En qué folio dejar la serie al cortar un cliente de SAE.
+         *
+         *     `sugerido` es None cuando la serie no tiene facturas espejo: no hay dato de
+         *     SAE con el cual proponer nada y mover el contador a ciegas rompería la
+         *     consecutividad.
+         */
+        SerieFolioSugerido: {
+            /** Facturas Espejo */
+            facturas_espejo: number;
+            /** Folio Actual */
+            folio_actual: number;
+            /** Folio Espejo Max */
+            folio_espejo_max: number | null;
+            /** Serie */
+            serie: string;
+            /** Sugerido */
+            sugerido: number | null;
+        };
         /** SerieOut */
         SerieOut: {
             /**
@@ -9638,6 +9744,82 @@ export interface operations {
         };
     };
     estado_cuenta_api_v1_cobranza_estado_cuenta__cliente_id__get: {
+        parameters: {
+            query?: {
+                /** @description Fecha de corte (default hoy) */
+                corte?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                cliente_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enviar_estado_cuenta_api_v1_cobranza_estado_cuenta__cliente_id__enviar_post: {
+        parameters: {
+            query?: {
+                /** @description Fecha de corte (default hoy) */
+                corte?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                cliente_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnviarEstadoCuentaIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    estado_cuenta_pdf_api_v1_cobranza_estado_cuenta__cliente_id__pdf_get: {
         parameters: {
             query?: {
                 /** @description Fecha de corte (default hoy) */
@@ -16093,6 +16275,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SerieOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    folio_sugerido_api_v1_series__serie_id__folio_sugerido_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                serie_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SerieFolioSugerido"];
                 };
             };
             /** @description Validation Error */

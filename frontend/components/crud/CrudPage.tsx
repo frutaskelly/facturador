@@ -22,13 +22,19 @@ export type CrudField = {
   label: string;
   type?: "text" | "number" | "decimal" | "textarea" | "switch" | "select";
   required?: boolean;
-  hint?: string;
+  /** Ayuda bajo el campo. Como función se recalcula con el formulario, para
+   *  interruptores en los que cada posición significa algo distinto y hay que
+   *  decir cuál está puesta. */
+  hint?: string | ((form: FormValues) => string);
   step?: string;
   placeholder?: string;
   options?: { value: string; label: string }[];
   colSpan?: 1 | 2;
   /** Campo no editable (se muestra deshabilitado). */
   readOnly?: boolean;
+  /** Solo aparece al EDITAR: el alta no lo acepta (el backend lo fija él
+   *  mismo), así que ofrecerlo al crear prometería un valor que no se guarda. */
+  editOnly?: boolean;
   /** Alias de `readOnly`: campo no editable (lo rellena el servidor). */
   readonly?: boolean;
   /** Valor derivado de otros campos; se recalcula al cambiar el formulario. */
@@ -53,6 +59,13 @@ export type CrudField = {
    * no pasa el dígito verificador) nunca llega a la base ni al timbrado.
    */
   validate?: (value: string, form: FormValues) => string | null;
+  /**
+   * Interruptor cuyo APAGADO habilita una operación real y en la práctica no se
+   * deshace (p. ej. sacar a un cliente del espejo de SAE: a partir de ahí se le
+   * timbra desde aquí). Se pregunta antes de apagarlo; encenderlo vuelve al
+   * estado seguro y no pregunta nada.
+   */
+  confirmOff?: { title: string; message: string; confirmLabel?: string };
   /**
    * Permite CREAR el catálogo desde el propio select, sin salir del formulario
    * (menos pasos: dar de alta un cliente ya no obliga a ir antes a Series o a
@@ -87,6 +100,10 @@ export type CrudConfig<T> = {
   newLabel?: string;
   basePath: string;
   writePerm: string;
+  /** Permiso del botón de ELIMINAR cuando el backend lo tiene separado del de
+   *  gestionar (`<recurso>:eliminar`). Sin él se cae en `writePerm`, así que
+   *  una pantalla cuyo DELETE no esté separado no necesita tocarse. */
+  deletePerm?: string;
   searchable?: boolean;
   deletable?: boolean;
   columns: Column<T>[];
@@ -134,6 +151,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
   const toast = useToast();
   const { post, patch, del, loading: saving } = useMutation();
   const canWrite = can(me, config.writePerm);
+  const canDelete = can(me, config.deletePerm ?? config.writePerm);
 
   const [q, setQ] = useState("");
   const [dq, setDq] = useState("");
@@ -178,6 +196,10 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
   const [form, setForm] = useState<FormValues | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<T | null>(null);
+  const [switchAApagar, setSwitchAApagar] = useState<CrudField | null>(null);
+  // Campos del formulario abierto: al crear se quedan fuera los `editOnly`, y
+  // por eso tampoco se les exige nada al guardar.
+  const campos = config.fields.filter((f) => editingId || !f.editOnly);
 
   // Lookups de los selects del formulario: se cargan la primera vez que se abre
   // el formulario, no al montar la página (ahorra peticiones en la carga inicial).
@@ -230,6 +252,16 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
     setEditingId(row.id);
     setForm(config.toForm(row));
   }
+  // Interruptor con `confirmOff`: apagarlo es la acción grave, así que pasa por
+  // el diálogo; encenderlo no.
+  function cambiarSwitch(f: CrudField, valor: boolean) {
+    if (!valor && f.confirmOff) {
+      setSwitchAApagar(f);
+      return;
+    }
+    setField(f.name, valor);
+  }
+
   function setField(name: string, value: string | boolean) {
     setForm((f) => {
       if (!f) return f;
@@ -243,7 +275,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
 
   async function save() {
     if (!form) return;
-    for (const f of config.fields) {
+    for (const f of campos) {
       const isReadonly = f.readonly || f.readOnly;
       const v = form[f.name];
       if (f.required && !isReadonly && typeof v === "string" && !v.trim()) {
@@ -317,7 +349,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
             {l.icon}
           </Link>
         ))}
-        {canWrite && config.deletable !== false && (
+        {canDelete && config.deletable !== false && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -334,7 +366,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
     ),
   };
   const columns =
-    canWrite || config.rowLinks ? [...config.columns, actionsCol] : config.columns;
+    canWrite || canDelete || config.rowLinks ? [...config.columns, actionsCol] : config.columns;
 
   const from = total === 0 ? 0 : page * LIMIT + 1;
   const to = Math.min((page + 1) * LIMIT, total);
@@ -401,15 +433,19 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
       >
         {form && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {config.fields.map((f) => {
+            {campos.map((f) => {
               const val = form[f.name];
               const opts = f.options ?? lookupOpts[f.name] ?? [];
               const cls = f.colSpan === 2 ? "sm:col-span-2" : "";
+              const hint = typeof f.hint === "function" ? f.hint(form) : f.hint;
               if (f.type === "switch") {
                 return (
-                  <div key={f.name} className={`flex items-center gap-3 pt-6 ${cls}`}>
-                    <Switch checked={Boolean(val)} onChange={(v) => setField(f.name, v)} />
-                    <span className="text-sm">{f.label}</span>
+                  <div key={f.name} className={`pt-6 ${cls}`}>
+                    <div className="flex items-center gap-3">
+                      <Switch checked={Boolean(val)} onChange={(v) => cambiarSwitch(f, v)} />
+                      <span className="text-sm">{f.label}</span>
+                    </div>
+                    {hint && <span className="mt-1 block text-xs text-muted">{hint}</span>}
                   </div>
                 );
               }
@@ -417,7 +453,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
               const errorCampo = f.validate ? f.validate(String(val ?? ""), form) : null;
               return (
                 <div key={f.name} className={cls}>
-                  <Field label={f.label} required={f.required} hint={f.hint}>
+                  <Field label={f.label} required={f.required} hint={hint}>
                     {f.type === "textarea" ? (
                       <Textarea rows={2} value={String(val ?? "")} onChange={(e) => setField(f.name, e.target.value)} />
                     ) : f.type === "select" ? (
@@ -507,6 +543,20 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
             setSugerenciasOpen(false);
             reload();
           }}
+        />
+      )}
+
+      {switchAApagar?.confirmOff && (
+        <ConfirmDialog
+          open
+          title={switchAApagar.confirmOff.title}
+          message={switchAApagar.confirmOff.message}
+          confirmLabel={switchAApagar.confirmOff.confirmLabel ?? "Apagar"}
+          onConfirm={() => {
+            setField(switchAApagar.name, false);
+            setSwitchAApagar(null);
+          }}
+          onClose={() => setSwitchAApagar(null)}
         />
       )}
 
