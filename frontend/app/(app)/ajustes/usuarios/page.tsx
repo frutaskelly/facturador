@@ -38,6 +38,8 @@ export default function UsuariosPage() {
   const { me } = useAuth();
   const toast = useToast();
   const canWrite = can(me, WRITE);
+  // Remover una membresía es un permiso aparte de gestionar (membership:eliminar).
+  const canDelete = can(me, "membership:eliminar");
   const { post, patch, put, del } = useMutation();
 
   const membersRes = useResource<Membership[]>("/api/v1/memberships");
@@ -333,14 +335,16 @@ export default function UsuariosPage() {
                 >
                   <KeyRound size={16} />
                 </button>
-                <button
-                  onClick={() => setToRemove(m)}
-                  disabled={busyId === m.id}
-                  className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
-                  aria-label="Remover"
-                >
-                  <Trash2 size={16} />
-                </button>
+                {canDelete && (
+                  <button
+                    onClick={() => setToRemove(m)}
+                    disabled={busyId === m.id}
+                    className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
+                    aria-label="Remover"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
               </>
             )}
           </div>

@@ -92,16 +92,26 @@ export default function SucursalesPage() {
 
   async function loadDetalle(clienteId: string) {
     setDetalle((d) => ({ ...d, [clienteId]: { sucursales: d[clienteId]?.sucursales ?? [], overrides: d[clienteId]?.overrides ?? [], loading: true } }));
+    // Cargas SEPARADAS: un 403 en overrides (usuario sin menú de precios, p. ej.
+    // portal con solo menu:clientes) no debe tirar también las sucursales.
+    let sucursales: Sucursal[] = [];
     try {
-      const [sucs, ovrs] = await Promise.all([
-        apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${clienteId}&limit=200`),
-        apiFetch<Page<PrecioOverride>>(`/api/v1/precios/overrides?cliente_id=${clienteId}&limit=200`),
-      ]);
-      setDetalle((d) => ({ ...d, [clienteId]: { sucursales: sucs.items, overrides: ovrs.items, loading: false } }));
+      sucursales = (await apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${clienteId}&limit=200`)).items;
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo cargar el detalle del cliente");
       setDetalle((d) => ({ ...d, [clienteId]: { sucursales: [], overrides: [], loading: false } }));
+      return;
     }
+    let overrides: PrecioOverride[] = [];
+    if (can(me, "menu:listas_precios")) {
+      try {
+        overrides = (await apiFetch<Page<PrecioOverride>>(`/api/v1/precios/overrides?cliente_id=${clienteId}&limit=200`)).items;
+      } catch {
+        // Sin overrides se muestra el resto igual; no vale un toast que asuste.
+        overrides = [];
+      }
+    }
+    setDetalle((d) => ({ ...d, [clienteId]: { sucursales, overrides, loading: false } }));
   }
 
   function reloadDetalle(clienteId: string) {

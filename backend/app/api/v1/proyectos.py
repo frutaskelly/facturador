@@ -71,7 +71,13 @@ def list_proyectos(
 ):
     query = db.query(Proyecto).filter(Proyecto.deleted_at.is_(None))
     if ctx.cliente_scope:
-        query = query.filter(Proyecto.cliente_id.in_(ctx.cliente_scope))
+        # Los del candado + los del GRUPO (sin dueño), que aplican a cualquier
+        # cliente — el cotizador los espera igual que el filtro por cliente.
+        from sqlalchemy import or_ as _or
+        query = query.filter(_or(
+            Proyecto.cliente_id.in_(ctx.cliente_scope),
+            Proyecto.cliente_id.is_(None),
+        ))
     if cliente_id is not None:
         # Los proyectos del grupo (sin dueño) aplican a cualquier cliente, así
         # que también salen al filtrar por uno.
@@ -92,7 +98,7 @@ def get_proyecto(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     obj = get_or_404(db, Proyecto, proyecto_id)
-    if not ctx.cliente_permitido(obj.cliente_id):
+    if obj.cliente_id is not None and not ctx.cliente_permitido(obj.cliente_id):
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return obj
 

@@ -51,6 +51,7 @@ _PORTAL_PERMS = ("menu:cotizador", "menu:clientes", "menu:remisiones", "menu:fac
 
 def upgrade() -> None:
     op.add_column("remisiones", sa.Column("export_sae_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column("remisiones", sa.Column("export_sae_folio", sa.String(30), nullable=True))
     op.add_column(
         "memberships",
         sa.Column("cliente_scope", postgresql.ARRAY(postgresql.UUID(as_uuid=True)), nullable=True),
@@ -142,4 +143,5 @@ def downgrade() -> None:
     op.get_bind().exec_driver_sql(f"DELETE FROM role_permissions WHERE permission_id IN ({lista})")
     op.get_bind().exec_driver_sql(f"DELETE FROM permissions WHERE id IN ({lista})")
     op.drop_column("memberships", "cliente_scope")
+    op.drop_column("remisiones", "export_sae_folio")
     op.drop_column("remisiones", "export_sae_at")

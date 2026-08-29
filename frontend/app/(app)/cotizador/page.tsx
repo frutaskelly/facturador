@@ -177,7 +177,9 @@ function CotizableCombobox({
             e.preventDefault();
             setHi((h) => Math.max(h - 1, 0));
           } else if (e.key === "Enter") {
-            if (items[hi]) {
+            // Con búsqueda en vuelo, items es de la consulta ANTERIOR: elegir
+            // con Enter tomaría un producto que no corresponde a lo tecleado.
+            if (!loading && items[hi]) {
               e.preventDefault();
               pick(items[hi]);
             }
@@ -289,7 +291,12 @@ export default function CotizadorPage() {
           setListas(l.listas);
         }
       } catch (e) {
-        if (active) toast.error(e instanceof ApiError ? e.message : "No se pudo cargar el cliente");
+        if (active) {
+          toast.error(e instanceof ApiError ? e.message : "No se pudo cargar el cliente");
+          // null significa "cargando": si se quedara así, la pestaña de listas
+          // enseñaría un spinner eterno tras el error.
+          setListas([]);
+        }
       }
     })();
     return () => {

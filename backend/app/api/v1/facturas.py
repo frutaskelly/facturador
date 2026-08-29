@@ -887,6 +887,7 @@ def factura_espejo(
                 if otra is not None and otra.origen != "ESPEJO_SAE" and otra.estado != "CANCELADA":
                     continue
             rem.factura_id = factura.id
+            rem.export_sae_folio = None   # propuesta consumida: manda la marca
             if rem.estado in ("BORRADOR", "RESERVADO", "CONFIRMADA"):
                 rem.estado = "FACTURADA"
         else:
@@ -896,6 +897,7 @@ def factura_espejo(
             # efecto en inventario" y reconfirmarla descontaría DOS veces.
             rem.factura_sae = None
             rem.export_sae_at = None   # que el próximo export no avise en falso
+            rem.export_sae_folio = None
             if rem.factura_id == factura.id:
                 con_stock = any(ln.lote_id for ln in rem.lineas)
                 if rem.estado == "FACTURADA":

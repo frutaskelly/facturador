@@ -56,6 +56,7 @@ def env(db_engine):
 
         cli = Cliente(tenant_id=t.id, codigo="CL1", legal_name="OPERADORA BALLES",
                       rfc="OBV191007BS1", serie_factura_id=serie_f.id,
+                      espejo_sae=True,   # el export FACTURA lo exige (29-ago)
                       serie_remision_id=serie_r.id, metodo_pago_default="PPD",
                       forma_pago_default="99", uso_cfdi_default="G01")
         prod = Producto(tenant_id=t.id, sku="00000001", nombre="ACEITE 20 LT",
@@ -357,3 +358,37 @@ def test_empresa_sae_se_decide_por_sucursal(client, env, auth_as):
                      json={"ids": [rem_02["id"], rem_03["id"]], "tipo": "PEDIDO"}).json()
     assert pv["ok"] is False
     assert any("mezcla empresas" in e for e in pv["errores"])
+
+
+def test_folio_sugerido_continua_tras_un_export_sin_confirmar(client, env, auth_as):
+    """Dos lotes seguidos NO deben proponer el mismo rango: el folio PROPUESTO
+    por un export reciente (aún sin factura confirmada) alimenta el sugerido
+    del siguiente — sin estampar nada como factura."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem1 = _rem(client, h, env)
+    client.post("/api/v1/remisiones/export-sae", headers=h,
+                json={"ids": [rem1["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 500}})
+    det = client.get(f"/api/v1/remisiones/{rem1['id']}", headers=h).json()
+    assert det["factura_sae"] is None            # sigue sin factura
+    rem2 = _rem(client, h, env, su_pedido="24990")
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem2["id"]], "tipo": "FACTURA"}).json()
+    assert pv["series"][0]["folio_sugerido"] == 501
+
+
+def test_export_factura_exige_cliente_en_espejo(client, env, auth_as):
+    from app.models import Cliente as _C
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem = _rem(client, h, env)
+    db = SessionLocal()
+    try:
+        db.query(_C).filter(_C.id == env["cli"]).update({"espejo_sae": False})
+        db.commit()
+        pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                         json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
+        assert pv["ok"] is False
+        assert any("espejo SAE" in e for e in pv["errores"])
+    finally:
+        db.query(_C).filter(_C.id == env["cli"]).update({"espejo_sae": True})
+        db.commit(); db.close()

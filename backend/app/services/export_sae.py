@@ -286,19 +286,22 @@ def preparar(
             db.query(Cliente).filter(Cliente.id == rem.cliente_facturacion_id).one(),
             "espejo_sae", False,
         ):
-            # Sin espejo, la factura de SAE nunca regresará a estampar la
-            # remisión: quedaría exportada e invoiceable nativa a la vez.
-            res.avisos.append(
-                f"{rem.folio_interno}: {nombre_cli} no está en espejo SAE — activa "
-                "clientes.espejo_sae para que su factura se refleje y ampare la remisión"
+            # Sin espejo, la factura de SAE JAMÁS regresará a amparar la
+            # remisión: quedaría exportada y facturable nativa a la vez (dos
+            # CFDI). Se activa el candado del cliente y se re-exporta.
+            res.errores.append(
+                f"{rem.folio_interno}: {nombre_cli} no está en espejo SAE — actívalo en "
+                "Clientes para que su factura se refleje y ampare la remisión"
             )
+            continue
         if tipo == "FACTURA" and rem.export_sae_at is not None:
             # No bloquea: el archivo anterior pudo no subirse nunca (caso real).
             # Pero si SÍ se importó, re-exportar duplica — el operador decide.
+            propuesto = f" (folio propuesto {rem.export_sae_folio})" if rem.export_sae_folio else ""
             res.avisos.append(
                 f"{rem.folio_interno}: ya salió en un archivo el "
-                f"{rem.export_sae_at:%d-%b %H:%M} y el espejo aún no confirma su factura "
-                "— si aquel archivo SÍ se importó en SAE, no la re-exportes"
+                f"{rem.export_sae_at:%d-%b %H:%M}{propuesto} y el espejo aún no confirma "
+                "su factura — si aquel archivo SÍ se importó en SAE, no la re-exportes"
             )
         pares = claves.get(rem.cliente_facturacion_id) or []
         if not pares:
@@ -375,13 +378,29 @@ def preparar(
 
 
 def _folio_sugerido(db: Session, tenant_id: UUID, serie: str) -> Optional[int]:
-    """max(folio conocido de esa serie) + 1, leyendo AMBAS fuentes del espejo:
-    remisiones.factura_sae ('ZHGO 331') y facturas espejo (serie/folio). Es un
-    PRELLENADO: el operador confirma contra SAE (regla D1 del plan) — un folio
-    adelantado o repetido hace fallar el import."""
-    from ..models import Factura  # import local: evita ciclo en el arranque
+    """max(folio conocido de esa serie) + 1. Lee lo CONFIRMADO (marcas
+    factura_sae y facturas) y además los folios PROPUESTOS por exports de los
+    últimos 7 días aún sin confirmar — dos lotes seguidos no proponen el mismo
+    rango. Es un PRELLENADO: el operador confirma contra SAE (regla D1)."""
+    from datetime import datetime, timedelta, timezone
 
-    folios = _folios_ocupados(db, tenant_id, serie)
+    folios = set(_folios_ocupados(db, tenant_id, serie))
+    corte = datetime.now(timezone.utc) - timedelta(days=7)
+    filas = (
+        db.query(Remision.export_sae_folio)
+        .filter(
+            Remision.tenant_id == tenant_id,
+            Remision.export_sae_folio.isnot(None),
+            Remision.export_sae_at >= corte,
+            Remision.factura_sae.is_(None),
+            Remision.deleted_at.is_(None),
+        )
+        .all()
+    )
+    for (fs,) in filas:
+        marca = parsear_marca(fs or "")
+        if marca and marca[0] == serie:
+            folios.add(marca[1])
     return max(folios) + 1 if folios else None
 
 
@@ -523,9 +542,11 @@ def generar(
             fila += 1
 
         if tipo == "FACTURA":
-            # Solo el RASTRO del export (para el aviso de doble export). El folio
-            # NO se estampa: factura_sae lo pone el espejo cuando SAE confirma.
+            # Solo el RASTRO del export (aviso de doble export y continuidad del
+            # folio sugerido). El folio NO se estampa como factura: factura_sae
+            # lo pone el espejo cuando SAE confirma.
             rem.export_sae_at = datetime.now(timezone.utc)
+            rem.export_sae_folio = f"{doc.serie} {doc.folio}"
 
     buf = io.BytesIO()
     libro.save(buf)

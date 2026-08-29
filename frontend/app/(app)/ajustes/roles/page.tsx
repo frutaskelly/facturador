@@ -129,6 +129,8 @@ export default function RolesPage() {
   const { me } = useAuth();
   const toast = useToast();
   const canWrite = can(me, WRITE);
+  // Borrar rol es un permiso aparte de gestionar (role:eliminar).
+  const canDelete = can(me, "role:eliminar");
   const { post, patch, del, loading: saving } = useMutation();
 
   const rolesRes = useResource<Role[]>("/api/v1/roles");
@@ -196,6 +198,9 @@ export default function RolesPage() {
       setSelected(new Set(detail.permissions));
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo cargar el rol");
+      // Sin el detalle, el modal quedaría editable con la matriz VACÍA y
+      // guardar borraría todos los permisos del rol: mejor cerrarlo.
+      setOpen(false);
     } finally {
       setLoadingDetail(false);
     }
@@ -296,7 +301,7 @@ export default function RolesPage() {
           >
             {r.es_preset || !canWrite ? <Eye size={16} /> : <Pencil size={16} />}
           </button>
-          {canWrite && !r.es_preset && (
+          {canDelete && !r.es_preset && (
             <button
               onClick={(e) => {
                 e.stopPropagation();

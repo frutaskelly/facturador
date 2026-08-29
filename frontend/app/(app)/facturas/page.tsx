@@ -36,6 +36,10 @@ export default function FacturasPage() {
   const { me } = useAuth();
   const toast = useToast();
   const canWrite = can(me, WRITE);
+  // Permisos destructivos separados de gestionar: cancelar toca al SAT y
+  // eliminar borra borradores; no todo rol que captura puede hacerlos.
+  const canCancelar = can(me, "factura:cancelar");
+  const canEliminar = can(me, "factura:eliminar");
 
   // Deep-link desde Remisiones (?ver=<factura_id>): abre esa factura con su
   // slide-down. Se lee de window (client-only) para no forzar Suspense.
@@ -70,7 +74,11 @@ export default function FacturasPage() {
     return [c.id, arr.join(", ")];
   })), [clientes]);
 
-  const seriesFacRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
+  // Un usuario de portal (sin menu:series) no puede listar series: pedirlas
+  // sería un 403 seguro; null = no pedir y trabajar con lista vacía.
+  const seriesFacRes = useResource<Page<Serie>>(
+    can(me, "menu:series") ? "/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200" : null,
+  );
   const seriesFac = seriesFacRes.data?.items ?? [];
 
   const { data, loading, error, reload } = useResource<Page<Factura>>("/api/v1/facturas?limit=50");
@@ -545,14 +553,15 @@ export default function FacturasPage() {
       onClick: (f) => abrirEnviar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
     // Las ESPEJO_SAE se cancelan/refacturan EN SAE (el backend lo rechaza con
     // 409); esconder los botones evita ofrecer algo que va a rebotar.
+    // Sustituir implica cancelar la original ante el SAT: mismo permiso.
     { id: "sustituir", label: "Sustituir (refacturar)", icon: <Replace size={15} />,
       onClick: (f) => abrirSustituir(f),
-      hidden: (f) => !(canWrite && f.estado === "TIMBRADA" && f.origen !== "ESPEJO_SAE") },
+      hidden: (f) => !(canCancelar && f.estado === "TIMBRADA" && f.origen !== "ESPEJO_SAE") },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
       onClick: (f) => abrirCancelar(f),
-      hidden: (f) => !(canWrite && f.estado === "TIMBRADA" && f.origen !== "ESPEJO_SAE") },
+      hidden: (f) => !(canCancelar && f.estado === "TIMBRADA" && f.origen !== "ESPEJO_SAE") },
     { id: "descartar", label: "Descartar borrador", icon: <Trash2 size={15} />, tone: "danger",
-      onClick: (f) => setToDescartar(f), hidden: (f) => !(canWrite && f.estado === "BORRADOR") },
+      onClick: (f) => setToDescartar(f), hidden: (f) => !(canEliminar && f.estado === "BORRADOR") },
   ];
 
   // ───────────────────────── render ─────────────────────────
@@ -603,7 +612,7 @@ export default function FacturasPage() {
                 <Stamp size={16} /> Timbrar ({borradoresSel.length})
               </Button>
             )}
-            {canWrite && timbradasSel.length > 0 && (
+            {canCancelar && timbradasSel.length > 0 && (
               <Button variant="danger" onClick={abrirCancelBulk} disabled={bulkBusy}>
                 <X size={16} /> Cancelar ({timbradasSel.length})
               </Button>

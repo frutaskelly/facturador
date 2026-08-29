@@ -72,8 +72,14 @@ export default function RemisionesPage() {
 
   // catálogos
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=200");
-  const almacenesRes = useResource<Page<Almacen>>("/api/v1/almacenes?limit=200");
-  const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=1000");
+  // Un usuario de portal (solo sus clientes) no tiene estos menús: pedir los
+  // catálogos daría 403 seguro; null = no pedir y trabajar con listas vacías.
+  const almacenesRes = useResource<Page<Almacen>>(
+    can(me, "menu:inventario") ? "/api/v1/almacenes?limit=200" : null,
+  );
+  const productosRes = useResource<Page<Producto>>(
+    can(me, "menu:productos") ? "/api/v1/productos?limit=1000" : null,
+  );
   const clientes = clientesRes.data?.items ?? [];
   const almacenes = almacenesRes.data?.items ?? [];
   const productos = productosRes.data?.items ?? [];
@@ -133,8 +139,11 @@ export default function RemisionesPage() {
   // paso del flujo por teclado: cuál caja se auto-abre/enfoca
   const [step, setStep] = useState<"cliente" | "sucursal" | "almacen" | "serie" | "lineas" | null>(null);
 
-  // series de remisión (para override) + preview de la serie que aplicaría
-  const seriesRemRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=REMISION&activa=true&limit=200");
+  // series de remisión (para override) + preview de la serie que aplicaría.
+  // Sin menu:series (portal) no se piden: sería un 403 seguro.
+  const seriesRemRes = useResource<Page<Serie>>(
+    can(me, "menu:series") ? "/api/v1/series?tipo_documento=REMISION&activa=true&limit=200" : null,
+  );
   const seriesRem = seriesRemRes.data?.items ?? [];
   const [serieResuelta, setSerieResuelta] = useState<Serie | null>(null);
   useEffect(() => {
