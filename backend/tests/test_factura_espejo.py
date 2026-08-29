@@ -71,7 +71,8 @@ def env(db_engine):
         db.add(ProductoCliente(tenant_id=t.id, cliente_id=cli.id, producto_id=prod.id,
                                codigo_cliente="ACEI-ACEI-639"))
         db.commit()
-        yield {"dueno": dueno, "cli": str(cli.id), "prod": str(prod.id), "tenant": t.id}
+        yield {"dueno": dueno, "cli": str(cli.id), "prod": str(prod.id),
+               "serie_f": str(serie_f.id), "tenant": t.id}
     finally:
         for table in _PURGE:
             for tid in created["tenants"]:
@@ -388,3 +389,64 @@ def test_resumen_del_espejo_para_conciliar(client, env, auth_as, sin_sesion):
     # otra empresa con la misma serie NO se mezcla (folios consecutivos por empresa)
     assert client.get("/api/v1/facturas/espejo/resumen", headers=hk,
                       params={"empresa": "03", "serie": "ZHGO"}).json()["total_facturas"] == 0
+
+
+def test_folio_sugerido_para_el_corte(client, env, auth_as, sin_sesion):
+    """Al cortar el cliente, la serie propia arranca donde SAE se quedó: el
+    contador incrementa ANTES de asignar, así que folio_actual = último folio
+    espejo y el primer CFDI propio sale en el siguiente."""
+    sid = env["serie_f"]
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+
+    # Sin espejo de esa serie no hay nada que proponer.
+    r = client.get(f"/api/v1/series/{sid}/folio-sugerido", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["sugerido"] is None and r.json()["facturas_espejo"] == 0
+
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=1180))
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=1207))
+
+    auth_as(env["dueno"])
+    d = client.get(f"/api/v1/series/{sid}/folio-sugerido", headers=h).json()
+    assert d["serie"] == "ZHGO"
+    assert d["facturas_espejo"] == 2
+    assert d["folio_espejo_max"] == 1207
+    assert d["sugerido"] == 1207                  # sin +1: el contador ya suma al emitir
+
+    # Aplicado a la serie, la siguiente factura propia es la 1208.
+    assert client.patch(f"/api/v1/series/{sid}", headers=h,
+                        json={"folio_actual": d["sugerido"]}).status_code == 200
+    from app.core.rbac import tenant_session
+    from app.services.series import consumir_folio
+    with tenant_session(env["tenant"]) as db:
+        assert consumir_folio(db, uuid.UUID(sid)) == 1208
+
+
+def test_folio_sugerido_solo_para_series_de_factura(client, env, auth_as, sin_sesion):
+    """La serie de remisión comparte el negocio pero no los folios fiscales:
+    proponerle el máximo del espejo movería un contador que no le toca.
+
+    La serie de remisión de la prueba lleva a propósito el MISMO código que la
+    fiscal (el UNIQUE es por código + tipo_documento, así que es un caso real):
+    si el filtro se hiciera solo por código, esta serie heredaría el 1300 del
+    espejo y la siguiente remisión saltaría mil folios.
+    """
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=1300))
+
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    gemela = client.post("/api/v1/series", headers=h, json={
+        "codigo": "ZHGO", "tipo": "NO_FISCAL", "tipo_documento": "REMISION",
+        "nombre": "Remisiones con el código de la fiscal"})
+    assert gemela.status_code == 201, gemela.text
+    d = client.get(f"/api/v1/series/{gemela.json()['id']}/folio-sugerido", headers=h).json()
+    assert d["serie"] == "ZHGO"                   # mismo código que la fiscal
+    assert d["sugerido"] is None and d["facturas_espejo"] == 0
+
+    # Y la de remisión con su propio código tampoco propone nada.
+    series = client.get("/api/v1/series", headers=h,
+                        params={"tipo_documento": "REMISION"}).json()["items"]
+    rem_id = next(s["id"] for s in series if s["codigo"] == "RZHGO")
+    otra = client.get(f"/api/v1/series/{rem_id}/folio-sugerido", headers=h).json()
+    assert otra["sugerido"] is None and otra["facturas_espejo"] == 0

@@ -206,6 +206,9 @@ export type Cliente = {
   codigo?: string | null;
   tipo: string;
   status: string;
+  // Candado de la migración: mientras esté encendido, las facturas del cliente
+  // las emite SAE y aquí solo se reflejan (el Facturador no le puede timbrar).
+  espejo_sae: boolean;
   legal_name: string;
   rfc: string;
   regimen_fiscal?: string | null;

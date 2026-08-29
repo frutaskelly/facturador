@@ -17,6 +17,7 @@ const config: CrudConfig<Cliente> = {
   newLabel: "Nuevo cliente",
   basePath: "/api/v1/clientes",
   writePerm: "cliente:gestionar",
+  deletePerm: "cliente:eliminar",
   searchable: false,
   wide: true,
   columns: [
@@ -27,7 +28,17 @@ const config: CrudConfig<Cliente> = {
       cell: (c) => Number(c.saldo_actual) > 0
         ? <span className="font-medium text-danger">{fmtMoney(c.saldo_actual)}</span>
         : <span className="text-muted">—</span> },
-    { header: "Estado", cell: (c) => <Badge tone={c.status === "ACTIVO" ? "success" : "muted"}>{c.status}</Badge> },
+    {
+      header: "Estado",
+      cell: (c) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge tone={c.status === "ACTIVO" ? "success" : "muted"}>{c.status}</Badge>
+          {/* Se marca solo a quien todavía factura en SAE: son los que quedan
+              por cortar, y a quien no se le puede timbrar desde aquí. */}
+          {c.espejo_sae && <Badge tone="muted">Espejo SAE</Badge>}
+        </div>
+      ),
+    },
   ],
   fields: [
     { name: "codigo", label: "Código", readonly: true, hint: "Se genera automáticamente" },
@@ -156,6 +167,27 @@ const config: CrudConfig<Cliente> = {
       ],
     },
     {
+      name: "espejo_sae",
+      label: "Facturación en SAE (espejo)",
+      type: "switch",
+      colSpan: 2,
+      // El alta (ClienteCreate) no lo acepta: un cliente nuevo siempre nace
+      // facturándose aquí y el espejo se enciende después, editándolo.
+      editOnly: true,
+      hint: (v) =>
+        v.espejo_sae
+          ? "Encendido: sus facturas las emite SAE y aquí solo se reflejan; el Facturador no puede timbrarle."
+          : "Apagado: se le factura desde el Facturador, que timbra sus CFDI.",
+      confirmOff: {
+        title: "Cortar este cliente al Facturador",
+        message:
+          "Al apagar el espejo, sus facturas dejan de emitirse en SAE y el Facturador empezará a timbrarle. " +
+          "Antes de guardar, revisa en Ajustes → Series y folios que el folio de su serie sea el último al que " +
+          "llegó SAE: si no, el primer CFDI propio saldrá con un folio repetido. En la práctica esto no se deshace.",
+        confirmLabel: "Cortar al Facturador",
+      },
+    },
+    {
       name: "serie_factura_id",
       label: "Serie de factura",
       type: "select",
@@ -256,6 +288,9 @@ const config: CrudConfig<Cliente> = {
     limite_credito: "0",
     dias_credito: "0",
     status: "ACTIVO",
+    // Un cliente dado de alta aquí nace facturándose aquí; el espejo se
+    // enciende a mano solo si además lo lleva SAE.
+    espejo_sae: false,
     serie_factura_id: "",
     serie_remision_id: "",
   }),
@@ -283,6 +318,7 @@ const config: CrudConfig<Cliente> = {
       limite_credito: c.limite_credito,
       dias_credito: String(c.dias_credito),
       status: c.status,
+      espejo_sae: c.espejo_sae,
       serie_factura_id: c.serie_factura_id ?? "",
       serie_remision_id: c.serie_remision_id ?? "",
     };
@@ -313,6 +349,7 @@ const config: CrudConfig<Cliente> = {
       limite_credito: Number(v.limite_credito) || 0,
       dias_credito: Number(v.dias_credito) || 0,
       status: v.status,
+      espejo_sae: v.espejo_sae,
       serie_factura_id: (v.serie_factura_id as string) || null,
       serie_remision_id: (v.serie_remision_id as string) || null,
     };

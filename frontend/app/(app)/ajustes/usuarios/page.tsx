@@ -55,6 +55,12 @@ export default function UsuariosPage() {
   // backend lo exige). Reflejarlo en la UI para no ofrecer acciones que darán 403.
   const isOwner = !!me?.active_tenant.is_owner;
   const roleOptions = roles.filter((r) => isOwner || !(r.es_preset && r.nombre === "OWNER"));
+  // Los roles listados son los de la empresa ACTUAL. Los preset son globales y
+  // existen en todas; un rol personalizado pertenece a una sola empresa, y el
+  // backend rechaza con 422 ("Rol inválido para esa empresa") si se intenta
+  // asignar en otra. Fuera de casa solo se ofrecen los preset.
+  const rolesDeEmpresa = (e: EmpresaAcceso) =>
+    e.es_actual ? roleOptions : roleOptions.filter((r) => r.es_preset);
   const rowLocked = (m: Membership) => m.role_nombre === "OWNER" && !isOwner;
 
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -512,49 +518,52 @@ export default function UsuariosPage() {
             <p className="text-sm text-muted">
               Marca en qué empresas del grupo puede entrar este usuario y con qué rol.
             </p>
-            {empresas.map((e) => (
-              <div
-                key={e.tenant_id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
-              >
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    {e.nombre}
-                    {e.es_actual && <Badge tone="muted">actual</Badge>}
+            {empresas.map((e) => {
+              const opcionesRol = rolesDeEmpresa(e);
+              return (
+                <div
+                  key={e.tenant_id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+                >
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      {e.nombre}
+                      {e.es_actual && <Badge tone="muted">actual</Badge>}
+                    </div>
+                    <div className="text-xs text-muted">{e.rfc || "—"}</div>
                   </div>
-                  <div className="text-xs text-muted">{e.rfc || "—"}</div>
+                  <div className="flex items-center gap-3">
+                    {e.tiene_acceso && (
+                      <Select
+                        value={e.role_id ?? ""}
+                        disabled={!e.puedo_administrar || empresaBusy === e.tenant_id}
+                        onChange={(ev) => void updateEmpresa(e, true, ev.target.value)}
+                        className="max-w-[12rem]"
+                      >
+                        {/* El rol vigente puede no existir en ESTA empresa (los roles
+                            se listan de la empresa actual); se muestra igual. */}
+                        {e.role_id && !opcionesRol.some((r) => r.id === e.role_id) && (
+                          <option value={e.role_id}>{e.role_nombre ?? "Rol actual"}</option>
+                        )}
+                        {opcionesRol.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.nombre}
+                            {r.es_preset ? "" : " (personalizado)"}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                    <span title={e.puedo_administrar ? undefined : "No administras usuarios en esa empresa"}>
+                      <Switch
+                        checked={e.tiene_acceso}
+                        disabled={!e.puedo_administrar || empresaBusy === e.tenant_id}
+                        onChange={(v) => void updateEmpresa(e, v)}
+                      />
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  {e.tiene_acceso && (
-                    <Select
-                      value={e.role_id ?? ""}
-                      disabled={!e.puedo_administrar || empresaBusy === e.tenant_id}
-                      onChange={(ev) => void updateEmpresa(e, true, ev.target.value)}
-                      className="max-w-[12rem]"
-                    >
-                      {/* El rol vigente puede no existir en ESTA empresa (los roles
-                          se listan de la empresa actual); se muestra igual. */}
-                      {e.role_id && !roleOptions.some((r) => r.id === e.role_id) && (
-                        <option value={e.role_id}>{e.role_nombre ?? "Rol actual"}</option>
-                      )}
-                      {roleOptions.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.nombre}
-                          {r.es_preset ? "" : " (personalizado)"}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                  <span title={e.puedo_administrar ? undefined : "No administras usuarios en esa empresa"}>
-                    <Switch
-                      checked={e.tiene_acceso}
-                      disabled={!e.puedo_administrar || empresaBusy === e.tenant_id}
-                      onChange={(v) => void updateEmpresa(e, v)}
-                    />
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Modal>

@@ -11,6 +11,7 @@ const config: CrudConfig<Categoria> = {
   newLabel: "Nueva categoría",
   basePath: "/api/v1/categorias",
   writePerm: "categoria:gestionar",
+  deletePerm: "categoria:eliminar",
   searchable: false,
   columns: [
     { header: "Código", cell: (c) => <span className="font-medium">{c.codigo}</span> },

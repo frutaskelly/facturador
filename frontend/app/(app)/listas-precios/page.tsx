@@ -20,6 +20,9 @@ import { useMutation, useResource, type Page } from "@/lib/hooks";
 import type { Categoria, ListaPrecios, Precio, Producto } from "@/lib/types";
 
 const WRITE = "lista_precios:gestionar";
+// Borrar la LISTA entera (con todos sus precios) lo pide el backend aparte;
+// quitar un precio suelto sigue siendo gestionar.
+const DELETE = "lista_precios:eliminar";
 
 /** Presentación options for a producto: its declared presentaciones keys. */
 function presentacionOptions(p: Producto | undefined): string[] {
@@ -38,6 +41,7 @@ export default function ListasPreciosPage() {
   const { me } = useAuth();
   const toast = useToast();
   const canWrite = can(me, WRITE);
+  const canDelete = can(me, DELETE);
   const { post, patch, del, loading: saving } = useMutation();
 
   const listasRes = useResource<Page<ListaPrecios>>("/api/v1/listas-precios?limit=200");
@@ -263,18 +267,18 @@ export default function ListasPreciosPage() {
             <Tag size={14} /> Precios
           </Button>
           {canWrite && (
-            <>
-              <button
-                onClick={(e) => { e.stopPropagation(); setListaForm({ id: l.id, codigo: l.codigo, nombre: l.nombre, status: l.status, copiarDe: "" }); }}
-                className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground" aria-label="Editar">
-                <Pencil size={16} />
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); setToDelete(l); }}
-                className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Eliminar">
-                <Trash2 size={16} />
-              </button>
-            </>
+            <button
+              onClick={(e) => { e.stopPropagation(); setListaForm({ id: l.id, codigo: l.codigo, nombre: l.nombre, status: l.status, copiarDe: "" }); }}
+              className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground" aria-label="Editar">
+              <Pencil size={16} />
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setToDelete(l); }}
+              className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Eliminar">
+              <Trash2 size={16} />
+            </button>
           )}
         </div>
       ),

@@ -10,6 +10,7 @@ const config: CrudConfig<Proveedor> = {
   newLabel: "Nuevo proveedor",
   basePath: "/api/v1/proveedores",
   writePerm: "proveedor:gestionar",
+  deletePerm: "proveedor:eliminar",
   searchable: false,
   columns: [
     { header: "Código", cell: (p) => <span className="font-medium">{p.codigo}</span> },

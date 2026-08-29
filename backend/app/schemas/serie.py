@@ -53,3 +53,17 @@ class SerieOut(ORMModel, SerieBase):
     folio_actual: int
     created_at: datetime
     updated_at: datetime
+
+
+class SerieFolioSugerido(BaseModel):
+    """En qué folio dejar la serie al cortar un cliente de SAE.
+
+    `sugerido` es None cuando la serie no tiene facturas espejo: no hay dato de
+    SAE con el cual proponer nada y mover el contador a ciegas rompería la
+    consecutividad.
+    """
+    serie: str
+    folio_actual: int
+    folio_espejo_max: Optional[int]
+    sugerido: Optional[int]
+    facturas_espejo: int

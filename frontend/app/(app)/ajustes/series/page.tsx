@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -11,12 +11,14 @@ import { Field, Input, Select, Switch } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
-import { ApiError } from "@/lib/api";
+import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
 import type { Serie } from "@/lib/types";
 
 const WRITE = "serie:gestionar";
+// Borrar una serie tira su consecutivo: el backend lo pide aparte de gestionar.
+const DELETE = "serie:eliminar";
 
 const DOC_LABEL: Record<string, string> = {
   FACTURA: "Factura",
@@ -34,6 +36,17 @@ const KIND_LABEL: Record<Kind, string> = {
   NOTA_CREDITO: "Nota de crédito (fiscal)",
   PAGO: "Complemento de pago (fiscal)",
   COMBO: "Combo: factura + remisión",
+};
+
+// GET /series/{id}/folio-sugerido: en qué folio dejar la serie al cortar un
+// cliente de SAE. `sugerido` viene en null cuando la serie no tiene facturas
+// espejo (no hay dato de SAE con el cual proponer nada).
+type FolioSugerido = {
+  serie: string;
+  folio_actual: number;
+  folio_espejo_max: number | null;
+  sugerido: number | null;
+  facturas_espejo: number;
 };
 
 // Naturaleza fiscal inferida del tipo de documento (no se pregunta: una factura
@@ -90,6 +103,7 @@ export default function SeriesPage() {
   const { me } = useAuth();
   const toast = useToast();
   const canWrite = can(me, WRITE);
+  const canDelete = can(me, DELETE);
   const { post, patch, del, loading: saving } = useMutation();
 
   const { data, loading, error, reload } = useResource<Page<Serie>>("/api/v1/series?limit=200");
@@ -97,14 +111,25 @@ export default function SeriesPage() {
 
   const [form, setForm] = useState<FormState | null>(null);
   const [toDelete, setToDelete] = useState<Serie | null>(null);
+  // Último folio que SAE gastó en esta serie (espejo de la migración) junto al
+  // folio GUARDADO de la serie. Hace falta el guardado, no el del formulario:
+  // una serie ya cortada va por delante de SAE, y ahí proponer el número de SAE
+  // sería BAJAR el contador y repetir folios ya timbrados.
+  const [folioSae, setFolioSae] = useState<{ sugerido: number; guardado: number } | null>(null);
+  // La serie cuyo folio se pidió: si el usuario abre otra antes de que llegue
+  // la respuesta, la vieja no debe pintar un número que no es de esta serie.
+  const serieConsultada = useRef<string | null>(null);
 
   const isEdit = form?.id != null;
   const isCombo = form?.kind === "COMBO";
 
   function openCreate() {
+    serieConsultada.current = null;
+    setFolioSae(null);
     setForm(emptyForm());
   }
   function openEdit(s: Serie) {
+    setFolioSae(null);
     setForm({
       ...emptyForm(),
       id: s.id,
@@ -115,6 +140,16 @@ export default function SeriesPage() {
       es_default: s.es_default,
       activa: s.activa,
     });
+    // Al cortar un cliente a facturarse aquí, el consecutivo tiene que arrancar
+    // donde lo dejó SAE o el primer CFDI propio repite folio. El endpoint es de
+    // la migración: si todavía no está, la pantalla sigue igual, sin ruido.
+    serieConsultada.current = s.id;
+    apiFetch<FolioSugerido>(`/api/v1/series/${s.id}/folio-sugerido`)
+      .then((r) => {
+        if (serieConsultada.current !== s.id) return;
+        setFolioSae(r.sugerido === null ? null : { sugerido: r.sugerido, guardado: r.folio_actual });
+      })
+      .catch(() => {});
   }
 
   function changeKind(kind: Kind) {
@@ -208,18 +243,22 @@ export default function SeriesPage() {
     },
     { header: "Estado", cell: (s) => <Badge tone={s.activa ? "success" : "muted"}>{s.activa ? "Activa" : "Inactiva"}</Badge>, sortable: true, sortValue: (s) => (s.activa ? "Activa" : "Inactiva") },
   ];
-  if (canWrite) {
+  if (canWrite || canDelete) {
     columns.push({
       header: "",
       className: "text-right w-1",
       cell: (s) => (
         <div className="flex justify-end gap-1">
-          <button onClick={() => openEdit(s)} aria-label="Editar" className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground">
-            <Pencil size={16} />
-          </button>
-          <button onClick={() => setToDelete(s)} aria-label="Eliminar" className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger">
-            <Trash2 size={16} />
-          </button>
+          {canWrite && (
+            <button onClick={() => openEdit(s)} aria-label="Editar" className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground">
+              <Pencil size={16} />
+            </button>
+          )}
+          {canDelete && (
+            <button onClick={() => setToDelete(s)} aria-label="Eliminar" className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger">
+              <Trash2 size={16} />
+            </button>
+          )}
         </div>
       ),
     });
@@ -325,9 +364,38 @@ export default function SeriesPage() {
                 <Field label="Nombre">
                   <Input placeholder="Facturas matriz" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} />
                 </Field>
-                <Field label="Folio inicial" hint="El primero emitido será este +1">
-                  <Input type="number" value={form.folio_actual} onChange={(e) => setForm({ ...form, folio_actual: e.target.value })} />
-                </Field>
+                <div>
+                  <Field
+                    label={isEdit ? "Folio actual" : "Folio inicial"}
+                    hint={isEdit ? "El siguiente emitido será este +1" : "El primero emitido será este +1"}
+                  >
+                    <Input type="number" value={form.folio_actual} onChange={(e) => setForm({ ...form, folio_actual: e.target.value })} />
+                  </Field>
+                  {folioSae !== null && (
+                    <p className="mt-1 text-xs text-muted">
+                      SAE llegó a {folioSae.sugerido} en esta serie —{" "}
+                      {folioSae.guardado >= folioSae.sugerido ? (
+                        // Serie ya cortada (o adelantada): ofrecer el número de
+                        // SAE aquí sería bajar el contador y repetir folios ya
+                        // emitidos, así que no se ofrece el atajo.
+                        "esta serie ya va en ese folio o más adelante; no lo bajes."
+                      ) : Number(form.folio_actual) === folioSae.sugerido ? (
+                        "el folio ya coincide."
+                      ) : (
+                        <>
+                          al cortar, pon ese número.{" "}
+                          <button
+                            type="button"
+                            onClick={() => setForm({ ...form, folio_actual: String(folioSae.sugerido) })}
+                            className="font-medium text-accent hover:underline"
+                          >
+                            usar {folioSae.sugerido}
+                          </button>
+                        </>
+                      )}
+                    </p>
+                  )}
+                </div>
                 <div className="flex flex-col justify-end gap-3 pb-1">
                   <div className="flex items-center gap-3">
                     <Switch checked={form.es_default} onChange={(v) => setForm({ ...form, es_default: v })} />
