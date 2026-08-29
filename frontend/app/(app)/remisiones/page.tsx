@@ -63,6 +63,9 @@ function puedeFacturar(r: Remision): boolean {
   );
 }
 
+const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+               "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
 export default function RemisionesPage() {
   const { me } = useAuth();
   const toast = useToast();
@@ -1057,6 +1060,10 @@ export default function RemisionesPage() {
   type ExportSaePreview = {
     ok: boolean; errores: string[]; avisos: string[];
     empresa: string | null; remisiones: number;
+    // Cómo va escrita la FECHA en el archivo. Se enseña porque Aspel la lee con
+    // el regional de la PC de importación: un formato que no case mete las
+    // facturas con la fecha cambiada y NO avisa.
+    fecha_ejemplo?: string | null;
     series: { serie: string; remisiones: number; folio_sugerido: number | null }[];
   };
   const [exportSae, setExportSae] = useState<null | {
@@ -1919,8 +1926,15 @@ export default function RemisionesPage() {
               <>
                 <p className="text-sm">
                   {exportSae.preview.remisiones} remisión(es) · empresa SAE{" "}
-                  <span className="font-medium tabular-nums">{exportSae.preview.empresa}</span> · fecha
-                  de hoy en MM/DD/YYYY (el formato que la PC de importación espera).
+                  <span className="font-medium tabular-nums">{exportSae.preview.empresa}</span>
+                  {exportSae.preview.fecha_ejemplo ? (
+                    <>
+                      {" "}· la fecha va a quedar escrita{" "}
+                      <b className="tabular-nums">{exportSae.preview.fecha_ejemplo}</b>. Si en tu
+                      Excel no se lee como {new Date().getDate()} de {MESES[new Date().getMonth()]},
+                      avísanos antes de importar: Aspel la leería cambiada.
+                    </>
+                  ) : null}
                 </p>
                 {exportSae.preview.avisos.length > 0 && (
                   // Avisos del backend: remisiones que YA salieron en un archivo

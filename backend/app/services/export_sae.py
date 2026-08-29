@@ -81,8 +81,15 @@ def folio_sae(serie: str, numero: int) -> str:
 
 
 def fecha_sae(d: date) -> str:
-    """MM/DD/YYYY — el regional de la PC de importación (trampa real, ver arriba)."""
-    return f"{d.month:02d}/{d.day:02d}/{d.year}"
+    """La FECHA como la lee Aspel: con el formato de la PC de importación.
+
+    Default MM/DD/YYYY (trampa real, ver arriba). Configurable por
+    `SAE_FORMATO_FECHA` para el día que esa PC cambie de regional, igual que
+    en el bot — así el arreglo no exige tocar código ni desplegar.
+    """
+    from ..core.config import settings
+
+    return d.strftime(settings.SAE_FORMATO_FECHA or "%m/%d/%Y")
 
 
 def _observacion(rem: Remision) -> str:
@@ -121,6 +128,10 @@ class ResultadoPreview:
     # Por serie fiscal: cuántas remisiones foliarán con ella y el folio sugerido.
     series: list[dict] = field(default_factory=list)
     remisiones: int = 0
+    # Cómo va a quedar escrita la FECHA en el archivo. Se muestra en el preview
+    # porque un formato que no case con el regional de la PC de importación
+    # mete las facturas con la fecha cambiada SIN avisar.
+    fecha_ejemplo: Optional[str] = None
 
 
 def _claves_sae_de_clientes(db: Session, tenant_id: UUID, cliente_ids: set) -> dict:
@@ -366,6 +377,7 @@ def preparar(
 
     res.empresa = next(iter(empresas), None)
     res.remisiones = len(docs)
+    res.fecha_ejemplo = fecha_sae(date.today())
     if tipo == "FACTURA":
         for codigo, n in sorted(series_conteo.items()):
             res.series.append({

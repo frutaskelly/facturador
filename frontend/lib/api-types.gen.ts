@@ -1192,6 +1192,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/facturas/espejo/resumen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Espejo Resumen
+         * @description Qué tiene el espejo de esa serie: folio, total y estado.
+         *
+         *     Es la contraparte de la conciliación Facturador↔SAE (criterio de la Etapa 3
+         *     del plan): el conector compara ESTO contra lo que SAE tiene y detecta las
+         *     facturas que nunca llegaron al espejo — si falta una, el estado de cuenta
+         *     del cliente miente y nadie se entera.
+         *
+         *     Deliberadamente gated por `factura:espejo` y no por `menu:facturas`: la
+         *     clave del conector puede verificar SU trabajo sin ganar acceso de lectura
+         *     a toda la facturación. Devuelve lo mínimo para cuadrar, no el detalle.
+         */
+        get: operations["espejo_resumen_api_v1_facturas_espejo_resumen_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/facturas/pdf": {
         parameters: {
             query?: never;
@@ -11467,6 +11496,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FacturaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    espejo_resumen_api_v1_facturas_espejo_resumen_get: {
+        parameters: {
+            query: {
+                empresa: string;
+                serie: string;
+                desde?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

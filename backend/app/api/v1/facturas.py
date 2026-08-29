@@ -15,7 +15,7 @@ import html as html_mod
 import logging
 import re
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -642,6 +642,44 @@ def _norm_clave_sae(v: str) -> str:
     import unicodedata
     s = unicodedata.normalize("NFKD", v or "").encode("ascii", "ignore").decode("ascii")
     return "".join(ch for ch in s.upper() if ch.isalnum() or ch == "-")
+
+
+@router.get("/espejo/resumen")
+def espejo_resumen(
+    empresa: str = Query(..., max_length=4),
+    serie: str = Query(..., max_length=20),
+    desde: Optional[date] = Query(default=None),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("factura:espejo")),
+):
+    """Qué tiene el espejo de esa serie: folio, total y estado.
+
+    Es la contraparte de la conciliación Facturador↔SAE (criterio de la Etapa 3
+    del plan): el conector compara ESTO contra lo que SAE tiene y detecta las
+    facturas que nunca llegaron al espejo — si falta una, el estado de cuenta
+    del cliente miente y nadie se entera.
+
+    Deliberadamente gated por `factura:espejo` y no por `menu:facturas`: la
+    clave del conector puede verificar SU trabajo sin ganar acceso de lectura
+    a toda la facturación. Devuelve lo mínimo para cuadrar, no el detalle.
+    """
+    q = db.query(Factura.folio, Factura.total, Factura.estado, Factura.saldo_insoluto).filter(
+        Factura.tenant_id == ctx.tenant_id,
+        Factura.origen == "ESPEJO_SAE",
+        Factura.espejo_empresa == empresa.strip(),
+        Factura.serie == serie.strip().upper(),
+        Factura.deleted_at.is_(None),
+    )
+    if desde:
+        q = q.filter(Factura.fecha >= desde)
+    filas = q.order_by(Factura.folio).all()
+    return {
+        "empresa": empresa, "serie": serie.strip().upper(), "total_facturas": len(filas),
+        "folios": [
+            {"folio": f, "total": str(t or 0), "estado": e, "saldo": str(sal or 0)}
+            for f, t, e, sal in filas
+        ],
+    }
 
 
 @router.post("/espejo", response_model=FacturaDetailOut, status_code=status.HTTP_201_CREATED)

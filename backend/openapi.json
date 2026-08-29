@@ -21212,6 +21212,96 @@
     ]
    }
   },
+  "/api/v1/facturas/espejo/resumen": {
+   "get": {
+    "description": "Qué tiene el espejo de esa serie: folio, total y estado.\n\nEs la contraparte de la conciliación Facturador↔SAE (criterio de la Etapa 3\ndel plan): el conector compara ESTO contra lo que SAE tiene y detecta las\nfacturas que nunca llegaron al espejo — si falta una, el estado de cuenta\ndel cliente miente y nadie se entera.\n\nDeliberadamente gated por `factura:espejo` y no por `menu:facturas`: la\nclave del conector puede verificar SU trabajo sin ganar acceso de lectura\na toda la facturación. Devuelve lo mínimo para cuadrar, no el detalle.",
+    "operationId": "espejo_resumen_api_v1_facturas_espejo_resumen_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "empresa",
+      "required": true,
+      "schema": {
+       "maxLength": 4,
+       "title": "Empresa",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "serie",
+      "required": true,
+      "schema": {
+       "maxLength": 20,
+       "title": "Serie",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "desde",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Desde"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Espejo Resumen",
+    "tags": [
+     "facturas"
+    ]
+   }
+  },
   "/api/v1/facturas/pdf": {
    "get": {
     "description": "PDF de varias facturas (una por página) para imprimir/guardar en lote.\nDefinido ANTES de /{factura_id} para que la ruta estática gane.",

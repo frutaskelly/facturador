@@ -1391,6 +1391,7 @@ def export_sae_preview(
     return {
         "ok": res.ok, "errores": res.errores, "avisos": res.avisos,
         "empresa": res.empresa, "series": res.series, "remisiones": res.remisiones,
+        "fecha_ejemplo": res.fecha_ejemplo,
     }
 
 
