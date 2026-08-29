@@ -431,6 +431,9 @@ def asignar_empresa(
     if not payload.acceso:
         if existente is None:
             return {"ok": True}
+        # Quitar el acceso ES borrar una membresía: mismo permiso que DELETE.
+        if not (ctx.is_owner or ctx.has("membership:eliminar")):
+            raise HTTPException(403, "Quitar el acceso requiere el permiso de eliminar usuarios")
         rol_exist = db.query(Role).filter(Role.id == existente.role_id).one_or_none()
         if _es_owner_preset(rol_exist) and not caller_owner_alla:
             raise HTTPException(403, "Solo un OWNER de esa empresa puede quitar a un OWNER")
@@ -440,6 +443,13 @@ def asignar_empresa(
         return {"ok": True}
 
     role_id = payload.role_id or (existente.role_id if existente else None)
+    if role_id is None:
+        # Default sensato para el toggle de la UI: el MISMO rol que tiene en la
+        # empresa actual, si es un preset (los presets son globales). Un rol
+        # personalizado no viaja entre empresas.
+        rol_actual = db.query(Role).filter(Role.id == m.role_id).one_or_none()
+        if rol_actual is not None and rol_actual.es_preset and rol_actual.nombre != "OWNER":
+            role_id = rol_actual.id
     if role_id is None:
         raise HTTPException(422, "Indica el rol con el que entra a esa empresa")
     rol = db.query(Role).filter(Role.id == role_id).one_or_none()

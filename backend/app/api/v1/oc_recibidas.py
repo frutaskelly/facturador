@@ -61,7 +61,11 @@ from ._helpers import ensure_fk, get_or_404, paginate
 
 router = APIRouter(prefix="/oc-recibidas", tags=["bandeja de OC"])
 
-_READ = "menu:remisiones"
+# Su propio menú desde 0057: compartir permiso con remisiones dejaba la
+# bandeja (órdenes de TODOS los clientes) a la vista de cualquier rol que
+# solo debía ver remisiones. Los roles con menu:remisiones lo recibieron en
+# la migración; la conexión del bot lo trae en PERMISOS_CONEXION.
+_READ = "menu:oc"
 _WRITE = "remision:gestionar"
 
 # Sistema de equivalencia ← campo del payload de ingesta.

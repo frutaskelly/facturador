@@ -55,6 +55,7 @@ _OWNER_ROLE = "OWNER"
 # Fuera, deliberadamente: cualquier cosa de CFDI nativo, borrar, usuarios,
 # series, y `producto:gestionar` (reapuntar un alias afecta a todo el catálogo).
 PERMISOS_CONEXION = frozenset({
+    "menu:oc",            # la bandeja de órdenes es SU puerta de entrada
     "menu:remisiones",
     "remision:gestionar",
     "menu:clientes",

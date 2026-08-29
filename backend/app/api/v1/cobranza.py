@@ -418,7 +418,7 @@ def cancelar_recibo(
     recibo_id: UUID,
     payload: CancelarReciboIn = Body(default=CancelarReciboIn()),
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(require_permission("factura:cancelar")),
 ):
     """Cancela el REP ante el PAC y REVIERTE el saldo insoluto de cada factura
     (le regresa el importe abonado). El SAT exige aceptación del receptor para

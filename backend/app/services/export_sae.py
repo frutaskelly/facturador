@@ -157,10 +157,11 @@ def _clave_para_remision(pares: list, sucursal_id) -> tuple:
     de empresas en conflicto."""
     exactas = [p for p in pares if p[2] is not None and p[2] == sucursal_id]
     candidatas = exactas or [p for p in pares if p[2] is None] or pares
-    empresas = {p[0] for p in candidatas}
-    if len(empresas) > 1:
-        return None, sorted(empresas)
-    return (candidatas[0][0], candidatas[0][1]), None
+    distintas = {(p[0], p[1]) for p in candidatas}
+    if len(distintas) > 1:
+        # Dos claves distintas y nada que decida (ni la sucursal): no se adivina.
+        return None, sorted({p[0] for p in candidatas})
+    return next(iter(distintas)), None
 
 
 def _codigos_cliente(db: Session, tenant_id: UUID, cliente_ids: set) -> dict:
@@ -281,6 +282,16 @@ def preparar(
                 f"{rem.factura_sae} — re-exportarla duplicaría el documento en SAE"
             )
             continue
+        if tipo == "FACTURA" and not getattr(
+            db.query(Cliente).filter(Cliente.id == rem.cliente_facturacion_id).one(),
+            "espejo_sae", False,
+        ):
+            # Sin espejo, la factura de SAE nunca regresará a estampar la
+            # remisión: quedaría exportada e invoiceable nativa a la vez.
+            res.avisos.append(
+                f"{rem.folio_interno}: {nombre_cli} no está en espejo SAE — activa "
+                "clientes.espejo_sae para que su factura se refleje y ampare la remisión"
+            )
         if tipo == "FACTURA" and rem.export_sae_at is not None:
             # No bloquea: el archivo anterior pudo no subirse nunca (caso real).
             # Pero si SÍ se importó, re-exportar duplica — el operador decide.

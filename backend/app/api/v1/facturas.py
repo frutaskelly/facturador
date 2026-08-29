@@ -895,6 +895,7 @@ def factura_espejo(
             # confirmarse), regresa a CONFIRMADA — BORRADOR significa "sin
             # efecto en inventario" y reconfirmarla descontaría DOS veces.
             rem.factura_sae = None
+            rem.export_sae_at = None   # que el próximo export no avise en falso
             if rem.factura_id == factura.id:
                 con_stock = any(ln.lote_id for ln in rem.lineas)
                 if rem.estado == "FACTURADA":
