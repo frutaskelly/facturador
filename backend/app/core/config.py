@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # Model for the SAT-code suggester. Haiku is plenty for this simple
     # classification (~5x cheaper than Opus); override via env if ever needed.
     SAT_AI_MODEL: str = "claude-haiku-4-5"
+    # Formato de la columna FECHA del masivo de SAE. Aspel lee ese texto con el
+    # formato de fecha corta de WINDOWS de la PC donde se importa: con el
+    # regional en mes/día/año, un DD/MM/YYYY entra con la fecha CAMBIADA en
+    # silencio (pasó: ZHGO 312/324/335/365-369, una de ellas timbrada). Si esa
+    # PC se corrige algún día, se cambia aquí — no en el código.
+    SAE_FORMATO_FECHA: str = "%m/%d/%Y"
     # Ambiente del PAC: sandbox (default) o producción (https://api.facturama.mx).
     FACTURAMA_BASE_URL: str = "https://apisandbox.facturama.mx"
     FACTURAMA_API_KEY: str = ""
