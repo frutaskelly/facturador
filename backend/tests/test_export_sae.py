@@ -316,3 +316,44 @@ def test_partida_sin_codigo_del_cliente_detiene_el_lote(client, env, auth_as):
                      json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
     assert pv["ok"] is False
     assert any("sin código del cliente" in e for e in pv["errores"])
+
+
+def test_empresa_sae_se_decide_por_sucursal(client, env, auth_as):
+    """Un cliente con clave en DOS empresas SAE (EHMO: 02 Pachuca y 03
+    Villahermosa): la equivalencia CON sucursal decide para las remisiones de
+    esa sucursal; las demás caen a la genérica (sin sucursal). Solo si nada
+    decide, el lote se detiene."""
+    from app.models import ClienteExterno, Sucursal
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suc = Sucursal(tenant_id=env["tenant"], cliente_id=env["cli"], nombre="Tabasco")
+        db.add(suc); db.flush()
+        db.add(ClienteExterno(tenant_id=env["tenant"], sistema="SAE", clave="03:1",
+                              clave_normalizada="03 1", cliente_id=env["cli"],
+                              sucursal_id=suc.id, origen="MANUAL", confianza="CONFIRMADA"))
+        db.commit()
+        suc_id = str(suc.id)
+    finally:
+        db.close()
+
+    # sin sucursal → cae a la genérica 02
+    rem_02 = _rem(client, h, env)
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem_02["id"]], "tipo": "PEDIDO"}).json()
+    assert pv["ok"] is True, pv
+    assert pv["empresa"] == "02"
+
+    # sucursal Tabasco → la 03
+    rem_03 = _rem(client, h, env, su_pedido="9901", sucursal_id=suc_id)
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem_03["id"]], "tipo": "PEDIDO"}).json()
+    assert pv["ok"] is True, pv
+    assert pv["empresa"] == "03"
+
+    # y mezclarlas sigue deteniendo el lote (SAE importa por empresa)
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem_02["id"], rem_03["id"]], "tipo": "PEDIDO"}).json()
+    assert pv["ok"] is False
+    assert any("mezcla empresas" in e for e in pv["errores"])

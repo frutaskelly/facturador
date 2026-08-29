@@ -430,7 +430,7 @@ def exportar_lista_pdf(
     _lista_descargable_o_403(db, ctx, lista_id)
     lista = get_or_404(db, ListaPrecios, lista_id)
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
-    contenido = lista_export.exportar_pdf(db, lista, tenant.legal_name or "")
+    contenido = lista_export.exportar_pdf(db, lista, tenant)
     nombre = f"lista_{(lista.codigo or 'precios').strip()}.pdf"
     return Response(content=contenido, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{nombre}"'})

@@ -243,14 +243,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Resolver Cliente
-         * @description Cruza las pistas de un documento (RFC, proyecto, nombre, ubicación, grupo)
-         *     contra las equivalencias registradas. No escribe nada.
-         *
-         *     Si las pistas se contradicen devuelve `ambiguo=true` y NO elige cliente:
-         *     adivinar aquí significaría facturarle a la empresa equivocada.
-         */
+        /** Resolver Cliente */
         post: operations["resolver_cliente_api_v1_clientes_resolver_post"];
         delete?: never;
         options?: never;

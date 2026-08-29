@@ -124,11 +124,13 @@ class ResultadoPreview:
 
 
 def _claves_sae_de_clientes(db: Session, tenant_id: UUID, cliente_ids: set) -> dict:
-    """{cliente_id: (empresa, numero)} desde cliente_externos sistema='SAE'.
+    """{cliente_id: [(empresa, numero, sucursal_id)]} de cliente_externos SAE.
 
-    Un cliente con claves en DOS empresas SAE (EHMO: 02:5 y 03:1) es ambiguo a
-    este nivel: se reporta como error hasta que la Etapa 2 mapee empresa por
-    sucursal. Balles/Jubran viven solo en la 02.
+    Un cliente puede tener clave en DOS empresas SAE (EHMO: 02:5 Pachuca y
+    03:1 Villahermosa): la fila de la equivalencia lleva `sucursal_id` para
+    decidir por la sucursal de la REMISIÓN. Sin mapeo por sucursal y con más
+    de una empresa, el lote se detiene (adivinar mandaría el documento a la
+    empresa SAE equivocada). Balles/Jubrán/MAFAN viven solo en la 02.
     """
     filas = (
         db.query(ClienteExterno)
@@ -145,8 +147,20 @@ def _claves_sae_de_clientes(db: Session, tenant_id: UUID, cliente_ids: set) -> d
         m = re.match(r"^\s*(\d+)\s*[:. ]\s*(\d+)\s*$", f.clave or "")
         if not m:
             continue
-        por_cliente.setdefault(f.cliente_id, []).append((m.group(1), m.group(2)))
+        por_cliente.setdefault(f.cliente_id, []).append((m.group(1), m.group(2), f.sucursal_id))
     return por_cliente
+
+
+def _clave_para_remision(pares: list, sucursal_id) -> tuple:
+    """Elige la clave SAE para UNA remisión: la de SU sucursal gana; si no hay,
+    caen las genéricas (sin sucursal). Devuelve (empresa, numero) o la lista
+    de empresas en conflicto."""
+    exactas = [p for p in pares if p[2] is not None and p[2] == sucursal_id]
+    candidatas = exactas or [p for p in pares if p[2] is None] or pares
+    empresas = {p[0] for p in candidatas}
+    if len(empresas) > 1:
+        return None, sorted(empresas)
+    return (candidatas[0][0], candidatas[0][1]), None
 
 
 def _codigos_cliente(db: Session, tenant_id: UUID, cliente_ids: set) -> dict:
@@ -282,13 +296,15 @@ def preparar(
                 "(cliente_externos sistema=SAE, formato 'empresa:cliente')"
             )
             continue
-        if len({p[0] for p in pares}) > 1:
+        elegida, conflicto = _clave_para_remision(pares, rem.sucursal_id)
+        if elegida is None:
             res.errores.append(
                 f"{rem.folio_interno}: {nombre_cli} tiene clave en más de una empresa SAE "
-                f"({', '.join(':'.join(p) for p in pares)}) — falta mapear empresa por sucursal"
+                f"({', '.join(conflicto)}) y su sucursal no decide — asigna la sucursal a "
+                "cada equivalencia SAE en el cliente (empresa por sucursal)"
             )
             continue
-        empresa, numero = pares[0]
+        empresa, numero = elegida
         empresas.add(empresa)
 
         # Una devolución total deja la línea viva con cantidad 0: SAE importaría

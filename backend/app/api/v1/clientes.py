@@ -101,6 +101,9 @@ def validar_rfc(
     Consume 1 folio de Facturama por llamada (botón manual en el formulario
     de clientes).
     """
+    if ctx.cliente_scope:
+        # Consume folios de Facturama y sondea RFCs arbitrarios: no es del portal.
+        raise HTTPException(status_code=403, detail="Tu usuario no puede validar RFCs")
     rfc_u = rfc.strip().upper()
     # Filtro local: formato + dígito verificador. El sandbox de Facturama aprueba
     # cualquier RFC bien formado, así que esto atrapa typos (p. ej. ...V1 vs ...VA)
@@ -233,6 +236,10 @@ def resolver_cliente(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
+    # El motor de cruce sondea TODO el directorio: un usuario con candado por
+    # cliente (portal) podría enumerar a los demás clientes con pistas.
+    if ctx.cliente_scope:
+        raise HTTPException(status_code=403, detail="Tu usuario no puede usar el resolutor")
     """Cruza las pistas de un documento (RFC, proyecto, nombre, ubicación, grupo)
     contra las equivalencias registradas. No escribe nada.
 
@@ -277,6 +284,9 @@ def list_externos(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     q = db.query(ClienteExterno)
+    if ctx.cliente_scope:
+        # Candado del portal: no se enumeran las claves de clientes ajenos.
+        q = q.filter(ClienteExterno.cliente_id.in_(ctx.cliente_scope))
     if cliente_id:
         q = q.filter(ClienteExterno.cliente_id == cliente_id)
     if sistema:
@@ -411,6 +421,8 @@ def catalogo_cliente(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
+    if not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
     get_or_404(db, Cliente, cliente_id)
     rows = (
         db.query(ProductoCliente, Producto)

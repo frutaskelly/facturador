@@ -16983,7 +16983,6 @@
   },
   "/api/v1/clientes/resolver": {
    "post": {
-    "description": "Cruza las pistas de un documento (RFC, proyecto, nombre, ubicación, grupo)\ncontra las equivalencias registradas. No escribe nada.\n\nSi las pistas se contradicen devuelve `ambiguo=true` y NO elige cliente:\nadivinar aquí significaría facturarle a la empresa equivocada.",
     "operationId": "resolver_cliente_api_v1_clientes_resolver_post",
     "parameters": [
      {

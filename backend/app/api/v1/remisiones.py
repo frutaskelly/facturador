@@ -1023,6 +1023,8 @@ def preview_totales(
     """Totales calculados por el SERVIDOR para el preview del alta (remisión o
     factura directa): el frontend nunca deriva impuestos por su cuenta — regla
     "el backend calcula todo" (2026-07-29). Mismo cerebro que el documento real."""
+    if ctx.cliente_scope:
+        raise HTTPException(status_code=403, detail="Tu usuario no captura documentos")
     fiscal = _fiscal_por_producto(db, [ln.producto_id for ln in payload.lineas])
     subtotal = _ZERO
     iva = _ZERO

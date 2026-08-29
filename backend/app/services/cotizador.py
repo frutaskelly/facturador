@@ -309,49 +309,43 @@ def cotizar_documento(
     }
 
 
-def cotizacion_pdf(cliente_nombre: str, tenant_nombre: str, cot: dict) -> bytes:
-    """La cotización como PDF, lista para mandarse al cliente."""
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import letter
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib.units import mm
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+def cotizacion_pdf(tenant, cot: dict) -> bytes:
+    """La cotización como PDF para el cliente, con el membrete del negocio
+    (layout Smart Supply: logo + datos fiscales, tabla azul, folio de página)."""
+    from datetime import date
 
-    import io
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=letter, topMargin=14 * mm, bottomMargin=14 * mm,
-                            leftMargin=14 * mm, rightMargin=14 * mm, title="Cotización")
-    st = getSampleStyleSheet()
-    partes = [Paragraph(tenant_nombre, st["Title"]),
-              Paragraph(f"Cotización — {cliente_nombre}", st["Heading2"]),
-              Spacer(1, 4)]
-    data = [["Producto", "Cant.", "Present.", "Precio", "Importe"]]
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, Spacer
+
+    from .reporte_pdf import CELDA, construir, membrete, tabla_reporte
+
+    filas = []
     for l in cot.get("lineas", []):
         if l.get("precio_unitario") is None:
             continue
-        data.append([l["producto_nombre"], l["cantidad"], l["presentacion"],
-                     f"${Decimal(l['precio_unitario']):,.2f}", f"${Decimal(l['importe']):,.2f}"])
-    data.append(["", "", "", "Subtotal", f"${Decimal(cot['subtotal']):,.2f}"])
+        filas.append([Paragraph(l["producto_nombre"], CELDA), l["cantidad"], l["presentacion"],
+                      f"${Decimal(l['precio_unitario']):,.2f}", f"${Decimal(l['importe']):,.2f}"])
+    totales = [["", "", "", "Subtotal", f"${Decimal(cot['subtotal']):,.2f}"]]
     if Decimal(cot.get("ieps", "0")):
-        data.append(["", "", "", "IEPS", f"${Decimal(cot['ieps']):,.2f}"])
-    data.append(["", "", "", "IVA", f"${Decimal(cot['iva']):,.2f}"])
-    data.append(["", "", "", "Total", f"${Decimal(cot['total']):,.2f}"])
-    t = Table(data, colWidths=[92 * mm, 18 * mm, 24 * mm, 22 * mm, 26 * mm], repeatRows=1)
-    t.setStyle(TableStyle([
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTNAME", (-2, -1), (-1, -1), "Helvetica-Bold"),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.75, colors.black),
-        ("LINEBELOW", (0, 1), (-1, -5), 0.25, colors.HexColor("#DDDDDD")),
-        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
-        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-    ]))
-    partes.append(t)
+        totales.append(["", "", "", "IEPS", f"${Decimal(cot['ieps']):,.2f}"])
+    totales.append(["", "", "", "IVA", f"${Decimal(cot['iva']):,.2f}"])
+    totales.append(["", "", "", "Total", f"${Decimal(cot['total']):,.2f}"])
+
+    partes = membrete(
+        tenant, "Cotización",
+        f"{cot.get('cliente_nombre') or ''} · {date.today():%d/%m/%Y} · {len(filas)} partidas")
+    partes.append(tabla_reporte(
+        ["Producto", "Cant.", "Present.", "Precio", "Importe"],
+        filas + totales,
+        [86 * mm, 18 * mm, 26 * mm, 24 * mm, 28 * mm],
+        num_cols=(1, 3, 4), filas_totales=len(totales),
+    ))
     if cot.get("sin_cruce"):
+        from reportlab.lib.styles import getSampleStyleSheet
+
         partes.append(Spacer(1, 8))
         partes.append(Paragraph(
-            f"Renglones no cotizados (revisar a mano): "
-            + "; ".join(x["descripcion"] for x in cot["sin_cruce"][:10]), st["Normal"]))
-    doc.build(partes)
-    return buf.getvalue()
+            "Renglones no cotizados (revisar a mano): "
+            + "; ".join(x["descripcion"] for x in cot["sin_cruce"][:10]),
+            getSampleStyleSheet()["Normal"]))
+    return construir("Cotización", partes)

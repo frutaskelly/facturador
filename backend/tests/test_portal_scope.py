@@ -60,7 +60,8 @@ def env(db_engine):
         prod_x = Producto(tenant_id=tid, sku="PERA", nombre="Pera", clave_sat="50300000",
                           unidad_sat="KGM", unidad_base="KILO", presentaciones={"KILO": {}})
         lista = ListaPrecios(tenant_id=tid, codigo="NEG-A", nombre="Negociada A")
-        db.add_all([prod_a, prod_x, lista]); db.flush()
+        ajena = ListaPrecios(tenant_id=tid, codigo="AJENA", nombre="Lista ajena")
+        db.add_all([prod_a, prod_x, lista, ajena]); db.flush()
         db.add(Precio(tenant_id=tid, lista_id=lista.id, producto_id=prod_a.id, presentacion="KILO",
                       precio_unitario=Decimal("30"), cantidad_minima=1))
         db.add(ListaAsignacion(tenant_id=tid, lista_id=lista.id, cliente_id=cli_a.id))
@@ -76,6 +77,7 @@ def env(db_engine):
         invalidate_auth_cache()
 
         yield {"admin": admin, "portal": portal, "tenant": tid,
+               "lista": str(lista.id), "ajena": str(ajena.id),
                "cli_a": str(cli_a.id), "cli_b": str(cli_b.id),
                "prod_a": str(prod_a.id), "prod_x": str(prod_x.id),
                "fact_a": str(fa.id), "fact_b": str(fb.id)}
@@ -247,3 +249,54 @@ def test_scope_editable_por_patch(client, env, auth_as):
     # [] = sin candado
     r = client.patch(f"/api/v1/memberships/{mid}", headers=h, json={"cliente_scope": []})
     assert r.json()["cliente_scope"] is None
+
+
+def test_descarga_de_listas_del_portal(client, env, auth_as):
+    """El usuario del portal baja el PDF/Excel de las listas de SUS clientes;
+    una lista no asignada a ellos responde 403."""
+    auth_as(env["portal"]); hp = _hdr(env["portal"])
+    r = client.get(f"/api/v1/listas-precios/{env['lista']}/pdf", headers=hp)
+    assert r.status_code == 200 and r.content.startswith(b"%PDF")
+    r = client.get(f"/api/v1/listas-precios/{env['lista']}/export", headers=hp)
+    assert r.status_code == 200
+    assert client.get(f"/api/v1/listas-precios/{env['ajena']}/pdf", headers=hp).status_code == 403
+    # y el CRUD de listas le sigue cerrado (no tiene menu:listas_precios)
+    assert client.get("/api/v1/listas-precios", headers=hp).status_code == 403
+
+
+def test_fugas_cerradas_cobranza_y_directorio(client, env, auth_as):
+    """Los hoyos que encontró la revisión adversarial (29-ago): estado de
+    cuenta, REPs, equivalencias, catálogo por IDOR, resolutor, validar-rfc,
+    conexiones y preview-totales — todos bajo el candado."""
+    auth_as(env["portal"]); hp = _hdr(env["portal"])
+
+    # estado de cuenta: el suyo sí, el ajeno 404
+    assert client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli_a']}", headers=hp).status_code == 200
+    assert client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli_b']}", headers=hp).status_code == 404
+
+    # catálogo del cliente por IDOR
+    assert client.get(f"/api/v1/clientes/{env['cli_a']}/catalogo", headers=hp).status_code == 200
+    assert client.get(f"/api/v1/clientes/{env['cli_b']}/catalogo", headers=hp).status_code == 404
+
+    # recibos: la lista viene filtrada (vacía aquí) y no truena
+    r = client.get("/api/v1/cobranza/recibos-pago", headers=hp)
+    assert r.status_code == 200 and r.json()["total"] == 0
+
+    # sondas cerradas para el portal
+    assert client.post("/api/v1/clientes/resolver", headers=hp, json={}).status_code == 403
+    assert client.get("/api/v1/clientes/validar-rfc", headers=hp,
+                      params={"rfc": "XAXX010101000"}).status_code == 403
+    assert client.get("/api/v1/conexiones/probar", headers=hp).status_code == 403
+    assert client.post("/api/v1/conexiones/grupos", headers=hp,
+                       json={"grupos": []}).status_code == 403
+    assert client.post("/api/v1/remisiones/preview-totales", headers=hp,
+                       json={"lineas": [{"producto_id": env["prod_a"], "cantidad": "1",
+                                          "precio_unitario": "1"}]}).status_code == 403
+
+    # externos: solo las claves de SUS clientes
+    r = client.get("/api/v1/clientes/externos", headers=hp)
+    assert r.status_code == 200
+    cuerpo = r.json()
+    filas = cuerpo["items"] if isinstance(cuerpo, dict) else cuerpo
+    ajenos = [x for x in filas if x["cliente_id"] != env["cli_a"]]
+    assert ajenos == []

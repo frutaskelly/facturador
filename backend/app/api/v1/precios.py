@@ -130,8 +130,7 @@ def cotizacion_pdf_endpoint(
         if not ctx.cliente_permitido(cid):
             raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
-    contenido = cotizador.cotizacion_pdf(
-        str(payload.get("cliente_nombre") or ""), tenant.legal_name or "", payload)
+    contenido = cotizador.cotizacion_pdf(tenant, payload)
     return Response(content=contenido, media_type="application/pdf",
                     headers={"Content-Disposition": 'inline; filename="cotizacion.pdf"'})
 

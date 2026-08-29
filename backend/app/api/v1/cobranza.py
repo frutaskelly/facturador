@@ -57,6 +57,8 @@ def estado_cuenta(
 ):
     """Estado de cuenta de un cliente: sus facturas PPD timbradas con saldo
     pendiente + antigüedad de saldos por fecha de vencimiento."""
+    if not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
     cliente = get_or_404(db, Cliente, cliente_id)
     hoy = corte or datetime.now(timezone.utc).date()
     dias_credito = int(cliente.dias_credito or 0)
@@ -191,6 +193,9 @@ def list_recibos(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     q = db.query(ReciboPago).filter(ReciboPago.tenant_id == ctx.tenant_id)
+    if ctx.cliente_scope:
+        # Candado del portal: solo recibos de SUS clientes.
+        q = q.filter(ReciboPago.cliente_id.in_(ctx.cliente_scope))
     if cliente_id is not None:
         q = q.filter(ReciboPago.cliente_id == cliente_id)
     total = q.count()
@@ -205,7 +210,10 @@ def get_recibo(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    return _recibo_out(db, get_or_404(db, ReciboPago, recibo_id, soft=False))
+    recibo = get_or_404(db, ReciboPago, recibo_id, soft=False)
+    if not ctx.cliente_permitido(recibo.cliente_id):
+        raise HTTPException(status_code=404, detail="Recibo no encontrado")
+    return _recibo_out(db, recibo)
 
 
 @router.post("/recibos-pago", status_code=201)
@@ -462,6 +470,8 @@ def recibo_pdf(
 ):
     from fastapi import Response
     recibo = get_or_404(db, ReciboPago, recibo_id, soft=False)
+    if not ctx.cliente_permitido(recibo.cliente_id):
+        raise HTTPException(status_code=404, detail="Recibo no encontrado")
     pdf = _recibo_pdf_bytes(db, ctx, recibo)
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="REP-{recibo.serie}{recibo.folio}.pdf"'})
@@ -475,6 +485,8 @@ def recibo_xml(
 ):
     from fastapi import Response
     recibo = get_or_404(db, ReciboPago, recibo_id, soft=False)
+    if not ctx.cliente_permitido(recibo.cliente_id):
+        raise HTTPException(status_code=404, detail="Recibo no encontrado")
     if not recibo.xml:
         raise HTTPException(status_code=404, detail="El recibo no tiene XML (¿no está timbrado?)")
     return Response(content=recibo.xml, media_type="application/xml",
