@@ -384,8 +384,18 @@ def _folio_sugerido(db: Session, tenant_id: UUID, serie: str) -> Optional[int]:
     rango. Es un PRELLENADO: el operador confirma contra SAE (regla D1)."""
     from datetime import datetime, timedelta, timezone
 
-    folios = set(_folios_ocupados(db, tenant_id, serie))
+    folios = _folios_ocupados(db, tenant_id, serie) | _folios_propuestos(db, tenant_id, serie)
+    return max(folios) + 1 if folios else None
+
+
+def _folios_propuestos(db: Session, tenant_id: UUID, serie: str) -> set[int]:
+    """Folios que salieron PROPUESTOS en archivos de los últimos 7 días y cuya
+    factura el espejo aún no confirma. No son reservas (el archivo pudo no
+    subirse): alimentan el folio sugerido y un AVISO de posible colisión."""
+    from datetime import datetime, timedelta, timezone
+
     corte = datetime.now(timezone.utc) - timedelta(days=7)
+    out: set[int] = set()
     filas = (
         db.query(Remision.export_sae_folio)
         .filter(
@@ -400,8 +410,8 @@ def _folio_sugerido(db: Session, tenant_id: UUID, serie: str) -> Optional[int]:
     for (fs,) in filas:
         marca = parsear_marca(fs or "")
         if marca and marca[0] == serie:
-            folios.add(marca[1])
-    return max(folios) + 1 if folios else None
+            out.add(marca[1])
+    return out
 
 
 def _folios_ocupados(db: Session, tenant_id: UUID, serie: str) -> set[int]:
@@ -475,10 +485,11 @@ def generar(
         if not res.ok:
             return res, None, None
         contador = {s: int(n) for s, n in folios.items()}
-        # Candado de colisión: el rango a estampar no puede pisar folios que ya
-        # existen (otra remisión estampada, una factura nativa o un espejo). Dos
-        # operadores confirmando el mismo "234" la misma mañana era doble
-        # documento en SAE; ahora el segundo recibe el error con los folios.
+        # Colisión: contra folios CONFIRMADOS (marca o factura) es ERROR; contra
+        # folios apenas PROPUESTOS por otro lote reciente (el archivo pudo no
+        # subirse) es AVISO — el operador decide con SAE enfrente. Antes la
+        # estampa inmediata hacía de libro de reservas; ya no existe (regla del
+        # dueño 29-ago) y esta es la red que queda para la ventana export→import.
         for s in res.series:
             serie = s["serie"]
             rango = set(range(contador[serie], contador[serie] + s["remisiones"]))
@@ -488,6 +499,14 @@ def generar(
                 res.errores.append(
                     f"serie {serie}: los folios {', '.join(map(str, chocan))} ya existen "
                     "(remisión estampada o factura) — verifica el folio inicial contra SAE"
+                )
+                continue
+            propuestos = sorted(rango & _folios_propuestos(db, tenant_id, serie))
+            if propuestos:
+                res.avisos.append(
+                    f"serie {serie}: los folios {', '.join(map(str, propuestos))} salieron "
+                    "PROPUESTOS en otro archivo reciente aún sin confirmar — si aquel "
+                    "archivo se importó en SAE, usar el mismo rango duplicaría documentos"
                 )
         if not res.ok:
             return res, None, None

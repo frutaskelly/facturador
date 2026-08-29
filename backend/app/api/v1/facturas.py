@@ -866,6 +866,14 @@ def factura_espejo(
                 .all()
             )
             match = [r for r in libres if _norm_oc(r.su_pedido) == oc]
+            # Sanidad de importes: una OC puede amparar VARIAS entregas — si el
+            # total de la única candidata se aleja demasiado del de la factura,
+            # no se estampa (queda para la captura manual). SAE ajusta cantidades
+            # al importar, así que la tolerancia es generosa.
+            if len(match) == 1 and match[0].total and total:
+                dif = abs(Decimal(str(match[0].total)) - Decimal(str(total)))
+                if dif > max(Decimal(str(total)) * Decimal("0.15"), Decimal("100")):
+                    match = []
             if len(match) == 1 and not (
                 match[0].factura_id and db.query(Factura.id).filter(
                     Factura.id == match[0].factura_id,
