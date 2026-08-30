@@ -14,6 +14,7 @@ import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { SearchBox } from "@/components/ui/SearchBox";
 import { useOnboarding } from "@/components/OnboardingChecklist";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
@@ -81,7 +82,18 @@ export default function FacturasPage() {
   );
   const seriesFac = seriesFacRes.data?.items ?? [];
 
-  const { data, loading, error, reload } = useResource<Page<Factura>>("/api/v1/facturas?limit=50");
+  // Buscar la factura por como la nombra quien pregunta: el folio fiscal
+  // ("ZMAFAN 167"), el UUID, o el folio interno de la entrega ("SN-33NER-JUE"),
+  // que vive en las observaciones y es con lo que el equipo la busca de verdad.
+  const [busca, setBusca] = useState("");
+  const [buscaAplicada, setBuscaAplicada] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setBuscaAplicada(busca.trim()), 300);
+    return () => clearTimeout(t);
+  }, [busca]);
+  const { data, loading, error, reload } = useResource<Page<Factura>>(
+    `/api/v1/facturas?limit=50${buscaAplicada ? `&q=${encodeURIComponent(buscaAplicada)}` : ""}`,
+  );
   const rows = data?.items ?? [];
 
   // Alta de factura directa (captura a mano, sin remisión): ocupa la pantalla
@@ -587,6 +599,20 @@ export default function FacturasPage() {
           </>
         ) : undefined}
       />
+
+      <div className="mb-3 flex items-center gap-3">
+        <SearchBox
+          value={busca}
+          onChange={setBusca}
+          placeholder="Buscar por folio, UUID u orden (p. ej. SN-33NER-JUE)"
+          className="max-w-md"
+        />
+        {buscaAplicada && !loading && (
+          <span className="text-sm text-muted">
+            {data?.total ?? 0} resultado{(data?.total ?? 0) === 1 ? "" : "s"}
+          </span>
+        )}
+      </div>
 
       {/* Barra de acciones en lote */}
       {selected.length > 0 && (

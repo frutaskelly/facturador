@@ -450,3 +450,45 @@ def test_folio_sugerido_solo_para_series_de_factura(client, env, auth_as, sin_se
     rem_id = next(s["id"] for s in series if s["codigo"] == "RZHGO")
     otra = client.get(f"/api/v1/series/{rem_id}/folio-sugerido", headers=h).json()
     assert otra["sugerido"] is None and otra["facturas_espejo"] == 0
+
+
+def test_espejo_liga_por_folio_interno_sin_prefijo_oc(client, env, auth_as, sin_sesion):
+    """Las observaciones de EHMO/MAFAN no dicen «OC»: llevan el folio interno al
+    FINAL («SEMANA 33 SECRETARIO NERI REQ 20/08/2026 SN-33NER-JUE»). Ese folio
+    es el su_pedido de la remisión y también sirve de llave — sin reconocerlo,
+    46 facturas reales quedaron sin ligar a su entrega."""
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "su_pedido": "SN-33NER-JUE",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    f = client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=960,
+        observaciones="SEMANA 33 SECRETARIO NERI REQ 20/08/2026 SN-33NER-JUE")).json()
+
+    auth_as(env["dueno"])
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["factura_sae"] == "ZHGO 960"
+    assert det["factura_id"] == f["id"]
+    assert det["estado"] == "FACTURADA"
+
+
+def test_buscar_factura_por_folio_interno_y_por_folio_fiscal(client, env, auth_as, sin_sesion):
+    """«No encuentro esta factura»: el equipo la busca por el folio de la
+    entrega, no por el fiscal. El listado busca en los dos, y en el UUID."""
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=961, observaciones="SEMANA 33 SECRETARIO NERI REQ SN-33NER-VIE"))
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+
+    for termino in ("SN-33NER-VIE", "ZHGO 961", "ZHGO961", "961"):
+        r = client.get("/api/v1/facturas", headers=h, params={"q": termino})
+        assert r.status_code == 200, r.text
+        folios = [f["folio"] for f in r.json()["items"]]
+        assert 961 in folios, f"«{termino}» no encontró la factura"
+
+    # y un término que no es de nadie no devuelve de más
+    r = client.get("/api/v1/facturas", headers=h, params={"q": "XX-99ZZZ-DOM"})
+    assert r.json()["total"] == 0

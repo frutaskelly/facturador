@@ -22,7 +22,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field as PydField
-from sqlalchemy import func, true as sa_true
+from sqlalchemy import func, or_, true as sa_true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -252,6 +252,11 @@ def _revertir_factura_directa(db: Session, ctx, factura, *, perdida: bool) -> No
 def list_facturas(
     estado: Optional[str] = Query(default=None, max_length=20),
     cliente_id: Optional[UUID] = Query(default=None),
+    # Buscar la factura POR COMO LA NOMBRA QUIEN PREGUNTA: puede ser el folio
+    # fiscal ("ZMAFAN 167"), el UUID que trae el SAT, o —lo más común en la
+    # operación— el folio interno de la entrega ("SN-33NER-JUE"), que vive en
+    # las observaciones porque es la llave con la que el equipo concilia.
+    q: Optional[str] = Query(default=None, max_length=120),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_tenant_db),
@@ -265,6 +270,22 @@ def list_facturas(
         query = query.filter(Factura.estado == estado)
     if cliente_id is not None:
         query = query.filter(Factura.cliente_id == cliente_id)
+    if q and q.strip():
+        termino = q.strip()
+        like = f"%{termino}%"
+        condiciones = [
+            Factura.notas.ilike(like),
+            Factura.uuid.ilike(like),
+            Factura.serie.ilike(like),
+            # "ZMAFAN 167" y "ZMAFAN167" son la misma factura para quien
+            # pregunta: se compara contra serie+folio con y sin espacio.
+            func.concat(Factura.serie, Factura.folio).ilike(like.replace(" ", "")),
+            func.concat(Factura.serie, " ", Factura.folio).ilike(like),
+        ]
+        digitos = "".join(ch for ch in termino if ch.isdigit())
+        if digitos and digitos == termino.strip():
+            condiciones.append(Factura.folio == int(digitos))
+        query = query.filter(or_(*condiciones))
     query = query.order_by(Factura.fecha.desc(), Factura.folio.desc())
     return paginate(query, FacturaOut, limit, offset)
 
@@ -613,6 +634,9 @@ def _rechazar_cliente_en_espejo(db: Session, cliente_id: UUID, cliente: Cliente 
 
 
 _RE_OC_OBS = re.compile(r"\bOC[\s:]+([A-Z0-9][A-Z0-9\-\/\.]*)")
+# El folio interno de una entrega EHMO/MAFAN: dos letras del proyecto, la
+# semana, el punto y el día — HO-33PAC-LUN, SN-33NER-JUE, VH-35SAL-VIE.
+_RE_FOLIO_INTERNO = re.compile(r"\b([A-Z]{2}-\d{1,2}[A-Z]{2,4}(?:-[A-Z]{3})?)\b")
 
 
 def _norm_oc(v: Optional[str]) -> Optional[str]:
@@ -632,8 +656,19 @@ def _extraer_oc(observaciones: Optional[str]) -> Optional[str]:
     (services/export_sae._observacion) y la que el resto del ecosistema
     (bot, Master) usa para conciliar. Solo la primera: una obs con dos OC es
     ambigua y no decide.
+
+    Segundo formato, el de EHMO/MAFAN: sus observaciones NO llevan el prefijo
+    "OC" y el folio interno va al FINAL — «SEMANA 33 SECRETARIO NERI REQ
+    20/08/2026 SN-33NER-JUE». Ese folio es igualmente el `su_pedido` de la
+    remisión, así que también sirve de llave; sin reconocerlo, 46 facturas
+    reales quedaron sin ligar a su entrega (detectado el 30-ago buscando
+    SN-33NER-JUE).
     """
-    m = _RE_OC_OBS.search((observaciones or "").upper())
+    texto = (observaciones or "").upper()
+    m = _RE_OC_OBS.search(texto)
+    if m:
+        return _norm_oc(m.group(1))
+    m = _RE_FOLIO_INTERNO.search(texto)
     return _norm_oc(m.group(1)) if m else None
 
 

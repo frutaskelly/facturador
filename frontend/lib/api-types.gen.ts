@@ -11520,6 +11520,7 @@ export interface operations {
             query?: {
                 estado?: string | null;
                 cliente_id?: string | null;
+                q?: string | null;
                 limit?: number;
                 offset?: number;
             };
