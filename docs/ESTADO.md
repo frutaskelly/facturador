@@ -1,4 +1,4 @@
-# Estado del proyecto — 31/08/2026 (actualizado tras los PRs #51–#57)
+# Estado del proyecto — 31/08/2026 (actualizado por la noche tras los PRs #51–#58)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,22 +7,23 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` @ `43ca515` (PR #57) — igual que `origin/main` |
+| Rama base | `main` @ `b73c910` (PR #58) — igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
-| Worktrees | 1 (`new-session-7acb50`, rama ya fusionada — podable) |
-| PRs abiertos | ninguno |
-| Migración head | `0057_export_rastro_portal_rbac` (el #51 no trae migraciones) |
+| Worktrees | 4 (`proyectos-sucursales-asignacion` ACTIVA, 1 commit adelante; `remisiones-fd9e06` ya embarcado — se poda al cerrar su sesión; `new-session-7acb50` y `zealous-torvalds-918745` podables) |
+| PRs abiertos | el de esta actualización |
+| Migración head | `0057_export_rastro_portal_rbac` en `main` (la `0058_proyecto_sucursales` viene en la rama de proyectos) |
 
 `Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
 
 ## Deploy
 
-**En vivo en https://facturador.mx** y al día: se comprobó **dentro del contenedor** que
-`backend/app/api/v1/facturas.py` trae el parámetro de búsqueda `q` que introdujo el PR #47, el
-commit más reciente de `main`. Los cinco contenedores (`frontend`, `backend`, `landing`,
-`tunnel`, `redis`) están arriba y sanos, y los cuatro propios se construyen desde **este**
-checkout, no desde un worktree.
+**En vivo en https://facturador.mx** y al día: se comprobó **dentro del contenedor** (31-ago
+por la noche) que el backend trae tanto el backfill de `archivo_url` del #54
+(`oc_recibidas.py`) como `resolver_precios_lote` del #57 (`precios.py`) — todo el contexto de
+app de `main` (`b73c910` solo mueve este archivo). Los cinco contenedores (`frontend`,
+`backend`, `landing`, `tunnel`, `redis`) están arriba y sanos, y los cuatro propios se
+construyen desde **este** checkout, no desde un worktree.
 
 ⚠️ **La marca de tiempo de la imagen no sirve para saber si el deploy está al día.** Una imagen
 construida segundos antes de fusionar un PR "parece" atrasada sin estarlo, y una imagen vieja
@@ -32,6 +33,21 @@ contenido dentro de la imagen.
 **La puerta de `deploy.sh` bloquea si el checkout no coincide con GitHub** — incluidos archivos
 sin rastrear. Por eso este `docs/ESTADO.md` va commiteado: suelto, detiene cada deploy. Nunca
 usar `FORCE=1` para saltarla: publica el trabajo a medias de otra sesión.
+
+## Lo que entró el 31-ago por la noche (PRs #53, #54 y #57)
+
+**La ingesta completa el link del documento en OCs ya asignadas (#54).** Una OC que ya generó
+su remisión no se tocaba en un reintento del bot — correcto para la captura, pero dejaba sin
+remedio el puntero al documento original: **183 órdenes de la migración llegaron sin
+`archivo_url`** y el botón «Ver la OC original» de `/remisiones` caía a la bandeja en vez de
+abrir el Drive (lo reportó el dueño con la SN-33NER-JUE). Ahora el reenvío completa
+`archivo_url`/`archivo_nombre` **solo si faltan**; con el link puesto no se pisa y la captura
+sigue intacta. El código del botón ya era correcto: abre el Drive cuando hay link y solo sin él
+cae a la bandeja filtrada. Queda la cura de los datos → pendiente 8.
+
+**#53 (bandeja):** la lista enseña el proyecto y el vistazo deja de repetir los botones del
+renglón. **#57 (precios por lote):** el detalle de una orden pasó de ~27 s a ~4 s y el vistazo
+a ~2 s — el detalle está en el pendiente 6, ya RESUELTO.
 
 ## Lo que entró el 31-ago por la tarde (PR #51)
 
@@ -128,6 +144,11 @@ podarla.
    esa sucursal. La regla pedida: el proyecto solo se cruza automáticamente cuando está asignado
    a la sucursal resuelta. DEPENDE del modelo proyecto↔sucursal que otra sesión tiene a medias
    (worktree `proyectos-sucursales-asignacion-6a1269`, migración `0058_proyecto_sucursales.py`
-   sin commitear): cuando esa rama aterrice, conectar la regla en `_proyecto_de` /
+   ya commiteada en su rama): cuando esa rama aterrice, conectar la regla en `_proyecto_de` /
    `_resolver_y_aplicar` de la bandeja y filtrar el selector de proyecto del detalle por
    sucursal.
+8. **183 OCs de la migración sin `archivo_url`** (31-ago, tras el PR #54). El #54 deja al
+   sistema listo para absorber los links: la cura de fondo es un script en `SmartSupply/bot`
+   que reenvíe esas órdenes por la ingesta con su URL de Drive — se completan sin tocar la
+   captura. **La SN-33NER-JUE que reportó el dueño sigue sin link** (verificado por la noche):
+   queda el UPDATE puntual que el dueño tiene pendiente de correr, o cae sola con el script.
