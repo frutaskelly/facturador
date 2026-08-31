@@ -215,6 +215,15 @@ def ingesta(
     )
     if existente is not None:
         if existente.remision_id is not None or existente.estado == "DESCARTADA":
+            # La captura ya no se toca, pero el puntero al documento original
+            # sí se completa si faltaba: 183 OCs de la migración llegaron sin
+            # su link de Drive y "Ver la OC original" no tenía a dónde ir.
+            if payload.archivo_url and not existente.archivo_url:
+                existente.archivo_url = payload.archivo_url
+                if payload.archivo_nombre and not existente.archivo_nombre:
+                    existente.archivo_nombre = payload.archivo_nombre
+                existente.updated_by = ctx.user_id
+                db.flush()
             return _detalle(db, existente)
         existente.payload = data
         existente.folio_externo = payload.folio_externo
