@@ -19,13 +19,16 @@ class Settings(BaseSettings):
 
     # ─── Database ─────────────────────────────────────────────────────────────
     DATABASE_URL: str
-    # Tamaño del pool. Configurable porque el pooler de Supabase en modo sesión
-    # admite 15 clientes en total, y un solo backend con los valores de antes
-    # (10 + 20) podía quedarse con todos: el deploy fallaba al migrar con
-    # «max clients reached» y hasta un script quedaba fuera. En prod se deja el
-    # default; un backend de desarrollo contra la misma BD debe bajarlo.
-    DB_POOL_SIZE: int = 10
-    DB_MAX_OVERFLOW: int = 20
+    # Tamaño del pool. El pooler de Supabase en modo sesión admite 15 clientes
+    # EN TOTAL y cada conexión del pool retiene su slot aunque esté ociosa. Con
+    # 10+20 el backend podía crecer hasta 30: la noche del 31-ago llenó los 15
+    # y todo lo demás (vistazo de OC, checklist, migraciones, scripts) recibía
+    # «max clients reached» — 164 errores 500 en 45 min. El tope del proceso
+    # va DEBAJO de 15 con holgura para alembic y scripts: 5 fijas + 7 de
+    # desborde = 12. Agotadas las 12, SQLAlchemy encola (pool_timeout) en vez
+    # de estrellarse contra el pooler.
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 7
     DATABASE_URL_ASYNC: str = ""
     # Cloud (Supabase) connection for applying migrations / seeding.
     SUPABASE_DB_URL: str = ""
