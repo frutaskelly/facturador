@@ -8,7 +8,7 @@
 //                  esquema de impuesto (reglas fiscales + IA), claves SAT, lista
 //   4. Preview     tabla editable: unidad, categoría, esquema, SAT, acción
 //   5. Resultado   + a quién se asigna la lista de precios
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Download, FileUp, Sparkles } from "lucide-react";
@@ -170,8 +170,36 @@ export default function ImportarProductosPage() {
   // Por cada categoría del archivo: "" = crear nueva, o el id de una existente.
   const [catDestino, setCatDestino] = useState<Record<string, string>>({});
   const [listaNombre, setListaNombre] = useState("");
-  const [sugiriendoEsq, setSugiriendoEsq] = useState(false);
-  const [sugiriendoCat, setSugiriendoCat] = useState(false);
+  // Lote vigente de filas: analizar() lo avanza al reemplazarlas (e importar()
+  // al aprobar, y la salida de la pantalla), y todo trabajo de fondo compara
+  // contra él para no aplicarse — ni toastear — sobre filas que ya no existen.
+  const loteRef = useRef(0);
+  // Lote cuya cadena de fondo corre (null = ninguna): un segundo clic en
+  // "Ver los productos" del MISMO lote no la duplica, y un lote nuevo sí
+  // arranca la suya aunque la vieja siga muriendo por sus guards.
+  const fondoRef = useRef<number | null>(null);
+  // Lote de la request de esquemas en vuelo: evita duplicarla dentro del lote
+  // ("Asignar automáticamente" + "Ver los productos" casi juntos) sin que una
+  // request moribunda de un lote descartado estorbe al lote nuevo.
+  const esqEnVuelo = useRef<number | null>(null);
+  // Cada análisis registra el LOTE al que pertenece (null = ninguno); los
+  // "Analizando…" solo encienden si es el lote vigente, para que una request
+  // moribunda de un lote descartado no congele spinners ni selects.
+  const [satLote, setSatLote] = useState<number | null>(null);
+  const [esqLote, setEsqLote] = useState<number | null>(null);
+  const [catLote, setCatLote] = useState<number | null>(null);
+  const sugiriendoSat = satLote !== null && satLote === loteRef.current;
+  const sugiriendoEsq = esqLote !== null && esqLote === loteRef.current;
+  const sugiriendoCat = catLote !== null && catLote === loteRef.current;
+
+  // Al desmontar la pantalla (Sidebar, Atrás del navegador, cualquier link),
+  // todo lo que siga en vuelo queda inválido: ni aplica ni toastea sobre la
+  // página a la que se fue el usuario.
+  useEffect(() => {
+    return () => {
+      loteRef.current += 1;
+    };
+  }, []);
 
   // Paso 5 — asignación de la lista
   const [asignar, setAsignar] = useState<"nada" | "default" | "clientes" | null>(null);
@@ -187,6 +215,18 @@ export default function ImportarProductosPage() {
   /** ¿Esta fila se va a importar? (casilla marcada) */
   const seImporta = useCallback((f: Fila) => incluidas.has(f.fila), [incluidas]);
 
+  // Espejos siempre frescos para el trabajo en segundo plano: los closures del
+  // clic se quedan con la foto vieja mientras la IA responde (~1 minuto en el
+  // que el usuario ya está editando la tabla).
+  const filasRef = useRef<Fila[]>([]);
+  useEffect(() => {
+    filasRef.current = filas;
+  }, [filas]);
+  const incluidasRef = useRef(incluidas);
+  useEffect(() => {
+    incluidasRef.current = incluidas;
+  }, [incluidas]);
+
   const resumen = useMemo(() => {
     const activas = filas.filter((f) => incluidas.has(f.fila));
     const crear = activas.filter((f) => f.accion === "crear").length;
@@ -198,10 +238,21 @@ export default function ImportarProductosPage() {
     // Solo las que se CREAN llevan categoría: al vincular se conserva la del
     // producto que ya existe.
     const sinCategoria = activas.filter((f) => f.accion === "crear" && !f.cat_id).length;
+    const sinClaveSat = activas.filter((f) => f.accion === "crear" && !f.clave_sat).length;
     const conPrecio = activas.filter((f) => f.precio).length;
     const variantes = activas.filter(esVarianteNueva).length;
-    return { crear, vincular, omitir, sinEsquema, sinCategoria, conPrecio, variantes };
+    return { crear, vincular, omitir, sinEsquema, sinCategoria, sinClaveSat, conPrecio, variantes };
   }, [filas, incluidas]);
+
+  // Sugerencias de IA corriendo en segundo plano (la tabla se llena sola).
+  const analizandoFondo = sugiriendoSat || sugiriendoEsq || sugiriendoCat;
+  const tareasFondo = [
+    sugiriendoSat && "claves SAT",
+    sugiriendoEsq && "esquemas de impuesto",
+    sugiriendoCat && "categorías",
+  ]
+    .filter(Boolean)
+    .join(" y ");
 
   // Dos filas que terminan en el MISMO producto: la segunda pisa el código y el
   // precio de la primera. El backend lo marca con la foto del preview; en cuanto
@@ -244,6 +295,7 @@ export default function ImportarProductosPage() {
         toast.error("Elige un archivo primero");
         return;
       }
+      const lote = loteRef.current;
       setCargando(true);
       try {
         const fd = new FormData();
@@ -259,6 +311,7 @@ export default function ImportarProductosPage() {
         setColumnas(p.columnas ?? []);
         setCampos(p.campos_mapeables ?? []);
         const nuevas = p.filas.map(aFila);
+        loteRef.current += 1;   // filas nuevas: sugerencias en vuelo ya no aplican
         setFilas(nuevas);
         // Todo entra por default, salvo lo repetido o dado de baja en el archivo.
         setIncluidas(new Set(nuevas.filter((f) => !f.duplicada_de && !f.baja).map((f) => f.fila)));
@@ -280,9 +333,13 @@ export default function ImportarProductosPage() {
           setPaso("revisar");
         }
       } catch (e) {
-        toast.error(
-          e instanceof ApiError ? e.message : "No se pudo leer el archivo. Intenta de nuevo."
-        );
+        // Gateado por lote: si el usuario ya salió de la pantalla, el fallo
+        // de una relectura abandonada no toastea sobre la otra página.
+        if (loteRef.current === lote) {
+          toast.error(
+            e instanceof ApiError ? e.message : "No se pudo leer el archivo. Intenta de nuevo."
+          );
+        }
       } finally {
         setCargando(false);
       }
@@ -314,44 +371,82 @@ export default function ImportarProductosPage() {
     await analizar(mapeo);
   }
 
-  /** Claves y unidades SAT faltantes, según lo elegido en el paso 3. */
-  async function aplicarSat(): Promise<Fila[]> {
-    const faltantes = filas.filter(
-      (f) => seImporta(f) && (!f.clave_sat || !f.unidad_sat)
+  /** Claves y unidades SAT faltantes, según lo elegido en el paso 3.
+   *  Corre en segundo plano mientras el usuario ya ve la tabla. Devuelve las
+   *  filas con las claves puestas, o null si NO se aplicó nada (falló la
+   *  sugerencia o el lote cambió a media espera) — la cadena que la llama no
+   *  debe seguir a los esquemas con claves a medias. */
+  async function aplicarSat(lote: number): Promise<Fila[] | null> {
+    const snapshot = filasRef.current;
+    const incluidasAlLanzar = new Set(incluidasRef.current);
+    const faltantes = snapshot.filter(
+      (f) => incluidasAlLanzar.has(f.fila) && (!f.clave_sat || !f.unidad_sat)
     );
-    if (faltantes.length === 0) return filas;
+    if (faltantes.length === 0) return snapshot;
     let porNombre: Record<string, SugerenciaSat> = {};
-    if (p1 === "sugerida" || p2 === "sugerida") {
-      const sugerencias = await apiFetch<SugerenciaSat[]>(
-        "/api/v1/productos/sugerir-sat-batch",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            productos: faltantes.map((f) => ({ nombre: f.nombre, unidad: f.unidad })),
-          }),
-        },
-        { timeoutMs: 5 * 60_000 },
-      );
-      porNombre = Object.fromEntries(sugerencias.map((s) => [s.nombre, s]));
+    // El switch de IA del paso 1 manda: apagado, ninguna llamada — se aplican
+    // las genéricas y el mapeo local de unidades.
+    if (usarIa && (p1 === "sugerida" || p2 === "sugerida")) {
+      setSatLote(lote);
+      try {
+        const sugerencias = await apiFetch<SugerenciaSat[]>(
+          "/api/v1/productos/sugerir-sat-batch",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              productos: faltantes.map((f) => ({ nombre: f.nombre, unidad: f.unidad })),
+            }),
+          },
+          { timeoutMs: 5 * 60_000 },
+        );
+        porNombre = Object.fromEntries(sugerencias.map((s) => [s.nombre, s]));
+      } catch (e) {
+        if (loteRef.current === lote) {
+          toast.error(
+            e instanceof ApiError
+              ? e.message
+              : "No se pudieron sugerir las claves SAT — puedes capturarlas en la tabla"
+          );
+        }
+        return null;
+      } finally {
+        setSatLote((v) => (v === lote ? null : v));
+      }
     }
-    const nuevas = filas.map((f) => {
-        if (!incluidas.has(f.fila)) return f;
+    if (loteRef.current !== lote) return null;
+    // Un campo se rellena solo si está vacío AHORA y ya estaba vacío AL LANZAR
+    // la request: lo que el usuario vació a propósito durante la espera (venía
+    // con valor) no se toca, y una fila re-marcada durante la espera sí recibe
+    // sus huecos (por nombre suele haber sugerencia — las repetidas comparten
+    // nombre con la fila que sí viajó).
+    const claveAlLanzar = new Map(snapshot.map((f) => [f.fila, f.clave_sat]));
+    const unidadAlLanzar = new Map(snapshot.map((f) => [f.fila, f.unidad_sat]));
+    const rellena = (f: Fila): Fila => {
+        if (!incluidasRef.current.has(f.fila)) return f;
         const s = porNombre[f.nombre];
         let clave = f.clave_sat;
         let unidad = f.unidad_sat;
-        if (!clave) clave = p1 === "sugerida" && s ? s.clave_sat : "01010101";
-        if (!unidad) {
+        if (!clave && !claveAlLanzar.get(f.fila)) {
+          clave = p1 === "sugerida" && s ? s.clave_sat : "01010101";
+        }
+        if (!unidad && !unidadAlLanzar.get(f.fila)) {
           // La unidad SAT sale de la unidad DE ESTA FILA. La sugerencia viene
           // cruzada por nombre, así que "CILANTRO" manojo y "CILANTRO" kilo
           // recibían la misma — y el manojo se timbraba como kilogramo.
+          // Sin unidad en el archivo, manda el KILO que la tabla ya enseña y
+          // el backend guarda como unidad_base — caer a H87 timbraba piezas
+          // sobre un producto mostrado y almacenado por kilo.
           unidad =
-            UNIDAD_SAT[(f.unidad || "").toUpperCase()] ??
+            UNIDAD_SAT[(f.unidad || "KILO").toUpperCase()] ??
             (p2 === "sugerida" && s ? s.unidad_sat : s?.unidad_sat_generica ?? "H87");
         }
         return { ...f, clave_sat: clave, unidad_sat: unidad };
-    });
-    setFilas(nuevas);
-    return nuevas;
+    };
+    // Funcional y solo llenando huecos: lo que el usuario editó en la tabla
+    // mientras la IA respondía no se pisa. El retorno parte del espejo fresco
+    // para que los esquemas se calculen con las claves manuales incluidas.
+    setFilas((rows) => rows.map(rellena));
+    return filasRef.current.map(rellena);
   }
 
   /** Categoría para los productos NUEVOS que no traen ninguna: la IA elige
@@ -362,7 +457,8 @@ export default function ImportarProductosPage() {
       toast.info("Todos los productos nuevos ya tienen categoría");
       return;
     }
-    setSugiriendoCat(true);
+    const lote = loteRef.current;
+    setCatLote(lote);
     try {
       const sug = await apiFetch<SugerenciaCategoria[]>(
         "/api/v1/productos/sugerir-categoria-batch",
@@ -375,11 +471,12 @@ export default function ImportarProductosPage() {
         },
         { timeoutMs: 5 * 60_000 },
       );
+      if (loteRef.current !== lote) return;   // ya son filas de otro archivo
       const porNombre = Object.fromEntries(sug.map((x) => [x.nombre, x]));
       const asignados = faltantes.filter((f) => porNombre[f.nombre]?.categoria_id).length;
       setFilas((rows) =>
         rows.map((f) => {
-          if (!incluidas.has(f.fila) || f.accion !== "crear" || f.cat_id) return f;
+          if (!incluidasRef.current.has(f.fila) || f.accion !== "crear" || f.cat_id) return f;
           const c = porNombre[f.nombre];
           return c?.categoria_id ? { ...f, cat_id: c.categoria_id } : f;
         })
@@ -392,21 +489,26 @@ export default function ImportarProductosPage() {
         toast.success(`${asignados} productos con categoría asignada`);
       }
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudieron sugerir las categorías");
+      if (loteRef.current === lote) {
+        toast.error(e instanceof ApiError ? e.message : "No se pudieron sugerir las categorías");
+      }
     } finally {
-      setSugiriendoCat(false);
+      setCatLote((v) => (v === lote ? null : v));
     }
   }
 
   /** Esquema de impuesto para las filas que no tienen: reglas fiscales + IA. */
   async function sugerirEsquemas(base?: Fila[]) {
     const filasBase = base ?? filas;
-    const faltantes = filasBase.filter((f) => seImporta(f) && !f.esq_id);
+    const faltantes = filasBase.filter((f) => incluidasRef.current.has(f.fila) && !f.esq_id);
     if (faltantes.length === 0) {
       if (!base) toast.info("Todas las filas ya tienen esquema");
       return;
     }
-    setSugiriendoEsq(true);
+    const lote = loteRef.current;
+    if (esqEnVuelo.current === lote) return;   // ya corre esta misma request
+    esqEnVuelo.current = lote;
+    setEsqLote(lote);
     try {
       const sug = await apiFetch<SugerenciaEsquema[]>(
         "/api/v1/productos/sugerir-esquema-batch",
@@ -423,11 +525,12 @@ export default function ImportarProductosPage() {
         },
         { timeoutMs: 5 * 60_000 },
       );
+      if (loteRef.current !== lote) return;   // ya son filas de otro archivo
       const porNombre = Object.fromEntries(sug.map((s) => [s.nombre, s]));
       const asignados = faltantes.filter((f) => porNombre[f.nombre]?.esquema_id).length;
       setFilas((rows) =>
         rows.map((f) => {
-          if (!incluidas.has(f.fila) || f.esq_id) return f;
+          if (!incluidasRef.current.has(f.fila) || f.esq_id) return f;
           const s = porNombre[f.nombre];
           if (!s?.esquema_id) {
             return s?.motivo ? { ...f, esquema_motivo: s.motivo, esquema_origen: s.origen } : f;
@@ -443,29 +546,52 @@ export default function ImportarProductosPage() {
         toast.success(`${asignados} productos con esquema asignado`);
       }
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudieron sugerir los esquemas");
+      if (loteRef.current === lote) {
+        toast.error(e instanceof ApiError ? e.message : "No se pudieron sugerir los esquemas");
+      }
     } finally {
-      setSugiriendoEsq(false);
+      if (esqEnVuelo.current === lote) esqEnVuelo.current = null;
+      setEsqLote((v) => (v === lote ? null : v));
     }
   }
 
-  async function irAlPreview() {
-    setCargando(true);
-    try {
-      const conSat = await aplicarSat();
-      // Sin esquema no se puede facturar: se asigna solo antes de enseñar la
-      // tabla, en vez de dejarlo a que el usuario recuerde apretar un botón.
-      // Con las filas RECIÉN actualizadas: las reglas fiscales se apoyan en la
-      // clave SAT que `aplicarSat` acaba de poner.
-      if (resumen.sinEsquema > 0 && esquemas.length > 0) {
-        await sugerirEsquemas(conSat);
+  /** A la tabla YA; las sugerencias corren en segundo plano. Con 160 filas la
+   *  IA tarda ~1 minuto y antes este botón esperaba TODO encadenado (claves
+   *  SAT y luego esquemas) con "Ver los productos" y "Regresar" congelados.
+   *  Ahora la tabla se va llenando sola y todo sigue editable mientras. */
+  function irAlPreview() {
+    setPaso("preview");
+    const lote = loteRef.current;
+    if (fondoRef.current === lote) return;   // la cadena de ESTE lote ya corre
+    fondoRef.current = lote;
+    void (async () => {
+      try {
+        const conSat = await aplicarSat(lote);
+        // null = no se aplicó nada (falló la sugerencia o el lote cambió):
+        // seguir a los esquemas con claves a medias los calcularía mal.
+        if (conSat === null || loteRef.current !== lote) return;
+        // Si el usuario disparó "Asignar automáticamente" a mano mientras
+        // corría lo del SAT, se le deja terminar y esta pasada — la que sí
+        // trae las claves nuevas — trabaja sobre lo que aquella no resolvió.
+        let base = conSat;
+        while (esqEnVuelo.current === lote) {
+          await new Promise((r) => setTimeout(r, 400));
+          if (loteRef.current !== lote) return;
+          base = filasRef.current;
+        }
+        // Sin esquema no se puede facturar: se asigna solo, sin que el usuario
+        // recuerde apretar un botón — sobre las filas RECIÉN actualizadas,
+        // porque las reglas fiscales se apoyan en la clave SAT nueva.
+        if (
+          esquemas.length > 0 &&
+          base.some((f) => incluidasRef.current.has(f.fila) && f.accion === "crear" && !f.esq_id)
+        ) {
+          await sugerirEsquemas(base);
+        }
+      } finally {
+        if (fondoRef.current === lote) fondoRef.current = null;
       }
-      setPaso("preview");
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudieron aplicar las sugerencias");
-    } finally {
-      setCargando(false);
-    }
+    })();
   }
 
   function setFila(fila: number, patch: Partial<Fila>) {
@@ -491,6 +617,15 @@ export default function ImportarProductosPage() {
       toast.error("No hay ninguna fila marcada para importar");
       return;
     }
+    if (
+      analizandoFondo &&
+      !window.confirm(
+        `Aún se están asignando ${tareasFondo} en segundo plano. Si apruebas ahora, ` +
+        "algunos productos pueden quedar sin esos datos. ¿Importar así?"
+      )
+    ) {
+      return;
+    }
     // Un "0,5" con coma llegaba al backend como texto y lo rechazaba entero,
     // con un mensaje en inglés y sin decir de qué fila. Se avisa aquí, por fila.
     const malFactor = filas.find(
@@ -514,6 +649,11 @@ export default function ImportarProductosPage() {
       return;
     }
     setCargando(true);
+    // Desde AQUÍ las sugerencias en vuelo ya no aplican: el payload de abajo
+    // viaja sin ellas, y aplicarlas (con su toast de éxito) mientras el import
+    // corre afirmaría datos que NO se importaron.
+    const loteImport = loteRef.current;
+    loteRef.current += 1;
     try {
       const conPrecios = Boolean(meta?.tiene_precios);
       const res = await apiFetch<ImportResult>(
@@ -553,6 +693,12 @@ export default function ImportarProductosPage() {
       setPaso("resultado");
       setFalloImport("");
     } catch (e) {
+      // El import falló: las filas siguen vivas en pantalla, así que se
+      // restaura el lote para que las sugerencias vuelvan a operar normal.
+      // Si el usuario ya salió (el lote avanzó por otro lado), ni se restaura
+      // ni se toastea sobre la otra página.
+      if (loteRef.current !== loteImport + 1) return;
+      loteRef.current = loteImport;
       const msg = e instanceof ApiError ? e.message : "No se pudo importar";
       setFalloImport(msg);
       toast.error(msg);
@@ -879,12 +1025,20 @@ export default function ImportarProductosPage() {
           <Link
             href="/productos"
             onClick={(e) => {
-              if (
-                hayTrabajo &&
-                !window.confirm("Se perderán las decisiones de esta importación. ¿Salir?")
-              ) {
+              // Con clic modificado (abrir en pestaña nueva) esta página sigue
+              // viva: ni confirm ni dar por muerto el trabajo en curso.
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              const importando = cargando && paso === "preview";
+              const aviso = importando
+                ? "La aprobación ya se envió y terminará en el servidor aunque salgas — " +
+                  "revisa el catálogo después. ¿Salir?"
+                : "Se perderán las decisiones de esta importación. ¿Salir?";
+              if (hayTrabajo && !window.confirm(aviso)) {
                 e.preventDefault();
+                return;
               }
+              // Al salir, todo lo que siga en vuelo ya no aplica ni toastea.
+              loteRef.current += 1;
             }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium hover:bg-surface-2"
           >
@@ -1200,9 +1354,25 @@ export default function ImportarProductosPage() {
           {meta.faltan_clave_sat > 0 || meta.faltan_unidad_sat > 0 ? (
             <section className="space-y-2">
               <h2 className="text-sm font-medium">Claves SAT faltantes</h2>
+              {sugiriendoSat ? (
+                <div className="flex items-center gap-2 text-sm text-muted">
+                  <Spinner className="h-4 w-4" />
+                  Asignando las claves en segundo plano con lo elegido aquí…
+                </div>
+              ) : null}
+              {!usarIa ? (
+                <p className="text-xs text-muted">
+                  La IA está apagada (paso 1): se usan las genéricas, y la
+                  unidad SAT se deduce de la unidad de venta.
+                </p>
+              ) : null}
               {meta.faltan_clave_sat > 0 ? (
                 <Field label={`${meta.faltan_clave_sat} productos sin clave SAT`}>
-                  <Select value={p1} onChange={(e) => setP1(e.target.value as "sugerida" | "generica")}>
+                  <Select
+                    value={p1}
+                    onChange={(e) => setP1(e.target.value as "sugerida" | "generica")}
+                    disabled={sugiriendoSat || !usarIa}
+                  >
                     <option value="sugerida">Asignar la sugerida (del catálogo SAT oficial)</option>
                     <option value="generica">Usar la genérica 01010101</option>
                   </Select>
@@ -1210,7 +1380,11 @@ export default function ImportarProductosPage() {
               ) : null}
               {meta.faltan_unidad_sat > 0 ? (
                 <Field label={`${meta.faltan_unidad_sat} productos sin unidad SAT`}>
-                  <Select value={p2} onChange={(e) => setP2(e.target.value as "sugerida" | "generica")}>
+                  <Select
+                    value={p2}
+                    onChange={(e) => setP2(e.target.value as "sugerida" | "generica")}
+                    disabled={sugiriendoSat || !usarIa}
+                  >
                     <option value="sugerida">Asignar la sugerida según la unidad de venta</option>
                     <option value="generica">Usar la genérica H87 (pieza)</option>
                   </Select>
@@ -1227,10 +1401,7 @@ export default function ImportarProductosPage() {
             >
               Regresar
             </Button>
-            <Button onClick={irAlPreview} disabled={cargando}>
-              {cargando ? <Spinner className="h-4 w-4" /> : null}
-              {cargando ? "Preparando…" : "Ver los productos"}
-            </Button>
+            <Button onClick={irAlPreview}>Ver los productos</Button>
           </div>
         </div>
       )}
@@ -1253,7 +1424,21 @@ export default function ImportarProductosPage() {
             {resumen.variantes > 0 ? (
               <Badge tone="accent">{resumen.variantes} presentaciones nuevas</Badge>
             ) : null}
-            {resumen.sinEsquema > 0 ? (
+            {analizandoFondo ? (
+              <span className="flex items-center gap-2 text-sm text-muted">
+                <Spinner className="h-4 w-4" />
+                Se siguen asignando {tareasFondo} — la tabla se llena sola;
+                puedes revisar y editar mientras.
+              </span>
+            ) : null}
+            {/* Los "sin dato" en rojo solo cuando su análisis ya terminó:
+                mientras corre serían alarmas falsas de todo el lote. Los
+                esquemas se asignan DESPUÉS de las claves SAT, así que su badge
+                también espera a esa fase. */}
+            {!sugiriendoSat && resumen.sinClaveSat > 0 ? (
+              <Badge tone="danger">{resumen.sinClaveSat} sin clave SAT</Badge>
+            ) : null}
+            {!sugiriendoSat && !sugiriendoEsq && resumen.sinEsquema > 0 ? (
               <Badge tone="danger">{resumen.sinEsquema} sin esquema de impuesto</Badge>
             ) : null}
             {resumen.conPrecio > 0 ? (
@@ -1266,6 +1451,9 @@ export default function ImportarProductosPage() {
             ) : null}
           </div>
 
+          {/* Mientras "Importando…" el payload YA viajó: se congela la tabla
+              para que una corrección tardía no se pierda en silencio. */}
+          <div className={cargando ? "pointer-events-none opacity-60" : undefined}>
           <DataTable
             columns={columnasPreview}
             rows={filas}
@@ -1276,7 +1464,10 @@ export default function ImportarProductosPage() {
               rescatarOmitidas(rows.map((f) => f.fila));
             }}
             selectionResetKey={resetSeleccion}
-            initialSelectedKeys={filas.filter((f) => !f.duplicada_de && !f.baja).map((f) => f.fila)}
+            // Desde `incluidas`, NO el default: al ir a Revisar y volver, la
+            // tabla se re-monta y con el default perdía en silencio las
+            // casillas que el usuario ya había cambiado.
+            initialSelectedKeys={[...incluidas]}
             searchable
             searchPlaceholder="Buscar producto, código, categoría…"
             paginated
@@ -1285,6 +1476,7 @@ export default function ImportarProductosPage() {
             storageKey="importar-productos-preview"
             empty="Sin filas"
           />
+          </div>
 
         </div>
       )}
