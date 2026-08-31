@@ -6,23 +6,10 @@ import { Plus, Sparkles } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
 import type { Candidato, MatchResult } from "@/lib/types";
-import { Button } from "@/components/ui/Button";
-import { Modal } from "@/components/ui/Modal";
-import { Field, Input, Select } from "@/components/ui/Field";
-import { useToast } from "@/components/ui/Toast";
+import { CrearProductoModal } from "@/components/CrearProductoModal";
 
 const BASE =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
-
-// Unidades para el alta rápida de producto desde el buscador.
-const UNIDADES_SAT: { code: string; nombre: string }[] = [
-  { code: "H87", nombre: "Pieza" }, { code: "KGM", nombre: "Kilogramo" },
-  { code: "GRM", nombre: "Gramo" }, { code: "LTR", nombre: "Litro" },
-  { code: "MLT", nombre: "Mililitro" }, { code: "XBX", nombre: "Caja" },
-  { code: "XPK", nombre: "Paquete" }, { code: "XBG", nombre: "Bolsa" },
-  { code: "XSA", nombre: "Saco / Costal" }, { code: "DPC", nombre: "Docena" },
-];
-const UNIDADES_BASE = ["KILO", "PIEZA", "LITRO", "CAJA", "BULTO", "COSTAL", "MANOJO", "BOLSA"];
 
 export type ProductoPick = {
   producto_id: string;
@@ -44,12 +31,21 @@ export function ProductoCombobox({
   placeholder = "Buscar producto…",
   autoFocus,
   onPaste,
+  clienteId = null,
+  unidadBase,
+  presentacion,
 }: {
   label?: string;
   onSelect: (p: ProductoPick | null, texto: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
   onPaste?: (e: ClipboardEvent<HTMLInputElement>) => void;
+  /** Cliente de la orden: deja capturar el precio en SU lista al dar de alta. */
+  clienteId?: string | null;
+  /** Unidad que traía el renglón, para arrancar el alta con la que toca. */
+  unidadBase?: string;
+  /** Presentación a la que va el precio del alta. */
+  presentacion?: string;
 }) {
   const [q, setQ] = useState(label ?? "");
   const [open, setOpen] = useState(false);
@@ -59,14 +55,11 @@ export function ProductoCombobox({
   const [hi, setHi] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const toast = useToast();
   // Alta rápida de producto desde el buscador ("+ Crear Producto Nuevo").
+  // Se delega en el modal compartido: trae el candado de duplicados, la
+  // sugerencia de clave SAT y el precio a la lista del cliente.
   const [createOpen, setCreateOpen] = useState(false);
-  const [cNombre, setCNombre] = useState("");
-  const [cClaveSat, setCClaveSat] = useState("01010101");
-  const [cUnidadSat, setCUnidadSat] = useState("H87");
-  const [cUnidadBase, setCUnidadBase] = useState("KILO");
-  const [cSaving, setCSaving] = useState(false);
+  const [createNombre, setCreateNombre] = useState("");
 
   useEffect(() => setQ(label ?? ""), [label]);
   useEffect(() => setHi(0), [cands]);
@@ -156,46 +149,9 @@ export function ProductoCombobox({
   }
 
   function abrirCrear() {
-    setCNombre(q.trim());
-    setCClaveSat("01010101"); setCUnidadSat("H87"); setCUnidadBase("KILO");
+    setCreateNombre(q.trim());
     setOpen(false);
     setCreateOpen(true);
-  }
-
-  async function crearProducto() {
-    if (cSaving) return;
-    if (!cNombre.trim()) { toast.error("Escribe el nombre del producto"); return; }
-    setCSaving(true);
-    try {
-      const prod = await apiFetch<{
-        id: string; sku: string; nombre: string;
-        presentaciones: Record<string, number>;
-        presentacion_default?: string | null; unidad_base?: string | null;
-      }>("/api/v1/productos", {
-        method: "POST",
-        body: JSON.stringify({
-          nombre: cNombre.trim(),
-          clave_sat: cClaveSat.trim() || "01010101",
-          unidad_sat: cUnidadSat,
-          unidad_base: cUnidadBase,
-          presentaciones: { [cUnidadBase]: 1 },
-          presentacion_default: cUnidadBase,
-        }),
-      });
-      // El producto recién creado se selecciona en esta caja (como un candidato).
-      onSelect({
-        producto_id: prod.id, sku: prod.sku, nombre: prod.nombre,
-        presentaciones: prod.presentaciones, presentacion_default: prod.presentacion_default,
-        unidad_base: prod.unidad_base,
-      }, prod.nombre);
-      setQ(prod.nombre);
-      setCreateOpen(false);
-      toast.success(`Producto "${prod.nombre}" creado`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "No se pudo crear el producto");
-    } finally {
-      setCSaving(false);
-    }
   }
 
   return (
@@ -271,43 +227,23 @@ export function ProductoCombobox({
         </div>
       )}
 
-      <Modal
+      <CrearProductoModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        title="Nuevo producto"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setCreateOpen(false)} disabled={cSaving}>Cancelar</Button>
-            <Button onClick={crearProducto} disabled={cSaving}>{cSaving ? "Creando…" : "Crear producto"}</Button>
-          </>
-        }
-      >
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="sm:col-span-2">
-            <Field label="Nombre" required>
-              <Input value={cNombre} onChange={(e) => setCNombre(e.target.value)} autoFocus />
-            </Field>
-          </div>
-          <Field label="Unidad base" hint="Unidad de inventario">
-            <Select value={cUnidadBase} onChange={(e) => setCUnidadBase(e.target.value)}>
-              {UNIDADES_BASE.map((u) => <option key={u} value={u}>{u}</option>)}
-            </Select>
-          </Field>
-          <Field label="Unidad SAT">
-            <Select value={cUnidadSat} onChange={(e) => setCUnidadSat(e.target.value)}>
-              {UNIDADES_SAT.map((u) => <option key={u.code} value={u.code}>{u.code} — {u.nombre}</option>)}
-            </Select>
-          </Field>
-          <div className="sm:col-span-2">
-            <Field label="Clave SAT" hint="Producto/servicio (por defecto 01010101 — genérico)">
-              <Input value={cClaveSat} onChange={(e) => setCClaveSat(e.target.value)} />
-            </Field>
-          </div>
-          <p className="text-xs text-muted sm:col-span-2">
-            Se crea con lo esencial. Puedes completar categoría, presentaciones e impuestos después en Productos.
-          </p>
-        </div>
-      </Modal>
+        nombreInicial={createNombre}
+        unidadBaseInicial={unidadBase || "KILO"}
+        clienteId={clienteId}
+        presentacionInicial={presentacion}
+        onCreated={(prod) => {
+          // El producto recién creado se selecciona en esta caja (como un candidato).
+          onSelect({
+            producto_id: prod.id, sku: prod.sku, nombre: prod.nombre,
+            presentaciones: prod.presentaciones, presentacion_default: prod.presentacion_default,
+            unidad_base: prod.unidad_base,
+          }, prod.nombre);
+          setQ(prod.nombre);
+        }}
+      />
     </div>
   );
 }

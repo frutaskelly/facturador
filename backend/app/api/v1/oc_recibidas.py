@@ -30,6 +30,7 @@ from ...models import (
     Almacen,
     Cliente,
     GrupoWhatsapp,
+    ListaPrecios,
     OCRecibida,
     Producto,
     Proyecto,
@@ -487,7 +488,7 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
     debe coincidir con el de la lista — discrepancia = PRECIO EN CONFLICTO.
     """
     def no(motivo: str) -> dict:
-        return {"ok": False, "motivo": motivo, "lineas": []}
+        return {"ok": False, "motivo": motivo, "lineas": [], "problemas": []}
 
     if oc.remision_id is not None:
         return no("Esta orden ya generó su remisión")
@@ -513,12 +514,24 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
         )
         serie_id = serie.id if serie is not None else None
     out_lineas = []
+    # Los problemas se JUNTAN, no se reporta solo el primero: el operador
+    # arreglaba uno, volvía a guardar y aparecía el siguiente. Cada uno trae el
+    # `numero` de su partida para que la pantalla pueda pintarla en rojo, y el
+    # conflicto de precio trae además las dos cifras y de qué lista sale la suya
+    # — sin eso el aviso decía "la lista dice 57.50" sin decir cuál lista.
+    problemas: list[dict] = []
+
+    def falla(ln: dict, tipo: str, mensaje: str, **extra) -> None:
+        problemas.append({"numero": ln["numero"], "tipo": tipo, "mensaje": mensaje, **extra})
+
     for ln in lineas:
         cands = ln.get("candidatos") or []
         top = cands[0] if cands else None
         etiqueta = f"«{(ln.get('descripcion') or ln.get('clave') or '')[:60]}»"
         if top is None or top["origen"] not in _ORIGENES_DETERMINISTAS or top["score"] < 100:
-            return no(f"La partida {ln['numero']} {etiqueta} no cruza por clave, alias ni exacto")
+            falla(ln, "sin_cruce",
+                  f"La partida {ln['numero']} {etiqueta} no cruza por clave, alias ni exacto")
+            continue
         # `buscar` emite a PROPÓSITO un 100 por CADA producto que normaliza igual
         # ("CILANTRO" y "Cilantro" son dos filas) para que un humano vea el
         # duplicado. Esa ambigüedad no la puede resolver el orden del seq scan:
@@ -528,28 +541,28 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
             if c["score"] >= 100 and c["origen"] in _ORIGENES_DETERMINISTAS
         }
         if len(empatados) > 1:
-            return no(
-                f"La partida {ln['numero']} {etiqueta} cruza al 100 con "
-                f"{len(empatados)} productos distintos: elige cuál va"
-            )
+            falla(ln, "ambiguo",
+                  f"La partida {ln['numero']} {etiqueta} cruza al 100 con "
+                  f"{len(empatados)} productos distintos: elige cuál va")
+            continue
         prod = by_id.get(top["producto_id"])
         pres = ln.get("presentacion_sugerida")
         presentaciones = set((prod.presentaciones or {}).keys()) | {prod.unidad_base}
         if not pres or pres not in presentaciones:
-            return no(
-                f"La partida {ln['numero']} {etiqueta} pide una unidad "
-                f"({ln.get('unidad') or 'sin unidad'}) que el producto no vende"
-            )
+            falla(ln, "unidad",
+                  f"La partida {ln['numero']} {etiqueta} pide una unidad "
+                  f"({ln.get('unidad') or 'sin unidad'}) que el producto no vende")
+            continue
         # La presentación ADIVINADA sugiere, no decide: el documento no dijo
         # unidad (o dijo una que no reconocemos) y el factor cambia cantidad y
         # precio — 10 MANOJO no es 10 KILO. Si el producto se vende de una sola
         # forma no hay nada que adivinar y la orden sigue siendo automática.
         if ln.get("presentacion_adivinada") and len(presentaciones) > 1:
-            return no(
-                f"La partida {ln['numero']} {etiqueta} no trae una unidad que se "
-                f"reconozca ({ln.get('unidad') or 'sin unidad'}) y el producto se "
-                "vende en varias presentaciones: confírmala a mano"
-            )
+            falla(ln, "unidad",
+                  f"La partida {ln['numero']} {etiqueta} no trae una unidad que se "
+                  f"reconozca ({ln.get('unidad') or 'sin unidad'}) y el producto se "
+                  "vende en varias presentaciones: confírmala a mano")
+            continue
         res = resolver_precio(
             db,
             producto_id=prod.id,
@@ -561,18 +574,26 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
             proyecto_id=oc.proyecto_id,
         )
         if res is None:
-            return no(f"La partida {ln['numero']} {etiqueta} no tiene precio en ninguna lista")
+            falla(ln, "sin_precio",
+                  f"La partida {ln['numero']} {etiqueta} no tiene precio en ninguna lista")
+            continue
         if res.get("origen") == "lista_base":
-            return no(
-                f"La partida {ln['numero']} {etiqueta} solo tiene precio en la lista "
-                "base, no en una lista negociada del cliente"
-            )
+            falla(ln, "precio_base",
+                  f"La partida {ln['numero']} {etiqueta} solo tiene precio en la lista "
+                  "base, no en una lista negociada del cliente")
+            continue
         precio_doc = ln.get("precio")
         if precio_doc is not None and abs(Decimal(str(precio_doc)) - Decimal(res["precio"])) > Decimal("0.01"):
-            return no(
-                f"La partida {ln['numero']} {etiqueta} trae precio {precio_doc} y la "
-                f"lista dice {res['precio']}: precio en conflicto"
+            fuente = _fuente_precio(db, res)
+            falla(
+                ln, "precio_conflicto",
+                f"La partida {ln['numero']} {etiqueta} viene con {precio_doc} en el "
+                f"documento y {fuente} dice {Decimal(res['precio']):.2f}: elige cuál se cobra",
+                precio_documento=str(precio_doc),
+                precio_lista=str(Decimal(res["precio"]).quantize(Decimal("0.01"))),
+                fuente_precio=fuente,
             )
+            continue
         out_lineas.append({
             "numero": ln["numero"],
             "producto_id": str(prod.id),
@@ -585,7 +606,32 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
             "clave": ln.get("clave"),
             "cruzo_por": top["origen"],
         })
-    return {"ok": True, "motivo": None, "lineas": out_lineas}
+    if problemas:
+        # `motivo` sigue siendo el primero: es lo que la pantalla resume arriba.
+        return {"ok": False, "motivo": problemas[0]["mensaje"], "lineas": [], "problemas": problemas}
+    return {"ok": True, "motivo": None, "lineas": out_lineas, "problemas": []}
+
+
+def _fuente_precio(db: Session, res: dict) -> str:
+    """De dónde salió el precio, con el NOMBRE de la lista cuando lo hay.
+
+    «la lista dice 57.50» obligaba a adivinar cuál de las listas del cliente
+    habló. Con el nombre, el operador va directo a corregirla si está mal."""
+    origen = res.get("origen") or ""
+    if origen == "override_sucursal":
+        return "el precio especial de la sucursal"
+    if origen == "override_cliente":
+        return "el precio especial del cliente"
+    lista_id = res.get("lista_id")
+    if lista_id:
+        lp = (
+            db.query(ListaPrecios)
+            .filter(ListaPrecios.id == lista_id, ListaPrecios.deleted_at.is_(None))
+            .one_or_none()
+        )
+        if lp is not None:
+            return f"la lista «{lp.nombre}»"
+    return "la lista de precios"
 
 
 @router.get("/{oc_id}", response_model=OCRecibidaDetailOut)

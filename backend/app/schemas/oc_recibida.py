@@ -109,6 +109,19 @@ class LineaAutoOut(BaseModel):
     cruzo_por: str
 
 
+class ProblemaLineaOut(BaseModel):
+    """Lo que le impide a UNA partida entrar sola, con su número para poder
+    señalarla en la tabla en vez de dejar el aviso suelto arriba."""
+    numero: int
+    tipo: str            # sin_cruce | ambiguo | unidad | sin_precio | precio_base | precio_conflicto
+    mensaje: str
+    # Solo en `precio_conflicto`: las dos cifras que no coinciden y de dónde
+    # sale la de la casa, para poder ofrecer «cobra esta» sin salir de la tabla.
+    precio_documento: Optional[str] = None
+    precio_lista: Optional[str] = None
+    fuente_precio: Optional[str] = None
+
+
 class AutoRemisionOut(BaseModel):
     """¿La orden entera puede volverse remisión con un clic? Y con qué líneas.
 
@@ -117,6 +130,7 @@ class AutoRemisionOut(BaseModel):
     ok: bool
     motivo: Optional[str] = None
     lineas: list[LineaAutoOut] = Field(default_factory=list)
+    problemas: list[ProblemaLineaOut] = Field(default_factory=list)
 
 
 class OCRecibidaOut(ORMModel):

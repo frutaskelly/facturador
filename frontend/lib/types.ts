@@ -727,10 +727,24 @@ export type LineaAuto = {
 /** ¿La orden entera puede volverse remisión con un clic? `ok` solo cuando TODAS
  *  las partidas cruzaron por clave del cliente, alias o exacto, con unidad
  *  vendible y precio de lista negociada (la lista base nunca decide). */
+/** Lo que le impide a UNA partida entrar sola, con su número para poder
+ *  señalarla en la tabla en vez de dejar el aviso suelto arriba. */
+export type ProblemaLinea = {
+  numero: number;
+  tipo: "sin_cruce" | "ambiguo" | "unidad" | "sin_precio" | "precio_base" | "precio_conflicto";
+  mensaje: string;
+  /** Solo en `precio_conflicto`: las dos cifras que no coinciden y de dónde
+   *  sale la de la casa, para ofrecer «cobra esta» sin salir de la tabla. */
+  precio_documento?: string | null;
+  precio_lista?: string | null;
+  fuente_precio?: string | null;
+};
+
 export type AutoRemision = {
   ok: boolean;
   motivo?: string | null;
   lineas: LineaAuto[];
+  problemas: ProblemaLinea[];
 };
 
 export type OCRecibida = {

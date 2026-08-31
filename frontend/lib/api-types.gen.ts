@@ -3511,6 +3511,8 @@ export interface components {
             motivo?: string | null;
             /** Ok */
             ok: boolean;
+            /** Problemas */
+            problemas?: components["schemas"]["ProblemaLineaOut"][];
         };
         /** AvanzarIn */
         AvanzarIn: {
@@ -7340,6 +7342,25 @@ export interface components {
             descuento: number | string;
             /** Lineas */
             lineas: components["schemas"]["PreviewLineaIn"][];
+        };
+        /**
+         * ProblemaLineaOut
+         * @description Lo que le impide a UNA partida entrar sola, con su número para poder
+         *     señalarla en la tabla en vez de dejar el aviso suelto arriba.
+         */
+        ProblemaLineaOut: {
+            /** Fuente Precio */
+            fuente_precio?: string | null;
+            /** Mensaje */
+            mensaje: string;
+            /** Numero */
+            numero: number;
+            /** Precio Documento */
+            precio_documento?: string | null;
+            /** Precio Lista */
+            precio_lista?: string | null;
+            /** Tipo */
+            tipo: string;
         };
         /** ProductoClienteOut */
         ProductoClienteOut: {

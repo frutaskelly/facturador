@@ -29,7 +29,10 @@ import {
   ORIGEN_CRUCE,
   precioNormalizado,
   presentacionDe,
+  problemaDe,
+  problemaVivo,
   tablaDe,
+  unidadBaseDe,
 } from "../cruce";
 
 const WRITE = "remision:gestionar";
@@ -144,6 +147,29 @@ export default function Page() {
   const sinProducto = useMemo(() => lineas.filter((l) => !l.producto_id).length, [lineas]);
   const bloqueada = !!oc && (!!oc.remision_id || oc.estado === "DESCARTADA");
   const auto = oc?.auto ?? null;
+
+  /** Conflictos de precio que el operador decidió dejar como venían en el
+   *  documento: se cobra lo del documento y el rojo se apaga. */
+  const [precioAceptado, setPrecioAceptado] = useState<number[]>([]);
+
+  /** Los problemas que el servidor detectó, por número de partida. */
+  const problemasSrv = useMemo(() => {
+    const m = new Map<number, NonNullable<typeof auto>["problemas"][number]>();
+    for (const p of auto?.problemas ?? []) if (!m.has(p.numero)) m.set(p.numero, p);
+    return m;
+  }, [auto]);
+
+  /** Cuántas partidas están marcadas en rojo ahora mismo: las que no cruzan más
+   *  las que el servidor objetó y siguen sin resolverse en la tabla. */
+  const partidasEnRojo = useMemo(
+    () =>
+      lineas.filter(
+        (l) =>
+          problemaDe(l) ||
+          (!precioAceptado.includes(l.numero) && problemaVivo(problemasSrv.get(l.numero), l))
+      ).length,
+    [lineas, problemasSrv, precioAceptado]
+  );
 
   /** ¿El operador corrigió una partida después de que el servidor evaluó `auto`?
    *  El atajo de un clic rearma las líneas desde su propia evaluación: la
@@ -313,7 +339,13 @@ export default function Page() {
             ) : null}
           </Alert>
         ) : auto?.motivo && !bloqueada && oc.cliente_id ? (
-          <p className="text-sm text-muted">Revisión a mano: {auto.motivo}</p>
+          <p className="text-sm text-muted">
+            Revisión a mano:{" "}
+            {auto.problemas?.length > 1
+              ? `${auto.problemas.length} partidas necesitan una decisión.`
+              : auto.motivo}{" "}
+            {partidasEnRojo ? "Están marcadas en rojo abajo." : "Ya las resolviste en la tabla."}
+          </p>
         ) : null}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
@@ -376,8 +408,12 @@ export default function Page() {
         <div>
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold">Partidas del documento</h3>
-            {sinProducto ? (
-              <span className="text-xs text-amber-700">{sinProducto} sin cruzar con un producto</span>
+            {partidasEnRojo ? (
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-danger">
+                <AlertTriangle size={13} />
+                {partidasEnRojo === 1 ? "1 partida en rojo" : `${partidasEnRojo} partidas en rojo`}
+                {sinProducto ? " — sin cruzar no hay remisión" : " — revísalas antes de crear"}
+              </span>
             ) : null}
           </div>
           <div className="overflow-x-auto rounded-lg border border-border bg-surface">
@@ -393,9 +429,21 @@ export default function Page() {
                 </tr>
               </thead>
               <tbody>
-                {lineas.map((l, i) => (
-                  <tr key={l.numero} className="border-t border-border">
-                    <td className="px-3 py-2">
+                {lineas.map((l, i) => {
+                  const problema = problemaDe(l);
+                  // Lo que dijo el servidor, ya contrastado con lo que hay
+                  // tecleado ahora — y sin lo que el operador dio por bueno.
+                  const srv = precioAceptado.includes(l.numero)
+                    ? null
+                    : problemaVivo(problemasSrv.get(l.numero), l);
+                  const conflicto = srv?.tipo === "precio_conflicto" ? srv : null;
+                  const enRojo = !!problema || !!srv;
+                  return (
+                  <tr
+                    key={l.numero}
+                    className={`border-t border-border${enRojo ? " bg-danger/5" : ""}`}
+                  >
+                    <td className={`px-3 py-2${enRojo ? " border-l-2 border-l-danger" : ""}`}>
                       {l.agregada ? (
                         <span className="text-xs italic text-muted">Agregada a mano — no venía en el documento</span>
                       ) : (
@@ -404,6 +452,20 @@ export default function Page() {
                       {l.clave ? (
                         <div className="mt-0.5 text-xs text-muted">
                           Su clave: <span className="tabular-nums">{l.clave}</span>
+                        </div>
+                      ) : null}
+                      {problema ? (
+                        <div className="mt-1 flex items-start gap-1.5 text-xs text-danger">
+                          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                          <span>
+                            <span className="font-medium">{problema.corto}.</span>{" "}
+                            {problema.comoResolver}
+                          </span>
+                        </div>
+                      ) : srv && !conflicto ? (
+                        <div className="mt-1 flex items-start gap-1.5 text-xs text-danger">
+                          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                          <span>{srv.mensaje}</span>
                         </div>
                       ) : null}
                     </td>
@@ -435,6 +497,7 @@ export default function Page() {
                         <Select
                           value={l.producto_id}
                           disabled={!editable}
+                          className={l.producto_id ? "" : "border-danger"}
                           onChange={(e) => {
                             const v = e.target.value;
                             if (v === "__buscar__") {
@@ -467,6 +530,11 @@ export default function Page() {
                         <ProductoCombobox
                           label={l.texto}
                           placeholder="Buscar en el catálogo…"
+                          // El alta que sale de aquí ya sabe de quién es la
+                          // orden: puede dejar el precio en su lista de una vez.
+                          clienteId={clienteSel || null}
+                          unidadBase={unidadBaseDe(l.unidad)}
+                          presentacion={l.presentacion}
                           onSelect={(prod) =>
                             setLineas((prev) =>
                               prev.map((x, j) =>
@@ -516,12 +584,44 @@ export default function Page() {
                         value={l.precio}
                         disabled={!editable}
                         placeholder="lista"
-                        className="text-right"
+                        className={`text-right${conflicto ? " border-danger" : ""}`}
                         onChange={(e) => {
                           const v = e.target.value;
                           setLineas((prev) => prev.map((x, j) => (j === i ? { ...x, precio: v } : x)));
                         }}
                       />
+                      {conflicto ? (
+                        <div className="mt-1 text-right text-xs">
+                          <div className="text-danger">
+                            El documento trae {conflicto.precio_documento} y{" "}
+                            {conflicto.fuente_precio ?? "la lista"} dice {conflicto.precio_lista}.
+                          </div>
+                          {editable ? (
+                            <div className="mt-1 flex flex-wrap justify-end gap-x-3 gap-y-1">
+                              <button
+                                type="button"
+                                className="text-accent hover:underline"
+                                onClick={() =>
+                                  setLineas((prev) =>
+                                    prev.map((x, j) =>
+                                      j === i ? { ...x, precio: conflicto.precio_lista ?? "" } : x
+                                    )
+                                  )
+                                }
+                              >
+                                Cobrar {conflicto.precio_lista}
+                              </button>
+                              <button
+                                type="button"
+                                className="text-accent hover:underline"
+                                onClick={() => setPrecioAceptado((prev) => [...prev, l.numero])}
+                              >
+                                Dejar {conflicto.precio_documento}
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </td>
                     {editable ? (
                       <td className="px-1 py-2">
@@ -537,7 +637,8 @@ export default function Page() {
                       </td>
                     ) : null}
                   </tr>
-                ))}
+                  );
+                })}
                 {!lineas.length ? (
                   <tr>
                     <td colSpan={6} className="px-3 py-6 text-center text-sm text-muted">
