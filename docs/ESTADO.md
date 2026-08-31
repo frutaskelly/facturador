@@ -1,4 +1,4 @@
-# Estado del proyecto — 31/08/2026 (actualizado por la tarde tras el PR #51)
+# Estado del proyecto — 31/08/2026 (actualizado por la noche tras el deploy del PR #54)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,22 +7,22 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` @ `ae395bf` (PR #51) — igual que `origin/main` |
+| Rama base | `main` @ `a54762a` (PR #54) — igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
-| Worktrees | 1 (`new-session-7acb50`, rama ya fusionada — podable) |
-| PRs abiertos | ninguno |
-| Migración head | `0057_export_rastro_portal_rbac` (el #51 no trae migraciones) |
+| Worktrees | 3 (`bandeja` con trabajo en curso sin commitear; `new-session-7acb50` y `zealous-torvalds-918745` podables) |
+| PRs abiertos | ninguno (esta actualización entra por el suyo) |
+| Migración head | `0057_export_rastro_portal_rbac` (ni #53 ni #54 traen migraciones) |
 
 `Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
 
 ## Deploy
 
-**En vivo en https://facturador.mx** y al día: se comprobó **dentro del contenedor** que
-`backend/app/api/v1/facturas.py` trae el parámetro de búsqueda `q` que introdujo el PR #47, el
-commit más reciente de `main`. Los cinco contenedores (`frontend`, `backend`, `landing`,
-`tunnel`, `redis`) están arriba y sanos, y los cuatro propios se construyen desde **este**
-checkout, no desde un worktree.
+**En vivo en https://facturador.mx** y al día con `a54762a` (PR #54): se comprobó **dentro del
+contenedor** que `backend/app/api/v1/oc_recibidas.py` trae el backfill de `archivo_url` que
+introdujo el #54. Los cinco contenedores (`frontend`, `backend`, `landing`, `tunnel`, `redis`)
+están arriba y sanos (deploy del 31-ago por la noche; facturador.mx y api.facturador.mx
+responden 200), y los cuatro propios se construyen desde **este** checkout, no desde un worktree.
 
 ⚠️ **La marca de tiempo de la imagen no sirve para saber si el deploy está al día.** Una imagen
 construida segundos antes de fusionar un PR "parece" atrasada sin estarlo, y una imagen vieja
@@ -32,6 +32,19 @@ contenido dentro de la imagen.
 **La puerta de `deploy.sh` bloquea si el checkout no coincide con GitHub** — incluidos archivos
 sin rastrear. Por eso este `docs/ESTADO.md` va commiteado: suelto, detiene cada deploy. Nunca
 usar `FORCE=1` para saltarla: publica el trabajo a medias de otra sesión.
+
+## Lo que entró el 31-ago por la noche (PRs #53 y #54)
+
+**La ingesta completa el link del documento en OCs ya asignadas (#54).** Una OC que ya generó su
+remisión no se tocaba en un reintento del bot — correcto para la captura, pero dejaba sin remedio
+el puntero al documento original: **183 órdenes de la migración llegaron sin `archivo_url`** y el
+botón «Ver la OC original» de `/remisiones` caía a la bandeja en vez de abrir el Drive (lo
+reportó el dueño con la SN-33NER-JUE). Ahora el reenvío completa `archivo_url`/`archivo_nombre`
+**solo si faltan**; con el link puesto no se pisa, y la captura sigue intacta. El código del
+botón ya era correcto: abre el Drive cuando hay link y solo sin él cae a la bandeja filtrada.
+
+**#53 (sesión de la bandeja):** la lista enseña el proyecto y el vistazo deja de repetir los
+botones del renglón; el detalle quedó en el propio PR.
 
 ## Lo que entró el 31-ago por la tarde (PR #51)
 
@@ -124,3 +137,9 @@ podarla.
    todo cruza bien; el #51 lo extendió a las órdenes con problemas al dejar de cortar en el
    primer tropiezo. El arreglo es de fondo: `resolver_precio` por lote (una consulta de
    overrides y una por lista para todos los productos, en vez de la cascada por partida).
+7. **183 OCs de la migración sin `archivo_url`** (nuevo, 31-ago, tras el PR #54). El #54 deja
+   al sistema listo para absorber los links, pero alguien tiene que mandarlos: la cura de fondo
+   es un script en `SmartSupply/bot` que reenvíe esas órdenes por la ingesta con su URL de
+   Drive (con el #54 en prod, se completan sin tocar la captura). **La SN-33NER-JUE sigue sin
+   link**: el dueño tiene el UPDATE puntual pendiente de correr (Claude no puede escribir a la
+   BD de prod), o cae sola cuando corra el script del bot.
