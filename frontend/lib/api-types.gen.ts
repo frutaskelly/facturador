@@ -1843,6 +1843,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oc-recibidas/grupos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Grupos Bandeja
+         * @description Los grupos de origen para el filtro de la lista, con SUS clientes.
+         *
+         *     Versión ligera del directorio de Conexiones (aquel exige el permiso de
+         *     administrar conexiones y recorre todas las órdenes): esto es solo lo que la
+         *     bandeja necesita para encadenar filtros — elegir el grupo acota el filtro
+         *     de cliente a los registrados en él, y el de proyecto a los de esos
+         *     clientes. Declarado antes de GET /{oc_id} para que "grupos" no intente
+         *     parsearse como UUID.
+         */
+        get: operations["grupos_bandeja_api_v1_oc_recibidas_grupos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/oc-recibidas/{oc_id}": {
         parameters: {
             query?: never;
@@ -5328,6 +5355,29 @@ export interface components {
             uuid_sustitucion?: string | null;
         };
         /**
+         * GrupoBandejaOut
+         * @description Un ORIGEN para el filtro de la bandeja, con sus clientes para encadenar
+         *     los demás filtros. Dos mundos conviven: los grupos de WhatsApp (tipo
+         *     "grupo", se filtra por su jid) y lo que entra por la conexión de Smart
+         *     Supply, que no trae jid — ahí el origen es el REMITENTE (tipo "remitente",
+         *     se filtra por el texto exacto, p. ej. «EHMO villahermosa»).
+         */
+        GrupoBandejaOut: {
+            /**
+             * Activo
+             * @default true
+             */
+            activo: boolean;
+            /** Clave */
+            clave: string;
+            /** Cliente Ids */
+            cliente_ids?: string[];
+            /** Nombre */
+            nombre?: string | null;
+            /** Tipo */
+            tipo: string;
+        };
+        /**
          * GrupoIn
          * @description Un grupo tal como lo reporta el bot desde su config.
          */
@@ -6474,6 +6524,8 @@ export interface components {
             lineas?: components["schemas"]["LineaOCRecibidaOut"][];
             /** Motivo */
             motivo?: string | null;
+            /** Observaciones */
+            observaciones?: string | null;
             /** Origen Externo */
             origen_externo: string;
             /** Payload */
@@ -6589,6 +6641,8 @@ export interface components {
             id: string;
             /** Motivo */
             motivo?: string | null;
+            /** Observaciones */
+            observaciones?: string | null;
             /** Origen Externo */
             origen_externo: string;
             /** Proyecto Id */
@@ -13055,6 +13109,9 @@ export interface operations {
                 estado?: string | null;
                 canal?: string | null;
                 cliente_id?: string | null;
+                proyecto_id?: string | null;
+                jid?: string | null;
+                remitente?: string | null;
                 sin_cliente?: boolean;
                 q?: string | null;
                 fecha_desde?: string | null;
@@ -13112,6 +13169,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grupos_bandeja_api_v1_oc_recibidas_grupos_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrupoBandejaOut"][];
                 };
             };
             /** @description Validation Error */

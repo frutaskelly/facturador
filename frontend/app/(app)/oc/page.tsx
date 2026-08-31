@@ -4,7 +4,7 @@
 // correo o captura) aterriza aquí antes de volverse remisión. El DETALLE de
 // cada orden vive en su propia página a pantalla completa (/oc/[id], 28-ago):
 // es la pantalla de trabajo diaria, no un popup.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ExternalLink, PencilLine, RotateCcw, Trash2 } from "lucide-react";
 
@@ -16,12 +16,13 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { SearchBox } from "@/components/ui/SearchBox";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { Page as PageOf } from "@/lib/hooks";
-import type { Cliente, OCRecibida, OCRecibidaDetalle } from "@/lib/types";
+import type { Cliente, GrupoBandeja, OCRecibida, OCRecibidaDetalle, Proyecto } from "@/lib/types";
 import { CANAL_TONE, estadoTexto, precioNormalizado } from "./cruce";
 
 const WRITE = "remision:gestionar";
@@ -107,10 +108,35 @@ export default function Page() {
   const [fechaHasta, setFechaHasta] = useState("");
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
+  const [grupoFiltro, setGrupoFiltro] = useState("");
+  const [proyectoFiltro, setProyectoFiltro] = useState("");
   const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [proyectos, setProyectos] = useState<Proyecto[]>([]);
+  const [grupos, setGrupos] = useState<GrupoBandeja[]>([]);
   const [aDescartar, setADescartar] = useState<OCRecibida | null>(null);
 
   const LIMIT = 100;
+
+  // Filtros encadenados: el grupo acota clientes y proyectos; el cliente acota
+  // proyectos. Se filtra lo que se OFRECE — la selección inválida se resetea en
+  // el onChange del filtro que la invalidó, nunca en silencio desde un efecto.
+  const grupoSel = useMemo(
+    () => grupos.find((g) => `${g.tipo}|${g.clave}` === grupoFiltro) ?? null,
+    [grupos, grupoFiltro]
+  );
+  // Un origen sin clientes conocidos no acota nada: acotar con un conjunto
+  // vacío sería ofrecer CERO clientes, que es peor que ofrecerlos todos.
+  const clientesDelGrupo = grupoSel && grupoSel.cliente_ids.length ? grupoSel.cliente_ids : null;
+  const clientesVisibles = useMemo(
+    () => (clientesDelGrupo ? clientes.filter((c) => clientesDelGrupo.includes(c.id)) : clientes),
+    [clientes, clientesDelGrupo]
+  );
+  // Un proyecto sin cliente es global: se ofrece siempre, como en el detalle.
+  const proyectosVisibles = useMemo(() => {
+    if (clienteFiltro) return proyectos.filter((p) => !p.cliente_id || p.cliente_id === clienteFiltro);
+    if (clientesDelGrupo) return proyectos.filter((p) => !p.cliente_id || clientesDelGrupo.includes(p.cliente_id));
+    return proyectos;
+  }, [proyectos, clienteFiltro, clientesDelGrupo]);
 
   // Resumen del día: la foto que el Master daba de un vistazo.
   const [resumen, setResumen] = useState<{ hoy: number; pendientes: number; conRemision: number } | null>(null);
@@ -127,12 +153,27 @@ export default function Page() {
       .catch(() => setResumen(null));
   }, [rows]);
 
+  // La búsqueda pega al SERVIDOR (folio, remitente, archivo, punto de entrega
+  // y observaciones): la lista está paginada y buscar solo en la página visible
+  // mentiría. `buscaInput` es lo tecleado; `busca` lo que ya viajó, con un
+  // debounce para no disparar una consulta por letra.
+  const [busca, setBusca] = useState("");
+  const [buscaInput, setBuscaInput] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setBusca((prev) => {
+        if (prev !== buscaInput.trim()) setOffset(0);
+        return buscaInput.trim();
+      });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [buscaInput]);
+
   // Deep-link desde Remisiones (?q=<folio del cliente>): busca esa OC en TODAS
   // las etapas, no solo en las pendientes.
-  const [busca, setBusca] = useState("");
   useEffect(() => {
     const p = new URLSearchParams(window.location.search).get("q");
-    if (p) { setBusca(p); setEstado(""); }
+    if (p) { setBuscaInput(p); setEstado(""); }
   }, []);
 
   const reload = useCallback(() => {
@@ -141,6 +182,11 @@ export default function Page() {
     if (estado) qs.set("estado", estado);
     if (busca) qs.set("q", busca);
     if (clienteFiltro) qs.set("cliente_id", clienteFiltro);
+    if (proyectoFiltro) qs.set("proyecto_id", proyectoFiltro);
+    if (grupoFiltro) {
+      const [tipo, ...resto] = grupoFiltro.split("|");
+      qs.set(tipo === "grupo" ? "jid" : "remitente", resto.join("|"));
+    }
     if (fechaDesde) qs.set("fecha_desde", fechaDesde);
     if (fechaHasta) qs.set("fecha_hasta", fechaHasta);
     apiFetch<PageOf<OCRecibida>>(`/api/v1/oc-recibidas?${qs}`)
@@ -149,13 +195,19 @@ export default function Page() {
         setTotal(p.total);
       })
       .catch(() => setError(true));
-  }, [estado, busca, clienteFiltro, fechaDesde, fechaHasta, offset]);
+  }, [estado, busca, clienteFiltro, proyectoFiltro, grupoFiltro, fechaDesde, fechaHasta, offset]);
 
   useEffect(() => {
     reload();
   }, [reload]);
 
   useEffect(() => {
+    apiFetch<GrupoBandeja[]>("/api/v1/oc-recibidas/grupos")
+      .then(setGrupos)
+      .catch(() => undefined);
+    apiFetch<PageOf<Proyecto>>("/api/v1/proyectos?activo=true&limit=500")
+      .then((p) => setProyectos(p.items))
+      .catch(() => undefined);
     apiFetch<PageOf<Cliente>>("/api/v1/clientes?limit=1000")
       .then((p) => setClientes(p.items))
       .catch(() => undefined);
@@ -275,6 +327,22 @@ export default function Page() {
           <span className="text-xs text-muted">—</span>
         ),
     },
+    {
+      header: "Observaciones",
+      cell: (r) =>
+        r.observaciones ? (
+          // Recortadas a dos líneas para que un párrafo no ensanche el renglón;
+          // el texto completo vive en el title y en el vistazo desplegado.
+          <span
+            className="block max-w-56 overflow-hidden text-xs text-muted [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
+            title={r.observaciones}
+          >
+            {r.observaciones}
+          </span>
+        ) : (
+          <span className="text-xs text-muted">—</span>
+        ),
+    },
     { header: "Estado", cell: (r) => estadoBadge(r) },
     {
       header: "Detalle",
@@ -379,18 +447,78 @@ export default function Page() {
       ) : null}
 
       <div className="mb-3 flex flex-wrap items-end gap-3">
+        <div className="w-72">
+          <Field label="Buscar">
+            <SearchBox
+              value={buscaInput}
+              onChange={setBuscaInput}
+              placeholder="Folio, remitente, punto de entrega, observaciones…"
+              aria-label="Buscar órdenes"
+            />
+          </Field>
+        </div>
+        <div className="w-56">
+          <Field label="Grupo de origen">
+            <Select
+              value={grupoFiltro}
+              onChange={(e) => {
+                const v = e.target.value;
+                const g = grupos.find((x) => `${x.tipo}|${x.clave}` === v) ?? null;
+                setGrupoFiltro(v);
+                // Lo elegido antes puede no existir bajo el origen nuevo. Un
+                // origen sin clientes conocidos no invalida nada.
+                if (g?.cliente_ids.length) {
+                  if (clienteFiltro && !g.cliente_ids.includes(clienteFiltro)) setClienteFiltro("");
+                  if (proyectoFiltro) {
+                    const pr = proyectos.find((x) => x.id === proyectoFiltro);
+                    if (pr?.cliente_id && !g.cliente_ids.includes(pr.cliente_id)) setProyectoFiltro("");
+                  }
+                }
+                setOffset(0);
+              }}
+            >
+              <option value="">Todos</option>
+              {grupos.map((g) => (
+                <option key={`${g.tipo}|${g.clave}`} value={`${g.tipo}|${g.clave}`}>
+                  {(g.nombre || g.clave) + (g.activo ? "" : " (apagado)")}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
         <div className="w-64">
           <Field label="Cliente">
             <Select
               value={clienteFiltro}
               onChange={(e) => {
-                setClienteFiltro(e.target.value);
+                const v = e.target.value;
+                setClienteFiltro(v);
+                if (v && proyectoFiltro) {
+                  const pr = proyectos.find((x) => x.id === proyectoFiltro);
+                  if (pr?.cliente_id && pr.cliente_id !== v) setProyectoFiltro("");
+                }
                 setOffset(0);
               }}
             >
               <option value="">Todos</option>
-              {clientes.map((c) => (
+              {clientesVisibles.map((c) => (
                 <option key={c.id} value={c.id}>{c.legal_name}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <div className="w-56">
+          <Field label="Proyecto">
+            <Select
+              value={proyectoFiltro}
+              onChange={(e) => {
+                setProyectoFiltro(e.target.value);
+                setOffset(0);
+              }}
+            >
+              <option value="">Todos</option>
+              {proyectosVisibles.map((pr) => (
+                <option key={pr.id} value={pr.id}>{pr.nombre}</option>
               ))}
             </Select>
           </Field>
@@ -430,11 +558,14 @@ export default function Page() {
         >
           Hoy
         </Button>
-        {clienteFiltro || fechaDesde || fechaHasta ? (
+        {buscaInput || grupoFiltro || clienteFiltro || proyectoFiltro || fechaDesde || fechaHasta ? (
           <button
             type="button"
             onClick={() => {
+              setBuscaInput("");
+              setGrupoFiltro("");
               setClienteFiltro("");
+              setProyectoFiltro("");
               setFechaDesde("");
               setFechaHasta("");
               setOffset(0);
@@ -446,19 +577,6 @@ export default function Page() {
         ) : null}
       </div>
 
-      {busca ? (
-        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-muted">Buscando la orden</span>
-          <Badge tone="accent">{busca}</Badge>
-          <button
-            type="button"
-            onClick={() => { setBusca(""); setEstado("PENDIENTE"); setOffset(0); }}
-            className="text-accent hover:underline"
-          >
-            Quitar el filtro
-          </button>
-        </div>
-      ) : null}
 
       <DataTable
         columns={columns}

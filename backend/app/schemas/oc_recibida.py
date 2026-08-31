@@ -109,6 +109,19 @@ class LineaAutoOut(BaseModel):
     cruzo_por: str
 
 
+class GrupoBandejaOut(BaseModel):
+    """Un ORIGEN para el filtro de la bandeja, con sus clientes para encadenar
+    los demás filtros. Dos mundos conviven: los grupos de WhatsApp (tipo
+    "grupo", se filtra por su jid) y lo que entra por la conexión de Smart
+    Supply, que no trae jid — ahí el origen es el REMITENTE (tipo "remitente",
+    se filtra por el texto exacto, p. ej. «EHMO villahermosa»)."""
+    tipo: str                       # "grupo" | "remitente"
+    clave: str                      # el jid, o el texto del remitente
+    nombre: Optional[str] = None
+    activo: bool = True
+    cliente_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
 class ProblemaLineaOut(BaseModel):
     """Lo que le impide a UNA partida entrar sola, con su número para poder
     señalarla en la tabla en vez de dejar el aviso suelto arriba."""
@@ -152,6 +165,9 @@ class OCRecibidaOut(ORMModel):
     punto_entrega: Optional[str] = None
     proyecto_id: Optional[uuid.UUID] = None
     proyecto_nombre: Optional[str] = None
+    # Lo que el documento decía fuera de las partidas ("entregar antes de las
+    # 9", la referencia). Sale del payload; la lista lo enseña en su columna.
+    observaciones: Optional[str] = None
     # Clientes posibles según el grupo del que llegó, cuando el documento no
     # alcanza a decidir. Vacío = no hay pista de grupo o ya se resolvió.
     candidatos: list[uuid.UUID] = Field(default_factory=list)

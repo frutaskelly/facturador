@@ -23,6 +23,7 @@ from app.main import app
 from app.models import Almacen, Cliente, Membership, Producto, Role, Sucursal, Tenant, User
 
 _PURGE = (
+    "grupos_whatsapp",
     "oc_recibidas", "cliente_externos", "lineas_remision", "remisiones",
     "movimientos_inventario", "lotes_inventario", "producto_alias",
     "precios", "listas_precios", "productos", "almacenes", "sucursales", "clientes",
@@ -709,3 +710,103 @@ def test_vistazo_trae_las_partidas_sin_cruce_ni_auto(client, env, auth_as):
     # Sin el flag, el detalle completo sigue cruzando y evaluando como siempre.
     d = client.get(f"/api/v1/oc-recibidas/{oc_id}", headers=h).json()
     assert d["auto"] is not None
+
+
+# ─── búsqueda, filtro por proyecto y observaciones en la lista ───────────────
+
+def test_buscar_por_observaciones_y_punto_de_entrega(client, env, auth_as):
+    """`q` también encuentra por lo que el documento decía fuera de las
+    partidas: es donde vive "el pedido que decía tal cosa" cuando el folio
+    no se sabe."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    marca = uuid.uuid4().hex[:8]
+    r = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo=f"OBS-{marca}",
+        observaciones=f"ENTREGAR ANTES DE LAS 9 REF {marca}",
+        ubicacion=f"HOSPITAL {marca}",
+    ))
+    assert r.status_code == 201, r.text
+
+    por_obs = client.get("/api/v1/oc-recibidas", headers=h,
+                         params={"q": f"REF {marca}"}).json()
+    assert [x["folio_externo"] for x in por_obs["items"]] == [f"OBS-{marca}"]
+    # La lista trae las observaciones para su columna, sin abrir el detalle.
+    assert f"REF {marca}" in por_obs["items"][0]["observaciones"]
+
+    por_punto = client.get("/api/v1/oc-recibidas", headers=h,
+                           params={"q": f"HOSPITAL {marca}"}).json()
+    assert [x["folio_externo"] for x in por_punto["items"]] == [f"OBS-{marca}"]
+
+
+def test_filtrar_por_proyecto(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    marca = uuid.uuid4().hex[:6]
+    proy = client.post("/api/v1/proyectos", headers=h,
+                       json={"nombre": f"HOSPITALES {marca}"}).json()
+    a = client.post("/api/v1/oc-recibidas", headers=h,
+                    json=_oc(folio_externo=f"PA-{marca}")).json()
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(folio_externo=f"PB-{marca}"))
+    client.patch(f"/api/v1/oc-recibidas/{a['id']}", headers=h,
+                 json={"proyecto_id": proy["id"], "aprender": False})
+
+    filtrado = client.get("/api/v1/oc-recibidas", headers=h,
+                          params={"proyecto_id": proy["id"]}).json()
+    assert [x["folio_externo"] for x in filtrado["items"]] == [f"PA-{marca}"]
+    assert filtrado["items"][0]["proyecto_nombre"] == f"HOSPITALES {marca}"
+
+
+# ─── filtro por grupo de origen (filtros encadenados de la lista) ────────────
+
+def test_grupos_de_la_bandeja_y_filtro_por_jid(client, env, auth_as):
+    """El filtro por grupo: GET /oc-recibidas/grupos enseña cada grupo con SUS
+    clientes (para que la pantalla acote los demás filtros), y ?jid= filtra la
+    lista por el grupo del que entró el documento."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    from app.core.db import SessionLocal
+    from app.models import GrupoWhatsapp
+
+    marca = uuid.uuid4().hex[:6]
+    jid = f"grupo-{marca}@g.us"
+    db = SessionLocal()
+    try:
+        db.add(GrupoWhatsapp(tenant_id=env["admin_a"]["tenant_id"], jid=jid,
+                             nombre=f"EHMO {marca}", rol="cliente", perfil="villahermosa"))
+        db.commit()
+    finally:
+        db.close()
+    # El cliente EHMO entra por este grupo (equivalencia WHATSAPP registrada).
+    assert _externo(client, h, "WHATSAPP", jid, env["ehmo"]).status_code == 201
+
+    grupos = client.get("/api/v1/oc-recibidas/grupos", headers=h).json()
+    g = next(x for x in grupos if x["tipo"] == "grupo" and x["clave"] == jid)
+    assert g["nombre"] == f"EHMO {marca}"
+    assert env["ehmo"] in g["cliente_ids"]
+
+    # Dos órdenes: una del grupo, otra de otro lado. ?jid= trae solo la suya.
+    client.post("/api/v1/oc-recibidas", headers=h,
+                json=_oc(folio_externo=f"G-{marca}", jid=jid))
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(folio_externo=f"X-{marca}"))
+    filtrado = client.get("/api/v1/oc-recibidas", headers=h, params={"jid": jid}).json()
+    assert [x["folio_externo"] for x in filtrado["items"]] == [f"G-{marca}"]
+
+
+def test_lo_que_entra_sin_jid_es_un_origen_por_remitente(client, env, auth_as):
+    """La conexión de Smart Supply no manda jid: su origen es el REMITENTE.
+    El endpoint de grupos lo enseña como bucket (con los clientes que de
+    verdad han entrado por ahí) y ?remitente= filtra la lista."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    marca = uuid.uuid4().hex[:6]
+    quien = f"EHMO villahermosa {marca}"
+    # Con equivalencia RFC, la orden resuelve cliente: el bucket lo aprende.
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    body = _oc(folio_externo=f"R-{marca}", remitente=quien)
+    body.pop("jid", None)
+    assert client.post("/api/v1/oc-recibidas", headers=h, json=body).status_code == 201
+
+    grupos = client.get("/api/v1/oc-recibidas/grupos", headers=h).json()
+    bucket = next(x for x in grupos if x["tipo"] == "remitente" and x["clave"] == quien)
+    assert env["ehmo"] in bucket["cliente_ids"]
+
+    filtrado = client.get("/api/v1/oc-recibidas", headers=h,
+                          params={"remitente": quien}).json()
+    assert [x["folio_externo"] for x in filtrado["items"]] == [f"R-{marca}"]

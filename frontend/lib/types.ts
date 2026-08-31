@@ -769,6 +769,7 @@ export type OCRecibida = {
   punto_entrega?: string | null;
   proyecto_id?: string | null;
   proyecto_nombre?: string | null;
+  observaciones?: string | null;
   candidatos: string[];        // clientes posibles según el grupo del que llegó
   ambiguo: boolean;
   remision_id?: string | null;
@@ -781,6 +782,17 @@ export type OCRecibidaDetalle = OCRecibida & {
   payload: Record<string, unknown>;
   lineas: LineaOC[];
   auto?: AutoRemision | null;
+};
+
+/** Un grupo de origen para el filtro de la bandeja: su nombre y qué clientes
+ *  entran por él. Elegir el grupo acota los filtros de cliente y proyecto. */
+export type GrupoBandeja = {
+  /** "grupo" (WhatsApp, filtra por jid) o "remitente" (filtra por el texto). */
+  tipo: "grupo" | "remitente";
+  clave: string;
+  nombre?: string | null;
+  activo: boolean;
+  cliente_ids: string[];
 };
 
 // ─── Conexiones ──────────────────────────────────────────────────────────────

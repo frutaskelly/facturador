@@ -5341,6 +5341,49 @@
     "title": "FacturaOut",
     "type": "object"
    },
+   "GrupoBandejaOut": {
+    "description": "Un ORIGEN para el filtro de la bandeja, con sus clientes para encadenar\nlos demás filtros. Dos mundos conviven: los grupos de WhatsApp (tipo\n\"grupo\", se filtra por su jid) y lo que entra por la conexión de Smart\nSupply, que no trae jid — ahí el origen es el REMITENTE (tipo \"remitente\",\nse filtra por el texto exacto, p. ej. «EHMO villahermosa»).",
+    "properties": {
+     "activo": {
+      "default": true,
+      "title": "Activo",
+      "type": "boolean"
+     },
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "cliente_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Cliente Ids",
+      "type": "array"
+     },
+     "nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre"
+     },
+     "tipo": {
+      "title": "Tipo",
+      "type": "string"
+     }
+    },
+    "required": [
+     "tipo",
+     "clave"
+    ],
+    "title": "GrupoBandejaOut",
+    "type": "object"
+   },
    "GrupoIn": {
     "description": "Un grupo tal como lo reporta el bot desde su config.",
     "properties": {
@@ -8556,6 +8599,17 @@
       ],
       "title": "Motivo"
      },
+     "observaciones": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Observaciones"
+     },
      "origen_externo": {
       "title": "Origen Externo",
       "type": "string"
@@ -8988,6 +9042,17 @@
        }
       ],
       "title": "Motivo"
+     },
+     "observaciones": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Observaciones"
      },
      "origen_externo": {
       "title": "Origen Externo",
@@ -24503,6 +24568,57 @@
      },
      {
       "in": "query",
+      "name": "proyecto_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Proyecto Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "jid",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 120,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Jid"
+      }
+     },
+     {
+      "in": "query",
+      "name": "remitente",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 254,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Remitente"
+      }
+     },
+     {
+      "in": "query",
       "name": "sin_cliente",
       "required": false,
       "schema": {
@@ -24693,6 +24809,65 @@
      }
     ],
     "summary": "Ingesta",
+    "tags": [
+     "bandeja de OC"
+    ]
+   }
+  },
+  "/api/v1/oc-recibidas/grupos": {
+   "get": {
+    "description": "Los grupos de origen para el filtro de la lista, con SUS clientes.\n\nVersión ligera del directorio de Conexiones (aquel exige el permiso de\nadministrar conexiones y recorre todas las órdenes): esto es solo lo que la\nbandeja necesita para encadenar filtros — elegir el grupo acota el filtro\nde cliente a los registrados en él, y el de proyecto a los de esos\nclientes. Declarado antes de GET /{oc_id} para que \"grupos\" no intente\nparsearse como UUID.",
+    "operationId": "grupos_bandeja_api_v1_oc_recibidas_grupos_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/GrupoBandejaOut"
+         },
+         "title": "Response Grupos Bandeja Api V1 Oc Recibidas Grupos Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Grupos Bandeja",
     "tags": [
      "bandeja de OC"
     ]

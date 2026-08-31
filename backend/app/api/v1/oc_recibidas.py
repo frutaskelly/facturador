@@ -40,6 +40,7 @@ from ...models import (
 from ...schemas.common import Page
 from ...schemas.oc_recibida import (
     CrearRemisionIn,
+    GrupoBandejaOut,
     OCRecibidaDetailOut,
     OCRecibidaIn,
     OCRecibidaOut,
@@ -305,6 +306,9 @@ def listar(
     estado: Optional[str] = Query(default=None, max_length=16),
     canal: Optional[str] = Query(default=None, max_length=20),
     cliente_id: Optional[UUID] = Query(default=None),
+    proyecto_id: Optional[UUID] = Query(default=None),
+    jid: Optional[str] = Query(default=None, max_length=120),
+    remitente: Optional[str] = Query(default=None, max_length=254),
     sin_cliente: bool = Query(default=False),
     q: Optional[str] = Query(default=None, max_length=254),
     # Rango sobre la fecha de RECEPCIÓN (no la del documento): es como el
@@ -326,14 +330,29 @@ def listar(
         query = query.filter(OCRecibida.canal == canal.upper())
     if cliente_id:
         query = query.filter(OCRecibida.cliente_id == cliente_id)
+    if proyecto_id:
+        query = query.filter(OCRecibida.proyecto_id == proyecto_id)
+    if jid:
+        # El grupo de origen vive en el payload de la ingesta; filtrar por él
+        # responde "¿qué ha entrado por el grupo de EHMO?" sin importar a qué
+        # cliente terminó asignado cada documento.
+        query = query.filter(OCRecibida.payload["jid"].astext == jid)
+    if remitente:
+        # El otro origen: lo que entra por la conexión de Smart Supply no trae
+        # jid, y su "grupo" es el remitente tal cual («EHMO villahermosa»).
+        query = query.filter(OCRecibida.remitente == remitente)
     if sin_cliente:
         query = query.filter(OCRecibida.cliente_id.is_(None))
     if q:
         like = f"%{q}%"
+        # También el punto de entrega y las observaciones del documento: es
+        # donde vive "el pedido que decía tal cosa" cuando el folio no se sabe.
         query = query.filter(
             OCRecibida.folio_externo.ilike(like)
             | OCRecibida.remitente.ilike(like)
             | OCRecibida.archivo_nombre.ilike(like)
+            | OCRecibida.punto_entrega.ilike(like)
+            | OCRecibida.payload["observaciones"].astext.ilike(like)
         )
     if fecha_desde:
         query = query.filter(OCRecibida.recibida_at >= fecha_desde)
@@ -703,6 +722,70 @@ def _fuente_precio(db: Session, res: dict) -> str:
         if lp is not None:
             return f"la lista «{lp.nombre}»"
     return "la lista de precios"
+
+
+@router.get("/grupos", response_model=list[GrupoBandejaOut])
+def grupos_bandeja(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Los grupos de origen para el filtro de la lista, con SUS clientes.
+
+    Versión ligera del directorio de Conexiones (aquel exige el permiso de
+    administrar conexiones y recorre todas las órdenes): esto es solo lo que la
+    bandeja necesita para encadenar filtros — elegir el grupo acota el filtro
+    de cliente a los registrados en él, y el de proyecto a los de esos
+    clientes. Declarado antes de GET /{oc_id} para que "grupos" no intente
+    parsearse como UUID."""
+    from ...models import ClienteExterno
+
+    from sqlalchemy import func
+
+    grupos = (
+        db.query(GrupoWhatsapp)
+        .order_by(GrupoWhatsapp.activo.desc(), GrupoWhatsapp.nombre)
+        .all()
+    )
+    por_jid: dict[str, list] = {}
+    for e in db.query(ClienteExterno).filter(ClienteExterno.sistema == "WHATSAPP"):
+        por_jid.setdefault(e.clave_normalizada, []).append(e.cliente_id)
+    salida = [
+        GrupoBandejaOut(
+            tipo="grupo",
+            clave=g.jid,
+            nombre=g.nombre,
+            activo=g.activo,
+            cliente_ids=por_jid.get(
+                cliente_match.normalizar_clave("WHATSAPP", g.jid), []
+            ),
+        )
+        for g in grupos
+    ]
+    # Lo que entró SIN jid (la conexión de Smart Supply): su origen es el
+    # remitente. Los clientes del bucket salen de las órdenes mismas — es lo
+    # que de verdad ha entrado por ahí, que es lo que el filtro encadena.
+    remitentes = (
+        db.query(
+            OCRecibida.remitente,
+            func.array_agg(func.distinct(OCRecibida.cliente_id)),
+        )
+        .filter(
+            OCRecibida.payload["jid"].astext.is_(None),
+            OCRecibida.remitente.isnot(None),
+        )
+        .group_by(OCRecibida.remitente)
+        .order_by(OCRecibida.remitente)
+        .all()
+    )
+    for nombre, cliente_ids in remitentes:
+        salida.append(GrupoBandejaOut(
+            tipo="remitente",
+            clave=nombre,
+            nombre=nombre,
+            activo=True,
+            cliente_ids=[c for c in (cliente_ids or []) if c is not None],
+        ))
+    return salida
 
 
 @router.get("/{oc_id}", response_model=OCRecibidaDetailOut)
