@@ -1104,6 +1104,58 @@ def test_preview_muestras_ven_mas_alla_de_las_primeras_filas(client, env, auth_a
     assert cat["muestras"] == ["ABARROTE"]
 
 
+def test_preview_encabezado_lejos_de_la_fila_cero(client, env, auth_as):
+    """Lista real de un operador: título y filas vacías ANTES del encabezado
+    («PRECIOS RIO LIBRE CZ…» y el DESCRIPCIÓN | MARCA | UNIDAD | PRECIO KELLY
+    hasta la fila 5). El encabezado se encuentra solo y la lista se importa
+    determinista — antes el título y el encabezado salían como productos."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    data = _xlsx([
+        [],
+        [],
+        ["PRECIOS RIO LIBRE CZ INICIO 27 AGOSTO 2026"],
+        [],
+        ["DESCRIPCIÓN", "MARCA", "UNIDAD", "PRECIO KELLY"],
+        ["ACEITE BOTELLA DE UN LITRO CADA UNO SIMILAR 1-2-3", "CANOIL", "PIEZA", "52"],
+        ["AJO EN POLVO BOTE DE 600 GRAMOS SIMILAR MC CORMICK", "MC CORMICK", "PIEZA", "226.1"],
+        ["CANELA POR KILO", "NO APLICA", "KG", "404.7"],
+    ])
+    r = client.post(
+        "/api/v1/productos/importar-preview", headers=h,
+        files={"archivo": ("precios cz.xlsx", data, "application/octet-stream")},
+        data={"usar_ia": "false"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["requiere_mapeo"] is False and body["formato"] == "plantilla"
+    assert [f["nombre"] for f in body["filas"]] == [
+        "ACEITE BOTELLA DE UN LITRO CADA UNO SIMILAR 1-2-3",
+        "AJO EN POLVO BOTE DE 600 GRAMOS SIMILAR MC CORMICK",
+        "CANELA POR KILO",
+    ]
+    assert body["filas_sin_nombre"] == 0        # el título no cuenta como descarte
+    f1 = body["filas"][0]
+    # «PRECIO KELLY» es el precio (rótulo propio) y MARCA la descripción extra.
+    assert f1["precio"] == "52" and f1["unidad"] == "PIEZA"
+    assert f1["descripcion"] == "CANOIL"
+    assert body["filas"][2]["unidad"] == "KILO"
+    campos = {c["encabezado"]: c["campo"] for c in body["columnas"]}
+    assert campos == {"DESCRIPCIÓN": "nombre", "MARCA": "descripcion",
+                      "UNIDAD": "unidad", "PRECIO KELLY": "precio"}
+
+
+def test_encabezados_con_rotulo_propio():
+    """El match de encabezados tolera el rótulo del operador (por prefijo),
+    sin capturar las columnas informativas del export SAE."""
+    from app.services.importar_productos import _campo_de_encabezado, _norm_header
+    assert _campo_de_encabezado(_norm_header("PRECIO KELLY")) == "precio"
+    assert _campo_de_encabezado(_norm_header("Nombre del producto")) == "nombre"
+    assert _campo_de_encabezado(_norm_header("CLAVE SAT PRODUCTO")) == "clave_sat"
+    assert _campo_de_encabezado(_norm_header("MARCA")) == "descripcion"
+    assert _campo_de_encabezado(_norm_header("DESCRIPCIÓN SAT")) is None   # informativa SAE
+    assert _campo_de_encabezado(_norm_header("$ LISTA")) is None
+
+
 # ─── Esquema de impuesto y match de categorías (preview con columnas propias) ─
 def _esquemas_base(tenant_id):
     """IVA 0% alimentos + IVA 16% + refresco (IEPS cuota) + botana (IEPS tasa)."""
