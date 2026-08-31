@@ -1,4 +1,4 @@
-# Estado del proyecto — 31/08/2026 (actualizado tras los PRs #62–#67)
+# Estado del proyecto — 31/08/2026 (unificado: PRs #62–#69 + cotizador `ec59214`)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -18,11 +18,11 @@ carpeta y leer este archivo.
 
 ## Deploy
 
-**En vivo en https://facturador.mx** y al día: `./deploy.sh` corrió el 31-ago en la noche desde
-este checkout en `31df063` — construyó las tres imágenes, **aplicó la migración
-`0057 → 0058_proyecto_sucursales` a Supabase prod**, recreó `backend`/`frontend`/`landing` y los
-cinco contenedores quedaron arriba y sanos (el commit de este archivo solo mueve docs; el
-contexto de app desplegado es el de `31df063`).
+**En vivo en https://facturador.mx**: el 31-ago por la noche la sesión del cotizador desplegó
+`ec59214` (verificó el endpoint nuevo con 401) y, tras unificar este ESTADO, se corre
+`./deploy.sh` de nuevo para subir los PRs #67–#69 (precio al cruzar con serie y tramo, el
+aviso que nombra partidas, y estos docs). El resultado del deploy queda verificado por
+contenido dentro de los contenedores, como manda la regla de abajo.
 
 ⚠️ **La marca de tiempo de la imagen no sirve para saber si el deploy está al día.** Una imagen
 construida segundos antes de fusionar un PR "parece" atrasada sin estarlo, y una imagen vieja
@@ -52,6 +52,21 @@ regla del sistema. El alias «Galleta mexicana (1000g)»→GALLETAS MEXICANAS qu
 intento era correcto y se conservó.
 
 ### Antes (PRs #62 y #64)
+
+**El cotizador replica al agente 1 de WhatsApp (`ec59214`, sin PR — fast-forward directo).**
+La pestaña «Cotizar un documento» de `/cotizador` ahora hace lo mismo que el bot con las
+requisiciones de Balles: lee el PDF de SAE con pdfplumber (port de `parse_all.py`, acomodos A
+y B; IA solo de red final para fotos/acomodos raros), detecta al cliente por el RFC impreso,
+valida el precio de cada partida contra `resolver_precio` con las dimensiones del cliente y
+dibuja el MISMO PDF que manda el bot (port de `pedido_pdf.py`): notas rojas verbatim («SE
+RESPETA EL PRECIO DE OC…» / «SE ENVIARA LA COTIZACION…» / «PRECIO INCORRECTO — OC $X ->
+CORRECTO $Y»), alarma ATENCION con conteos, totales y total con letra. La pantalla enseña
+exactamente ese PDF y el operador lo descarga. Validado contra la REQ 0000006477 real: mismo
+resultado que el PDF del bot (3 respetadas + 1 incorrecta, total $1,798.60). De paso: las
+cantidades fraccionarias (0.5 kg) ahora cotizan con el escalón base (antes quedaban «sin
+precio» porque los tramos arrancan en `cantidad_minima=1`). El flujo de corrección del bot
+(«actualizar rq» / nota «PRECIO YA COTIZADO» / v2) NO está incluido. Ver pendiente 9 para los
+datos que faltan en prod.
 
 **La bandeja se filtra encadenada y se busca de verdad (#64).** Buscador al servidor (folio,
 remitente, archivo, punto de entrega y OBSERVACIONES del documento — que además salen en su
@@ -216,3 +231,18 @@ podarla.
    que reenvíe esas órdenes por la ingesta con su URL de Drive — se completan sin tocar la
    captura. **La SN-33NER-JUE que reportó el dueño sigue sin link** (verificado por la noche):
    queda el UPDATE puntual que el dueño tiene pendiente de correr, o cae sola con el script.
+9. **Datos en prod para que el PDF del cotizador salga idéntico al del bot** (código ya
+   desplegado en `ec59214`): (a) subir el logo de Álvarez Kelly en Ajustes › Empresa (el
+   checklist de onboarding lo marca pendiente); (b) poner `7` como código del cliente
+   OPERADORA BALLES (el bloque «( clave ) nombre» sale de `clientes.codigo`); (c) tener la
+   lista BALLES JUBRAN cargada y al día — los precios salen de las listas del Facturador, no
+   de SAE. Limpieza menor aparte: borrar el usuario de prueba `ok-833@test.local` en Supabase
+   Auth → Users (lo creó por accidente una corrida de tests del 31-ago con credenciales
+   reales; solo existe en Auth, sin datos).
+10. **La conciliación de 6 h no avisó de 14 OCs perdidas** (Balles/Jubran, 28–31 ago, la
+    25306 incluida). Se detectaron el 31-ago por la noche corriendo `facturador_conciliar.py`
+    a mano y se recuperaron TODAS con `facturador_backfill.py` + contexto regenerado fresco de
+    la BD (14 pendientes, 0 duplicados). Falta la causa raíz: por qué el flujo en vivo no las
+    empujó (llegaron por el grupo Interno SM) y por qué el job de 6 h no alertó — y OJO: el
+    repo del bot tiene cambios sin commitear (`index.js`, `sheets_push.py`) de otra sesión en
+    esas mismas fechas. Revisarlo desde la sesión que trabaja ese repo.
