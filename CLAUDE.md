@@ -33,3 +33,29 @@ el stack `facturadorprod`. Verifica después con los dominios reales
 - Backend: `cd backend && ./.venv/bin/python -m pytest -q`
 - Frontend: `cd frontend && npx tsc --noEmit`
 - Cambios de UI: recuerda que el usuario recarga con Ctrl+Shift+R.
+
+## Dónde está el estado (empieza por aquí)
+
+`docs/ESTADO.md` lleva el estado vivo del proyecto: en qué commit está `main`, si el deploy está
+al día, qué se cerró en los últimos días y los **pendientes numerados**. Lo reescribe
+`/endworking` al cerrar. Va **commiteado a propósito**: la puerta de checkout limpio de
+`deploy.sh` se dispara con archivos sin rastrear, así que un `ESTADO.md` suelto detiene el
+deploy.
+
+## Cómo está armado
+
+- `backend/` — FastAPI + SQLAlchemy, migraciones Alembic en `backend/migrations/versions`.
+  Multi-tenant con RLS (`public.current_tenant_id()`); los permisos y el alcance por cliente
+  viven en `backend/app/core/rbac.py`.
+- `frontend/` — Next.js (App Router). El cliente de la API se **genera**: tras cambiar el
+  backend corre `python -m scripts.export_openapi` y luego `npm run gen:api`.
+- El conector con SAE (Aspel) y el bot de WhatsApp viven en otro repo
+  (`SmartSupply/bot`), corren desde disco vía launchd y consultan SAE por sqlcmd.
+
+## Dos reglas que no se rompen
+
+1. **El Facturador no estampa un folio del SAE que el SAE no haya confirmado.** Generar el Excel
+   masivo deja rastro (`export_sae_at`, `export_sae_folio`) y nada más; `factura_sae` lo escribe
+   solo el espejo o una captura manual. Sin confirmación, la remisión se queda en BORRADOR.
+2. **Los folios siempre los pone el sistema**, sin ceros a la izquierda ni espacios. SAE los
+   guarda rellenados con ceros (`0000024736`), así que al comparar hay que normalizar.
