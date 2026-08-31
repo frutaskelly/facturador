@@ -105,6 +105,13 @@ export default function AsignacionesPreciosPage() {
         : proyectos.filter((p) => !p.cliente_id),
     [form?.cliente_id, proyectos],
   );
+  // La negociación es de su plaza: proyecto y sucursal se filtran entre sí por
+  // el alcance del proyecto (sin sucursales asignadas = sin restricción), para
+  // que el par que el backend rechazaría con 422 ni siquiera se pueda armar.
+  const proyectoForm = useMemo(
+    () => proyectos.find((p) => p.id === form?.proyecto_id) ?? null,
+    [form?.proyecto_id, proyectos],
+  );
 
   async function guardar() {
     if (!form) return;
@@ -398,11 +405,17 @@ export default function AsignacionesPreciosPage() {
                   disabled={!form.cliente_id}
                 >
                   <option value="">— Cualquiera —</option>
-                  {sucursalesDelCliente.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.nombre}
-                    </option>
-                  ))}
+                  {sucursalesDelCliente
+                    .filter(
+                      (s) =>
+                        !proyectoForm?.sucursal_ids?.length ||
+                        proyectoForm.sucursal_ids.includes(s.id)
+                    )
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.nombre}
+                      </option>
+                    ))}
                 </Select>
               </Field>
               <Field label="Serie">
@@ -418,17 +431,31 @@ export default function AsignacionesPreciosPage() {
                   ))}
                 </Select>
               </Field>
-              <Field label="Proyecto">
+              <Field
+                label="Proyecto"
+                hint={
+                  form.proyecto_id && !form.sucursal_id
+                    ? "Sin sucursal, el renglón aplica en todas las plazas donde entrega el proyecto; si la negociación es por plaza, elige también la sucursal."
+                    : undefined
+                }
+              >
                 <Select
                   value={form.proyecto_id}
                   onChange={(e) => setForm({ ...form, proyecto_id: e.target.value })}
                 >
                   <option value="">— Cualquiera —</option>
-                  {proyectosDelCliente.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.nombre}
-                    </option>
-                  ))}
+                  {proyectosDelCliente
+                    .filter(
+                      (p) =>
+                        !form.sucursal_id ||
+                        !p.sucursal_ids?.length ||
+                        p.sucursal_ids.includes(form.sucursal_id)
+                    )
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombre}
+                      </option>
+                    ))}
                 </Select>
               </Field>
               <Field label="Vigente desde" hint="Vacío = desde siempre.">

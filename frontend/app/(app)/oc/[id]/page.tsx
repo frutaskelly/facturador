@@ -96,6 +96,16 @@ export default function Page() {
       .catch(() => setSucursales([]));
   }, [clienteSel]);
 
+  /** ¿El proyecto elegido NO entrega en la sucursal elegida? (regla de alcance:
+   *  un proyecto sin sucursales asignadas aplica en cualquier plaza). Guardar
+   *  un par incompatible falla con 422 en el backend; esto avisa antes. */
+  const proyectoFueraDePlaza = useMemo(() => {
+    if (!proyectoSel) return null;
+    const p = proyectos.find((x) => x.id === proyectoSel);
+    if (!p?.sucursal_ids?.length) return null;
+    return sucursalSel && p.sucursal_ids.includes(sucursalSel) ? null : p;
+  }, [proyectos, proyectoSel, sucursalSel]);
+
   /** ¿El operador cambió cliente/sucursal y todavía no se ha guardado? */
   const sinGuardar = useMemo(
     () =>
@@ -390,8 +400,22 @@ export default function Page() {
               <option value="">— Sin proyecto —</option>
               {proyectos
                 .filter((p) => !p.cliente_id || !clienteSel || p.cliente_id === clienteSel)
+                // La negociación es de su plaza: los proyectos con sucursales
+                // asignadas solo se ofrecen cuando la sucursal elegida está en
+                // su alcance. El ya seleccionado se queda visible aunque no
+                // aplique — ocultarlo dejaría al select con un valor fantasma.
+                .filter(
+                  (p) =>
+                    p.id === proyectoSel ||
+                    !p.sucursal_ids?.length ||
+                    (sucursalSel !== "" && p.sucursal_ids.includes(sucursalSel))
+                )
                 .map((p) => (
-                  <option key={p.id} value={p.id}>{p.nombre}</option>
+                  <option key={p.id} value={p.id}>
+                    {p.id === proyectoSel && proyectoFueraDePlaza
+                      ? `${p.nombre} (no entrega en esta sucursal)`
+                      : p.nombre}
+                  </option>
                 ))}
             </Select>
           </Field>
@@ -404,6 +428,14 @@ export default function Page() {
             </Select>
           </Field>
         </div>
+
+        {proyectoFueraDePlaza ? (
+          <Alert tone="warning">
+            {sucursalSel
+              ? `El proyecto «${proyectoFueraDePlaza.nombre}» no entrega en la sucursal elegida: guardar así va a fallar. Quítalo, cambia la sucursal, o amplía su alcance en Catálogos → Proyectos.`
+              : `El proyecto «${proyectoFueraDePlaza.nombre}» solo entrega en ciertas sucursales: elige primero la sucursal de la orden.`}
+          </Alert>
+        ) : null}
 
         <div>
           <div className="mb-2 flex items-center justify-between">
