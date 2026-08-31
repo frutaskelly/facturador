@@ -1,4 +1,4 @@
-# Estado del proyecto — 31/08/2026 (actualizado tras el wrap-all nocturno: PRs #56, #59, #60 y #61)
+# Estado del proyecto — 31/08/2026 (actualizado tras el wrap-all nocturno: PRs #56, #59, #60, #61 y el #62 posterior)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,10 +7,10 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` — el commit de este archivo, sobre `31df063` (#59) — igual que `origin/main` |
+| Rama base | `main` — el commit de este archivo, sobre `6c68639` (#62) — igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
-| Worktrees | 3 activos + 1 bloqueado: `listaprecios-a35db8` (embarcado por #61, se poda al cerrar su sesión), `subida-productos-102286` y `bandeja-filtros` (sesiones NUEVAS abiertas durante el wrap — no tocar), y `new-session-7acb50` (rama `claude/estado-cierre-31ago`: conflicta con este ESTADO y su contenido ya está incorporado aquí — ver nota abajo) |
+| Worktrees | 2 activos + 1 bloqueado: `listaprecios-a35db8` (embarcado por #61, se poda al cerrar su sesión), `bandeja-filtros` (sesión abierta durante el wrap — no tocar), y `new-session-7acb50` (rama `claude/estado-cierre-31ago`: conflicta con este ESTADO y su contenido ya está incorporado aquí — ver nota abajo). `subida-productos-102286` cerró con el #62 y ya se podó |
 | PRs abiertos | ninguno |
 | Migración head | `0058_proyecto_sucursales` en `main` **y aplicada a prod** |
 
@@ -19,10 +19,10 @@ carpeta y leer este archivo.
 ## Deploy
 
 **En vivo en https://facturador.mx** y al día: `./deploy.sh` corrió el 31-ago en la noche desde
-este checkout en `31df063` — construyó las tres imágenes, **aplicó la migración
-`0057 → 0058_proyecto_sucursales` a Supabase prod**, recreó `backend`/`frontend`/`landing` y los
-cinco contenedores quedaron arriba y sanos (el commit de este archivo solo mueve docs; el
-contexto de app desplegado es el de `31df063`).
+este checkout en `6c68639` (#62) — sin migraciones nuevas (head sigue `0058`), recreó
+`backend`/`frontend`/`landing` y los cinco contenedores quedaron arriba y sanos. El deploy
+anterior (mismo día, desde `31df063`) fue el que **aplicó la migración
+`0057 → 0058_proyecto_sucursales` a Supabase prod**.
 
 ⚠️ **La marca de tiempo de la imagen no sirve para saber si el deploy está al día.** Una imagen
 construida segundos antes de fusionar un PR "parece" atrasada sin estarlo, y una imagen vieja
@@ -32,6 +32,15 @@ contenido dentro de la imagen.
 **La puerta de `deploy.sh` bloquea si el checkout no coincide con GitHub** — incluidos archivos
 sin rastrear. Por eso este `docs/ESTADO.md` va commiteado: suelto, detiene cada deploy. Nunca
 usar `FORCE=1` para saltarla: publica el trabajo a medias de otra sesión.
+
+## Lo que entró después del wrap-all (PR #62)
+
+**La importación de productos encuentra el encabezado aunque no esté en la fila 1.** La lista
+real «PRECIOS RIO LIBRE CZ» del operador (título y filas vacías antes del encabezado, en la
+fila 5) salía con columnas `Unnamed` y el título como si fuera un producto. Ahora
+`importar_productos` busca la fila con ≥2 campos conocidos entre las primeras 15, los rótulos
+propios mapean por prefijo («PRECIO KELLY» → precio) y MARCA entra como descripción adicional.
+Probado con el archivo real: 160 productos, cero filas basura, determinista (sin gastar IA).
 
 ## Lo que entró en el wrap-all nocturno (PRs #56, #59, #60 y #61)
 
