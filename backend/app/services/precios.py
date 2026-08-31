@@ -53,7 +53,13 @@ def _override(db, *, producto_id, presentacion, fecha, cliente_id=None, sucursal
         PrecioOverride.presentacion == presentacion,
     )
     q = q.filter(PrecioOverride.sucursal_id == sucursal_id) if sucursal_id else q.filter(PrecioOverride.cliente_id == cliente_id)
-    q = _vigente(q, PrecioOverride, fecha).order_by(PrecioOverride.created_at.desc())
+    # id como desempate: dos overrides capturados en la misma transacción traen
+    # el MISMO created_at (func.now() es por transacción) y sin llave secundaria
+    # el ganador dependía del plan de la consulta — aquí y en el lote debe ser
+    # el mismo.
+    q = _vigente(q, PrecioOverride, fecha).order_by(
+        PrecioOverride.created_at.desc(), PrecioOverride.id.desc()
+    )
     row = q.first()
     return row[0] if row else None
 
@@ -95,7 +101,8 @@ def resolver_asignacion(
     q = _vigente(q, ListaAsignacion, fecha)
     # A igual especificidad gana la más reciente: es la última negociación.
     return q.order_by(
-        ListaAsignacion.especificidad.desc(), ListaAsignacion.created_at.desc()
+        ListaAsignacion.especificidad.desc(), ListaAsignacion.created_at.desc(),
+        ListaAsignacion.id.desc(),
     ).first()
 
 
@@ -125,7 +132,8 @@ def resolver_asignaciones(
     )
     q = _vigente(q, ListaAsignacion, fecha)
     return q.order_by(
-        ListaAsignacion.especificidad.desc(), ListaAsignacion.created_at.desc()
+        ListaAsignacion.especificidad.desc(), ListaAsignacion.created_at.desc(),
+        ListaAsignacion.id.desc(),
     ).all()
 
 
@@ -346,7 +354,9 @@ def resolver_precios_lote(
         ).filter(PrecioOverride.producto_id.in_(producto_ids))
         for col, val in dim.items():
             q = q.filter(getattr(PrecioOverride, col) == val)
-        q = _vigente(q, PrecioOverride, fecha).order_by(PrecioOverride.created_at.desc())
+        q = _vigente(q, PrecioOverride, fecha).order_by(
+            PrecioOverride.created_at.desc(), PrecioOverride.id.desc()
+        )
         out: dict[tuple, Decimal] = {}
         for pid, pres, precio in q.all():
             out.setdefault((pid, pres), precio)

@@ -601,7 +601,7 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
         serie_id=serie_id,
         proyecto_id=oc.proyecto_id,
     )
-    for (ln, prod, pres), res in zip(pendientes, resultados):
+    for (ln, prod, pres), res in zip(pendientes, resultados, strict=True):
         etiqueta = f"«{(ln.get('descripcion') or ln.get('clave') or '')[:60]}»"
         top = (ln.get("candidatos") or [])[0]
         if res is None:

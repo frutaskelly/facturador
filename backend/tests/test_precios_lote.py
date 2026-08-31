@@ -9,11 +9,13 @@ vigencias vencidas, presentación derivada de la base × factor y productos sin
 precio — y exige el MISMO resultado, campo por campo.
 """
 import uuid
+from contextlib import contextmanager
 from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
 from app.models import (
@@ -123,6 +125,19 @@ def env(db_engine):
         db.commit(); db.close()
 
 
+@contextmanager
+def _sesion_tenant(db_engine, tid):
+    """Sesión con RLS activo y el tenant fijado — el mismo par SET LOCAL ROLE
+    app_user + GUC que usa get_tenant_db. Sin esto, el postgres dueño de las
+    tablas ve los datos de TODOS los tenants (p. ej. otra lista UNICO sembrada
+    por otra suite) y `_lista_default` truena con MultipleResultsFound."""
+    with db_engine.connect() as conn:
+        with conn.begin():
+            conn.execute(text("SET LOCAL ROLE app_user"))
+            conn.execute(text("SELECT set_config('app.current_tenant_id', :t, true)"), {"t": str(tid)})
+            yield Session(bind=conn)
+
+
 def _contextos(env):
     """Los contextos (cliente, sucursal, serie, proyecto) que ejercitan cada
     rama de la cascada, incluido el comodín total (solo lista base)."""
@@ -150,36 +165,37 @@ def _items(env):
     ]
 
 
-def test_el_lote_calcula_lo_mismo_que_la_cascada(env):
-    db = env["db"]
+def test_el_lote_calcula_lo_mismo_que_la_cascada(env, db_engine):
     for ctx in _contextos(env):
         items = _items(env)
-        lote = resolver_precios_lote(db, items=items, **ctx)
-        uno_a_uno = [
-            resolver_precio(
-                db,
-                producto_id=it["producto_id"],
-                presentacion=it["presentacion"],
-                cantidad=it["cantidad"],
-                **ctx,
-            )
-            for it in items
-        ]
+        with _sesion_tenant(db_engine, env["tid"]) as db:
+            lote = resolver_precios_lote(db, items=items, **ctx)
+            uno_a_uno = [
+                resolver_precio(
+                    db,
+                    producto_id=it["producto_id"],
+                    presentacion=it["presentacion"],
+                    cantidad=it["cantidad"],
+                    **ctx,
+                )
+                for it in items
+            ]
         assert lote == uno_a_uno, f"divergencia con contexto {ctx}"
 
 
-def test_lote_vacio(env):
-    assert resolver_precios_lote(env["db"], items=[], cliente_id=env["cli"]) == []
+def test_lote_vacio(env, db_engine):
+    with _sesion_tenant(db_engine, env["tid"]) as db:
+        assert resolver_precios_lote(db, items=[], cliente_id=env["cli"]) == []
 
 
-def test_el_lote_respeta_precedencias_concretas(env):
+def test_el_lote_respeta_precedencias_concretas(env, db_engine):
     """No solo paridad: los valores esperados, para que un bug simétrico en
     ambos resolutores no pase como 'iguales'."""
-    db = env["db"]
-    lote = resolver_precios_lote(
-        db, items=_items(env), cliente_id=env["cli"], sucursal_id=env["suc"],
-        proyecto_id=env["proy"],
-    )
+    with _sesion_tenant(db_engine, env["tid"]) as db:
+        lote = resolver_precios_lote(
+            db, items=_items(env), cliente_id=env["cli"], sucursal_id=env["suc"],
+            proyecto_id=env["proy"],
+        )
     # AGUA 5: lista del proyecto (más específica) $17.50
     assert lote[0] == {"precio": Decimal("17.5"), "origen": "lista_proyecto",
                        "lista_id": lote[0]["lista_id"], "asignacion_id": lote[0]["asignacion_id"]}
@@ -189,3 +205,24 @@ def test_el_lote_respeta_precedencias_concretas(env):
     assert lote[3]["precio"] == Decimal("288.00") and lote[3]["origen"] == "override_sucursal"
     # Sin precio en ningún lado
     assert lote[4] is None
+
+
+def test_desempate_determinista_en_overrides(env, db_engine):
+    """Dos overrides de la MISMA llave en la misma transacción comparten
+    created_at (func.now() es por transacción): el ganador debe ser el mismo en
+    la cascada y en el lote — el id como desempate lo garantiza."""
+    db = env["db"]
+    db.add_all([
+        PrecioOverride(tenant_id=env["tid"], cliente_id=env["cli"], producto_id=env["agua"],
+                       presentacion="KILO", precio_unitario=Decimal("11")),
+        PrecioOverride(tenant_id=env["tid"], cliente_id=env["cli"], producto_id=env["agua"],
+                       presentacion="KILO", precio_unitario=Decimal("12")),
+    ])
+    db.commit()
+    item = {"producto_id": env["agua"], "presentacion": "KILO", "cantidad": Decimal("1")}
+    with _sesion_tenant(db_engine, env["tid"]) as sdb:
+        lote = resolver_precios_lote(sdb, items=[item], cliente_id=env["cli"])
+        uno = resolver_precio(sdb, producto_id=env["agua"], presentacion="KILO",
+                              cantidad=Decimal("1"), cliente_id=env["cli"])
+    assert lote[0] == uno
+    assert lote[0]["origen"] == "override_cliente"
