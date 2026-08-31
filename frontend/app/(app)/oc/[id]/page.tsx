@@ -5,7 +5,7 @@
 // diaria — aquí se decide a quién se le factura, qué producto es cada partida
 // y con eso nace la remisión. Merece toda la pantalla y su propia URL
 // (compartible, recargable, con botón de atrás).
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AlertTriangle, ArrowLeft, ExternalLink, FileText, Inbox, Trash2 } from "lucide-react";
 
@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Field, Input, Select } from "@/components/ui/Field";
+import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
@@ -67,6 +68,7 @@ export default function Page() {
     try {
       const d = await apiFetch<OCRecibidaDetalle>(`/api/v1/oc-recibidas/${id}`);
       setOc(d);
+      setPrecioAceptado([]);
       setClienteSel(d.cliente_id ?? "");
       setSucursalSel(d.sucursal_id ?? "");
       setPuntoEntrega(d.punto_entrega ?? "");
@@ -112,13 +114,15 @@ export default function Page() {
       !!oc &&
       (clienteSel !== (oc.cliente_id ?? "") ||
         sucursalSel !== (oc.sucursal_id ?? "") ||
-        puntoEntrega.trim() !== (oc.punto_entrega ?? "") ||
+        puntoEntrega.trim() !== (oc.punto_entrega ?? "").trim() ||
         proyectoSel !== (oc.proyecto_id ?? "")),
     [oc, clienteSel, sucursalSel, puntoEntrega, proyectoSel]
   );
 
-  /** Persiste cliente/sucursal. Devuelve la OC guardada, o null si falló. */
-  async function guardarAsignacion(): Promise<OCRecibidaDetalle | null> {
+  /** Persiste cliente/sucursal. Devuelve la OC guardada, o null si falló.
+   *  `aprender` decide si la corrección se guarda como equivalencia (las
+   *  próximas órdenes iguales se resuelven solas) o aplica solo a esta. */
+  async function guardarAsignacion(aprender = true): Promise<OCRecibidaDetalle | null> {
     if (!oc || !clienteSel) {
       toast.error("Elige el cliente");
       return null;
@@ -133,10 +137,13 @@ export default function Page() {
           sucursal_id: sucursalSel || null,
           punto_entrega: puntoEntrega.trim() || null,
           proyecto_id: proyectoSel || null,
-          aprender: true,
+          aprender,
         }),
       });
       setOc(d);
+      // La evaluación del servidor se renovó: las aceptaciones de conflictos
+      // eran sobre la anterior.
+      setPrecioAceptado([]);
       // El cruce se recalculó contra el catálogo y el vocabulario del cliente
       // guardado: la tabla se rehace o seguiría mandando productos del anterior.
       if (cambioDeCliente) setLineas(tablaDe(d));
@@ -147,11 +154,116 @@ export default function Page() {
     }
   }
 
-  async function asignar() {
-    setGuardando(true);
-    const d = await guardarAsignacion();
-    setGuardando(false);
-    if (d) toast.success("Asignada — la próxima orden igual ya se resuelve sola");
+  /** Cotiza la partida `numero` contra la lista del cliente y refleja el
+   *  resultado: si el campo está vacío (o su valor vino de una cotización
+   *  previa), se llena — es lo que se va a cobrar, y verlo evita el "lista" a
+   *  ciegas. Un precio TECLEADO jamás se pisa. La respuesta vieja no pisa a la
+   *  nueva: se descarta si la línea ya apunta a otro producto/presentación.
+   *  Si el rol no puede cotizar (menu:cotizador), simplemente no llena. */
+  const cotizaSeq = useRef<Record<number, number>>({});
+
+  // Otra sucursal u otro proyecto = otra negociación: lo cotizado ya no
+  // aplica. Se limpia referencia y auto-llenado (lo tecleado se queda); el
+  // precio bueno lo resuelve el backend al crear, y volver a cruzar re-cotiza.
+  const contextoPrecios = `${sucursalSel}|${proyectoSel}`;
+  const contextoPrev = useRef(contextoPrecios);
+  useEffect(() => {
+    if (contextoPrev.current === contextoPrecios) return;
+    contextoPrev.current = contextoPrecios;
+    cotizaSeq.current = {};
+    setLineas((prev) =>
+      prev.map((x) =>
+        x.precioLista == null && !x.precioAuto
+          ? x
+          : {
+              ...x,
+              precioLista: null,
+              precioListaId: null,
+              precioTramo: null,
+              ...(x.precioAuto ? { precio: "", precioAuto: false } : {}),
+            }
+      )
+    );
+  }, [contextoPrecios]);
+  async function cotizarLinea(numero: number, productoId: string, presentacion: string, cantidad: string) {
+    // Solo la ÚLTIMA cotización pedida para la partida puede escribir: dos
+    // respuestas fuera de orden (cambio rápido de producto o de cantidad) no
+    // deben dejar el precio ni la referencia de la anterior.
+    const seq = (cotizaSeq.current[numero] ?? 0) + 1;
+    cotizaSeq.current[numero] = seq;
+    const qs = new URLSearchParams({
+      producto_id: productoId,
+      presentacion,
+      cantidad: Number(cantidad) > 0 ? cantidad : "1",
+    });
+    if (clienteSel) qs.set("cliente_id", clienteSel);
+    if (sucursalSel) qs.set("sucursal_id", sucursalSel);
+    if (proyectoSel) qs.set("proyecto_id", proyectoSel);
+    // La serie pesa más que sucursal+cliente en las asignaciones: sin ella,
+    // una lista negociada por serie sería invisible para la cotización.
+    if (oc?.serie_prevista_id) qs.set("serie_id", oc.serie_prevista_id);
+    try {
+      const c = await apiFetch<{
+        precio?: string | number | null;
+        origen?: string | null;
+        lista_id?: string | null;
+        cantidad_minima?: number | null;
+      }>(`/api/v1/precios/cotizar?${qs}`);
+      if (cotizaSeq.current[numero] !== seq) return;
+      setLineas((prev) =>
+        prev.map((x) => {
+          if (x.numero !== numero || x.producto_id !== productoId || x.presentacion !== presentacion) return x;
+          const resuelto = c.precio != null && Number.isFinite(Number(c.precio))
+            ? Number(c.precio).toFixed(2)
+            : null;
+          const llenar = resuelto != null && (!x.precio.trim() || x.precioAuto);
+          // La lista BASE queda fuera de «actualizar la lista»: es la default
+          // de todo el negocio y reescribirla desde una partida es demasiado.
+          const origen = c.origen ?? "";
+          const actualizable = origen.startsWith("lista") && origen !== "lista_base";
+          return {
+            ...x,
+            precioLista: resuelto,
+            precioListaId: actualizable ? (c.lista_id ?? null) : null,
+            precioTramo: actualizable ? (c.cantidad_minima ?? null) : null,
+            ...(llenar ? { precio: resuelto, precioAuto: true } : {}),
+          };
+        })
+      );
+    } catch {
+      /* cotización informativa: sin permiso o sin red, el campo queda como estaba */
+    }
+  }
+
+  /** Escribe el precio tecleado en la lista de donde salió el de referencia.
+   *  Es la mitad "y que el sistema lo aprenda" del precio manual: cobrar otra
+   *  cosa es válido siempre; actualizar la lista es una DECISIÓN y por eso es
+   *  un clic aparte, nunca automático. Actualiza el tramo base (desde 1). */
+  async function actualizarLista(l: LineaEdit) {
+    const v = precioNormalizado(l.precio);
+    if (!v || !l.precioListaId || !l.producto_id || l.precioTramo == null) return;
+    try {
+      await apiFetch(`/api/v1/listas-precios/${l.precioListaId}/precios/bulk`, {
+        method: "POST",
+        body: JSON.stringify({
+          items: [{
+            producto_id: l.producto_id,
+            presentacion: l.presentacion,
+            precio_unitario: v,
+            // El MISMO tramo del que salió la referencia: escribir el tramo
+            // base con un precio de volumen sería un subcobro permanente.
+            cantidad_minima: l.precioTramo,
+          }],
+        }),
+      });
+      const nuevo = Number(v).toFixed(2);
+      toast.success(`La lista quedó en ${nuevo} para esta presentación`);
+      setLineas((prev) =>
+        prev.map((x) => (x.numero === l.numero ? { ...x, precioLista: nuevo } : x))
+      );
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo actualizar la lista");
+    }
   }
 
   const sinProducto = useMemo(() => lineas.filter((l) => !l.producto_id).length, [lineas]);
@@ -198,21 +310,51 @@ export default function Page() {
     });
   }, [auto, lineas]);
 
-  async function crearRemision() {
-    if (!oc) return;
-    if (!clienteSel) { toast.error("Asigna primero el cliente"); return; }
+  /** ¿La orden pasa las validaciones locales para volverse remisión? */
+  function listaParaCrear(): boolean {
+    if (!oc) return false;
+    if (!clienteSel) { toast.error("Asigna primero el cliente"); return false; }
     if (!lineas.length || sinProducto) {
       toast.error(`Faltan ${sinProducto} partida(s) por cruzar con un producto`);
-      return;
+      return false;
     }
     const sinCantidad = lineas.filter((l) => !(Number(l.cantidad) > 0)).length;
-    if (sinCantidad) { toast.error(`${sinCantidad} partida(s) sin cantidad válida`); return; }
+    if (sinCantidad) { toast.error(`${sinCantidad} partida(s) sin cantidad válida`); return false; }
+    return true;
+  }
+
+  /** El clic en «Crear remisión»: si hay asignación sin guardar, primero se
+   *  pregunta si además se APRENDE (equivalencias para las próximas órdenes);
+   *  el modal llama a `crearRemision(aprender)`. Sin cambios, directo. */
+  const [preguntaGuardar, setPreguntaGuardar] = useState(false);
+  function clicCrear() {
+    if (!listaParaCrear()) return;
+    if (sinGuardar) setPreguntaGuardar(true);
+    else void crearRemision(true);
+  }
+
+  async function crearRemision(aprender: boolean) {
+    if (!oc || !listaParaCrear()) return;
+    setPreguntaGuardar(false);
     setGuardando(true);
     try {
       // La remisión se crea con el cliente y la sucursal PERSISTIDOS: si el
-      // operador los cambió y no guardó, se guarda aquí antes — si no, saldría
-      // a nombre del cliente anterior y con la serie equivocada.
-      if (sinGuardar && !(await guardarAsignacion())) return;
+      // operador los cambió, se guardan aquí — si no, saldría a nombre del
+      // cliente anterior y con la serie equivocada. `aprender` viene de la
+      // pregunta del modal.
+      const reCruza =
+        clienteSel !== (oc.cliente_id ?? "") || sucursalSel !== (oc.sucursal_id ?? "");
+      if (sinGuardar && !(await guardarAsignacion(aprender))) return;
+      if (reCruza) {
+        // Con otro cliente/sucursal el servidor RECRUZÓ las partidas y la tabla
+        // se rehizo: crear con la tabla anterior mandaría productos (y
+        // aprendería claves) del cliente equivocado. Se guarda y se pide una
+        // mirada antes del segundo clic.
+        toast.info(
+          "Asignación guardada. El cruce se recalculó para el cliente nuevo: revísalo y vuelve a crear."
+        );
+        return;
+      }
       const d = await apiFetch<OCRecibidaDetalle>(`/api/v1/oc-recibidas/${oc.id}/crear-remision`, {
         method: "POST",
         body: JSON.stringify({
@@ -221,7 +363,10 @@ export default function Page() {
             producto_id: l.producto_id,
             cantidad: l.cantidad,
             presentacion: l.presentacion,
-            precio_unitario: precioNormalizado(l.precio) || null,
+            // El precio AUTO es informativo: se manda vacío y el backend
+            // resuelve de la lista al crear (tramos por cantidad incluidos).
+            // Solo lo tecleado viaja como precio explícito.
+            precio_unitario: l.precioAuto ? null : precioNormalizado(l.precio) || null,
             notas: l.notas,
             texto_original: l.agregada ? null : l.texto || null,
             clave: l.agregada ? null : l.clave,
@@ -344,7 +489,7 @@ export default function Page() {
             </div>
             {sinGuardar ? (
               <div className="mt-2 text-xs">
-                Guarda primero la asignación: esto se calculó con el cliente que ya estaba.
+                Cambiaste la asignación: esto se calculó con el cliente que ya estaba. Al crear se guarda y recalcula.
               </div>
             ) : null}
           </Alert>
@@ -526,6 +671,10 @@ export default function Page() {
                               onChange={(e) => {
                                 const v = e.target.value;
                                 setLineas((prev) => prev.map((x, j) => (j === i ? { ...x, cantidad: v } : x)));
+                                // El tramo por volumen depende de la cantidad;
+                                // el guard de secuencia descarta las respuestas
+                                // intermedias del tecleo.
+                                if (l.producto_id) void cotizarLinea(l.numero, l.producto_id, l.presentacion, v);
                               }}
                             />
                           </div>
@@ -547,21 +696,41 @@ export default function Page() {
                           onChange={(e) => {
                             const v = e.target.value;
                             if (v === "__buscar__") {
-                              setLineas((prev) => prev.map((x, j) => (j === i ? { ...x, buscando: true, producto_id: "" } : x)));
+                              setLineas((prev) =>
+                                prev.map((x, j) =>
+                                  j === i
+                                    ? {
+                                        ...x, buscando: true, producto_id: "",
+                                        precioLista: null, precioListaId: null, precioTramo: null,
+                                        ...(x.precioAuto ? { precio: "", precioAuto: false } : {}),
+                                      }
+                                    : x
+                                )
+                              );
                               return;
                             }
+                            const cand = l.candidatos.find((c) => c.producto_id === v);
+                            const pres = presentacionDe(l.unidad, cand);
                             setLineas((prev) =>
                               prev.map((x, j) => {
                                 if (j !== i) return x;
-                                const cand = x.candidatos.find((c) => c.producto_id === v);
+                                // Cambiar de producto invalida el precio de la
+                                // cotización anterior YA (no cuando responda la
+                                // nueva): si falla, no queda un número ajeno.
+                                // El precio TECLEADO se conserva.
                                 return {
                                   ...x,
                                   producto_id: v,
-                                  presentacion: presentacionDe(x.unidad, cand),
+                                  presentacion: pres,
                                   presentaciones: Object.keys(cand?.presentaciones ?? {}),
+                                  precioLista: null,
+                                  precioListaId: null,
+                                  precioTramo: null,
+                                  ...(x.precioAuto ? { precio: "", precioAuto: false } : {}),
                                 };
                               })
                             );
+                            if (v) void cotizarLinea(l.numero, v, pres, l.cantidad);
                           }}
                         >
                           <option value="">— Sin cruzar —</option>
@@ -581,30 +750,35 @@ export default function Page() {
                           clienteId={clienteSel || null}
                           unidadBase={unidadBaseDe(l.unidad)}
                           presentacion={l.presentacion}
-                          onSelect={(prod) =>
+                          onSelect={(prod) => {
+                            const pres = prod
+                              ? presentacionDe(l.unidad, {
+                                  producto_id: prod.producto_id,
+                                  sku: prod.sku,
+                                  nombre: prod.nombre,
+                                  score: 100,
+                                  origen: "manual",
+                                  presentaciones: prod.presentaciones,
+                                  presentacion_default: prod.presentacion_default,
+                                })
+                              : l.presentacion;
                             setLineas((prev) =>
-                              prev.map((x, j) =>
-                                j === i
-                                  ? {
-                                      ...x,
-                                      producto_id: prod ? prod.producto_id : "",
-                                      presentacion: prod
-                                        ? presentacionDe(x.unidad, {
-                                            producto_id: prod.producto_id,
-                                            sku: prod.sku,
-                                            nombre: prod.nombre,
-                                            score: 100,
-                                            origen: "manual",
-                                            presentaciones: prod.presentaciones,
-                                            presentacion_default: prod.presentacion_default,
-                                          })
-                                        : x.presentacion,
-                                      presentaciones: prod ? Object.keys(prod.presentaciones ?? {}) : [],
-                                    }
-                                  : x
-                              )
-                            )
-                          }
+                              prev.map((x, j) => {
+                                if (j !== i) return x;
+                                return {
+                                  ...x,
+                                  producto_id: prod ? prod.producto_id : "",
+                                  presentacion: pres,
+                                  presentaciones: prod ? Object.keys(prod.presentaciones ?? {}) : [],
+                                  precioLista: null,
+                                  precioListaId: null,
+                                  precioTramo: null,
+                                  ...(x.precioAuto ? { precio: "", precioAuto: false } : {}),
+                                };
+                              })
+                            );
+                            if (prod) void cotizarLinea(l.numero, prod.producto_id, pres, l.cantidad);
+                          }}
                         />
                       )}
                     </td>
@@ -615,6 +789,8 @@ export default function Page() {
                           onChange={(e) => {
                             const v = e.target.value;
                             setLineas((prev) => prev.map((x, j) => (j === i ? { ...x, presentacion: v } : x)));
+                            // Otra presentación, otro precio de lista.
+                            if (l.producto_id) void cotizarLinea(l.numero, l.producto_id, v, l.cantidad);
                           }}
                         >
                           {l.presentaciones.map((p) => (
@@ -633,9 +809,12 @@ export default function Page() {
                         className={`text-right${conflicto ? " border-danger" : ""}`}
                         onChange={(e) => {
                           const v = e.target.value;
-                          setLineas((prev) => prev.map((x, j) => (j === i ? { ...x, precio: v } : x)));
+                          setLineas((prev) => prev.map((x, j) => (j === i ? { ...x, precio: v, precioAuto: false } : x)));
                         }}
                       />
+                      {l.precioAuto && !conflicto ? (
+                        <div className="mt-1 text-right text-xs text-muted">precio de lista</div>
+                      ) : null}
                       {conflicto && editable ? (
                         <div className="mt-1 flex flex-wrap justify-end gap-x-3 gap-y-1 text-xs">
                           <button
@@ -644,7 +823,9 @@ export default function Page() {
                             onClick={() =>
                               setLineas((prev) =>
                                 prev.map((x, j) =>
-                                  j === i ? { ...x, precio: conflicto.precio_lista ?? "" } : x
+                                  j === i
+                                    ? { ...x, precio: conflicto.precio_lista ?? "", precioAuto: false }
+                                    : x
                                 )
                               )
                             }
@@ -660,6 +841,33 @@ export default function Page() {
                           </button>
                         </div>
                       ) : null}
+                      {(() => {
+                        // Precio tecleado distinto del de la lista: se acepta
+                        // siempre, y se OFRECE llevarlo a la lista — decisión
+                        // aparte, nunca automática. Con el conflicto del
+                        // servidor visible no se duplica el aviso.
+                        if (conflicto || !editable || l.precioAuto || !l.precioLista) return null;
+                        const v = Number(precioNormalizado(l.precio));
+                        if (!Number.isFinite(v) || !l.precio.trim()) return null;
+                        if (Math.abs(v - Number(l.precioLista)) <= 0.01) return null;
+                        const puedeActualizar =
+                          l.precioListaId && l.precioTramo != null && can(me, "lista_precios:gestionar");
+                        return (
+                          <div className="mt-1 text-right text-xs text-muted">
+                            La lista dice {l.precioLista}.{" "}
+                            {puedeActualizar ? (
+                              <button
+                                type="button"
+                                className="text-accent hover:underline"
+                                onClick={() => void actualizarLista(l)}
+                              >
+                                Actualizar la lista a {v.toFixed(2)}
+                                {l.precioTramo && l.precioTramo > 1 ? ` (tramo desde ${l.precioTramo})` : ""}
+                              </button>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
                     </td>
                     {editable ? (
                       <td className="px-1 py-2">
@@ -702,7 +910,8 @@ export default function Page() {
                       numero: Math.max(0, ...prev.map((x) => x.numero)) + 1000,
                       texto: "", cantidad: "", unidad: "", clave: null,
                       producto_id: "", presentacion: "KILO", presentaciones: [],
-                      precio: "", notas: null, candidatos: [], buscando: true, agregada: true,
+                      precio: "", precioLista: null, precioListaId: null, precioTramo: null, precioAuto: false,
+                      notas: null, candidatos: [], buscando: true, agregada: true,
                     },
                   ])
                 }
@@ -743,20 +952,17 @@ export default function Page() {
               <Button variant="danger" onClick={() => setConfirmaDescartar(true)} disabled={guardando}>
                 Descartar
               </Button>
-              <Button variant="secondary" onClick={() => { void asignar(); }} disabled={guardando || !clienteSel}>
-                Guardar asignación
-              </Button>
               {auto?.ok && !autoDesfasado ? (
                 <Button
                   variant="secondary"
                   onClick={() => { void crearRemisionAuto(); }}
                   disabled={guardando || sinGuardar}
-                  title={sinGuardar ? "Guarda la asignación: esto se calculó con el cliente anterior" : undefined}
+                  title={sinGuardar ? "Cambiaste la asignación: crea con «Crear remisión», que la guarda" : undefined}
                 >
                   Crear remisión de un clic
                 </Button>
               ) : null}
-              <Button onClick={() => { void crearRemision(); }} disabled={guardando}>
+              <Button onClick={clicCrear} disabled={guardando}>
                 {guardando ? "Creando…" : "Crear remisión"}
               </Button>
             </>
@@ -771,6 +977,32 @@ export default function Page() {
         onClose={() => setConfirmaDescartar(false)}
         onConfirm={descartar}
       />
+
+      <Modal
+        open={preguntaGuardar}
+        onClose={() => setPreguntaGuardar(false)}
+        title="¿Guardar la asignación?"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setPreguntaGuardar(false)} disabled={guardando}>
+              Cancelar
+            </Button>
+            <Button variant="secondary" onClick={() => { void crearRemision(false); }} disabled={guardando}>
+              No — solo esta remisión
+            </Button>
+            <Button onClick={() => { void crearRemision(true); }} disabled={guardando}>
+              Sí, guardar y crear
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm">
+          Cambiaste cliente, sucursal, punto de entrega o proyecto. Con <strong>Sí</strong>, el
+          sistema lo aprende y las próximas órdenes iguales se resuelven solas. Con{" "}
+          <strong>No</strong>, el cambio aplica a esta remisión sin enseñarle nada al sistema.
+          En ambos casos la remisión se crea ahora.
+        </p>
+      </Modal>
     </div>
   );
 }

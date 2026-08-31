@@ -3178,6 +3178,17 @@
       "title": "Cantidad",
       "type": "string"
      },
+     "cantidad_minima": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cantidad Minima"
+     },
      "lista_id": {
       "anyOf": [
        {
@@ -8763,6 +8774,18 @@
        }
       ],
       "title": "Resuelto Via"
+     },
+     "serie_prevista_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Prevista Id"
      },
      "sucursal_id": {
       "anyOf": [

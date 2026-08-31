@@ -189,6 +189,10 @@ class OCRecibidaDetailOut(OCRecibidaOut):
     payload: dict = Field(default_factory=dict)
     lineas: list[LineaOCRecibidaOut] = Field(default_factory=list)
     auto: Optional[AutoRemisionOut] = None
+    # La serie con la que se foliaria la remisión de esta orden; la pantalla
+    # cotiza los precios con ella (una asignación por serie pesa más que
+    # sucursal+cliente). None en modo vistazo o sin cliente.
+    serie_prevista_id: Optional[uuid.UUID] = None
 
 
 class LineaCrearIn(BaseModel):

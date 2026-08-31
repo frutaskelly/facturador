@@ -96,3 +96,7 @@ class CotizacionOut(BaseModel):
     precio: Optional[Decimal] = None
     origen: Optional[str] = None
     lista_id: Optional[uuid.UUID] = None
+    # El cantidad_minima del TRAMO que habló, cuando el precio salió de una fila
+    # de esta presentación. Sin él, «actualizar la lista» apuntaría al tramo
+    # base aunque la referencia viniera de un tramo por volumen.
+    cantidad_minima: Optional[int] = None

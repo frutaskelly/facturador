@@ -232,11 +232,37 @@ def cotizar(
         cliente_id=cliente_id, sucursal_id=sucursal_id,
         serie_id=serie_id, proyecto_id=proyecto_id, fecha=fecha,
     )
+    # El tramo aplicado: existe solo si el precio salió de una fila de ESTA
+    # presentación (el fallback base×factor viene de otra fila y ahí no se
+    # ofrece actualizar). Es lo que permite que «actualizar la lista» escriba
+    # en el tramo que habló y no pise el tramo base con un precio de volumen.
+    cantidad_minima = None
+    lista_id = (res or {}).get("lista_id")
+    if lista_id:
+        from sqlalchemy import or_ as _or
+        from ...models import Precio
+        hoy = fecha or date.today()
+        fila = (
+            db.query(Precio.cantidad_minima, Precio.precio_unitario)
+            .filter(
+                Precio.lista_id == lista_id,
+                Precio.producto_id == producto_id,
+                Precio.presentacion == presentacion,
+                Precio.cantidad_minima <= cantidad,
+                _or(Precio.vigencia_desde.is_(None), Precio.vigencia_desde <= hoy),
+                _or(Precio.vigencia_hasta.is_(None), Precio.vigencia_hasta >= hoy),
+            )
+            .order_by(Precio.cantidad_minima.desc())
+            .first()
+        )
+        if fila is not None and fila[1] == (res or {}).get("precio"):
+            cantidad_minima = fila[0]
     return CotizacionOut(
         producto_id=producto_id, presentacion=presentacion, cantidad=cantidad,
         precio=(res or {}).get("precio"),
         origen=(res or {}).get("origen"),
-        lista_id=(res or {}).get("lista_id"),
+        lista_id=lista_id,
+        cantidad_minima=cantidad_minima,
     )
 
 

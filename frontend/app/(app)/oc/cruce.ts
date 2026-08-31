@@ -27,6 +27,20 @@ export type LineaEdit = {
    *  presentación — entonces no hay nada que escoger. */
   presentaciones: string[];
   precio: string;
+  /** El precio que la lista del cliente resuelve HOY para producto+presentación
+   *  (cotizado al cruzar). Es lo que llena el campo cuando está vacío y la
+   *  referencia del aviso «la lista dice X» al teclear otro. */
+  precioLista: string | null;
+  /** De qué lista salió `precioLista` — solo con lista_id se puede ofrecer
+   *  «actualizar la lista»; un override no es una lista. */
+  precioListaId: string | null;
+  /** El cantidad_minima del TRAMO que habló. Sin él no se ofrece actualizar:
+   *  escribir el tramo base con un precio de volumen es un subcobro permanente. */
+  precioTramo: number | null;
+  /** El valor del campo vino de la cotización, no del teclado: al crear se
+   *  manda vacío para que el backend resuelva (tramos incluidos) — el número
+   *  en pantalla es informativo, no una orden de cobrar eso. */
+  precioAuto: boolean;
   notas: string | null;
   candidatos: LineaOC["candidatos"];
   /** El operador pidió buscar fuera de los candidatos sugeridos. */
@@ -98,6 +112,10 @@ export function tablaDe(oc: OCRecibidaDetalle): LineaEdit[] {
       presentacion: sirve ? sugerida : presentacionDe(unidad, fuerte),
       presentaciones: Object.keys(fuerte?.presentaciones ?? {}),
       precio: l.precio != null ? String(l.precio) : "",
+      precioLista: null,
+      precioListaId: null,
+      precioTramo: null,
+      precioAuto: false,
       notas: l.notas ?? null,
       candidatos: l.candidatos,
       buscando: false,
