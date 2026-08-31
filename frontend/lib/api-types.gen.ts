@@ -2382,6 +2382,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/precios/cotizar-requisicion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cotizar Requisicion Endpoint
+         * @description El cotizador del bot de WhatsApp (agente 1), tal cual: se sube la
+         *     requisición del cliente (formato SAE) y regresa el MISMO PDF que manda el
+         *     bot — validación de precio por partida con notas en rojo, alarma con el
+         *     conteo y totales — listo para mostrarse y descargarse. El cliente se
+         *     detecta del propio documento (RFC/nombre); `cliente_id` lo fuerza.
+         */
+        post: operations["cotizar_requisicion_endpoint_api_v1_precios_cotizar_requisicion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/precios/listas-del-cliente": {
         parameters: {
             query?: never;
@@ -3562,6 +3586,22 @@ export interface components {
              * Format: uuid
              */
             cliente_id: string;
+            /** Proyecto Id */
+            proyecto_id?: string | null;
+            /** Serie Id */
+            serie_id?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+        };
+        /** Body_cotizar_requisicion_endpoint_api_v1_precios_cotizar_requisicion_post */
+        Body_cotizar_requisicion_endpoint_api_v1_precios_cotizar_requisicion_post: {
+            /**
+             * Archivo
+             * Format: binary
+             */
+            archivo: string;
+            /** Cliente Id */
+            cliente_id?: string | null;
             /** Proyecto Id */
             proyecto_id?: string | null;
             /** Serie Id */
@@ -14173,6 +14213,41 @@ export interface operations {
         requestBody: {
             content: {
                 "multipart/form-data": components["schemas"]["Body_cotizar_documento_endpoint_api_v1_precios_cotizar_documento_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cotizar_requisicion_endpoint_api_v1_precios_cotizar_requisicion_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_cotizar_requisicion_endpoint_api_v1_precios_cotizar_requisicion_post"];
             };
         };
         responses: {

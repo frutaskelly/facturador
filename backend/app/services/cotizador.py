@@ -309,6 +309,225 @@ def cotizar_documento(
     }
 
 
+def _cliente_para_requisicion(db: Session, tenant_id: UUID, doc: dict,
+                              cliente_id: Optional[UUID]) -> Cliente:
+    """El cliente al que se cotiza: el elegido por el operador y, si no, el que
+    la requisición trae impreso (RFC primero, nombre después) — igual que el
+    bot resuelve contra CLIE02."""
+    base = db.query(Cliente).filter(Cliente.tenant_id == tenant_id, Cliente.deleted_at.is_(None))
+    if cliente_id:
+        cli = base.filter(Cliente.id == cliente_id).one_or_none()
+        if cli is None:
+            raise CotizadorError("Ese cliente no existe")
+        return cli
+    rfc = (doc.get("cliente_rfc") or "").strip().upper()
+    if rfc:
+        cli = base.filter(Cliente.rfc == rfc).first()
+        if cli is not None:
+            return cli
+    nombre = (doc.get("cliente_nombre") or "").strip()
+    if nombre:
+        cli = base.filter(Cliente.legal_name.ilike(nombre)).first()
+        if cli is not None:
+            return cli
+    detalle = f" ({nombre or rfc})" if (nombre or rfc) else ""
+    raise CotizadorError(
+        f"No pude identificar al cliente de la requisición{detalle}; elige el cliente y vuelve a intentar")
+
+
+def cotizar_requisicion(
+    db: Session,
+    tenant,
+    *,
+    data: bytes,
+    filename: str,
+    cliente_id: Optional[UUID] = None,
+    sucursal_id: Optional[UUID] = None,
+    serie_id: Optional[UUID] = None,
+    proyecto_id: Optional[UUID] = None,
+) -> dict:
+    """El cotizador de requisiciones del bot (agente 1), dentro del Facturador.
+
+    Lee la requisición del cliente (formato SAE, determinista; IA solo de red
+    final), valida el precio de CADA partida contra el precio que el Facturador
+    le resuelve a ESE cliente (resolver_precio con sus dimensiones) y arma el
+    MISMO PDF que manda el bot por WhatsApp, con sus reglas verbatim:
+
+      1. cotizado y la OC trae otro precio -> "PRECIO INCORRECTO — OC $X -> CORRECTO $Y"
+      2. no cotizado CON precio de OC      -> "SE RESPETA EL PRECIO DE OC. ..."
+      3. no cotizado SIN precio (OC $0.00) -> "SE ENVIARA LA COTIZACION CORRESPONDIENTE."
+
+    más la ALARMA en rojo bajo el bloque del cliente con el conteo de cada
+    grupo. Partidas en el MISMO orden de la requisición, nunca alfabético.
+    A diferencia del otro flujo del cotizador, aquí lo que no cruza NO se
+    descarta: se cotiza con el precio de la propia OC y sale con su nota roja,
+    exactamente como hace el bot."""
+    from datetime import date
+
+    from . import requisicion_parse
+    from .requisicion_pdf import generar_pdf_requisicion
+
+    tenant_id = tenant.id
+    doc = requisicion_parse.leer_documento(data, filename)
+    if not doc["items"]:
+        raise CotizadorError("No se encontraron partidas legibles en el documento")
+    cliente = _cliente_para_requisicion(db, tenant_id, doc, cliente_id)
+
+    # ── cruce: clave contra el SKU del catálogo (las claves de la requisición
+    # SON las claves SAE = sku), luego la clave que el cliente le puso al
+    # producto, y al final la cascada por descripción (alias/exacto/difuso).
+    prods = producto_match.productos_activos(db)
+    por_id = {p.id: p for p in prods}
+    por_sku = {}
+    for p in prods:
+        if p.sku:
+            por_sku.setdefault(_norm_codigo(p.sku), p.id)
+    codigos_cliente: dict[str, Optional[UUID]] = {}
+    presentacion_cliente: dict[UUID, str] = {}
+    for pc in db.query(ProductoCliente).filter(
+        ProductoCliente.tenant_id == tenant_id,
+        ProductoCliente.cliente_id == cliente.id,
+        ProductoCliente.codigo_cliente.isnot(None),
+    ):
+        cod = _norm_codigo(pc.codigo_cliente)
+        codigos_cliente[cod] = None if (cod in codigos_cliente and codigos_cliente[cod] != pc.producto_id) \
+            else (codigos_cliente.get(cod) or pc.producto_id)
+        if pc.presentacion:
+            presentacion_cliente[pc.producto_id] = pc.presentacion
+
+    esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(
+        EsquemaImpuesto.tenant_id == tenant_id, EsquemaImpuesto.deleted_at.is_(None))}
+
+    # ── validación de precio por partida: las reglas del bot, verbatim
+    items, n_respeta, n_sin_precio, n_incorrecto = [], 0, 0, 0
+    sub = ieps_t = iva_t = 0.0
+    incorrectos, sin_autorizar = [], []
+    for pt in doc["items"]:
+        cant = float(pt.get("cantidad") or 0)
+        oc = float(pt.get("costo_unitario") or 0)
+        clave_doc = (pt.get("clave") or "").strip()
+
+        prod = None
+        if clave_doc:
+            pid = por_sku.get(_norm_codigo(clave_doc)) or codigos_cliente.get(_norm_codigo(clave_doc))
+            prod = por_id.get(pid) if pid else None
+        if prod is None and pt.get("descripcion"):
+            cands = producto_match.buscar(db, tenant_id, pt["descripcion"], limit=3,
+                                          prods=prods, unidad=pt.get("unidad") or None)
+            if cands and cands[0].score >= 96:
+                prod = por_id.get(cands[0].producto_id)
+
+        precio_sistema = None
+        iva_pct = ieps_pct = 0.0
+        if prod is not None:
+            presentacion = _presentacion_para(prod, pt.get("unidad") or "",
+                                              presentacion_cliente.get(prod.id))
+            # Cantidades fraccionarias (0.5 kg) se cotizan con el escalón base:
+            # los tramos arrancan en cantidad_minima=1 y sin esto medio kilo se
+            # quedaría "sin precio" — el bot (SAE) cobra la lista a cualquier
+            # cantidad.
+            cot = resolver_precio(
+                db, producto_id=prod.id, presentacion=presentacion,
+                cantidad=Decimal(str(cant)) if cant >= 1 else Decimal("1"),
+                cliente_id=cliente.id, sucursal_id=sucursal_id,
+                serie_id=serie_id, proyecto_id=proyecto_id,
+            )
+            if cot and cot.get("precio") is not None:
+                precio_sistema = float(cot["precio"])
+            esq = esquemas.get(prod.esquema_impuesto_id)
+            iva_tasa = (esq.iva_tasa if esq else getattr(prod, "iva_tasa", 0)) or 0
+            if esq is not None and esq.iva_exento:
+                iva_tasa = 0
+            ieps_tasa = (esq.ieps_tasa if esq and esq.tipo_ieps == "TASA" else 0) or 0
+            iva_pct = float(iva_tasa) * 100.0
+            ieps_pct = float(ieps_tasa) * 100.0
+
+        nota_alarma = ""
+        if precio_sistema:
+            precio = precio_sistema
+            if oc > 0 and abs(oc - precio) > 0.01:
+                nota_alarma = f"PRECIO INCORRECTO — OC ${oc:,.2f} -> CORRECTO ${precio:,.2f}"
+                n_incorrecto += 1
+                incorrectos.append({"clave": clave_doc, "descripcion": pt.get("descripcion") or "",
+                                    "oc": oc, "correcto": precio})
+        else:
+            # producto NO cotizado: con precio de OC se respeta; sin precio
+            # (OC $0.00) no hay de dónde tomarlo y se cotizará después.
+            precio = oc
+            if oc > 0:
+                nota_alarma = "SE RESPETA EL PRECIO DE OC. SE ACTUALIZARA EN LA SIGUIENTE ORDEN."
+                n_respeta += 1
+            else:
+                nota_alarma = "SE ENVIARA LA COTIZACION CORRESPONDIENTE."
+                n_sin_precio += 1
+            sin_autorizar.append({"clave": clave_doc, "descripcion": pt.get("descripcion") or "",
+                                  "unidad": pt.get("unidad") or "", "oc": oc,
+                                  "existe": prod is not None})
+        importe = round(cant * precio, 2)
+        m_ieps = round(importe * ieps_pct / 100.0, 2)
+        m_iva = round(importe * iva_pct / 100.0, 2)
+        sub += importe
+        ieps_t += m_ieps
+        iva_t += m_iva
+        items.append({"cant": cant, "unidad": (pt.get("unidad") or "")[:8],
+                      "clave": clave_doc, "descr": (pt.get("descripcion") or "").strip(),
+                      "nota": (pt.get("nota") or "").strip(), "nota_alarma": nota_alarma,
+                      "desc_pct": 0.0, "precio": precio, "importe": importe,
+                      "ieps_pct": ieps_pct, "ieps": m_ieps,
+                      "iva_pct": iva_pct, "iva": m_iva})
+
+    partes_alarma = []
+    if n_respeta:
+        partes_alarma.append(f"{n_respeta} partida(s) con precio de producto no cotizado")
+    if n_sin_precio:
+        partes_alarma.append(f"{n_sin_precio} partida(s) sin precio de producto no cotizado")
+    if n_incorrecto:
+        partes_alarma.append(f"{n_incorrecto} partida(s) con precio incorrecto")
+    alarma = ("ATENCION: " + " · ".join(partes_alarma) +
+              " — ver la nota en rojo de cada partida.") if partes_alarma else ""
+
+    sub, ieps_t, iva_t = round(sub, 2), round(ieps_t, 2), round(iva_t, 2)
+    folio = str(doc.get("folio") or "").strip() or "S/F"
+    ped = {"folio": folio, "tipo_doc": "REQUISICION No.:",
+           "fecha": doc.get("fecha_documento") or f"{date.today():%d/%m/%Y}",
+           "cliente_clave": cliente.codigo or "?",
+           "cliente_nombre": cliente.legal_name or doc.get("cliente_nombre") or "",
+           "cliente_rfc": cliente.rfc or doc.get("cliente_rfc") or "",
+           "cliente_domicilio": _domicilio_cliente(cliente),
+           "observacion": "", "alarma": alarma, "items": items,
+           "subtotal": sub, "descuento": 0.0, "desc_fin": 0.0,
+           "ieps": ieps_t, "iva": iva_t,
+           "total": round(sub + ieps_t + iva_t, 2)}
+    pdf = generar_pdf_requisicion(ped, tenant)
+
+    fname = ("Requisicion_" + re.sub(r"[^A-Za-z0-9]+", "_", folio).strip("_") + ".pdf")
+    return {
+        "ok": True,
+        "cliente_id": str(cliente.id),
+        "cliente_nombre": cliente.legal_name,
+        "archivo": filename,
+        "folio": folio,
+        "fecha": ped["fecha"],
+        "lineas": len(items),
+        "alarma": alarma,
+        "warnings": doc.get("warnings") or [],
+        "incorrectos": incorrectos,
+        "sin_autorizar": sin_autorizar,
+        "subtotal": f"{sub:.2f}",
+        "ieps": f"{ieps_t:.2f}",
+        "iva": f"{iva_t:.2f}",
+        "total": f"{ped['total']:.2f}",
+        "pdf_filename": fname,
+        "pdf_base64": base64.standard_b64encode(pdf).decode(),
+    }
+
+
+def _domicilio_cliente(cliente: Cliente) -> str:
+    from .requisicion_pdf import _domicilio_sae
+
+    return _domicilio_sae(cliente.domicilio_fiscal or {})
+
+
 def cotizacion_pdf(tenant, cot: dict) -> bytes:
     """La cotización como PDF para el cliente, con el membrete del negocio
     (layout Smart Supply: logo + datos fiscales, tabla azul, folio de página)."""

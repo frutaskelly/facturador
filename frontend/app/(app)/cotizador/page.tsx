@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { Tabs } from "@/components/ui/Tabs";
 import { useToast } from "@/components/ui/Toast";
-import { ApiError, apiDownload, apiDownloadPost, apiFetch } from "@/lib/api";
+import { ApiError, apiDownload, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtMoney } from "@/lib/format";
 import { useResource, type Page } from "@/lib/hooks";
@@ -30,44 +30,21 @@ const ORIGEN_LABEL: Record<string, string> = {
   lista_base: "Lista base (público)",
 };
 
-// Lo que devuelve POST /precios/cotizar-documento (services/cotizador.py).
-type LineaCot = {
-  descripcion: string;
-  cantidad: string;
-  unidad: string | null;
-  clave: string | null;
-  producto_id: string;
-  producto_nombre: string;
-  sku: string | null;
-  presentacion: string;
-  cruce: string | null;
-  precio_unitario: string | null;
-  importe: string | null;
-  origen_precio: string | null;
-  iva_importe?: string;
-  ieps_importe?: string;
-};
-type SinCruce = {
-  descripcion: string;
-  cantidad: string;
-  unidad: string | null;
-  clave: string | null;
-  candidatos: { nombre: string; score: number }[];
-  // Presente cuando el producto SÍ existe pero no se puede cotizar (p. ej. no
-  // está en la lista de precios del cliente); entonces no vienen candidatos.
-  motivo?: string | null;
-};
-type CotDoc = {
+// Lo que devuelve POST /precios/cotizar-requisicion (services/cotizador.py):
+// el flujo del bot de WhatsApp — el resultado ES el PDF, listo para verse y
+// descargarse; los demás campos son para el encabezado y los avisos.
+type CotReq = {
   cliente_id: string;
   cliente_nombre: string;
   archivo: string;
-  lineas: LineaCot[];
-  sin_cruce: SinCruce[];
-  sin_precio: number;
-  subtotal: string;
-  iva: string;
-  ieps: string;
+  folio: string;
+  fecha: string;
+  lineas: number;
+  alarma: string;
+  warnings: string[];
   total: string;
+  pdf_filename: string;
+  pdf_base64: string;
 };
 type ListaDelCliente = { lista_id: string; nombre: string; alcance: string };
 
@@ -241,7 +218,20 @@ export default function CotizadorPage() {
   // ── Documento ──────────────────────────────────────────────────────────
   const [archivo, setArchivo] = useState<File | null>(null);
   const [cotizando, setCotizando] = useState(false);
-  const [cotDoc, setCotDoc] = useState<CotDoc | null>(null);
+  const [cotReq, setCotReq] = useState<CotReq | null>(null);
+
+  // El PDF llega en base64; para el <iframe> y la descarga se vuelve blob URL
+  // (y se libera al cambiar de resultado).
+  const pdfUrl = useMemo(() => {
+    if (!cotReq) return null;
+    const bytes = Uint8Array.from(atob(cotReq.pdf_base64), (ch) => ch.charCodeAt(0));
+    return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  }, [cotReq]);
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    };
+  }, [pdfUrl]);
 
   // ── Un producto ────────────────────────────────────────────────────────
   const [prod, setProd] = useState<ProductoPick | null>(null);
@@ -266,7 +256,7 @@ export default function CotizadorPage() {
   useEffect(() => {
     setSucursalId("");
     setProyectoId("");
-    setCotDoc(null);
+    setCotReq(null);
     setListas(null);
     // El producto elegido puede no estar en la lista del nuevo cliente: se
     // descarta junto con su cotización para no enseñar un precio ajeno.
@@ -313,33 +303,28 @@ export default function CotizadorPage() {
   }
 
   async function cotizarDocumento() {
-    if (!clienteId) {
-      toast.error("Elige el cliente: la cotización sale con SUS precios");
-      return;
-    }
     if (!archivo) {
-      toast.error("Sube la orden (PDF, foto o Excel)");
+      toast.error("Sube la requisición (PDF, foto o Excel)");
       return;
     }
     const fd = new FormData();
     fd.set("archivo", archivo);
-    fd.set("cliente_id", clienteId);
+    // El cliente se detecta del propio documento (RFC/nombre); elegirlo aquí
+    // solo lo fuerza — igual que el bot, que sabe de qué grupo llegó.
+    if (clienteId) fd.set("cliente_id", clienteId);
     if (sucursalId) fd.set("sucursal_id", sucursalId);
     if (serieId) fd.set("serie_id", serieId);
     if (proyectoId) fd.set("proyecto_id", proyectoId);
     setCotizando(true);
-    setCotDoc(null);
+    setCotReq(null);
     try {
-      // La IA lee el documento completo: puede tardar más que el timeout normal.
-      const r = await apiFetch<CotDoc>(
-        "/api/v1/precios/cotizar-documento",
+      // Si el PDF viene en un acomodo raro entra la IA: puede tardar.
+      const r = await apiFetch<CotReq>(
+        "/api/v1/precios/cotizar-requisicion",
         { method: "POST", body: fd },
         { timeoutMs: 240_000 },
       );
-      setCotDoc(r);
-      if (r.lineas.length === 0 && r.sin_cruce.length === 0) {
-        toast.error("No se encontraron partidas en el documento");
-      }
+      setCotReq(r);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo cotizar el documento");
     } finally {
@@ -347,13 +332,12 @@ export default function CotizadorPage() {
     }
   }
 
-  async function descargarPdfCotizacion() {
-    if (!cotDoc) return;
-    try {
-      await apiDownloadPost("/api/v1/precios/cotizacion-pdf", cotDoc, "cotizacion.pdf");
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo generar el PDF");
-    }
+  function descargarPdfRequisicion() {
+    if (!cotReq || !pdfUrl) return;
+    const a = document.createElement("a");
+    a.href = pdfUrl;
+    a.download = cotReq.pdf_filename;
+    a.click();
   }
 
   async function cotizar() {
@@ -393,150 +377,64 @@ export default function CotizadorPage() {
   const tabDocumento = (
     <div className="space-y-4">
       <div className="rounded-lg border border-border bg-surface-2 p-3 text-sm text-muted">
-        Sube tu <b>orden de compra o pedido</b> (PDF, foto o Excel) y te regresamos la{" "}
-        <b>cotización completa</b> con los precios negociados — igual que el cotizador de WhatsApp.
+        Sube la <b>requisición del cliente</b> (PDF, foto o Excel) y te regresamos el{" "}
+        <b>mismo PDF que manda el cotizador de WhatsApp</b>: precio validado partida por
+        partida, con sus notas en rojo — y aquí lo puedes descargar.
       </div>
       <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-3">
         <div className="sm:col-span-2">
-          <Field label="Documento (PDF, foto o Excel)">
+          <Field label="Requisición (PDF, foto o Excel)">
             <input
               type="file"
               accept={ACCEPT}
               onChange={(e) => {
                 setArchivo(e.target.files?.[0] ?? null);
-                setCotDoc(null);
+                setCotReq(null);
               }}
               className="block w-full cursor-pointer rounded-lg border border-border bg-background text-sm file:mr-3 file:cursor-pointer file:rounded-l-lg file:border-0 file:bg-surface-2 file:px-3.5 file:py-2 file:text-sm file:font-medium"
             />
           </Field>
         </div>
         <div>
-          <Button onClick={() => void cotizarDocumento()} disabled={!archivo || !clienteId || cotizando}>
+          <Button onClick={() => void cotizarDocumento()} disabled={!archivo || cotizando}>
             {cotizando ? <Spinner className="h-4 w-4" /> : <FileUp size={16} />}
-            {cotizando ? "Leyendo y cotizando…" : "Cotizar documento"}
+            {cotizando ? "Leyendo y cotizando…" : "Cotizar requisición"}
           </Button>
         </div>
       </div>
 
-      {cotDoc && (
+      {cotReq && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm">
-              <b>{cotDoc.cliente_nombre}</b> · {cotDoc.archivo} · {cotDoc.lineas.length} partida
-              {cotDoc.lineas.length === 1 ? "" : "s"}
+              ✅ Requisición <b>{cotReq.folio}</b> · <b>{cotReq.cliente_nombre}</b> ·{" "}
+              {cotReq.lineas} línea{cotReq.lineas === 1 ? "" : "s"} · Total{" "}
+              {fmtMoney(cotReq.total)}
             </div>
-            <Button variant="secondary" onClick={() => void descargarPdfCotizacion()}>
-              <FileText size={16} /> Descargar PDF
+            <Button variant="secondary" onClick={descargarPdfRequisicion}>
+              <Download size={16} /> Descargar PDF
             </Button>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-surface-2 text-left text-xs uppercase text-muted">
-                <tr>
-                  <th className="px-3 py-2">Producto</th>
-                  <th className="px-3 py-2">Lo que decía el documento</th>
-                  <th className="px-3 py-2 text-right">Cantidad</th>
-                  <th className="px-3 py-2">Presentación</th>
-                  <th className="px-3 py-2 text-right">Precio</th>
-                  <th className="px-3 py-2 text-right">Importe</th>
-                </tr>
-              </thead>
-              <tbody>
-                {cotDoc.lineas.map((l, i) => (
-                  <tr key={i} className="border-t border-border">
-                    <td className="px-3 py-2">
-                      <div className="font-medium">{l.producto_nombre}</div>
-                      {l.origen_precio && (
-                        <div className="text-xs text-muted">
-                          {ORIGEN_LABEL[l.origen_precio] ?? l.origen_precio}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-muted">
-                      {l.descripcion}
-                      {l.clave ? ` · ${l.clave}` : ""}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{l.cantidad}</td>
-                    <td className="px-3 py-2">{l.presentacion}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      {l.precio_unitario != null ? (
-                        fmtMoney(l.precio_unitario)
-                      ) : (
-                        <span className="text-danger">Sin precio</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      {l.importe != null ? fmtMoney(l.importe) : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot className="border-t border-border bg-surface-2 text-sm">
-                <tr>
-                  <td colSpan={4} />
-                  <td className="px-3 py-1.5 text-right text-muted">Subtotal</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(cotDoc.subtotal)}</td>
-                </tr>
-                <tr>
-                  <td colSpan={4} />
-                  <td className="px-3 py-1.5 text-right text-muted">IVA</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(cotDoc.iva)}</td>
-                </tr>
-                {Number(cotDoc.ieps) > 0 && (
-                  <tr>
-                    <td colSpan={4} />
-                    <td className="px-3 py-1.5 text-right text-muted">IEPS</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(cotDoc.ieps)}</td>
-                  </tr>
-                )}
-                <tr className="font-semibold">
-                  <td colSpan={4} />
-                  <td className="px-3 py-2 text-right">Total</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(cotDoc.total)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-
-          {cotDoc.sin_precio > 0 && (
+          {cotReq.warnings.length > 0 && (
             <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 p-3 text-sm">
               <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
-              <div>
-                {cotDoc.sin_precio} partida{cotDoc.sin_precio === 1 ? "" : "s"} sin precio en las
-                listas de este cliente: no entran al total ni al PDF.
-              </div>
-            </div>
-          )}
-
-          {cotDoc.sin_cruce.length > 0 && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 p-3 text-sm">
-              <div className="mb-1 flex items-center gap-2 font-medium">
-                <AlertTriangle size={16} className="text-amber-600" />
-                {cotDoc.sin_cruce.length} renglón{cotDoc.sin_cruce.length === 1 ? "" : "es"} que no
-                pudimos identificar con certeza (no se cotizaron):
-              </div>
-              <ul className="ml-5 list-disc space-y-0.5">
-                {cotDoc.sin_cruce.map((s, i) => (
-                  <li key={i}>
-                    <b>{s.descripcion}</b> — {s.cantidad} {s.unidad ?? ""}
-                    {/* Con motivo el producto SÍ se identificó pero no es cotizable
-                        (p. ej. fuera de la lista del cliente): sugerir candidatos
-                        confundiría. */}
-                    {s.motivo ? (
-                      <span className="text-muted"> — {s.motivo}</span>
-                    ) : (
-                      s.candidatos.length > 0 && (
-                        <span className="text-muted">
-                          {" "}
-                          · ¿quizá {s.candidatos.map((c) => c.nombre).join(", ")}?
-                        </span>
-                      )
-                    )}
-                  </li>
+              <ul className="space-y-0.5">
+                {cotReq.warnings.map((w, i) => (
+                  <li key={i}>{w}</li>
                 ))}
               </ul>
             </div>
+          )}
+
+          {/* La pantalla enseña EXACTAMENTE el PDF (pedido del dueño): lo que
+              ve el operador es lo que recibiría el cliente por WhatsApp. */}
+          {pdfUrl && (
+            <iframe
+              src={pdfUrl}
+              title={cotReq.pdf_filename}
+              className="h-[75vh] w-full rounded-xl border border-border bg-white"
+            />
           )}
         </div>
       )}
@@ -652,7 +550,7 @@ export default function CotizadorPage() {
     <div>
       <PageHeader
         title="Cotizador"
-        subtitle="Sube tu orden y te la cotizamos completa con tus precios; o consulta un producto o descarga tu lista."
+        subtitle="Sube la requisición y sale el mismo PDF que el cotizador de WhatsApp, listo para descargar; o consulta un producto o descarga tu lista."
       />
 
       {/* Las dimensiones de la negociación aplican a las tres pestañas. */}

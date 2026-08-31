@@ -112,6 +112,46 @@ def cotizar_documento_endpoint(
         raise HTTPException(status_code=422, detail=str(exc))
 
 
+@router.post("/cotizar-requisicion")
+def cotizar_requisicion_endpoint(
+    archivo: UploadFile = File(...),
+    cliente_id: Optional[UUID] = Form(default=None),
+    sucursal_id: Optional[UUID] = Form(default=None),
+    serie_id: Optional[UUID] = Form(default=None),
+    proyecto_id: Optional[UUID] = Form(default=None),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ_COTIZAR)),
+):
+    """El cotizador del bot de WhatsApp (agente 1), tal cual: se sube la
+    requisición del cliente (formato SAE) y regresa el MISMO PDF que manda el
+    bot — validación de precio por partida con notas en rojo, alarma con el
+    conteo y totales — listo para mostrarse y descargarse. El cliente se
+    detecta del propio documento (RFC/nombre); `cliente_id` lo fuerza."""
+    from ...core.ratelimit import enforce
+    from ...services import cotizador
+
+    if cliente_id is not None and not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
+    enforce(f"cotizador-req:{ctx.tenant_id}", 120, 3600)
+    data = archivo.file.read(10 * 1024 * 1024 + 1)
+    if not data or len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=422, detail="Archivo vacío o mayor a 10 MB")
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    try:
+        res = cotizador.cotizar_requisicion(
+            db, tenant, data=data, filename=archivo.filename or "documento",
+            cliente_id=cliente_id, sucursal_id=sucursal_id,
+            serie_id=serie_id, proyecto_id=proyecto_id,
+        )
+    except cotizador.CotizadorError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    # el cliente pudo resolverse del documento: un usuario de portal solo puede
+    # ver requisiciones de SUS clientes.
+    if ctx.cliente_scope and not ctx.cliente_permitido(UUID(res["cliente_id"])):
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
+    return res
+
+
 @router.post("/cotizacion-pdf")
 def cotizacion_pdf_endpoint(
     payload: dict = Body(...),

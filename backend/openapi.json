@@ -564,6 +564,68 @@
     "title": "Body_cotizar_documento_endpoint_api_v1_precios_cotizar_documento_post",
     "type": "object"
    },
+   "Body_cotizar_requisicion_endpoint_api_v1_precios_cotizar_requisicion_post": {
+    "properties": {
+     "archivo": {
+      "format": "binary",
+      "title": "Archivo",
+      "type": "string"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
+     },
+     "serie_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Id"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     }
+    },
+    "required": [
+     "archivo"
+    ],
+    "title": "Body_cotizar_requisicion_endpoint_api_v1_precios_cotizar_requisicion_post",
+    "type": "object"
+   },
    "Body_importar_lista_xlsx_api_v1_listas_precios__lista_id__importar_post": {
     "properties": {
      "archivo": {
@@ -26929,6 +26991,69 @@
      }
     ],
     "summary": "Cotizar Documento Endpoint",
+    "tags": [
+     "precios"
+    ]
+   }
+  },
+  "/api/v1/precios/cotizar-requisicion": {
+   "post": {
+    "description": "El cotizador del bot de WhatsApp (agente 1), tal cual: se sube la\nrequisición del cliente (formato SAE) y regresa el MISMO PDF que manda el\nbot — validación de precio por partida con notas en rojo, alarma con el\nconteo y totales — listo para mostrarse y descargarse. El cliente se\ndetecta del propio documento (RFC/nombre); `cliente_id` lo fuerza.",
+    "operationId": "cotizar_requisicion_endpoint_api_v1_precios_cotizar_requisicion_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_cotizar_requisicion_endpoint_api_v1_precios_cotizar_requisicion_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cotizar Requisicion Endpoint",
     "tags": [
      "precios"
     ]
