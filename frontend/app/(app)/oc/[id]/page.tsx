@@ -462,10 +462,24 @@ export default function Page() {
                             {problema.comoResolver}
                           </span>
                         </div>
-                      ) : srv && !conflicto ? (
+                      ) : srv ? (
                         <div className="mt-1 flex items-start gap-1.5 text-xs text-danger">
                           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-                          <span>{srv.mensaje}</span>
+                          {/* El texto va en la columna ANCHA; en la de precio
+                              solo caben las dos salidas. Puesto ahí, un renglón
+                              con conflicto medía cinco líneas de alto. */}
+                          <span>
+                            {conflicto ? (
+                              <>
+                                <span className="font-medium">Precio en conflicto.</span> El
+                                documento trae {conflicto.precio_documento} y{" "}
+                                {conflicto.fuente_precio ?? "la lista"} dice{" "}
+                                {conflicto.precio_lista}.
+                              </>
+                            ) : (
+                              srv.mensaje
+                            )}
+                          </span>
                         </div>
                       ) : null}
                     </td>
@@ -590,36 +604,28 @@ export default function Page() {
                           setLineas((prev) => prev.map((x, j) => (j === i ? { ...x, precio: v } : x)));
                         }}
                       />
-                      {conflicto ? (
-                        <div className="mt-1 text-right text-xs">
-                          <div className="text-danger">
-                            El documento trae {conflicto.precio_documento} y{" "}
-                            {conflicto.fuente_precio ?? "la lista"} dice {conflicto.precio_lista}.
-                          </div>
-                          {editable ? (
-                            <div className="mt-1 flex flex-wrap justify-end gap-x-3 gap-y-1">
-                              <button
-                                type="button"
-                                className="text-accent hover:underline"
-                                onClick={() =>
-                                  setLineas((prev) =>
-                                    prev.map((x, j) =>
-                                      j === i ? { ...x, precio: conflicto.precio_lista ?? "" } : x
-                                    )
-                                  )
-                                }
-                              >
-                                Cobrar {conflicto.precio_lista}
-                              </button>
-                              <button
-                                type="button"
-                                className="text-accent hover:underline"
-                                onClick={() => setPrecioAceptado((prev) => [...prev, l.numero])}
-                              >
-                                Dejar {conflicto.precio_documento}
-                              </button>
-                            </div>
-                          ) : null}
+                      {conflicto && editable ? (
+                        <div className="mt-1 flex flex-wrap justify-end gap-x-3 gap-y-1 text-xs">
+                          <button
+                            type="button"
+                            className="text-accent hover:underline"
+                            onClick={() =>
+                              setLineas((prev) =>
+                                prev.map((x, j) =>
+                                  j === i ? { ...x, precio: conflicto.precio_lista ?? "" } : x
+                                )
+                              )
+                            }
+                          >
+                            Cobrar {conflicto.precio_lista}
+                          </button>
+                          <button
+                            type="button"
+                            className="text-accent hover:underline"
+                            onClick={() => setPrecioAceptado((prev) => [...prev, l.numero])}
+                          >
+                            Dejar {conflicto.precio_documento}
+                          </button>
                         </div>
                       ) : null}
                     </td>

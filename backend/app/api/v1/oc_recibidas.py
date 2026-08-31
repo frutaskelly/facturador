@@ -520,6 +520,9 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
     # conflicto de precio trae además las dos cifras y de qué lista sale la suya
     # — sin eso el aviso decía "la lista dice 57.50" sin decir cuál lista.
     problemas: list[dict] = []
+    # Nombre de cada lista, resuelto UNA vez por evaluación: una orden con 20
+    # conflictos contra la misma lista no la consulta 20 veces (la BD es remota).
+    fuentes: dict[str, str] = {}
 
     def falla(ln: dict, tipo: str, mensaje: str, **extra) -> None:
         problemas.append({"numero": ln["numero"], "tipo": tipo, "mensaje": mensaje, **extra})
@@ -584,7 +587,10 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
             continue
         precio_doc = ln.get("precio")
         if precio_doc is not None and abs(Decimal(str(precio_doc)) - Decimal(res["precio"])) > Decimal("0.01"):
-            fuente = _fuente_precio(db, res)
+            clave_fuente = str(res.get("lista_id") or res.get("origen") or "")
+            fuente = fuentes.get(clave_fuente)
+            if fuente is None:
+                fuente = fuentes[clave_fuente] = _fuente_precio(db, res)
             falla(
                 ln, "precio_conflicto",
                 f"La partida {ln['numero']} {etiqueta} viene con {precio_doc} en el "
