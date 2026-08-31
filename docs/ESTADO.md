@@ -1,4 +1,4 @@
-# Estado del proyecto — cierre del 31/08/2026
+# Estado del proyecto — 31/08/2026 (actualizado por la tarde tras el PR #51)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,12 +7,12 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` @ `3a17f01` — igual que `origin/main` |
+| Rama base | `main` @ `ae395bf` (PR #51) — igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
 | Worktrees | 1 (`new-session-7acb50`, rama ya fusionada — podable) |
 | PRs abiertos | ninguno |
-| Migración head | `0057_export_rastro_portal_rbac` |
+| Migración head | `0057_export_rastro_portal_rbac` (el #51 no trae migraciones) |
 
 `Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
 
@@ -32,6 +32,18 @@ contenido dentro de la imagen.
 **La puerta de `deploy.sh` bloquea si el checkout no coincide con GitHub** — incluidos archivos
 sin rastrear. Por eso este `docs/ESTADO.md` va commiteado: suelto, detiene cada deploy. Nunca
 usar `FORCE=1` para saltarla: publica el trabajo a medias de otra sesión.
+
+## Lo que entró el 31-ago por la tarde (PR #51)
+
+**La bandeja marca en rojo la partida que la detiene.** El renglón se pinta y dice su salida
+(«elige el producto de al lado» / «dalo de alta»); la evaluación automática ya no corta en el
+primer tropiezo — reporta TODOS los problemas, cada uno con su partida. El conflicto de precio
+trae las dos cifras y **el nombre de la lista** («HOSPITALES (SAE lista 9)» — eso explicó el
+57.5 que confundía en la VH-35TEA-MAR), con un clic para cobrar el de la lista o dejar el del
+documento. El alta rápida de producto pide la clave SAT a la IA al abrir (endpoint que ya
+existía, solo lo usaba Productos), enlaza el catálogo del SAT para verificar, y con el cliente
+de la orden guarda el precio en su lista sin salir del modal; el buscador dejó su copia del
+modal y usa el compartido (con el candado de duplicados).
 
 ## Lo que se cerró el 29–31 de agosto (PRs #40 a #47)
 
@@ -106,3 +118,9 @@ podarla.
    en `activo: false`, listos para encender.
 5. **Extender `SERIES_POR_EMPRESA` del conector a las empresas 04 y 05** — diferido junto con
    el onboarding (misma decisión); hoy solo cubre 02 y 03.
+6. **Resolver precios por lote al abrir una orden** (nuevo, 31-ago, tras el PR #51). El detalle
+   de una OC evalúa el precio de CADA partida contra la BD remota (~6 consultas por partida):
+   una orden de 25 partidas tarda ~27 s en abrir. Ese costo ya existía para las órdenes donde
+   todo cruza bien; el #51 lo extendió a las órdenes con problemas al dejar de cortar en el
+   primer tropiezo. El arreglo es de fondo: `resolver_precio` por lote (una consulta de
+   overrides y una por lista para todos los productos, en vez de la cascada por partida).
