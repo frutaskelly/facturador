@@ -84,10 +84,12 @@ podarla.
 
 1. **51 textos de producto sin cruzar** — necesitan ojo humano; ninguna automatización los va a
    resolver sola.
-2. **ZMAFAN 167 sigue viva en el SAE.** El dueño la canceló, pero SAE la muestra con
-   `STATUS='O'` y `FECHA_CANCELA` nula: no quedó cancelada en Aspel. Además el importe no cuadra
-   con la remisión que la sustituye (RZMAFAN4): $4,777.50 facturados contra $12,017.36. Hay que
-   cancelarla de verdad antes de refacturar.
+2. **ZMAFAN 167: cancelación en proceso en el SAT** (verificado 31-ago en CFDI02: «Cancelación
+   enviada al SAT», motivo 02, acuse recibido). Por el importe, el receptor debe aceptarla en su
+   buzón — 3 días hábiles, o se cancela por plazo vencido. No requiere acción: el espejo la
+   marcará CANCELADA solo cuando SAE reciba `FECHA_CANCELA`/`STATUS='C'`. Sí queda el descuadre
+   contra la remisión que la sustituye (RZMAFAN4): $4,914.46 facturados contra $12,017.36 —
+   revisar antes de refacturar.
 3. **Confirmar el formato de fecha en la primera importación real** del masivo, con el Windows
    que de hecho la importa.
 4. **Onboarding de los 4 clientes nuevos del SAE** (más la tercera operación de EHMO), según las
