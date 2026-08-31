@@ -27,9 +27,10 @@ import { CANAL_TONE, estadoTexto, precioNormalizado } from "./cruce";
 const WRITE = "remision:gestionar";
 
 /** El vistazo rápido de una orden (slidedown de la lista): las partidas como
- *  venían, el punto de entrega y el DOCUMENTO ORIGINAL en Drive a un clic.
- *  Para trabajarla (cruzar, corregir, crear la remisión) está /oc/[id]. */
-function VistazoOC({ id, onAbrir }: { id: string; onAbrir: () => void }) {
+ *  venían y el punto de entrega. Abrir el documento y trabajarla (cruzar,
+ *  corregir, crear la remisión) son los íconos del renglón — aquí no se
+ *  repiten. */
+function VistazoOC({ id }: { id: string }) {
   const [d, setD] = useState<OCRecibidaDetalle | null>(null);
   const [fallo, setFallo] = useState(false);
   useEffect(() => {
@@ -41,24 +42,18 @@ function VistazoOC({ id, onAbrir }: { id: string; onAbrir: () => void }) {
   if (!d) return <div className="flex justify-center py-4"><Spinner /></div>;
   return (
     <div className="space-y-3 py-2">
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        {d.archivo_url ? (
-          <a
-            href={d.archivo_url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 font-medium hover:bg-surface-2"
-          >
-            <ExternalLink size={15} /> Ver la OC original (Drive)
-          </a>
-        ) : (
-          <span className="text-muted">Sin documento adjunto</span>
-        )}
-        <Button onClick={onAbrir}>
-          <PencilLine size={15} /> Abrir para trabajar
-        </Button>
-        {d.punto_entrega ? <span className="text-muted">Punto de entrega: <strong className="text-foreground">{d.punto_entrega}</strong></span> : null}
-      </div>
+      {/* Sin botones aquí: abrir y ver el documento ya viven como íconos en el
+          renglón — repetirlos solo empujaba las partidas hacia abajo. */}
+      {d.punto_entrega || !d.archivo_url ? (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          {d.punto_entrega ? (
+            <span className="text-muted">
+              Punto de entrega: <strong className="text-foreground">{d.punto_entrega}</strong>
+            </span>
+          ) : null}
+          {!d.archivo_url ? <span className="text-muted">Sin documento adjunto</span> : null}
+        </div>
+      ) : null}
       {typeof d.payload?.observaciones === "string" && d.payload.observaciones ? (
         <p className="text-sm text-muted">{d.payload.observaciones}</p>
       ) : null}
@@ -268,6 +263,15 @@ export default function Page() {
         </div>
       ),
     },
+    {
+      header: "Proyecto",
+      cell: (r) =>
+        r.proyecto_nombre ? (
+          <span>{r.proyecto_nombre}</span>
+        ) : (
+          <span className="text-xs text-muted">—</span>
+        ),
+    },
     { header: "Estado", cell: (r) => estadoBadge(r) },
     {
       header: "Detalle",
@@ -465,7 +469,7 @@ export default function Page() {
         }
         rowKey={(r) => r.id}
         renderExpanded={(r) => (
-          <VistazoOC id={r.id} onAbrir={() => router.push(`/oc/${r.id}`)} />
+          <VistazoOC id={r.id} />
         )}
       />
 
