@@ -82,3 +82,12 @@ class OCRecibida(Base, TimestampMixin):
     @property
     def remision_folio(self):
         return self.remision.folio_interno if self.remision else None
+
+    @property
+    def observaciones(self):
+        """Las observaciones que traía el documento (viven en el payload).
+        La lista las enseña en su propia columna: es donde el cliente escribe
+        lo que no cupo en las partidas — «entregar antes de las 9», la OC de
+        referencia, el contacto."""
+        texto = str((self.payload or {}).get("observaciones") or "").strip()
+        return texto or None
