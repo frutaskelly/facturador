@@ -12419,6 +12419,15 @@
        }
       ],
       "title": "Notas"
+     },
+     "sucursal_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Sucursal Ids",
+      "type": "array"
      }
     },
     "required": [
@@ -12484,6 +12493,21 @@
        }
       ],
       "title": "Notas"
+     },
+     "sucursal_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Sucursal Ids",
+      "type": "array"
+     },
+     "sucursales_nombres": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Sucursales Nombres",
+      "type": "array"
      },
      "tenant_id": {
       "format": "uuid",
@@ -12555,6 +12579,22 @@
        }
       ],
       "title": "Notas"
+     },
+     "sucursal_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "format": "uuid",
+         "type": "string"
+        },
+        "maxItems": 100,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Ids"
      }
     },
     "title": "ProyectoUpdate",
