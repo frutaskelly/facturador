@@ -82,8 +82,14 @@ podarla.
 
 ## Pendientes
 
-1. **51 textos de producto sin cruzar** — necesitan ojo humano; ninguna automatización los va a
-   resolver sola.
+1. **15 textos de producto sin cruzar** (eran 51; el 31-ago se resolvieron 34 con las facturas
+   del SAE, el historial de cada cliente y el catálogo INVE — 35 acciones: alias aprendidos,
+   9 productos nuevos con su código SAE, 3 duplicados detectados y fusionados). Los 15 restantes
+   necesitan decisión del dueño: los "CHILE COLOR" regionales, GUINEO, MELON CRIOLLO (¿chino o
+   valenciano?), PITAYA (línea en KG, producto en PIEZA), el casillero de huevo de Balles, y
+   5 abarrotes de Balles que no existen en el SAE (mole, mix de cacahuate, cereal 860g, galleta
+   salada, papa en hojuela). Además hay 2 pares de productos duplicados por fusionar a mano:
+   FLOR DE JAMAICA vs JAMAICA DE PRIMERA A GRANEL, y LECHUGA ROMANA kg vs pz por cliente.
 2. **ZMAFAN 167: cancelación en proceso en el SAT** (verificado 31-ago en CFDI02: «Cancelación
    enviada al SAT», motivo 02, acuse recibido). Por el importe, el receptor debe aceptarla en su
    buzón — 3 días hábiles, o se cancela por plazo vencido. No requiere acción: el espejo la
@@ -91,10 +97,12 @@ podarla.
    importe contra RZMAFAN4 ($4,914.46 facturados vs $12,017.36) **ya la revisó el dueño y es
    correcta** (31-ago): la 167 se emitió con errores — por eso el motivo 02 — y la remisión trae
    el importe bueno. Al rematarse la cancelación, refacturar desde RZMAFAN4.
-3. **Confirmar el formato de fecha en la primera importación real** del masivo, con el Windows
-   que de hecho la importa.
-4. **Onboarding de los 4 clientes nuevos del SAE** (más la tercera operación de EHMO), según las
-   Etapas A–E de `PLAN-onboarding-clientes-sae.md`. Los grupos de WhatsApp ya están
-   configurados pero en `activo: false`.
-5. **Extender `SERIES_POR_EMPRESA` del conector a las empresas 04 y 05** — hoy solo cubre 02
-   y 03.
+3. ~~Formato de fecha del masivo~~ — **CONFIRMADO** el 31-ago: el dueño subió
+   `FACTURA_massiva_SAE.xls` (fechas `08/30/2026`, el default `%m/%d/%Y`) y el SAE lo importó
+   sin problemas.
+4. **Onboarding de los 4 clientes nuevos del SAE** — **DIFERIDO a propósito** (decisión del
+   dueño, 31-ago): se retoma en otra sesión, en otra cuenta. El plan completo vive en
+   `PLAN-onboarding-clientes-sae.md` (Etapas A–E); los grupos de WhatsApp ya están configurados
+   en `activo: false`, listos para encender.
+5. **Extender `SERIES_POR_EMPRESA` del conector a las empresas 04 y 05** — diferido junto con
+   el onboarding (misma decisión); hoy solo cubre 02 y 03.
