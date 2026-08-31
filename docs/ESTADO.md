@@ -1,4 +1,4 @@
-# Estado del proyecto — 31/08/2026 (actualizado por la tarde tras el PR #51)
+# Estado del proyecto — 31/08/2026 (actualizado tras los PRs #51–#57)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,7 +7,7 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` @ `ae395bf` (PR #51) — igual que `origin/main` |
+| Rama base | `main` @ `43ca515` (PR #57) — igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
 | Worktrees | 1 (`new-session-7acb50`, rama ya fusionada — podable) |
@@ -118,9 +118,16 @@ podarla.
    en `activo: false`, listos para encender.
 5. **Extender `SERIES_POR_EMPRESA` del conector a las empresas 04 y 05** — diferido junto con
    el onboarding (misma decisión); hoy solo cubre 02 y 03.
-6. **Resolver precios por lote al abrir una orden** (nuevo, 31-ago, tras el PR #51). El detalle
-   de una OC evalúa el precio de CADA partida contra la BD remota (~6 consultas por partida):
-   una orden de 25 partidas tarda ~27 s en abrir. Ese costo ya existía para las órdenes donde
-   todo cruza bien; el #51 lo extendió a las órdenes con problemas al dejar de cortar en el
-   primer tropiezo. El arreglo es de fondo: `resolver_precio` por lote (una consulta de
-   overrides y una por lista para todos los productos, en vez de la cascada por partida).
+6. ~~Resolver precios por lote al abrir una orden~~ — **RESUELTO** el 31-ago (PR #57):
+   `resolver_precios_lote` deja el detalle en 3–9 consultas fijas para N partidas (~27 s → ~4 s)
+   y el slidedown usa `?vistazo=true` que salta cruce y precios (~27 s → ~2 s). Un test de
+   paridad corre ambos resolutores sobre una matriz de escenarios bajo RLS y exige el mismo
+   resultado campo por campo.
+7. **Cruce de proyecto sin respetar la sucursal** (nuevo, 31-ago, reporte del dueño): una OC de
+   EHMO con sucursal SUC-02 Tabasco entró con el proyecto HOSPITALES aunque no está asignado a
+   esa sucursal. La regla pedida: el proyecto solo se cruza automáticamente cuando está asignado
+   a la sucursal resuelta. DEPENDE del modelo proyecto↔sucursal que otra sesión tiene a medias
+   (worktree `proyectos-sucursales-asignacion-6a1269`, migración `0058_proyecto_sucursales.py`
+   sin commitear): cuando esa rama aterrice, conectar la regla en `_proyecto_de` /
+   `_resolver_y_aplicar` de la bandeja y filtrar el selector de proyecto del detalle por
+   sucursal.
