@@ -1,4 +1,4 @@
-# Estado del proyecto — 31/08/2026 (actualizado tras los PRs #62 y #64)
+# Estado del proyecto — 31/08/2026 (actualizado tras los PRs #62–#67)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -33,7 +33,25 @@ contenido dentro de la imagen.
 sin rastrear. Por eso este `docs/ESTADO.md` va commiteado: suelto, detiene cada deploy. Nunca
 usar `FORCE=1` para saltarla: publica el trabajo a medias de otra sesión.
 
-## Lo que entró después del wrap-all (PRs #62 y #64)
+## Lo que entró después del wrap-all (PRs #62 a #67)
+
+**El detalle de la OC cierra el circuito del precio (#67).** Al cruzar una partida se cotiza
+(cliente+sucursal+proyecto+serie — la serie pesa más que sucursal+cliente) y el campo se llena
+con el precio de la lista, etiquetado; el número es informativo (al crear, el backend resuelve
+con tramos). Lo tecleado jamás se pisa y, si difiere, se ofrece llevarlo a la lista — al TRAMO
+del que salió la referencia (`cotizar` reporta `cantidad_minima`), nunca a la lista base.
+«Guardar asignación» desapareció: Crear pregunta —solo con cambios— si además se aprende la
+asignación, y con cambio de cliente/sucursal recalcula el cruce y pide una mirada. Una revisión
+adversarial de 18 agentes tumbó la primera versión (escribía en la lista de la asignación
+anterior); todo lo confirmado quedó corregido con tests.
+
+**Incidente revertido (31-ago, tarde-noche):** una prueba de Claude creó por error la remisión
+RZEHMOHOS108 (borrador) desde la OC HO-35MEZ-JUE; se revirtió completo con aprobación del dueño
+(borrador soft-borrado, OC de vuelta a PENDIENTE). El folio 108 de esa serie quedó quemado —
+regla del sistema. El alias «Galleta mexicana (1000g)»→GALLETAS MEXICANAS que aprendió el
+intento era correcto y se conservó.
+
+### Antes (PRs #62 y #64)
 
 **La bandeja se filtra encadenada y se busca de verdad (#64).** Buscador al servidor (folio,
 remitente, archivo, punto de entrega y OBSERVACIONES del documento — que además salen en su
