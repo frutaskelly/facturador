@@ -48,6 +48,7 @@ from ...schemas.oc_recibida import (
 from ...models import ProductoCliente
 from ...services import cliente_match
 from ...services.precios import resolver_precios_lote
+from ...services.proyecto_alcance import proyecto_aplica
 from ...services.series import resolver_almacen, resolver_serie
 from ...services.producto_match import (
     aprender_alias_con_alcance,
@@ -104,13 +105,19 @@ def _pistas_de(payload: dict) -> list[cliente_match.Pista]:
     return pistas
 
 
-def _proyecto_de(db: Session, tenant_id, payload: dict):
+def _proyecto_de(db: Session, tenant_id, payload: dict, *, cliente_id, sucursal_id):
     """El proyecto del catálogo al que apunta la clave PROYECTO del documento.
 
     Es lo que hace que una orden que dice "HOSPITALES" entre ya etiquetada con
     la negociación —y por lo tanto con sus precios— sin que nadie capture nada.
     Devuelve None si la clave no está dada de alta o no tiene proyecto enlazado;
     entonces el operador lo elige en la bandeja y ahí se aprende.
+
+    El proyecto solo cruza si es coherente con lo que la orden ya resolvió: de
+    su cliente, y de su plaza cuando tiene alcance (una OC de Villahermosa
+    etiquetada HOSPITALES-de-Pachuca cobraba la lista equivocada). Si no cruza,
+    la orden entra sin proyecto y la corrección del operador —con aprender=true—
+    reapunta la equivalencia: el error se repara solo.
     """
     perfil = (payload.get("perfil") or "").strip().lower()
     proyecto = (payload.get("proyecto") or "").strip()
@@ -119,7 +126,20 @@ def _proyecto_de(db: Session, tenant_id, payload: dict):
     fila = cliente_match.buscar_equivalencia(
         db, tenant_id, "PROYECTO", f"{perfil}:{proyecto}", solo_confirmadas=True
     )
-    return fila.proyecto_id if fila is not None else None
+    if fila is None or fila.proyecto_id is None:
+        return None
+    proy = (
+        db.query(Proyecto)
+        .filter(Proyecto.id == fila.proyecto_id, Proyecto.deleted_at.is_(None))
+        .one_or_none()
+    )
+    if proy is None or not proy.activo:
+        return None
+    if proy.cliente_id is not None and proy.cliente_id != cliente_id:
+        return None
+    if not proyecto_aplica(db, proy.id, sucursal_id):
+        return None
+    return proy.id
 
 
 def _grupo_apagado(db: Session, jid: str) -> bool:
@@ -161,7 +181,6 @@ def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
     # a las observaciones, resuelva o no una sucursal. Es lo que el equipo lee
     # para saber a dónde llevar la mercancía.
     oc.punto_entrega = (payload.get("ubicacion") or "").strip() or None
-    oc.proyecto_id = _proyecto_de(db, oc.tenant_id, payload)
 
     if res.cliente_id is not None:
         if oc.punto_entrega:
@@ -176,6 +195,14 @@ def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
             oc.sucursal_id = cliente_match.sucursal_del_grupo(
                 db, oc.tenant_id, str(payload.get("jid") or ""), res.cliente_id
             )
+
+    # El proyecto se cruza AL FINAL a propósito: su regla necesita el cliente y
+    # la sucursal ya resueltos (antes se estampaba primero, y una orden de
+    # Villahermosa entraba con la negociación —y los precios— de Pachuca).
+    oc.proyecto_id = _proyecto_de(
+        db, oc.tenant_id, payload,
+        cliente_id=res.cliente_id, sucursal_id=oc.sucursal_id,
+    )
 
     if res.cliente_id is None:
         oc.estado = "PENDIENTE"
@@ -509,6 +536,14 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
         return no("Solo una orden pendiente se convierte en automática")
     if oc.cliente_id is None or oc.ambiguo:
         return no("El cliente no está resuelto sin ambigüedad")
+    # Cinturón para órdenes estampadas ANTES de la regla de alcance (o cuyo
+    # proyecto se restringió después): precificar con la negociación de otra
+    # plaza es exactamente el error que la bandeja existe para atajar.
+    if oc.proyecto_id is not None and not proyecto_aplica(db, oc.proyecto_id, oc.sucursal_id):
+        return no(
+            "El proyecto de la orden no entrega en su sucursal; "
+            "corrígelo antes de crear la remisión"
+        )
     if not lineas:
         return no("El documento no trae partidas legibles")
 
@@ -730,6 +765,31 @@ def asignar(
     if "proyecto_id" in data:
         ensure_fk(db, Proyecto, data["proyecto_id"], "proyecto_id")
         oc.proyecto_id = data["proyecto_id"]
+    # La coherencia se valida sobre el par FINAL (proyecto, sucursal): da igual
+    # cuál de los dos cambió este request — un par incompatible no se guarda, y
+    # así el aprendizaje de abajo jamás confirma una equivalencia envenenada.
+    if oc.proyecto_id is not None and (
+        "proyecto_id" in data or "sucursal_id" in data or "cliente_id" in data
+    ):
+        proy = db.query(Proyecto).filter(Proyecto.id == oc.proyecto_id).one()
+        if proy.cliente_id is not None and proy.cliente_id != oc.cliente_id:
+            raise HTTPException(
+                status_code=422, detail="El proyecto no es del cliente de la orden"
+            )
+        if not proyecto_aplica(db, oc.proyecto_id, oc.sucursal_id):
+            if oc.sucursal_id is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"El proyecto «{proy.nombre}» solo entrega en ciertas "
+                    "sucursales; resuelve primero la sucursal de la orden",
+                )
+            suc = db.query(Sucursal).filter(Sucursal.id == oc.sucursal_id).one()
+            raise HTTPException(
+                status_code=422,
+                detail=f"El proyecto «{proy.nombre}» no entrega en la sucursal "
+                f"«{suc.nombre}»: quítalo, elige otra sucursal o amplía su "
+                "alcance en Catálogos → Proyectos",
+            )
     if "folio_externo" in data:
         oc.folio_externo = data["folio_externo"]
     if "punto_entrega" in data:

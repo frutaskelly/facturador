@@ -52,6 +52,7 @@ from ...schemas.lista_precios import (
 )
 from ...schemas.common import Page
 from ...services.precios import resolver_asignacion
+from ...services.proyecto_alcance import proyecto_aplica
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 router = APIRouter(prefix="/listas-precios", tags=["listas de precios"])
@@ -488,6 +489,13 @@ def _validar_coherencia(db: Session, cliente_id, sucursal_id, proyecto_id) -> No
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Ese proyecto no es del cliente elegido",
             )
+    # Solo cuando vienen AMBAS dimensiones: un renglón de proyecto sin sucursal
+    # es legítimo (la negociación con una sola plaza vive así).
+    if sucursal_id and proyecto_id and not proyecto_aplica(db, proyecto_id, sucursal_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Ese proyecto no entrega en esa sucursal",
+        )
 
 
 def _con_nombres(db: Session, filas: list[ListaAsignacion]) -> list[ListaAsignacionOut]:
