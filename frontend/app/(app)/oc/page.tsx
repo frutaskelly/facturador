@@ -34,7 +34,10 @@ function VistazoOC({ id }: { id: string }) {
   const [d, setD] = useState<OCRecibidaDetalle | null>(null);
   const [fallo, setFallo] = useState(false);
   useEffect(() => {
-    apiFetch<OCRecibidaDetalle>(`/api/v1/oc-recibidas/${id}`)
+    // vistazo=true: solo las partidas como venían — sin cruce ni precios, que
+    // es lo único que este slidedown enseña. Sin el flag pagaba el costo de la
+    // pantalla completa.
+    apiFetch<OCRecibidaDetalle>(`/api/v1/oc-recibidas/${id}?vistazo=true`)
       .then(setD)
       .catch(() => setFallo(true));
   }, [id]);

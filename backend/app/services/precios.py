@@ -276,3 +276,148 @@ def resolver_precio(
         if p is not None:
             return {"precio": p, "origen": "lista_base", "lista_id": str(base_lp.id)}
     return None
+
+
+def resolver_precios_lote(
+    db: Session,
+    *,
+    items: list[dict],
+    cliente_id: Optional[UUID] = None,
+    sucursal_id: Optional[UUID] = None,
+    serie_id: Optional[UUID] = None,
+    proyecto_id: Optional[UUID] = None,
+    fecha: Optional[date] = None,
+) -> list[Optional[dict]]:
+    """`resolver_precio` para N partidas con un puñado de consultas, no ~6×N.
+
+    Nació de la bandeja: abrir una orden de 25 partidas contra la BD remota
+    tardaba ~27 s porque cada partida recorría su propia cascada de consultas.
+    Aquí se trae TODO lo que la cascada puede necesitar (overrides, asignaciones,
+    precios de esas listas, la lista base) en una consulta por tabla, y la
+    cascada corre en memoria con las mismas reglas y el mismo orden.
+
+    `items` es una lista de {producto_id, presentacion, cantidad}; devuelve una
+    lista paralela con el mismo dict que daría `resolver_precio` (o None). No
+    contempla la lista forzada del documento (paso 3), que es por-remisión.
+    La paridad con `resolver_precio` la vigila un test que corre ambos sobre la
+    misma matriz de escenarios.
+    """
+    if not items:
+        return []
+    fecha = fecha or date.today()
+
+    suc = None
+    if sucursal_id:
+        suc = db.query(Sucursal).filter(Sucursal.id == sucursal_id, Sucursal.deleted_at.is_(None)).one_or_none()
+        if suc and cliente_id is None:
+            cliente_id = suc.cliente_id
+
+    producto_ids = {it["producto_id"] for it in items}
+    prods = {
+        p.id: p
+        for p in db.query(Producto)
+        .filter(Producto.id.in_(producto_ids), Producto.deleted_at.is_(None))
+        .all()
+    }
+
+    # Los intentos de cada partida: la presentación pedida y, si el producto la
+    # traduce, la unidad base × factor — mismos criterios que resolver_precio.
+    intentos_por_item: list[list[tuple[str, Decimal, Decimal]]] = []
+    for it in items:
+        cantidad = Decimal(it["cantidad"])
+        presentacion = it["presentacion"]
+        intentos: list[tuple[str, Decimal, Decimal]] = [(presentacion, Decimal(1), cantidad)]
+        prod = prods.get(it["producto_id"])
+        if prod:
+            pres = prod.presentaciones or {}
+            base = prod.unidad_base or prod.presentacion_default
+            if base and base != presentacion and presentacion in pres and base in pres:
+                ratio = _factor(pres[presentacion]) / _factor(pres[base])
+                if ratio > 0:
+                    intentos.append((base, ratio, cantidad * ratio))
+        intentos_por_item.append(intentos)
+
+    # Overrides de sucursal y de cliente: una consulta por dimensión, indexada
+    # por (producto, presentación); el orden created_at desc hace que el primero
+    # visto sea el que resolver_precio elegiría (el más reciente).
+    def _overrides(**dim) -> dict[tuple, Decimal]:
+        q = db.query(
+            PrecioOverride.producto_id, PrecioOverride.presentacion, PrecioOverride.precio_unitario
+        ).filter(PrecioOverride.producto_id.in_(producto_ids))
+        for col, val in dim.items():
+            q = q.filter(getattr(PrecioOverride, col) == val)
+        q = _vigente(q, PrecioOverride, fecha).order_by(PrecioOverride.created_at.desc())
+        out: dict[tuple, Decimal] = {}
+        for pid, pres, precio in q.all():
+            out.setdefault((pid, pres), precio)
+        return out
+
+    ov_sucursal = _overrides(sucursal_id=sucursal_id) if sucursal_id else {}
+    ov_cliente = _overrides(cliente_id=cliente_id) if cliente_id else {}
+
+    asignaciones = resolver_asignaciones(
+        db, cliente_id=cliente_id, sucursal_id=sucursal_id,
+        serie_id=serie_id, proyecto_id=proyecto_id, fecha=fecha,
+    )
+    base_lp = _lista_default(db)
+    lista_ids = [a.lista_id for a in asignaciones]
+    if base_lp is not None and base_lp.id not in lista_ids:
+        lista_ids.append(base_lp.id)
+
+    # Precios de TODAS esas listas para TODOS los productos, con sus tramos
+    # ordenados como los ordenaría _precio_lista (cantidad_minima desc).
+    tramos: dict[tuple, list[tuple[int, Decimal]]] = {}
+    if lista_ids:
+        q = db.query(
+            Precio.lista_id, Precio.producto_id, Precio.presentacion,
+            Precio.cantidad_minima, Precio.precio_unitario,
+        ).filter(Precio.lista_id.in_(lista_ids), Precio.producto_id.in_(producto_ids))
+        q = _vigente(q, Precio, fecha)
+        for lid, pid, pres, cmin, precio in q.all():
+            tramos.setdefault((lid, pid, pres), []).append((cmin, precio))
+        for lst in tramos.values():
+            lst.sort(key=lambda t: t[0], reverse=True)
+
+    def _precio_en(lista_id, pid, pres, cantidad) -> Optional[Decimal]:
+        for cmin, precio in tramos.get((lista_id, pid, pres), ()):
+            if cmin <= cantidad:
+                return precio
+        return None
+
+    resultados: list[Optional[dict]] = []
+    for it, intentos in zip(items, intentos_por_item):
+        pid = it["producto_id"]
+
+        def _resolver(src) -> Optional[Decimal]:
+            for pres_try, mult, cant_try in intentos:
+                p = src(pres_try, cant_try)
+                if p is not None:
+                    return p if mult == 1 else (p * mult).quantize(Decimal("0.01"))
+            return None
+
+        res: Optional[dict] = None
+        if sucursal_id:
+            p = _resolver(lambda pr, _c: ov_sucursal.get((pid, pr)))
+            if p is not None:
+                res = {"precio": p, "origen": "override_sucursal"}
+        if res is None and cliente_id:
+            p = _resolver(lambda pr, _c: ov_cliente.get((pid, pr)))
+            if p is not None:
+                res = {"precio": p, "origen": "override_cliente"}
+        if res is None:
+            for asignacion in asignaciones:
+                p = _resolver(lambda pr, cant, _l=asignacion.lista_id: _precio_en(_l, pid, pr, cant))
+                if p is not None:
+                    res = {
+                        "precio": p,
+                        "origen": origen_de(asignacion),
+                        "lista_id": str(asignacion.lista_id),
+                        "asignacion_id": str(asignacion.id),
+                    }
+                    break
+        if res is None and base_lp is not None:
+            p = _resolver(lambda pr, cant: _precio_en(base_lp.id, pid, pr, cant))
+            if p is not None:
+                res = {"precio": p, "origen": "lista_base", "lista_id": str(base_lp.id)}
+        resultados.append(res)
+    return resultados
