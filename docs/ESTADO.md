@@ -10,7 +10,7 @@ carpeta y leer este archivo.
 | Rama base | `main` @ `a54762a` (PR #54) — igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
-| Worktrees | 3 (`bandeja` con trabajo en curso sin commitear; `new-session-7acb50` y `zealous-torvalds-918745` podables) |
+| Worktrees | 4 (`bandeja` con trabajo en curso sin commitear; `remisiones-fd9e06` ya embarcado — se poda al cerrar su sesión; `new-session-7acb50` y `zealous-torvalds-918745` podables) |
 | PRs abiertos | ninguno (esta actualización entra por el suyo) |
 | Migración head | `0057_export_rastro_portal_rbac` (ni #53 ni #54 traen migraciones) |
 
