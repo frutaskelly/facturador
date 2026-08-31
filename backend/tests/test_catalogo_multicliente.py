@@ -294,7 +294,35 @@ def test_precio_en_conflicto_no_es_automatico(client, env, auth_as):
          "unidad": "KG", "clave": "CILA-FRUT-145", "precio": "30.00"},
     ])
     assert not oc["auto"]["ok"]
-    assert "conflicto" in oc["auto"]["motivo"]
+    # El problema viene SEÑALADO: con su partida, las dos cifras que no cuadran
+    # y el nombre de la lista que habló. Sin eso la pantalla no puede pintar el
+    # renglón en rojo ni ofrecer «cobra este» — y el operador tenía que adivinar
+    # cuál de las listas del cliente decía ese precio.
+    problema = oc["auto"]["problemas"][0]
+    assert problema["numero"] == 1
+    assert problema["tipo"] == "precio_conflicto"
+    assert problema["precio_documento"] == "30.00"
+    assert problema["precio_lista"] == "32.50"
+    assert "Lista Balles" in problema["fuente_precio"]
+    assert problema["mensaje"] == oc["auto"]["motivo"]
+
+
+def test_los_problemas_se_reportan_todos_no_solo_el_primero(client, env, auth_as):
+    """Antes la evaluación cortaba en el primer tropiezo: el operador corregía
+    uno, volvía a guardar y aparecía el siguiente. Ahora salen juntos."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    client.post("/api/v1/clientes/externos", headers=h, json={
+        "sistema": "RFC", "clave": "OBV191007BS1", "cliente_id": env["balles"]})
+    oc = _oc_auto(client, h, f"WA:x:{uuid.uuid4().hex[:6]}", [
+        {"descripcion": "CILANTRO MANOJO DE 1 KG", "cantidad": "10",
+         "unidad": "KG", "clave": "CILA-FRUT-145", "precio": "30.00"},   # precio en conflicto
+        {"descripcion": "ALGO QUE NO EXISTE EN EL CATALOGO", "cantidad": "1", "unidad": "KG"},
+    ])
+    assert not oc["auto"]["ok"]
+    problemas = oc["auto"]["problemas"]
+    assert [p["numero"] for p in problemas] == [1, 2]
+    assert problemas[0]["tipo"] == "precio_conflicto"
+    assert problemas[1]["tipo"] == "sin_cruce"
 
 
 def test_lo_difuso_jamas_decide_solo(client, env, auth_as):

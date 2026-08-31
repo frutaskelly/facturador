@@ -453,6 +453,13 @@
      "ok": {
       "title": "Ok",
       "type": "boolean"
+     },
+     "problemas": {
+      "items": {
+       "$ref": "#/components/schemas/ProblemaLineaOut"
+      },
+      "title": "Problemas",
+      "type": "array"
      }
     },
     "required": [
@@ -11061,6 +11068,63 @@
      "lineas"
     ],
     "title": "PreviewTotalesIn",
+    "type": "object"
+   },
+   "ProblemaLineaOut": {
+    "description": "Lo que le impide a UNA partida entrar sola, con su número para poder\nseñalarla en la tabla en vez de dejar el aviso suelto arriba.",
+    "properties": {
+     "fuente_precio": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fuente Precio"
+     },
+     "mensaje": {
+      "title": "Mensaje",
+      "type": "string"
+     },
+     "numero": {
+      "title": "Numero",
+      "type": "integer"
+     },
+     "precio_documento": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Precio Documento"
+     },
+     "precio_lista": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Precio Lista"
+     },
+     "tipo": {
+      "title": "Tipo",
+      "type": "string"
+     }
+    },
+    "required": [
+     "numero",
+     "tipo",
+     "mensaje"
+    ],
+    "title": "ProblemaLineaOut",
     "type": "object"
    },
    "ProductoClienteOut": {

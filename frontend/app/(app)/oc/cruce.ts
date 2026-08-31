@@ -1,7 +1,7 @@
 // Piezas compartidas entre la LISTA de la bandeja (/oc) y el DETALLE de una
 // orden (/oc/[id]). El detalle dejó de ser un popup el 28-ago-2026: es la
 // pantalla de trabajo diaria y merece la pantalla completa y su propia URL.
-import type { LineaOC, OCRecibida, OCRecibidaDetalle } from "@/lib/types";
+import type { LineaOC, OCRecibida, OCRecibidaDetalle, ProblemaLinea } from "@/lib/types";
 
 export const CANAL_TONE: Record<string, "accent" | "muted" | "default"> = {
   WHATSAPP: "accent",
@@ -106,12 +106,65 @@ export function tablaDe(oc: OCRecibidaDetalle): LineaEdit[] {
   });
 }
 
+/** Las unidades base que ofrece el alta rápida de producto. */
+const UNIDADES_BASE = ["KILO", "PIEZA", "LITRO", "CAJA", "BULTO", "COSTAL", "MANOJO", "BOLSA"];
+
+/** La unidad del documento traducida a una unidad base del catálogo, para que
+ *  el alta de producto arranque con la que trae la orden ("PIEZAS" → PIEZA) en
+ *  vez de con KILO. Sin traducción posible, KILO: es la unidad de casi todo lo
+ *  que se vende, y de todos modos el operador la ve y la puede cambiar. */
+export function unidadBaseDe(unidad: string): string {
+  const u = (unidad || "").trim().toUpperCase();
+  const norm = UNIDAD_ALIAS[u] ?? u;
+  return UNIDADES_BASE.includes(norm) ? norm : "KILO";
+}
+
+/** Lo que le falta a una partida para poder salir en la remisión, dicho como lo
+ *  que hay que HACER. `null` = la partida está lista.
+ *
+ *  Antes el único aviso era un contador ámbar arriba de la tabla ("2 sin
+ *  cruzar"): con quince renglones en pantalla había que recorrerlos a ojo para
+ *  encontrar cuáles eran. El renglón se marca en rojo y dice su salida. */
+export function problemaDe(l: LineaEdit): { corto: string; comoResolver: string } | null {
+  if (l.producto_id) return null;
+  // Con candidatos el desplegable ya trae la respuesta: es un clic, no una búsqueda.
+  if (l.candidatos.length && !l.buscando)
+    return {
+      corto: "Sin cruzar",
+      comoResolver: "Elige el producto en la lista de al lado y sigue.",
+    };
+  return {
+    corto: "No está en el catálogo",
+    comoResolver: "Búscalo por otro nombre, o dalo de alta con «Crear Producto Nuevo».",
+  };
+}
+
 /** Precio tecleado a la mexicana ("1,234.50" o "12,50") → decimal del backend. */
 export function precioNormalizado(v: string): string {
   const t = v.trim();
   if (!t) return "";
   if (t.includes(",") && !t.includes(".")) return t.replace(",", ".");
   return t.replace(/,/g, "");
+}
+
+/** El problema que reportó el servidor, contrastado con lo que el operador
+ *  tiene tecleado AHORA. El servidor evalúa la orden como está GUARDADA; si ya
+ *  se corrigió en la tabla, el rojo se apaga sin recargar ni volver a guardar.
+ *  `null` = ese problema ya no aplica. */
+export function problemaVivo(p: ProblemaLinea | undefined, l: LineaEdit): ProblemaLinea | null {
+  if (!p) return null;
+  if (p.tipo === "precio_conflicto") {
+    const v = precioNormalizado(l.precio);
+    // En blanco = que mande la lista, que es justo lo que se discutía.
+    if (!v) return null;
+    const doc = Number(v);
+    const lista = Number(p.precio_lista ?? "");
+    if (!Number.isFinite(doc) || !Number.isFinite(lista)) return p;
+    return Math.abs(doc - lista) > 0.01 ? p : null;
+  }
+  // Cruzar la partida a mano resuelve tanto el "no cruza" como la ambigüedad.
+  if ((p.tipo === "sin_cruce" || p.tipo === "ambiguo") && l.producto_id) return null;
+  return p;
 }
 
 export function estadoTexto(oc: OCRecibida): { texto: string; tone: "success" | "muted" | "danger" | "warning" } {
