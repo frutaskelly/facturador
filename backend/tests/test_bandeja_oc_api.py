@@ -206,6 +206,40 @@ def test_ingesta_es_idempotente(client, env, auth_as):
     assert total == 1
 
 
+def test_reintento_completa_el_link_del_documento(client, env, auth_as):
+    """Una OC que ya generó remisión no se toca en un reintento… salvo el
+    puntero al documento original: si llegó sin `archivo_url` (pasó con 183
+    órdenes de la migración del master), el reenvío del bot lo completa. Con
+    el link ya puesto, no se pisa."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+    assert oc["archivo_url"] is None
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+    body = {"almacen_id": env["alm"], "lineas": [{
+        "producto_id": env["prod"], "cantidad": "25", "precio_unitario": "18.50",
+        "texto_original": "JITOMATE SALADET"}]}
+    hecho = client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision",
+                        headers=h, json=body).json()
+    assert hecho["remision_id"]
+
+    url = "https://drive.google.com/file/d/abc123/view"
+    again = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=oc["origen_externo"], archivo_url=url,
+        archivo_nombre="Requisición 13 de agosto.pdf")).json()
+    assert again["archivo_url"] == url
+    assert again["archivo_nombre"] == "Requisición 13 de agosto.pdf"
+    # La captura sigue intacta: misma remisión, mismo estado.
+    assert again["remision_id"] == hecho["remision_id"]
+    assert again["estado"] == "ASIGNADA"
+
+    otra = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=oc["origen_externo"],
+        archivo_url="https://drive.google.com/file/d/otro/view")).json()
+    assert otra["archivo_url"] == url
+
+
 def test_listado_filtra_por_fecha_de_recepcion(client, env, auth_as):
     """El flujo diario es "lo que llegó hoy": el rango va sobre recibida_at y
     `fecha_hasta` es INCLUSIVO — "hasta el 28" no puede dejar fuera la tarde."""
