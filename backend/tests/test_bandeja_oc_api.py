@@ -688,3 +688,24 @@ def test_asignar_sucursal_limpia_el_motivo_viejo(client, env, auth_as):
                  json={"motivo": "revisar precios con el cliente"})
     r = client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h, json={"sucursal_id": suc_id})
     assert r.json()["motivo"] == "revisar precios con el cliente"
+
+
+# ─── vistazo (slidedown de la lista) ─────────────────────────────────────────
+
+def test_vistazo_trae_las_partidas_sin_cruce_ni_auto(client, env, auth_as):
+    """El slidedown solo enseña las partidas como venían: con `vistazo=true`
+    el detalle no carga catálogo, no cruza candidatos y no evalúa precios —
+    era lo que hacía tardar segundos un renglón desplegado."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    r = client.post("/api/v1/oc-recibidas", headers=h, json=_oc())
+    assert r.status_code == 201, r.text
+    oc_id = r.json()["id"]
+
+    v = client.get(f"/api/v1/oc-recibidas/{oc_id}", headers=h, params={"vistazo": "true"}).json()
+    assert v["auto"] is None
+    assert v["lineas"][0]["descripcion"] == "JITOMATE SALADET"
+    assert v["lineas"][0]["candidatos"] == []
+
+    # Sin el flag, el detalle completo sigue cruzando y evaluando como siempre.
+    d = client.get(f"/api/v1/oc-recibidas/{oc_id}", headers=h).json()
+    assert d["auto"] is not None

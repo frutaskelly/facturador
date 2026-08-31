@@ -13119,7 +13119,10 @@ export interface operations {
     };
     detalle_api_v1_oc_recibidas__oc_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Solo las partidas como venían, sin cruce ni evaluación automática (lo que usa el slidedown de la lista). Mucho más rápido. */
+                vistazo?: boolean;
+            };
             header?: {
                 "X-Tenant-Id"?: string | null;
             };

@@ -24673,6 +24673,18 @@
       }
      },
      {
+      "description": "Solo las partidas como venían, sin cruce ni evaluación automática (lo que usa el slidedown de la lista). Mucho más rápido.",
+      "in": "query",
+      "name": "vistazo",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Solo las partidas como venían, sin cruce ni evaluación automática (lo que usa el slidedown de la lista). Mucho más rápido.",
+       "title": "Vistazo",
+       "type": "boolean"
+      }
+     },
+     {
       "in": "header",
       "name": "X-Tenant-Id",
       "required": false,

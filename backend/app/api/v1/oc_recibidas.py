@@ -47,7 +47,7 @@ from ...schemas.oc_recibida import (
 )
 from ...models import ProductoCliente
 from ...services import cliente_match
-from ...services.precios import resolver_precio
+from ...services.precios import resolver_precios_lote
 from ...services.series import resolver_almacen, resolver_serie
 from ...services.producto_match import (
     aprender_alias_con_alcance,
@@ -371,7 +371,7 @@ def _codigos_para(db: Session, cliente_id) -> tuple[dict, dict, dict]:
     return del_cliente, de_otros, pres_cliente
 
 
-def _detalle(db: Session, oc: OCRecibida) -> dict:
+def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
     """Detalle + cruce de productos sugerido para cada partida.
 
     El cruce se calcula al vuelo (no se persiste): el catálogo cambia, y una
@@ -386,7 +386,11 @@ def _detalle(db: Session, oc: OCRecibida) -> dict:
     """
     payload = oc.payload or {}
     lineas_raw = payload.get("lineas") or []
-    catalogo = productos_activos(db) if lineas_raw else []
+    # `vistazo`: el slidedown de la lista solo enseña las partidas COMO VENÍAN
+    # (texto, cantidad, unidad, clave) — cargar el catálogo, cruzar candidatos y
+    # evaluar precios para eso es pagar la pantalla completa por un renglón.
+    # Con el catálogo vacío, todo el cruce de abajo se vuelve gratis.
+    catalogo = productos_activos(db) if (lineas_raw and not vistazo) else []
     # Precalculado una vez para las N partidas: si no, el cruce es
     # O(partidas × productos) normalizaciones por cada apertura de la orden.
     norms = normalizar_catalogo(catalogo) if catalogo else {}
@@ -462,7 +466,7 @@ def _detalle(db: Session, oc: OCRecibida) -> dict:
         })
     out = OCRecibidaDetailOut.model_validate(oc).model_dump()
     out["lineas"] = lineas
-    out["auto"] = _auto_de(db, oc, lineas, by_id)
+    out["auto"] = None if vistazo else _auto_de(db, oc, lineas, by_id)
     return out
 
 
@@ -536,6 +540,11 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
     def falla(ln: dict, tipo: str, mensaje: str, **extra) -> None:
         problemas.append({"numero": ln["numero"], "tipo": tipo, "mensaje": mensaje, **extra})
 
+    # Dos pasadas: primero los chequeos que no tocan la BD, y el precio de las
+    # partidas que sobreviven se resuelve en UN lote. Partida por partida eran
+    # ~6 consultas cada una contra una BD remota: abrir una orden de 25
+    # renglones costaba ~27 segundos.
+    pendientes: list[tuple[dict, object, str]] = []
     for ln in lineas:
         cands = ln.get("candidatos") or []
         top = cands[0] if cands else None
@@ -575,16 +584,26 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
                   f"reconozca ({ln.get('unidad') or 'sin unidad'}) y el producto se "
                   "vende en varias presentaciones: confírmala a mano")
             continue
-        res = resolver_precio(
-            db,
-            producto_id=prod.id,
-            presentacion=pres,
-            cantidad=Decimal(str(ln.get("cantidad") or 1)),
-            cliente_id=oc.cliente_id,
-            sucursal_id=oc.sucursal_id,
-            serie_id=serie_id,
-            proyecto_id=oc.proyecto_id,
-        )
+        pendientes.append((ln, prod, pres))
+
+    resultados = resolver_precios_lote(
+        db,
+        items=[
+            {
+                "producto_id": prod.id,
+                "presentacion": pres,
+                "cantidad": Decimal(str(ln.get("cantidad") or 1)),
+            }
+            for ln, prod, pres in pendientes
+        ],
+        cliente_id=oc.cliente_id,
+        sucursal_id=oc.sucursal_id,
+        serie_id=serie_id,
+        proyecto_id=oc.proyecto_id,
+    )
+    for (ln, prod, pres), res in zip(pendientes, resultados, strict=True):
+        etiqueta = f"«{(ln.get('descripcion') or ln.get('clave') or '')[:60]}»"
+        top = (ln.get("candidatos") or [])[0]
         if res is None:
             falla(ln, "sin_precio",
                   f"La partida {ln['numero']} {etiqueta} no tiene precio en ninguna lista")
@@ -622,7 +641,9 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
             "cruzo_por": top["origen"],
         })
     if problemas:
-        # `motivo` sigue siendo el primero: es lo que la pantalla resume arriba.
+        # En orden de partida: las dos pasadas los generan desordenados, y el
+        # `motivo` (lo que la pantalla resume arriba) debe ser el de la primera.
+        problemas.sort(key=lambda p: p["numero"])
         return {"ok": False, "motivo": problemas[0]["mensaje"], "lineas": [], "problemas": problemas}
     return {"ok": True, "motivo": None, "lineas": out_lineas, "problemas": []}
 
@@ -652,13 +673,18 @@ def _fuente_precio(db: Session, res: dict) -> str:
 @router.get("/{oc_id}", response_model=OCRecibidaDetailOut)
 def detalle(
     oc_id: UUID,
+    vistazo: bool = Query(
+        default=False,
+        description="Solo las partidas como venían, sin cruce ni evaluación "
+        "automática (lo que usa el slidedown de la lista). Mucho más rápido.",
+    ),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     oc = get_or_404(db, OCRecibida, oc_id, soft=False)
     if not ctx.cliente_permitido(oc.cliente_id):
         raise HTTPException(status_code=404, detail="Orden no encontrada")
-    return _detalle(db, oc)
+    return _detalle(db, oc, vistazo=vistazo)
 
 
 @router.patch("/{oc_id}", response_model=OCRecibidaDetailOut)
