@@ -10,7 +10,7 @@ carpeta y leer este archivo.
 | Rama base | `main` @ `a54762a` (PR #54) — igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
-| Worktrees | 4 (`bandeja` con trabajo en curso sin commitear; `remisiones-fd9e06` ya embarcado — se poda al cerrar su sesión; `new-session-7acb50` y `zealous-torvalds-918745` podables) |
+| Worktrees | 5: dos sesiones ACTIVAS (`precios-lote` — pendiente #6, **edita `oc_recibidas.py` y su test, los mismos archivos del #54, y va 1 atrás: rebasar antes de seguir** — y `proyectos-sucursales-asignacion`); `remisiones-fd9e06` ya embarcado (se poda al cerrar su sesión); `new-session-7acb50` y `zealous-torvalds-918745` podables |
 | PRs abiertos | ninguno (esta actualización entra por el suyo) |
 | Migración head | `0057_export_rastro_portal_rbac` (ni #53 ni #54 traen migraciones) |
 
