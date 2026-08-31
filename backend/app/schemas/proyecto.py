@@ -17,6 +17,9 @@ class ProyectoCreate(BaseModel):
     cliente_id: Optional[uuid.UUID] = None
     activo: bool = True
     notas: Optional[str] = None
+    # Sucursales donde entrega el proyecto (una o más). Si el proyecto tiene
+    # dueño, deben ser de ese cliente; uno del grupo acepta de varios.
+    sucursal_ids: list[uuid.UUID] = Field(default_factory=list, max_length=100)
 
 
 class ProyectoUpdate(BaseModel):
@@ -24,6 +27,8 @@ class ProyectoUpdate(BaseModel):
     cliente_id: Optional[uuid.UUID] = None
     activo: Optional[bool] = None
     notas: Optional[str] = None
+    # None = no tocar las asignaciones; lista (aun vacía) = reemplazarlas.
+    sucursal_ids: Optional[list[uuid.UUID]] = Field(default=None, max_length=100)
 
 
 class ProyectoOut(ORMModel):
@@ -35,5 +40,8 @@ class ProyectoOut(ORMModel):
     cliente_nombre: Optional[str] = None
     activo: bool
     notas: Optional[str] = None
+    sucursal_ids: list[uuid.UUID] = Field(default_factory=list)
+    # Para pintar la columna sin otra consulta ("Pachuca, Tulancingo").
+    sucursales_nombres: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

@@ -107,6 +107,9 @@ export type Proyecto = {
   cliente_nombre?: string | null;
   activo: boolean;
   notas?: string | null;
+  /** Alcance: en qué sucursales entrega (0058). Si hay dueño, son suyas. */
+  sucursal_ids?: string[];
+  sucursales_nombres?: string[];
   created_at: string;
   updated_at: string;
 };

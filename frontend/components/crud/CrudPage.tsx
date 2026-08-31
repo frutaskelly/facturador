@@ -20,7 +20,7 @@ export type FormValues = Record<string, string | boolean>;
 export type CrudField = {
   name: string;
   label: string;
-  type?: "text" | "number" | "decimal" | "textarea" | "switch" | "select";
+  type?: "text" | "number" | "decimal" | "textarea" | "switch" | "select" | "multiselect";
   required?: boolean;
   /** Ayuda bajo el campo. Como función se recalcula con el formulario, para
    *  interruptores en los que cada posición significa algo distinto y hay que
@@ -28,8 +28,20 @@ export type CrudField = {
   hint?: string | ((form: FormValues) => string);
   step?: string;
   placeholder?: string;
-  options?: { value: string; label: string }[];
+  options?: { value: string; label: string; tag?: string }[];
   colSpan?: 1 | 2;
+  /**
+   * Solo `multiselect`: nombre de OTRO campo del formulario que filtra las
+   * opciones — quedan las cuyo `tag` (ver Lookup) coincide con su valor; con
+   * el campo vacío se ofrecen todas. Al cambiar ese campo, las palomeadas que
+   * queden fuera se sueltan solas (si no, viajarían ids de otro dueño y el
+   * backend las rechazaría). El valor del formulario es un CSV de ids —
+   * `FormValues` no carga arreglos — así que `toForm`/`toPayload` hacen
+   * join/split.
+   */
+  filterBy?: string;
+  /** Solo `multiselect`: texto cuando no queda ninguna opción que palomear. */
+  emptyText?: string;
   /** Campo no editable (se muestra deshabilitado). */
   readOnly?: boolean;
   /** Solo aparece al EDITAR: el alta no lo acepta (el backend lo fija él
@@ -91,6 +103,9 @@ export type Lookup = {
   path: string;
   value: (row: Record<string, unknown>) => string;
   label: (row: Record<string, unknown>) => string;
+  /** Valor con el que un `multiselect` con `filterBy` filtra esta opción
+   *  (p. ej. el cliente_id de la sucursal). */
+  tag?: (row: Record<string, unknown>) => string;
 };
 
 export type CrudConfig<T> = {
@@ -177,7 +192,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
   const rows = data?.items ?? [];
   const total = data?.total ?? 0;
 
-  const [lookupOpts, setLookupOpts] = useState<Record<string, { value: string; label: string }[]>>({});
+  const [lookupOpts, setLookupOpts] = useState<Record<string, { value: string; label: string; tag?: string }[]>>({});
   const lookupsLoaded = useRef(false);
 
   // Campo cuyo catálogo se está creando desde el propio formulario (mini-modal).
@@ -212,7 +227,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
       for (const [field, lk] of Object.entries(config.lookups!)) {
         try {
           const pageData = await apiFetch<Page<Record<string, unknown>>>(lk.path);
-          out[field] = pageData.items.map((r) => ({ value: lk.value(r), label: lk.label(r) }));
+          out[field] = pageData.items.map((r) => ({ value: lk.value(r), label: lk.label(r), tag: lk.tag?.(r) }));
         } catch {
           out[field] = [];
         }
@@ -227,6 +242,26 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
     };
   }, [config.lookups, form]);
 
+  // Multiselect con `filterBy`: al cambiar el campo del que depende, las
+  // palomeadas que quedaron fuera del filtro se sueltan del valor. Solo con el
+  // lookup YA cargado — antes de eso "no hay opciones" significa "aún no sé",
+  // y podar ahí vaciaría la selección de un registro recién abierto.
+  useEffect(() => {
+    if (form === null) return;
+    for (const f of config.fields) {
+      if (f.type !== "multiselect" || !f.filterBy) continue;
+      const filtro = String(form[f.filterBy] ?? "");
+      const opciones = lookupOpts[f.name];
+      if (!filtro || !opciones) continue;
+      const permitidos = new Set(opciones.filter((o) => o.tag === filtro).map((o) => o.value));
+      const sel = String(form[f.name] ?? "").split(",").filter(Boolean);
+      const podados = sel.filter((x) => permitidos.has(x));
+      if (podados.length !== sel.length) {
+        setForm((prev) => (prev ? { ...prev, [f.name]: podados.join(",") } : prev));
+      }
+    }
+  }, [form, lookupOpts, config.fields]);
+
   // Recarga los lookups indicados (tras crear un catálogo desde el formulario).
   async function refrescarLookups(campos: string[]) {
     if (!config.lookups) return;
@@ -236,7 +271,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
       if (!lk) continue;
       try {
         const pageData = await apiFetch<Page<Record<string, unknown>>>(lk.path);
-        out[campo] = pageData.items.map((r) => ({ value: lk.value(r), label: lk.label(r) }));
+        out[campo] = pageData.items.map((r) => ({ value: lk.value(r), label: lk.label(r), tag: lk.tag?.(r) }));
       } catch {
         /* se conserva lo que ya había */
       }
@@ -465,6 +500,39 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                           </option>
                         ))}
                       </Select>
+                    ) : f.type === "multiselect" ? (
+                      (() => {
+                        const filtro = f.filterBy ? String(form[f.filterBy] ?? "") : "";
+                        const visibles = filtro ? opts.filter((o) => o.tag === filtro) : opts;
+                        const sel = String(val ?? "").split(",").filter(Boolean);
+                        const toggle = (id: string, on: boolean) =>
+                          setField(f.name, (on ? [...sel, id] : sel.filter((x) => x !== id)).join(","));
+                        // Sin filtro se mezclan opciones de varios dueños y los
+                        // nombres se repiten ("Pachuca" de dos clientes): se
+                        // anexa el dueño, sacado del lookup del campo filtro.
+                        const etiqueta = (o: { label: string; tag?: string }) => {
+                          if (!f.filterBy || filtro) return o.label;
+                          const dueno = lookupOpts[f.filterBy]?.find((c) => c.value === o.tag)?.label;
+                          return dueno ? `${o.label} · ${dueno}` : o.label;
+                        };
+                        return (
+                          <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+                            {visibles.map((o) => (
+                              <label key={o.value} className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={sel.includes(o.value)}
+                                  onChange={(e) => toggle(o.value, e.target.checked)}
+                                />
+                                {etiqueta(o)}
+                              </label>
+                            ))}
+                            {!visibles.length ? (
+                              <span className="text-xs text-muted">{f.emptyText ?? "Sin opciones"}</span>
+                            ) : null}
+                          </div>
+                        );
+                      })()
                     ) : (
                       // `decimal` usa un input de texto (no el nativo `number`,
                       // que muestra el separador decimal según el locale del SO

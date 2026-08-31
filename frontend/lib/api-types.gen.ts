@@ -7753,6 +7753,8 @@ export interface components {
             nombre: string;
             /** Notas */
             notas?: string | null;
+            /** Sucursal Ids */
+            sucursal_ids?: string[];
         };
         /** ProyectoOut */
         ProyectoOut: {
@@ -7778,6 +7780,10 @@ export interface components {
             nombre: string;
             /** Notas */
             notas?: string | null;
+            /** Sucursal Ids */
+            sucursal_ids?: string[];
+            /** Sucursales Nombres */
+            sucursales_nombres?: string[];
             /**
              * Tenant Id
              * Format: uuid
@@ -7799,6 +7805,8 @@ export interface components {
             nombre?: string | null;
             /** Notas */
             notas?: string | null;
+            /** Sucursal Ids */
+            sucursal_ids?: string[] | null;
         };
         /** PruebaOut */
         PruebaOut: {

@@ -22,7 +22,7 @@ from .precio import ListaAsignacion, ListaPrecios, Precio
 from .producto import Producto
 from .producto_alias import ProductoAlias
 from .producto_cliente import ProductoCliente
-from .proyecto import Proyecto
+from .proyecto import Proyecto, ProyectoSucursal
 from .sat_catalogo import SatClaveProdServ, SatClaveUnidad
 from .proveedor import Proveedor
 from .remision import LineaRemision, Remision
@@ -51,6 +51,7 @@ __all__ = [
     "ListaAsignacion",
     "Precio",
     "Proyecto",
+    "ProyectoSucursal",
     "Cliente",
     "ClienteExterno",
     "Conexion",
