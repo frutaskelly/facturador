@@ -388,3 +388,19 @@ def test_proyecto_codigo_se_autogenera(client, env, auth_as):
     otro = client.post("/api/v1/proyectos", headers=h,
                        json={"nombre": "Ceresos y Seguridad Pública"})
     assert otro.status_code == 201 and otro.json()["codigo"] == "CERESOSYSE2"
+
+
+def test_cotizar_reporta_el_tramo_aplicado(client, env, auth_as):
+    """La pantalla de la bandeja ofrece «actualizar la lista» solo apuntando al
+    TRAMO del que salió la referencia: cotizar lo reporta. Con cantidad 15 el
+    que habla es el tramo de mayoreo (≥10), no el base."""
+    auth_as(env["admin"]); h = _hdr(env["admin"]); pid = env["aguacate"]
+    mayoreo = _cot(client, h, pid, cliente_id=env["cli3"], cantidad="15")
+    assert float(mayoreo["precio"]) == 20.0
+    assert mayoreo["cantidad_minima"] == 10
+    base = _cot(client, h, pid, cliente_id=env["cli3"], cantidad="5")
+    assert float(base["precio"]) == 25.0
+    assert base["cantidad_minima"] == 1
+    # Un override no es una lista: sin tramo que actualizar.
+    ov = _cot(client, h, pid, cliente_id=env["cli1"])
+    assert ov["origen"] == "override_cliente" and ov["cantidad_minima"] is None

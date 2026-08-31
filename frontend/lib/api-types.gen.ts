@@ -4545,6 +4545,8 @@ export interface components {
         CotizacionOut: {
             /** Cantidad */
             cantidad: string;
+            /** Cantidad Minima */
+            cantidad_minima?: number | null;
             /** Lista Id */
             lista_id?: string | null;
             /** Origen */
@@ -6589,6 +6591,8 @@ export interface components {
             remitente?: string | null;
             /** Resuelto Via */
             resuelto_via?: string | null;
+            /** Serie Prevista Id */
+            serie_prevista_id?: string | null;
             /** Sucursal Id */
             sucursal_id?: string | null;
             /** Sucursal Nombre */

@@ -810,3 +810,16 @@ def test_lo_que_entra_sin_jid_es_un_origen_por_remitente(client, env, auth_as):
     filtrado = client.get("/api/v1/oc-recibidas", headers=h,
                           params={"remitente": quien}).json()
     assert [x["folio_externo"] for x in filtrado["items"]] == [f"R-{marca}"]
+
+
+def test_el_detalle_trae_la_serie_prevista(client, env, auth_as):
+    """La pantalla cotiza precios CON la serie que foliaria la remisión (pesa
+    más que sucursal+cliente en las asignaciones); el detalle la expone."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    r = client.post("/api/v1/oc-recibidas", headers=h, json=_oc())
+    oc_id = r.json()["id"]
+    d = client.get(f"/api/v1/oc-recibidas/{oc_id}", headers=h).json()
+    assert "serie_prevista_id" in d
+    v = client.get(f"/api/v1/oc-recibidas/{oc_id}", headers=h, params={"vistazo": "true"}).json()
+    assert v["serie_prevista_id"] is None

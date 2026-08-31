@@ -782,6 +782,9 @@ export type OCRecibidaDetalle = OCRecibida & {
   payload: Record<string, unknown>;
   lineas: LineaOC[];
   auto?: AutoRemision | null;
+  /** La serie con la que se foliaria la remisión: la cotización de precios va
+   *  con ella (una asignación por serie pesa más que sucursal+cliente). */
+  serie_prevista_id?: string | null;
 };
 
 /** Un grupo de origen para el filtro de la bandeja: su nombre y qué clientes

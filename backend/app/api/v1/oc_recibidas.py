@@ -513,6 +513,22 @@ def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
     out = OCRecibidaDetailOut.model_validate(oc).model_dump()
     out["lineas"] = lineas
     out["auto"] = None if vistazo else _auto_de(db, oc, lineas, by_id)
+    # La serie con la que ESTA orden foliaria su remisión (grupo → sucursal →
+    # cliente → default). La pantalla cotiza con ella: la serie pesa más que
+    # sucursal+cliente en las asignaciones, y sin ella una lista negociada por
+    # serie (Balles/Jubran) sería invisible para la cotización.
+    if not vistazo:
+        serie_id = cliente_match.serie_del_grupo(
+            db, oc.tenant_id, str((oc.payload or {}).get("jid") or ""),
+            oc.cliente_id, "serie_remision_id",
+        )
+        if serie_id is None and oc.cliente_id is not None:
+            serie = resolver_serie(
+                db, oc.tenant_id, "REMISION",
+                sucursal_id=oc.sucursal_id, cliente_id=oc.cliente_id,
+            )
+            serie_id = serie.id if serie is not None else None
+        out["serie_prevista_id"] = serie_id
     return out
 
 
