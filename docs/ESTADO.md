@@ -1,4 +1,4 @@
-# Estado del proyecto — 31/08/2026 (actualizado por la noche tras los PRs #51–#58)
+# Estado del proyecto — 31/08/2026 (actualizado tras el wrap-all nocturno: PRs #56, #59, #60 y #61)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,23 +7,22 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` @ `b73c910` (PR #58) — igual que `origin/main` |
+| Rama base | `main` — el commit de este archivo, sobre `31df063` (#59) — igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
-| Worktrees | 4 (`proyectos-sucursales-asignacion` ACTIVA, 1 commit adelante; `remisiones-fd9e06` ya embarcado — se poda al cerrar su sesión; `new-session-7acb50` y `zealous-torvalds-918745` podables) |
-| PRs abiertos | el de esta actualización |
-| Migración head | `0057_export_rastro_portal_rbac` en `main` (la `0058_proyecto_sucursales` viene en la rama de proyectos) |
+| Worktrees | 3 activos + 1 bloqueado: `listaprecios-a35db8` (embarcado por #61, se poda al cerrar su sesión), `subida-productos-102286` y `bandeja-filtros` (sesiones NUEVAS abiertas durante el wrap — no tocar), y `new-session-7acb50` (rama `claude/estado-cierre-31ago`: conflicta con este ESTADO y su contenido ya está incorporado aquí — ver nota abajo) |
+| PRs abiertos | ninguno |
+| Migración head | `0058_proyecto_sucursales` en `main` **y aplicada a prod** |
 
 `Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
 
 ## Deploy
 
-**En vivo en https://facturador.mx** y al día: se comprobó **dentro del contenedor** (31-ago
-por la noche) que el backend trae tanto el backfill de `archivo_url` del #54
-(`oc_recibidas.py`) como `resolver_precios_lote` del #57 (`precios.py`) — todo el contexto de
-app de `main` (`b73c910` solo mueve este archivo). Los cinco contenedores (`frontend`,
-`backend`, `landing`, `tunnel`, `redis`) están arriba y sanos, y los cuatro propios se
-construyen desde **este** checkout, no desde un worktree.
+**En vivo en https://facturador.mx** y al día: `./deploy.sh` corrió el 31-ago en la noche desde
+este checkout en `31df063` — construyó las tres imágenes, **aplicó la migración
+`0057 → 0058_proyecto_sucursales` a Supabase prod**, recreó `backend`/`frontend`/`landing` y los
+cinco contenedores quedaron arriba y sanos (el commit de este archivo solo mueve docs; el
+contexto de app desplegado es el de `31df063`).
 
 ⚠️ **La marca de tiempo de la imagen no sirve para saber si el deploy está al día.** Una imagen
 construida segundos antes de fusionar un PR "parece" atrasada sin estarlo, y una imagen vieja
@@ -33,6 +32,37 @@ contenido dentro de la imagen.
 **La puerta de `deploy.sh` bloquea si el checkout no coincide con GitHub** — incluidos archivos
 sin rastrear. Por eso este `docs/ESTADO.md` va commiteado: suelto, detiene cada deploy. Nunca
 usar `FORCE=1` para saltarla: publica el trabajo a medias de otra sesión.
+
+## Lo que entró en el wrap-all nocturno (PRs #56, #59, #60 y #61)
+
+**La negociación es de su plaza (#56 + #61, pendiente 7 RESUELTO en código).** El caso
+VH-35COM-MAR: una OC de EHMO Villahermosa entraba etiquetada HOSPITALES —la negociación de
+Pachuca— y proponía los precios de la lista SAE 9. Ahora los proyectos declaran en qué
+sucursales entregan (#56, tabla `proyecto_sucursales` + multiselect en Catálogos → Proyectos) y
+la regla vive en un helper único (`backend/app/services/proyecto_alcance.py`, #61): la ingesta
+resuelve la sucursal ANTES que el proyecto y solo lo estampa si es del cliente y de la plaza
+(si no, la orden entra sin proyecto y la corrección del operador con `aprender` reapunta la
+equivalencia); el PATCH de la bandeja rechaza con 422 el par incompatible; `_auto_de` bloquea
+la remisión de un clic de una orden mal etiquetada; y crear una asignación de precios
+sucursal+proyecto imposible también da 422 (la UI filtra ambos selects por el alcance).
+**Sin filas de alcance un proyecto no tiene restricción** — nada cambia hasta configurar datos.
+
+**Fix de datos que ya corrió en prod (mismo día, sin deploy):** la asignación
+cliente EHMO + SUC-02 Tabasco + HOSPITALES → «Lista EHMO Villahermosa 08_2026»
+(especificidad 11 > 9). La lista VH trae exactamente los precios de los documentos de VH, así
+que los conflictos de precio de las ~37 OCs pendientes de Tabasco desaparecen solos al abrirlas.
+
+**Decisiones del dueño (31-ago):** HOSPITALES son negociaciones DISTINTAS por plaza (se parte
+en dos proyectos — ver pendiente 7) y «Bienestar es Pachuca» (IMSS BIENESTAR se restringe allá).
+
+**#59:** el ESTADO recupera lo del #54 que la reescritura del #58 perdió. **#60:** el pool del
+backend cabe bajo el tope del pooler (5+7=12 de 15).
+
+**Rama `claude/estado-cierre-31ago` (worktree `new-session-7acb50`): superseded.** Sus 3
+commits reescriben este archivo desde una base vieja y conflictúan con `main`; sus hechos
+(ZMAFAN 167 con cancelación en proceso, descuadre revisado por el dueño, fecha del masivo
+confirmada, onboarding diferido) ya están incorporados abajo. La rama queda en origin por si
+algo faltara; el worktree se puede podar cuando su sesión cierre.
 
 ## Lo que entró el 31-ago por la noche (PRs #53, #54 y #57)
 
@@ -139,14 +169,19 @@ podarla.
    y el slidedown usa `?vistazo=true` que salta cruce y precios (~27 s → ~2 s). Un test de
    paridad corre ambos resolutores sobre una matriz de escenarios bajo RLS y exige el mismo
    resultado campo por campo.
-7. **Cruce de proyecto sin respetar la sucursal** (nuevo, 31-ago, reporte del dueño): una OC de
-   EHMO con sucursal SUC-02 Tabasco entró con el proyecto HOSPITALES aunque no está asignado a
-   esa sucursal. La regla pedida: el proyecto solo se cruza automáticamente cuando está asignado
-   a la sucursal resuelta. DEPENDE del modelo proyecto↔sucursal que otra sesión tiene a medias
-   (worktree `proyectos-sucursales-asignacion-6a1269`, migración `0058_proyecto_sucursales.py`
-   ya commiteada en su rama): cuando esa rama aterrice, conectar la regla en `_proyecto_de` /
-   `_resolver_y_aplicar` de la bandeja y filtrar el selector de proyecto del detalle por
-   sucursal.
+7. ~~Cruce de proyecto sin respetar la sucursal~~ — **RESUELTO en código y desplegado** el
+   31-ago (PRs #56 + #61, ver arriba). **Queda la configuración de DATOS en prod** (decisión
+   del dueño: negociación por plaza), en este orden desde la UI ya desplegada:
+   (a) crear proyecto **HOSPITALES VILLAHERMOSA** (dueño EHMO, alcance SUC-02 Tabasco) y
+   restringir HOSPITALES e IMSS BIENESTAR a SUC-01 Pachuca en Catálogos → Proyectos;
+   (b) reapuntar la equivalencia `villahermosa:HOSPITALES` corrigiendo una OC de VH desde la
+   bandeja con «Guardar asignación»; (c) crear la asignación cliente EHMO + HOSPITALES
+   VILLAHERMOSA → «Lista EHMO Villahermosa 08_2026» y **borrar la especificidad-11 provisional**
+   (EHMO+Tabasco+HOSPITALES, id `da5e658b…`, creada el 31-ago como puente); (d) `POST
+   /oc-recibidas/{id}/reabrir` en las PENDIENTE de Tabasco con `resuelto_via != 'MANUAL'`.
+   Diferido a propósito: la defensa dentro del resolutor de precios (tras #61 el par inválido ya
+   no se puede crear; la alternativa barata sería validar con el helper en `create_remision` y
+   el cotizador). Limpieza aparte detectada: SUC-03/SUC-04 «HIDALGO EHMO» duplicadas en prod.
 8. **183 OCs de la migración sin `archivo_url`** (31-ago, tras el PR #54). El #54 deja al
    sistema listo para absorber los links: la cura de fondo es un script en `SmartSupply/bot`
    que reenvíe esas órdenes por la ingesta con su URL de Drive — se completan sin tocar la
