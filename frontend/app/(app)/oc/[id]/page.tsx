@@ -315,12 +315,34 @@ export default function Page() {
     if (!oc) return false;
     if (!clienteSel) { toast.error("Asigna primero el cliente"); return false; }
     if (!lineas.length || sinProducto) {
-      toast.error(`Faltan ${sinProducto} partida(s) por cruzar con un producto`);
+      // Con 63 renglones, «faltan 2» sin decir CUÁLES es una búsqueda a ojo:
+      // se nombran y la vista salta a la primera. (El operador borró una sin
+      // cruzar, el aviso le reclamó la otra, y no la encontraba.)
+      const faltan = lineas.filter((l) => !l.producto_id);
+      toast.error(
+        faltan.length === 1
+          ? `Falta cruzar la partida ${faltan[0].numero}: «${faltan[0].texto.slice(0, 40) || "agregada a mano"}»`
+          : `Faltan ${faltan.length} por cruzar: ${faltan.slice(0, 3).map((x) => `la ${x.numero} «${x.texto.slice(0, 25)}»`).join(", ")}${faltan.length > 3 ? "…" : ""}`
+      );
+      irALinea(faltan[0].numero);
       return false;
     }
-    const sinCantidad = lineas.filter((l) => !(Number(l.cantidad) > 0)).length;
-    if (sinCantidad) { toast.error(`${sinCantidad} partida(s) sin cantidad válida`); return false; }
+    const sinCantidad = lineas.filter((l) => !(Number(l.cantidad) > 0));
+    if (sinCantidad.length) {
+      toast.error(
+        `Sin cantidad válida: ${sinCantidad.slice(0, 3).map((x) => `la ${x.numero} «${x.texto.slice(0, 25)}»`).join(", ")}${sinCantidad.length > 3 ? "…" : ""}`
+      );
+      irALinea(sinCantidad[0].numero);
+      return false;
+    }
     return true;
+  }
+
+  /** Lleva la vista al renglón de la partida — es la mitad útil del aviso. */
+  function irALinea(numero: number) {
+    document
+      .querySelector(`[data-linea="${numero}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   /** El clic en «Crear remisión»: si hay asignación sin guardar, primero se
@@ -618,6 +640,7 @@ export default function Page() {
                   return (
                   <tr
                     key={l.numero}
+                    data-linea={l.numero}
                     className={`border-t border-border${enRojo ? " bg-danger/5" : ""}`}
                   >
                     <td className={`px-3 py-2${enRojo ? " border-l-2 border-l-danger" : ""}`}>
