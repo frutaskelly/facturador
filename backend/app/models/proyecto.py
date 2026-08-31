@@ -17,6 +17,21 @@ from ..core.db import Base
 from .base import SoftDeleteMixin, TimestampMixin, tenant_fk, uuid_pk
 
 
+class ProyectoSucursal(Base):
+    """Sucursal ASIGNADA al proyecto (migración 0058). El alcance del proyecto:
+    a qué plazas entrega. Si el proyecto tiene dueño, sus sucursales son de ese
+    cliente; uno del grupo puede abarcar sucursales de varios clientes."""
+    __tablename__ = "proyecto_sucursales"
+    __table_args__ = (
+        UniqueConstraint("proyecto_id", "sucursal_id", name="uq_proyecto_sucursal"),
+    )
+
+    id = uuid_pk()
+    tenant_id = tenant_fk()
+    proyecto_id = Column(UUID(as_uuid=True), ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=False, index=True)
+    sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id", ondelete="CASCADE"), nullable=False)
+
+
 class Proyecto(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "proyectos"
     __table_args__ = (
