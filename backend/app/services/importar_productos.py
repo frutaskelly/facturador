@@ -75,14 +75,35 @@ _HEADERS = {
     "CODIGOBARRAS": "codigo_barras",
     "CATEGORIA": "categoria",
     "LINEA": "categoria",
+    "MARCA": "descripcion",
     "ESQUEMA": "esquema",
     "ESQUEMAIMPUESTO": "esquema",
     "ESQUEMADEIMPUESTO": "esquema",
     "ESTATUS": "estatus",
     "ESTADO": "estatus",
-    # Columnas informativas de los exports que NO deben capturarse:
-    # DESCRIPCIONSAT y DESCRIPCIONUNIDADSAT no están aquí a propósito.
 }
+
+# Columnas informativas de los exports (SAE) que NO deben capturarse aunque su
+# nombre empiece igual que un campo conocido.
+_HEADERS_EXCLUIDOS = {"DESCRIPCIONSAT", "DESCRIPCIONUNIDADSAT"}
+
+_HEADERS_POR_LARGO = sorted(_HEADERS, key=len, reverse=True)
+
+
+def _campo_de_encabezado(norm: str) -> Optional[str]:
+    """Encabezado normalizado → campo. Exacto primero; si no, por prefijo:
+    el operador rotula a su modo («PRECIO KELLY», «NOMBRE DEL PRODUCTO») y no
+    hay que obligarlo a la plantilla. El prefijo más largo gana, para que
+    «CLAVE SAT …» caiga en clave_sat y no en codigo."""
+    if not norm or norm in _HEADERS_EXCLUIDOS:
+        return None
+    campo = _HEADERS.get(norm)
+    if campo:
+        return campo
+    for clave in _HEADERS_POR_LARGO:
+        if norm.startswith(clave):
+            return _HEADERS[clave]
+    return None
 
 
 def _texto(v) -> str:
@@ -139,19 +160,48 @@ def normalizar_unidad(u: str) -> str:
     return _UNIDADES_CANON.get(s, s)
 
 
+_FILAS_BUSCA_ENCABEZADO = 15   # cuántas filas iniciales se revisan buscando el encabezado
+
+
+def _fila_encabezado(raw) -> int:
+    """Índice de la fila que se ve como el encabezado real.
+
+    Las listas del operador traen título y filas vacías antes del encabezado
+    («PRECIOS RIO LIBRE CZ…» y hasta la fila 5 el DESCRIPCIÓN | MARCA | …).
+    Gana la fila con más campos conocidos DISTINTOS; se exigen al menos 2
+    porque un título («PRECIOS …») o un renglón de datos («PRODUCTO X…»)
+    pueden puntuar 1 por prefijo. Sin ganadora, el encabezado queda en la
+    fila 0 (comportamiento de siempre)."""
+    mejor, mejor_puntos = 0, 0
+    for r in range(min(_FILAS_BUSCA_ENCABEZADO, len(raw))):
+        campos = {_campo_de_encabezado(_norm_header(v)) for v in raw.iloc[r].tolist()}
+        puntos = len(campos - {None})
+        if puntos > mejor_puntos:
+            mejor, mejor_puntos = r, puntos
+    return mejor if mejor_puntos >= 2 else 0
+
+
 def _leer_tabla(data: bytes, filename: str):
-    """xlsx/xls/csv → DataFrame de textos (header en la fila 0)."""
+    """xlsx/xls/csv → DataFrame de textos con el encabezado real como columnas
+    (que no siempre es la fila 0: ver _fila_encabezado)."""
     import pandas as pd
 
     ext = (filename.rsplit(".", 1)[-1] if "." in filename else "").lower()
     try:
         if ext == "csv":
-            return pd.read_csv(io.BytesIO(data), header=0, dtype=str, sep=None, engine="python")
-        return pd.read_excel(io.BytesIO(data), sheet_name=0, header=0, dtype=str)
+            raw = pd.read_csv(io.BytesIO(data), header=None, dtype=str, sep=None, engine="python")
+        else:
+            raw = pd.read_excel(io.BytesIO(data), sheet_name=0, header=None, dtype=str)
     except Exception as exc:  # noqa: BLE001 — el error de la lib es críptico
         raise ImportProductosError(
             f"No se pudo leer el archivo '{filename}'. ¿Es un Excel (.xlsx/.xls) o CSV?"
         ) from exc
+    if raw.empty:
+        return raw
+    fila_enc = _fila_encabezado(raw)
+    df = raw.iloc[fila_enc + 1:].reset_index(drop=True)
+    df.columns = [_texto(v) for v in raw.iloc[fila_enc].tolist()]
+    return df
 
 
 # Campos del sistema a los que se puede mapear una columna del archivo.
@@ -172,9 +222,9 @@ CAMPOS_MAPEABLES = [
 
 def _detectar_columnas(df) -> dict[int, str]:
     """Encabezados del archivo → campo del sistema (mapeo automático)."""
+    campos = [(i, _campo_de_encabezado(_norm_header(h))) for i, h in enumerate(df.columns)]
     cols: dict[int, str] = {}
-    for i, h in enumerate(df.columns):
-        campo = _HEADERS.get(_norm_header(h))
+    for i, campo in campos:
         if campo and campo not in cols.values():
             cols[i] = campo
     if "nombre" not in cols.values():
@@ -183,6 +233,11 @@ def _detectar_columnas(df) -> dict[int, str]:
         desc_idx = next((i for i, c in cols.items() if c == "descripcion"), None)
         if desc_idx is not None:
             cols[desc_idx] = "nombre"
+            # El lugar que se libera lo toma la columna que había perdido el
+            # turno contra DESCRIPCIÓN (p. ej. MARCA → descripción adicional).
+            sig = next((i for i, c in campos if c == "descripcion" and i not in cols), None)
+            if sig is not None:
+                cols[sig] = "descripcion"
     return cols
 
 
