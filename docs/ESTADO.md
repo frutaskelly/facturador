@@ -1,4 +1,4 @@
-# Estado del proyecto — 31/08/2026 (actualizado tras el wrap-all nocturno: PRs #56, #59, #60 y #61)
+# Estado del proyecto — 31/08/2026 (actualizado tras los PRs #62 y #64)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,7 +7,7 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` — el commit de este archivo, sobre `31df063` (#59) — igual que `origin/main` |
+| Rama base | `main` — el commit de este archivo, sobre `0e67b05` (#64) — igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
 | Worktrees | 3 activos + 1 bloqueado: `listaprecios-a35db8` (embarcado por #61, se poda al cerrar su sesión), `subida-productos-102286` y `bandeja-filtros` (sesiones NUEVAS abiertas durante el wrap — no tocar), y `new-session-7acb50` (rama `claude/estado-cierre-31ago`: conflicta con este ESTADO y su contenido ya está incorporado aquí — ver nota abajo) |
@@ -32,6 +32,17 @@ contenido dentro de la imagen.
 **La puerta de `deploy.sh` bloquea si el checkout no coincide con GitHub** — incluidos archivos
 sin rastrear. Por eso este `docs/ESTADO.md` va commiteado: suelto, detiene cada deploy. Nunca
 usar `FORCE=1` para saltarla: publica el trabajo a medias de otra sesión.
+
+## Lo que entró después del wrap-all (PRs #62 y #64)
+
+**La bandeja se filtra encadenada y se busca de verdad (#64).** Buscador al servidor (folio,
+remitente, archivo, punto de entrega y OBSERVACIONES del documento — que además salen en su
+propia columna), y filtro «Grupo de origen» que cubre los dos mundos: los grupos de WhatsApp
+(por jid) y lo que entra por la conexión de Smart Supply sin jid, cuyo origen es el remitente
+(«EHMO villahermosa» — 49 de las 57 pendientes de hoy). `GET /oc-recibidas/grupos` enseña ambos
+con SUS clientes y los filtros se encadenan: origen → clientes/proyectos, cliente → proyectos.
+
+**La importación de productos encuentra el encabezado aunque no esté en la fila 1 (#62).**
 
 ## Lo que entró en el wrap-all nocturno (PRs #56, #59, #60 y #61)
 
