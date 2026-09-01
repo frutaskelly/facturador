@@ -1,4 +1,4 @@
-# Estado del proyecto — 01/09/2026 (noche: `2a8b29f` en vivo — Match IA editable y medio kilo con precio)
+# Estado del proyecto — 01/09/2026 (cierre: `7b6e6ca` en vivo — la tabla y el menú caben en la pantalla)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,23 +7,67 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` — el commit de este archivo, sobre `2a8b29f` (Match IA + tramos de precio) — igual que `origin/main` salvo este commit de docs |
+| Rama base | `main` en `7b6e6ca`, igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
-| Working tree | limpio en el padre y en la worktree |
-| Worktrees | Solo la de esta sesión (`elastic-morse`, en `main`, limpia). El cierre de la noche removió las 4 restantes y podó **9 ramas locales** ya fusionadas — las de `catálogo-multicliente` (#34) y `vocabulario` (#74) verificadas por `headRefOid`, no por conteo de commits |
-| PRs abiertos | ninguno (#78 por squash; `2a8b29f` entró por fast-forward directo) |
-| Migración head | `0063_export_pedido_rastro`, sin cambios: ni #78 ni `2a8b29f` traen migración |
+| Working tree | limpio en el padre |
+| Worktrees | Dos vivas: la de esta sesión (`remisiones-table-layout`, ya fusionada) y **`facturador-migration-proposal`, que tiene trabajo sin commitear** (ver Pendientes 7). El cierre removió `admiring-aryabhata` y `elastic-morse`, ambas fusionadas y limpias, y podó sus dos ramas |
+| PRs abiertos | ninguno — #79 (docs) y #80 (tabla + menú) fusionados en este cierre |
+| Migración head | `0063_export_pedido_rastro`, sin cambios: el trabajo de hoy es sólo frontend |
 
 `Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
 
+**El push directo a `main` lo bloquea el clasificador de permisos.** El camino que sí funciona
+es `gh pr create --base main` y luego `gh pr merge N --merge`.
+
 ## Deploy
 
-**En vivo en https://facturador.mx y al día con `2a8b29f`** (noche del 01-sep, tercer deploy).
-`./deploy.sh` reconstruyó las tres imágenes y los cinco contenedores quedaron sanos. Verificado
-contra los dominios reales: `facturador.mx` 200, `api.facturador.mx/health` 200,
-`admin.facturador.mx` 200 y `app.facturador.mx` 307 (redirige a login, que es lo correcto).
-Sin migración nueva que aplicar. Deploys previos del día: `ff728f7` (folio de pedido),
-`6d22c4b` (vocabulario de alias), `1d5e5d0`, `7f02ce9` (rediseño de plazas) y `7a9c689`.
+**En vivo en https://facturador.mx y al día con `7b6e6ca`.** `./deploy.sh` reconstruyó frontend
+y backend (la imagen de landing se reusó de caché: su contexto no cambió) y los cinco
+contenedores quedaron sanos. Verificado contra los dominios reales: `facturador.mx` 200,
+`api.facturador.mx/health` 200, `admin.facturador.mx` 200 y `app.facturador.mx` 307 (redirige a
+login, que es lo correcto). Sin migración nueva que aplicar. Los cinco contenedores se
+construyen desde este checkout, ninguna worktree respalda el deploy.
+
+## La tabla y el menú caben en la pantalla (`7b6e6ca`, PR #80)
+
+Dos quejas del dueño sobre la misma causa: no cabía nada en la pantalla.
+
+**La tabla de remisiones pedía 1672 px en una laptop de 1280.** Quedaban 682 px (41 %) detrás
+del scroll horizontal y lo primero que se perdía era la columna de Opciones: para tocar un icono
+había que irse a la derecha en cada renglón. La `DataTable` compartida gana tres cosas que
+heredan **las 18 tablas** del app (todas pasan `actions`): `stickyActions` deja Opciones pegada
+al borde derecho; `maxInlineActions` (2 por omisión) muestra dos iconos sueltos y manda el resto
+a un menú ⋮ por fila —de 217 px a 110—; y `Column.truncate` / `Column.hiddenByDefault` permiten
+columnas elásticas de un renglón y columnas que arrancan ocultas pero siguen en el menú
+«Columnas» y en el CSV. El padding de celda bajó de 16 a 12 px: 72 px recuperados en una tabla
+de 9 columnas. Remisiones además agrupa 13 columnas en 6 y ahora pide 990 px: cabe completa.
+
+**El menú fijo de 240 px se llevaba la cuarta parte del ancho** y, con 29 items, tampoco cabía a
+lo alto: pedía 1256 px contra 738 disponibles, así que Ajustes quedaba bajo el pliegue. Se midió
+la opción obvia —dejar sólo los iconos— y **empeora**: los 29 siguen apilados y piden 1331 px.
+Lo que entró se contrae a 64 px con los favoritos como iconos siempre visibles (con ⭐ y tooltip
+`Sección · Etiqueta`, que es lo que desambigua los iconos repetidos: hay dos `Building2` y dos
+`Store`) sobre un riel de secciones anclado que abre un panel con las etiquetas completas y su
+estrella. El contenido pasa de 992 a 1168 px y el menú cabe entero por primera vez.
+
+`NAV` se reagrupó en **seis secciones**, cada una con su icono y nombre corto dentro del propio
+modelo —en un mapa aparte, una sección nueva se quedaría sin botón y desaparecería para quien
+tenga el menú contraído—: `General` (dashboard, OC, remisiones, facturas, cobranza), `Catálogo`,
+`Compras`, `Extras` (POS, inventario, cotizador, conversiones), `Configuraciones` (precios,
+impuestos, series, POS de ajustes) y `Ajustes` (empresas, usuarios, roles, correo, conexiones,
+diseño). La regla: **Configuraciones = cómo se cobra y cómo se numera; Ajustes = quién entra y
+con qué se conecta.** Eso separa de paso los dos «Punto de venta» que antes se confundían.
+
+Tres trampas que costaron y conviene no repetir: `Node.contains(e.target)` **lanza** cuando el
+scroll viene de `window`/`document` (no son Node) y mata el handler en silencio; el
+`stopPropagation()` de un handler de React corre **después** de un listener puesto en `document`
+—React engancha en la raíz—, así que el panel se cerraba en el `mousedown` antes de que el clic
+llegara a la estrella; y cualquier lista que salga de `NAV` crudo le enseña las 29 pantallas a un
+capturista, así que todo deriva de un `navVisible` filtrado con `can`/`canAny`.
+
+**Sin verificación visual contra datos reales**: se revisó con mediciones del DOM sobre un banco
+de pruebas con datos falsos (ya eliminado), incluido un usuario capturista para comprobar el
+recorte por permisos. Nadie ha visto `/remisiones` con sesión iniciada. **Conviene mirarlo.**
 
 ## Match IA editable y medio kilo con precio (`2a8b29f`)
 
@@ -321,6 +365,9 @@ podarla.
 
 ## Pendientes
 
+0. **Mirar la tabla y el menú con datos reales.** Todo el trabajo de `7b6e6ca` se verificó con
+   mediciones sobre un banco de pruebas, nunca con sesión iniciada. Recargar con Ctrl+Shift+R y
+   revisar sobre todo la columna Cliente de remisiones con los nombres largos de verdad.
 1. **15 textos de producto sin cruzar** (eran 51; el 31-ago se resolvieron 34 con las facturas
    del SAE, el historial de cada cliente y el catálogo INVE — 35 acciones: alias aprendidos,
    9 productos nuevos con su código SAE, 3 duplicados detectados y fusionados). Los 15 restantes
@@ -343,6 +390,13 @@ podarla.
    dueño, 31-ago): se retoma en otra sesión, en otra cuenta. El plan completo vive en
    `PLAN-onboarding-clientes-sae.md` (Etapas A–E); los grupos de WhatsApp ya están configurados
    en `activo: false`, listos para encender.
+7. **`facturador-migration-proposal` tiene trabajo sin commitear**: `PLAN-retiro-master-ordenes.md`
+   (248 líneas, propuesta del 1-sep para retirar el Master de órdenes). El cierre **no lo tocó**
+   a propósito — es de otra sesión y no estaba revisado. Su worktree sigue viva en
+   `.claude/worktrees/facturador-migration-proposal-c1faa9`. Decidir si se commitea o se descarta.
+8. **Decisiones abiertas del menú nuevo**: si los favoritos deben seguir «mudándose» de su
+   sección al marcarlos (regla del 28-ago) ahora que viven dentro de un panel, y si conviene
+   distinguir los iconos de Remisiones y Facturas, que son casi la misma hoja de papel.
 5. **Extender `SERIES_POR_EMPRESA` del conector a las empresas 04 y 05** — diferido junto con
    el onboarding (misma decisión); hoy solo cubre 02 y 03.
 6. ~~Resolver precios por lote al abrir una orden~~ — **RESUELTO** el 31-ago (PR #57):
