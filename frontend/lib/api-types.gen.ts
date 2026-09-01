@@ -2571,6 +2571,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/alias/{alias_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Borrar Alias
+         * @description Quita el texto del vocabulario. Se borra de verdad: un alias no es un
+         *     documento, y dejarlo en `deleted_at` obligaría a filtrarlo en cada cruce.
+         */
+        delete: operations["borrar_alias_api_v1_productos_alias__alias_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Reapuntar Alias
+         * @description Manda ese texto a otro producto, sin cambiar su alcance.
+         */
+        patch: operations["reapuntar_alias_api_v1_productos_alias__alias_id__patch"];
+        trace?: never;
+    };
     "/api/v1/productos/catalogo-cliente-batch": {
         parameters: {
             query?: never;
@@ -3642,6 +3667,18 @@ export interface components {
             tambien_en: string[];
             /** Texto */
             texto: string;
+        };
+        /**
+         * AliasReapuntarIn
+         * @description A qué producto debe ir ese texto. El alcance NO se toca: cambiarlo
+         *     convertiría la corrección de un cliente en una regla para todos.
+         */
+        AliasReapuntarIn: {
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
         };
         /** AlmacenCreate */
         AlmacenCreate: {
@@ -14842,6 +14879,72 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    borrar_alias_api_v1_productos_alias__alias_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                alias_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reapuntar_alias_api_v1_productos_alias__alias_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                alias_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AliasReapuntarIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

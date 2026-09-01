@@ -169,6 +169,12 @@ class AliasOut(BaseModel):
     created_at: datetime
 
 
+class AliasReapuntarIn(BaseModel):
+    """A qué producto debe ir ese texto. El alcance NO se toca: cambiarlo
+    convertiría la corrección de un cliente en una regla para todos."""
+    producto_id: uuid.UUID
+
+
 class AliasIn(BaseModel):
     texto: str = Field(min_length=1, max_length=254)
     producto_id: uuid.UUID

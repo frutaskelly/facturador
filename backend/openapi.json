@@ -212,6 +212,21 @@
     "title": "AliasOut",
     "type": "object"
    },
+   "AliasReapuntarIn": {
+    "description": "A qué producto debe ir ese texto. El alcance NO se toca: cambiarlo\nconvertiría la corrección de un cliente en una regla para todos.",
+    "properties": {
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "producto_id"
+    ],
+    "title": "AliasReapuntarIn",
+    "type": "object"
+   },
    "AlmacenCreate": {
     "properties": {
      "calle": {
@@ -28189,6 +28204,130 @@
      }
     ],
     "summary": "Crear Alias",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/alias/{alias_id}": {
+   "delete": {
+    "description": "Quita el texto del vocabulario. Se borra de verdad: un alias no es un\ndocumento, y dejarlo en `deleted_at` obligaría a filtrarlo en cada cruce.",
+    "operationId": "borrar_alias_api_v1_productos_alias__alias_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "alias_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Alias Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Borrar Alias",
+    "tags": [
+     "productos"
+    ]
+   },
+   "patch": {
+    "description": "Manda ese texto a otro producto, sin cambiar su alcance.",
+    "operationId": "reapuntar_alias_api_v1_productos_alias__alias_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "alias_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Alias Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AliasReapuntarIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Reapuntar Alias",
     "tags": [
      "productos"
     ]

@@ -224,6 +224,47 @@ def test_la_ficha_del_producto_enseña_sus_alias_y_marca_los_ambiguos(client, en
     assert del_cliente["tambien_en"] == ["CHILE SERRANO"]
 
 
+def test_el_capturista_corrige_el_alias_de_su_cliente_pero_no_el_global(client, env, auth_as):
+    """Equivocarse en el vocabulario de UN cliente solo daña a ese cliente y es
+    el flujo natural de captura; el global lo heredan todos —incluido el cliente
+    nuevo sin vocabulario propio— así que moverlo pide gestión de productos."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "chile de la casa", "producto_id": env["serrano"]})
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "chile de la casa", "producto_id": env["serrano"],
+                      "cliente_id": env["ehmo"]})
+    ids = {(a["cliente_id"] or "global"): a["id"]
+           for a in client.get(f"/api/v1/productos/{env['serrano']}/alias", headers=h).json()
+           if a["texto"] == "chile de la casa"}
+
+    auth_as(env["capturista"]); hc = _hdr(env["capturista"])
+    # El suyo sí: el texto de EHMO pasa a apuntar al jalapeño.
+    r = client.patch(f"/api/v1/productos/alias/{ids[env['ehmo']]}", headers=hc,
+                     json={"producto_id": env["jalapeno"]})
+    assert r.status_code == 204
+    # El global no.
+    r = client.patch(f"/api/v1/productos/alias/{ids['global']}", headers=hc,
+                     json={"producto_id": env["jalapeno"]})
+    assert r.status_code == 403
+    assert client.delete(f"/api/v1/productos/alias/{ids['global']}", headers=hc).status_code == 403
+
+    auth_as(env["admin"])
+    destinos = {a["cliente_id"]: a["texto"]
+                for a in client.get(f"/api/v1/productos/{env['jalapeno']}/alias", headers=h).json()}
+    assert destinos.get(env["ehmo"]) == "chile de la casa"   # se movió el del cliente
+    # El global siguió donde estaba, intacto.
+    globales = [a for a in client.get(f"/api/v1/productos/{env['serrano']}/alias", headers=h).json()
+                if a["texto"] == "chile de la casa" and a["cliente_id"] is None]
+    assert len(globales) == 1
+
+    # Y quien sí gestiona productos puede quitarlo.
+    assert client.delete(f"/api/v1/productos/alias/{globales[0]['id']}", headers=h).status_code == 204
+    restantes = [a for a in client.get(f"/api/v1/productos/{env['serrano']}/alias", headers=h).json()
+                 if a["texto"] == "chile de la casa"]
+    assert restantes == []
+
+
 def test_el_cruce_de_la_bandeja_prefiere_el_vocabulario_del_cliente(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
     client.post("/api/v1/productos/alias", headers=h,

@@ -40,6 +40,7 @@ from ...schemas.producto import (
     PresentacionCreate,
     AliasIn,
     AliasOut,
+    AliasReapuntarIn,
     CandidatoOut,
     CatalogoClienteBatchIn,
     CatalogoClienteBatchOut,
@@ -386,6 +387,54 @@ def crear_alias(
         )
     aprender_alias(db, ctx.tenant_id, payload.texto, payload.producto_id, origen="MANUAL", user_id=ctx.user_id)
     return {"ok": True}
+
+
+def _alias_editable(db: Session, alias_id: UUID, ctx: AuthContext) -> ProductoAlias:
+    """El alias, si esta persona puede tocarlo.
+
+    Misma línea que `crear_alias` (decisión 2026-07-29): el vocabulario de UN
+    cliente lo corrige quien captura, porque equivocarse ahí solo afecta a ese
+    cliente y es el flujo natural del día. El GLOBAL lo heredan todos —incluido
+    el cliente nuevo que todavía no tiene vocabulario propio— así que moverlo
+    exige gestión de productos.
+    """
+    alias = get_or_404(db, ProductoAlias, alias_id)
+    if alias.cliente_id is None and _WRITE not in ctx.permissions and not ctx.is_owner:
+        raise HTTPException(
+            status_code=403,
+            detail=("Ese texto lo usan todos los clientes; cambiarlo requiere el "
+                    "permiso de gestión de productos"),
+        )
+    return alias
+
+
+@router.patch("/alias/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
+def reapuntar_alias(
+    alias_id: UUID,
+    payload: AliasReapuntarIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Manda ese texto a otro producto, sin cambiar su alcance."""
+    alias = _alias_editable(db, alias_id, ctx)
+    ensure_fk(db, Producto, payload.producto_id, "producto_id")
+    alias.producto_id = payload.producto_id
+    alias.origen = "MANUAL"        # lo decidió una persona: deja de ser importado
+    db.flush()
+    return None
+
+
+@router.delete("/alias/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
+def borrar_alias(
+    alias_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Quita el texto del vocabulario. Se borra de verdad: un alias no es un
+    documento, y dejarlo en `deleted_at` obligaría a filtrarlo en cada cruce."""
+    db.delete(_alias_editable(db, alias_id, ctx))
+    db.flush()
+    return None
 
 
 # ─── Importación masiva (plantilla o lista de precios del cliente) ───────────
