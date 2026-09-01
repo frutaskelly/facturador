@@ -65,6 +65,7 @@ from ...schemas.producto import (
     SugerirCategoriaBatchIn,
     SugerirEsquemaBatchIn,
     SugerirSatBatchIn,
+    VocabularioOut,
 )
 from ...schemas.common import Page
 from ...services.categoria_codigo import slugify_codigo
@@ -389,6 +390,74 @@ def crear_alias(
     return {"ok": True}
 
 
+@router.get("/vocabulario", response_model=Page[VocabularioOut])
+def vocabulario(
+    q: str = Query("", max_length=120),
+    cliente_id: Optional[UUID] = None,
+    solo_global: bool = False,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """La tabla puente: qué escribe cada cliente = qué producto es.
+
+    Declarada ANTES de `/{producto_id}` para no capturarse como UUID.
+
+    `q` busca en los dos lados a la vez —el texto del cliente y el nombre o SKU
+    del producto— porque la pregunta real es «enséñame todo lo que tenga que ver
+    con limón», y quien pregunta no sabe de qué lado está lo que busca.
+    """
+    base = (
+        db.query(ProductoAlias, Producto, Cliente.legal_name, Sucursal.nombre)
+        .join(Producto, Producto.id == ProductoAlias.producto_id)
+        .outerjoin(Cliente, Cliente.id == ProductoAlias.cliente_id)
+        .outerjoin(Sucursal, Sucursal.id == ProductoAlias.sucursal_id)
+        .filter(Producto.deleted_at.is_(None))
+    )
+    if solo_global:
+        base = base.filter(ProductoAlias.cliente_id.is_(None))
+    elif cliente_id is not None:
+        base = base.filter(ProductoAlias.cliente_id == cliente_id)
+    termino = (q or "").strip()
+    if termino:
+        like = f"%{normalizar(termino)}%"
+        base = base.filter(
+            ProductoAlias.alias_normalizado.ilike(like)
+            | Producto.nombre.ilike(f"%{termino}%")
+            | Producto.sku.ilike(f"%{termino}%")
+        )
+    total = base.order_by(None).count()
+    filas = (
+        base.order_by(Producto.nombre, ProductoAlias.cliente_id.nullsfirst(), ProductoAlias.alias)
+        .offset(offset).limit(limit).all()
+    )
+    # ¿Cuáles de estos textos llevan a más de un producto? Una consulta para todos.
+    normas = {a.alias_normalizado for a, _, _, _ in filas}
+    ambiguos = set()
+    if normas:
+        ambiguos = {
+            n for (n,) in db.query(ProductoAlias.alias_normalizado)
+            .filter(ProductoAlias.alias_normalizado.in_(normas))
+            .group_by(ProductoAlias.alias_normalizado)
+            .having(func.count(func.distinct(ProductoAlias.producto_id)) > 1)
+            .all()
+        }
+    return Page[VocabularioOut](
+        items=[
+            VocabularioOut(
+                id=a.id, texto=a.alias, origen=a.origen,
+                producto_id=p.id, producto_sku=p.sku, producto_nombre=p.nombre,
+                cliente_id=a.cliente_id, cliente_nombre=cli,
+                sucursal_id=a.sucursal_id, sucursal_nombre=suc,
+                ambiguo=a.alias_normalizado in ambiguos,
+            )
+            for a, p, cli, suc in filas
+        ],
+        total=total, limit=limit, offset=offset,
+    )
+
+
 def _alias_editable(db: Session, alias_id: UUID, ctx: AuthContext) -> ProductoAlias:
     """El alias, si esta persona puede tocarlo.
 
@@ -415,12 +484,21 @@ def reapuntar_alias(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    """Manda ese texto a otro producto, sin cambiar su alcance."""
+    """Corrige el renglón: el texto, el producto, o los dos."""
     alias = _alias_editable(db, alias_id, ctx)
-    ensure_fk(db, Producto, payload.producto_id, "producto_id")
-    alias.producto_id = payload.producto_id
+    if payload.producto_id is not None:
+        ensure_fk(db, Producto, payload.producto_id, "producto_id")
+        alias.producto_id = payload.producto_id
+    if payload.texto is not None:
+        norm = normalizar(payload.texto)[:254]
+        if not norm:
+            raise HTTPException(status_code=422, detail="El texto no puede quedar vacío")
+        alias.alias = payload.texto.strip()[:254]
+        alias.alias_normalizado = norm
     alias.origen = "MANUAL"        # lo decidió una persona: deja de ser importado
-    db.flush()
+    # El índice único es (tenant, cliente, sucursal, texto normalizado): al
+    # reescribir el texto se puede chocar con otro renglón del MISMO alcance.
+    flush_or_conflict(db, detail="Ese texto ya está en el vocabulario de ese alcance")
     return None
 
 

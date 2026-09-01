@@ -213,17 +213,34 @@
     "type": "object"
    },
    "AliasReapuntarIn": {
-    "description": "A qué producto debe ir ese texto. El alcance NO se toca: cambiarlo\nconvertiría la corrección de un cliente en una regla para todos.",
+    "description": "Corrige una fila del vocabulario: el texto, el producto, o los dos.\n\nEl ALCANCE no se toca aquí: pasar el alias de un cliente al global\nconvertiría su corrección en una regla para todos, y esa es otra decisión\n(con otro permiso). Para eso se quita y se vuelve a escribir.",
     "properties": {
      "producto_id": {
-      "format": "uuid",
-      "title": "Producto Id",
-      "type": "string"
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
+     },
+     "texto": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Texto"
      }
     },
-    "required": [
-     "producto_id"
-    ],
     "title": "AliasReapuntarIn",
     "type": "object"
    },
@@ -10616,6 +10633,37 @@
     "title": "Page[SucursalOut]",
     "type": "object"
    },
+   "Page_VocabularioOut_": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/VocabularioOut"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "offset": {
+      "title": "Offset",
+      "type": "integer"
+     },
+     "total": {
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "items",
+     "total",
+     "limit",
+     "offset"
+    ],
+    "title": "Page[VocabularioOut]",
+    "type": "object"
+   },
    "PagoIn": {
     "properties": {
      "forma": {
@@ -16017,6 +16065,98 @@
      "type"
     ],
     "title": "ValidationError",
+    "type": "object"
+   },
+   "VocabularioOut": {
+    "description": "Una fila de la tabla puente: «lo que escribe el cliente» = «qué es».",
+    "properties": {
+     "ambiguo": {
+      "default": false,
+      "title": "Ambiguo",
+      "type": "boolean"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "cliente_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nombre"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     },
+     "producto_nombre": {
+      "title": "Producto Nombre",
+      "type": "string"
+     },
+     "producto_sku": {
+      "title": "Producto Sku",
+      "type": "string"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     },
+     "sucursal_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Nombre"
+     },
+     "texto": {
+      "title": "Texto",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "texto",
+     "producto_id",
+     "producto_sku",
+     "producto_nombre",
+     "origen"
+    ],
+    "title": "VocabularioOut",
     "type": "object"
    }
   },
@@ -28267,7 +28407,7 @@
     ]
    },
    "patch": {
-    "description": "Manda ese texto a otro producto, sin cambiar su alcance.",
+    "description": "Corrige el renglón: el texto, el producto, o los dos.",
     "operationId": "reapuntar_alias_api_v1_productos_alias__alias_id__patch",
     "parameters": [
      {
@@ -28991,6 +29131,122 @@
      }
     ],
     "summary": "Sugerir Sat Batch",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/vocabulario": {
+   "get": {
+    "description": "La tabla puente: qué escribe cada cliente = qué producto es.\n\nDeclarada ANTES de `/{producto_id}` para no capturarse como UUID.\n\n`q` busca en los dos lados a la vez —el texto del cliente y el nombre o SKU\ndel producto— porque la pregunta real es «enséñame todo lo que tenga que ver\ncon limón», y quien pregunta no sabe de qué lado está lo que busca.",
+    "operationId": "vocabulario_api_v1_productos_vocabulario_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "default": "",
+       "maxLength": 120,
+       "title": "Q",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "solo_global",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Solo Global",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 100,
+       "maximum": 500,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Page_VocabularioOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Vocabulario",
     "tags": [
      "productos"
     ]

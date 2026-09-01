@@ -2591,7 +2591,7 @@ export interface paths {
         head?: never;
         /**
          * Reapuntar Alias
-         * @description Manda ese texto a otro producto, sin cambiar su alcance.
+         * @description Corrige el renglón: el texto, el producto, o los dos.
          */
         patch: operations["reapuntar_alias_api_v1_productos_alias__alias_id__patch"];
         trace?: never;
@@ -2823,6 +2823,32 @@ export interface paths {
          *     gana el mejor candidato por texto; sin candidatos, la genérica 01010101).
          */
         post: operations["sugerir_sat_batch_api_v1_productos_sugerir_sat_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/productos/vocabulario": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Vocabulario
+         * @description La tabla puente: qué escribe cada cliente = qué producto es.
+         *
+         *     Declarada ANTES de `/{producto_id}` para no capturarse como UUID.
+         *
+         *     `q` busca en los dos lados a la vez —el texto del cliente y el nombre o SKU
+         *     del producto— porque la pregunta real es «enséñame todo lo que tenga que ver
+         *     con limón», y quien pregunta no sabe de qué lado está lo que busca.
+         */
+        get: operations["vocabulario_api_v1_productos_vocabulario_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3670,15 +3696,17 @@ export interface components {
         };
         /**
          * AliasReapuntarIn
-         * @description A qué producto debe ir ese texto. El alcance NO se toca: cambiarlo
-         *     convertiría la corrección de un cliente en una regla para todos.
+         * @description Corrige una fila del vocabulario: el texto, el producto, o los dos.
+         *
+         *     El ALCANCE no se toca aquí: pasar el alias de un cliente al global
+         *     convertiría su corrección en una regla para todos, y esa es otra decisión
+         *     (con otro permiso). Para eso se quita y se vuelve a escribir.
          */
         AliasReapuntarIn: {
-            /**
-             * Producto Id
-             * Format: uuid
-             */
-            producto_id: string;
+            /** Producto Id */
+            producto_id?: string | null;
+            /** Texto */
+            texto?: string | null;
         };
         /** AlmacenCreate */
         AlmacenCreate: {
@@ -7367,6 +7395,17 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** Page[VocabularioOut] */
+        Page_VocabularioOut_: {
+            /** Items */
+            items: components["schemas"]["VocabularioOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
         /** PagoIn */
         PagoIn: {
             /** Forma */
@@ -9141,6 +9180,43 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /**
+         * VocabularioOut
+         * @description Una fila de la tabla puente: «lo que escribe el cliente» = «qué es».
+         */
+        VocabularioOut: {
+            /**
+             * Ambiguo
+             * @default false
+             */
+            ambiguo: boolean;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Origen */
+            origen: string;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Producto Nombre */
+            producto_nombre: string;
+            /** Producto Sku */
+            producto_sku: string;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
+            /** Texto */
+            texto: string;
         };
     };
     responses: never;
@@ -15288,6 +15364,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SugerenciaSatOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    vocabulario_api_v1_productos_vocabulario_get: {
+        parameters: {
+            query?: {
+                q?: string;
+                cliente_id?: string | null;
+                solo_global?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_VocabularioOut_"];
                 };
             };
             /** @description Validation Error */

@@ -224,6 +224,46 @@ def test_la_ficha_del_producto_enseña_sus_alias_y_marca_los_ambiguos(client, en
     assert del_cliente["tambien_en"] == ["CHILE SERRANO"]
 
 
+def test_la_tabla_puente_busca_por_los_dos_lados_y_el_texto_se_reescribe(client, env, auth_as):
+    """El vocabulario se consulta como «enséñame todo lo que tenga que ver con
+    serrano», y quien pregunta no sabe si eso está del lado del texto o del
+    producto — así que `q` busca en los dos."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "chile de arbol seco", "producto_id": env["serrano"]})
+
+    # Por el nombre del PRODUCTO, aunque el texto no se le parezca.
+    r = client.get("/api/v1/productos/vocabulario?q=serrano", headers=h)
+    assert r.status_code == 200
+    textos = {i["texto"]: i for i in r.json()["items"]}
+    assert "chile de arbol seco" in textos
+    fila = textos["chile de arbol seco"]
+    assert fila["producto_nombre"] == "CHILE SERRANO"
+    assert fila["cliente_id"] is None
+
+    # Y por el TEXTO del cliente.
+    r = client.get("/api/v1/productos/vocabulario?q=arbol", headers=h)
+    assert any(i["texto"] == "chile de arbol seco" for i in r.json()["items"])
+
+    # Reescribir el texto: el cruce empieza a reconocer la forma corregida.
+    r = client.patch(f"/api/v1/productos/alias/{fila['id']}", headers=h,
+                     json={"texto": "chile de árbol"})
+    assert r.status_code == 204
+    r = client.get("/api/v1/productos/vocabulario?q=arbol", headers=h)
+    items = {i["texto"] for i in r.json()["items"]}
+    assert "chile de árbol" in items and "chile de arbol seco" not in items
+
+    # Y no se puede duplicar un texto dentro del mismo alcance.
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "chile del arbolito", "producto_id": env["jalapeno"]})
+    otro = next(i for i in client.get("/api/v1/productos/vocabulario?q=arbolito",
+                                      headers=h).json()["items"]
+                if i["texto"] == "chile del arbolito")
+    r = client.patch(f"/api/v1/productos/alias/{otro['id']}", headers=h,
+                     json={"texto": "chile de árbol"})
+    assert r.status_code == 409
+
+
 def test_el_capturista_corrige_el_alias_de_su_cliente_pero_no_el_global(client, env, auth_as):
     """Equivocarse en el vocabulario de UN cliente solo daña a ese cliente y es
     el flujo natural de captura; el global lo heredan todos —incluido el cliente

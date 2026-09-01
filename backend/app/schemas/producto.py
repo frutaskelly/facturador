@@ -170,9 +170,30 @@ class AliasOut(BaseModel):
 
 
 class AliasReapuntarIn(BaseModel):
-    """A qué producto debe ir ese texto. El alcance NO se toca: cambiarlo
-    convertiría la corrección de un cliente en una regla para todos."""
+    """Corrige una fila del vocabulario: el texto, el producto, o los dos.
+
+    El ALCANCE no se toca aquí: pasar el alias de un cliente al global
+    convertiría su corrección en una regla para todos, y esa es otra decisión
+    (con otro permiso). Para eso se quita y se vuelve a escribir.
+    """
+    texto: Optional[str] = Field(default=None, min_length=1, max_length=254)
+    producto_id: Optional[uuid.UUID] = None
+
+
+class VocabularioOut(BaseModel):
+    """Una fila de la tabla puente: «lo que escribe el cliente» = «qué es»."""
+    id: uuid.UUID
+    texto: str
     producto_id: uuid.UUID
+    producto_sku: str
+    producto_nombre: str
+    cliente_id: Optional[uuid.UUID] = None
+    cliente_nombre: Optional[str] = None
+    sucursal_id: Optional[uuid.UUID] = None
+    sucursal_nombre: Optional[str] = None
+    origen: str
+    # El mismo texto lleva a otro producto en otro alcance.
+    ambiguo: bool = False
 
 
 class AliasIn(BaseModel):
