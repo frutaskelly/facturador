@@ -96,7 +96,7 @@ def test_las_categorias_cubren_los_departamentos_reales():
     ideas: fruta/verdura, abarrote, lácteos, pan, proteína, congelados,
     plásticos y limpieza."""
     nombres = {n.lower() for n, _ in CATEGORIAS_DEFAULT}
-    for esperado in ("frutas", "verduras", "abarrotes", "lácteos", "carnes",
+    for esperado in ("frutas y verduras", "abarrotes", "lácteos", "carnes",
                      "panadería", "congelados", "limpieza", "desechables"):
         assert esperado in nombres, esperado
 

@@ -111,8 +111,7 @@ def sembrar_esquemas_impuesto(db: Session, tenant_id) -> list[EsquemaImpuesto]:
 # Es un ARRANQUE, no un corsé: se editan, se borran y el catálogo sugerido
 # sigue ofreciendo el resto (enlatados, granos, especias, aceites, papelería).
 CATEGORIAS_DEFAULT: list[tuple[str, str]] = [
-    ("Frutas", "Fruta fresca de temporada"),
-    ("Verduras", "Verdura y hortaliza fresca"),
+    ("Frutas y Verduras", "Fruta, verdura y hortaliza fresca de temporada"),
     ("Abarrotes", "Despensa y productos secos"),
     ("Lácteos", "Leche, queso, crema y yogurt"),
     ("Carnes", "Res, cerdo, pollo y pavo"),
