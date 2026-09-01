@@ -44,6 +44,7 @@ from ...schemas.empresa import (
 from ...services.facturama import FacturamaClient, FacturamaError, csd_public_fields
 from ...services.catalogos_default import (
     categoria_sin_categorizar,
+    sembrar_categorias,
     sembrar_esquemas_impuesto,
 )
 from ...services.csd_validador import validar_csd
@@ -289,6 +290,7 @@ def crear_empresa_hija(
     # La categoría por defecto: los productos que se den de alta sin elegir una
     # caen aquí, y así se pueden listar y repartir en vez de ser un hueco.
     categoria_sin_categorizar(db, hija.id)
+    sembrar_categorias(db, hija.id)
     try:
         db.commit()
     except IntegrityError:
