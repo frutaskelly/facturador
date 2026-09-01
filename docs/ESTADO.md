@@ -1,4 +1,4 @@
-# Estado del proyecto — 01/09/2026 (noche: `6d22c4b` en vivo — el vocabulario de alias ya se ve y se edita)
+# Estado del proyecto — 01/09/2026 (noche: `ff728f7` en vivo — el folio del pedido lo pone el SAE)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,22 +7,49 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` — el commit de este archivo, sobre `6d22c4b` (vocabulario de alias, PR #74) — igual que `origin/main` salvo este commit de docs |
+| Rama base | `main` — el commit de este archivo, sobre `ff728f7` (folio de pedido + nombre del masivo, PR #75) — igual que `origin/main` salvo este commit de docs |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
-| Worktrees | Quedan `nifty-wright-842100` (la del vocabulario: su trabajo YA está en `main` vía squash #74, se puede podar), `remisiones-filenames-folios-3263f5` (**1 commit sin fusionar y trae migración** — cerrarla pronto para no pelear el head de Alembic) y `amazing-gould-c9fa17`, vacía |
-| PRs abiertos | ninguno (#74 fusionado por squash) |
-| Migración head | `0062_remision_por_revisar` en `main` **y aplicada a prod** (`alembic_version` verificada) |
+| Worktrees | Quedan `nifty-wright-842100` (la del vocabulario: su trabajo YA está en `main` vía squash #74, se puede podar) y `amazing-gould-c9fa17`, vacía. `remisiones-filenames-folios-3263f5` se cerró con este deploy |
+| PRs abiertos | ninguno (#74 por squash, #75 por merge) |
+| Migración head | `0063_export_pedido_rastro` en `main` **y aplicada a prod** por el deploy de la noche (cabeza única: el PR #74 no traía migración) |
 
 `Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
 
 ## Deploy
 
-**En vivo en https://facturador.mx y al día con `6d22c4b`** (noche del 01-sep). `./deploy.sh`
-reconstruyó las tres imágenes y los cinco contenedores quedaron sanos; sin migraciones nuevas
-(head sigue `0062`). Verificado por respuesta, no por fecha de imagen: `/vocabulario` contesta
-200 y `GET /api/v1/productos/vocabulario` contesta 401 (existe y pide sesión). Deploys previos
-del día: `1d5e5d0`, `7f02ce9` (rediseño de plazas) y `7a9c689` (sugerir-sat-batch).
+**En vivo en https://facturador.mx y al día con `ff728f7`** (noche del 01-sep, segundo deploy).
+`./deploy.sh` reconstruyó las tres imágenes, aplicó la **migración `0063`** a Supabase y los
+cinco contenedores quedaron sanos. Verificado por respuesta, no por fecha de imagen:
+`/health` contesta `{"status":"ok"}` y su cabecera trae
+`access-control-expose-headers: … Content-Disposition` — la línea que introdujo este deploy, así
+que el backend que corre ES el nuevo. Deploys previos del día: `6d22c4b` (vocabulario de alias),
+`1d5e5d0`, `7f02ce9` (rediseño de plazas) y `7a9c689` (sugerir-sat-batch).
+
+## El folio del pedido lo pone el SAE, y el masivo se llama como su remisión (`ff728f7`, PR #75)
+
+**El masivo de PEDIDOS escribía la OC del cliente en la columna FOLIO** (`CE-34CER-MAR`). Ahí va
+el **consecutivo de pedidos del SAE**: una sola serie por empresa (`STAND.`, `TIP_DOC='P'`),
+rellena a 10 dígitos con ceros (`0000000134`) — lo que dicen `KnowHow_Massivos_SAE.md` §2 y
+`REGLAS_PEDIDOS.md` Regla 2, y la forma con la que entraron los masivos que sí quedaron bien
+(`PEDIDO_massivo_SAE_3JUBRAN`, `_lote1_4ordenes`). Ahora el pedido recorre el mismo camino que la
+factura: el preview pide el folio inicial, **el operador lo confirma contra SAE** y cada remisión
+del lote se lleva su consecutivo. La OC pasa a su columna (`SU PEDIDO`) y sigue en la Observación,
+que es por donde concilia el resto del sistema.
+
+Como el Facturador no ve el SAE, el prellenado sale de lo que él mismo propuso:
+`export_pedido_at`/`export_pedido_folio` (**migración `0063`**) guardan el rastro como
+`<empresa>:<numero>`, **aparte** del rastro de facturas porque una misma remisión sale primero
+como pedido y después como factura — compartir columna borraría el aviso de doble export de la
+otra. De ahí salen el folio sugerido y el aviso de re-export.
+
+**El nombre del archivo** era genérico y el navegador acababa numerando copias: bajar el pedido y
+la factura de la misma remisión daba `PEDIDO_massivo_SAE (4)`. Ahora es `PEDIDO RZMAFAN9.xls` /
+`FACTURA RZMAFAN9 al 22.xls`. Eran **dos bugs encadenados**: el backend ya mandaba un nombre
+propio, pero `Content-Disposition` no estaba en `expose_headers` del CORS, así que el navegador no
+dejaba leerlo y todo download caía al nombre de respaldo.
+
+Ver el **pendiente 12**: el bot de WhatsApp sigue escribiendo la OC como folio.
 
 ## El vocabulario de alias ya se ve y se edita (`6d22c4b`, PR #74)
 
@@ -354,3 +381,11 @@ podarla.
     en el SAE a mano. Recordatorio de la regla de la casa: generar el masivo deja rastro
     (`export_sae_at`/`export_sae_folio`) y nada más; `factura_sae` lo escribe el espejo o una
     captura manual.
+12. **El bot de WhatsApp sigue poniendo la OC como folio del pedido** (01-sep, noche). El PR #75
+    arregló el masivo del Facturador, pero `cmd_massivo` en `SmartSupply/bot/sheets_push.py`
+    hace todavía lo viejo: escribe `su_pedido` en la columna FOLIO. Ahí sí hay acceso al SAE
+    —existe `_sae_sig_folio_pedido()`, que toma el mayor entre `MAX(FACTP02)+1` y
+    `FOLIOSF02.ULT_DOC+1`—, pero `cmd_massivo` no la llama. Es OTRO repo, así que se dejó fuera
+    a propósito: mientras no se alinee, los pedidos que salgan del bot y los que salgan del
+    Facturador se folian distinto. Ojo también con los cambios sin commitear que el pendiente 10
+    reporta en ese mismo archivo.
