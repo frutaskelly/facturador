@@ -22,6 +22,7 @@ from app.main import app
 from app.models import (
     Almacen,
     Cliente,
+    EsquemaImpuesto,
     ListaAsignacion,
     ListaPrecios,
     Membership,
@@ -379,17 +380,34 @@ def test_confirmar_en_bandeja_aprende_alias_y_registra_la_clave(client, env, aut
 
 # ─── alta con detector de duplicados y SKU del servidor ──────────────────────
 
+def _esquema(tenant_id) -> str:
+    """Un esquema de impuesto para el tenant: dar de alta sin él está prohibido
+    (el producto nacería sin IVA). Bajo demanda e idempotente."""
+    db = SessionLocal()
+    try:
+        esq = db.query(EsquemaImpuesto).filter(
+            EsquemaImpuesto.tenant_id == tenant_id, EsquemaImpuesto.codigo == "FIXT").first()
+        if esq is None:
+            esq = EsquemaImpuesto(tenant_id=tenant_id, codigo="FIXT", nombre="IVA 0% de prueba")
+            db.add(esq); db.commit()
+        return str(esq.id)
+    finally:
+        db.close()
+
+
 def test_alta_con_candidato_fuerte_exige_decidir(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
+    esq = _esquema(env["tenant"])
     r = client.post("/api/v1/productos", headers=h, json={
-        "nombre": "CILANTRO", "clave_sat": "50403700", "unidad_sat": "KGM"})
+        "nombre": "CILANTRO", "esquema_impuesto_id": esq,
+        "clave_sat": "50403700", "unidad_sat": "KGM"})
     assert r.status_code == 409
     detalle = r.json()["detail"]
     assert any(c["producto_id"] == env["cilantro"] for c in detalle["candidatos"])
     # A sabiendas, con forzar, sí se crea.
     r = client.post("/api/v1/productos", headers=h, json={
-        "nombre": "CILANTRO DESHIDRATADO EN FRASCO", "clave_sat": "50403700",
-        "unidad_sat": "KGM", "forzar": True})
+        "nombre": "CILANTRO DESHIDRATADO EN FRASCO", "esquema_impuesto_id": esq,
+        "clave_sat": "50403700", "unidad_sat": "KGM", "forzar": True})
     assert r.status_code == 201, r.text
 
 
@@ -474,7 +492,8 @@ def test_dos_productos_con_el_mismo_nombre_no_deciden(client, env, auth_as):
     # El duplicado que este mismo trabajo viene a evitar, pero que el catálogo
     # ya podría arrastrar: mismo nombre normalizado, otra fila.
     gemelo = client.post("/api/v1/productos", headers=h, json={
-        "nombre": "Cilantro", "clave_sat": "50403700",
+        "nombre": "Cilantro", "esquema_impuesto_id": _esquema(env["tenant"]),
+        "clave_sat": "50403700",
         "unidad_sat": "KGM", "unidad_base": "KILO",
         "presentaciones": {"KILO": 1}, "forzar": True}).json()
     lista = client.get("/api/v1/listas-precios?limit=50", headers=h).json()["items"]

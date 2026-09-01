@@ -122,6 +122,11 @@ export function CrearProductoModal({
   const [precio, setPrecio] = useState("");
   const [listas, setListas] = useState<ListaDelCliente[]>([]);
   const [listaSel, setListaSel] = useState("");
+  // Esquema de impuesto: obligatorio. Sin él el producto nace sin IVA y su
+  // CFDI sale mal — el backend lo rechaza, y por aquí se colaron 22 productos
+  // cuando este campo no existía.
+  const [esquemas, setEsquemas] = useState<{ id: string; codigo: string; nombre: string }[]>([]);
+  const [esquemaSel, setEsquemaSel] = useState("");
 
   /** Pide a la IA las claves candidatas para `nombre`. */
   const sugerirSat = useCallback(
@@ -173,6 +178,22 @@ export function CrearProductoModal({
     if (nombreInicial.trim()) void sugerirSat(nombreInicial);
   }, [open, nombreInicial, unidadBaseInicial, sugerirSat]);
 
+  // Los esquemas de impuesto del negocio, para elegir el del producto nuevo.
+  useEffect(() => {
+    if (!open) return;
+    apiFetch<{ items: { id: string; codigo: string; nombre: string; activo: boolean }[] }>(
+      "/api/v1/esquemas-impuesto?limit=200"
+    )
+      .then((r) => {
+        const act = r.items.filter((e) => e.activo);
+        setEsquemas(act);
+        // No se preselecciona ninguno: elegir el esquema es una decisión fiscal
+        // y un default invisible es justo cómo se cuela el equivocado.
+        setEsquemaSel("");
+      })
+      .catch(() => setEsquemas([]));
+  }, [open]);
+
   // Las listas del cliente, para ofrecer dónde guardar el precio.
   useEffect(() => {
     if (!open || !clienteId) { setListas([]); return; }
@@ -222,12 +243,14 @@ export function CrearProductoModal({
   async function crearProducto(forzar = false) {
     if (cSaving) return;
     if (!cNombre.trim()) { toast.error("Escribe el nombre del producto"); return; }
+    if (!esquemaSel) { toast.error("Elige el esquema de impuesto"); return; }
     setCSaving(true);
     try {
       const prod = await apiFetch<ProductoCreado>("/api/v1/productos", {
         method: "POST",
         body: JSON.stringify({
           nombre: cNombre.trim(),
+          esquema_impuesto_id: esquemaSel,
           clave_sat: cClaveSat.trim() || "01010101",
           unidad_sat: cUnidadSat,
           unidad_base: cUnidadBase,
@@ -348,6 +371,29 @@ export function CrearProductoModal({
 
         <div className="sm:col-span-2">
           <Field
+            label="Esquema de impuesto"
+            required
+            hint={
+              esquemas.length === 0
+                ? "No hay esquemas dados de alta — créalos en Catálogo › Esquemas de impuesto"
+                : "Define el IVA/IEPS del producto. Sin él su factura saldría mal."
+            }
+          >
+            <Select
+              value={esquemaSel}
+              onChange={(e) => setEsquemaSel(e.target.value)}
+              disabled={esquemas.length === 0}
+            >
+              <option value="">Elige uno…</option>
+              {esquemas.map((e) => (
+                <option key={e.id} value={e.id}>{e.codigo} — {e.nombre}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+
+        <div className="sm:col-span-2">
+          <Field
             label="Clave SAT"
             hint="Producto/servicio. La mal puesta no rebota al timbrar: clasifica mal la factura."
           >
@@ -444,7 +490,7 @@ export function CrearProductoModal({
         ) : null}
 
         <p className="text-xs text-muted sm:col-span-2">
-          Se crea con lo esencial. Puedes completar categoría, presentaciones e impuestos después en Productos.
+          Se crea con lo esencial. Puedes completar categoría y presentaciones después en Productos.
         </p>
       </div>
     </Modal>

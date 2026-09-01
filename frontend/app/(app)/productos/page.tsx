@@ -209,6 +209,13 @@ export default function ProductosPage() {
       toast.error("El nombre es obligatorio");
       return;
     }
+    // Sin esquema el producto nace sin IVA y su CFDI sale mal. Solo al CREAR:
+    // editar un producto viejo que arrastra el hueco no debe quedar bloqueado
+    // (es justo la pantalla donde se arregla).
+    if (!editingId && !form.esquema_impuesto_id) {
+      toast.error("Elige el esquema de impuesto");
+      return;
+    }
     const unidadBase = form.unidad_base.trim() || "KILO";
     // Build the presentation→base-units map; the base unit is always 1:1.
     const presentaciones: Record<string, number> = { [unidadBase]: 1 };
