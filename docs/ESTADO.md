@@ -1,4 +1,4 @@
-# Estado del proyecto — 01/09/2026 (cierre de la tarde: `1d5e5d0` en vivo y EHMO Tabasco con lista de precios)
+# Estado del proyecto — 01/09/2026 (noche: `6d22c4b` en vivo — el vocabulario de alias ya se ve y se edita)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,23 +7,39 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` — el commit de este archivo, sobre `7f02ce9` (sucursal = plaza) — igual que `origin/main` salvo este commit de docs |
+| Rama base | `main` — el commit de este archivo, sobre `6d22c4b` (vocabulario de alias, PR #74) — igual que `origin/main` salvo este commit de docs |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
-| Worktrees | El wrap-all de la tarde cerró 5: `productos-52155f`, `quick-remision-button-9089b8`, `sucursales-cliente-relationship-71a3af`, `quci-e2f686` y `lista-precios-sae-fe7e71` — **verificados por CONTENIDO** (`git merge-tree` contra `origin/main` no aporta nada; entraron por squash). Quedan **`nifty-wright-842100` (sesión VIVA, no se tocó**: 3 commits del vocabulario de alias y un archivo a medio editar) y `amazing-gould-c9fa17`, desde donde corrió este cierre |
-| PRs abiertos | ninguno |
+| Worktrees | Quedan `nifty-wright-842100` (la del vocabulario: su trabajo YA está en `main` vía squash #74, se puede podar), `remisiones-filenames-folios-3263f5` (**1 commit sin fusionar y trae migración** — cerrarla pronto para no pelear el head de Alembic) y `amazing-gould-c9fa17`, vacía |
+| PRs abiertos | ninguno (#74 fusionado por squash) |
 | Migración head | `0062_remision_por_revisar` en `main` **y aplicada a prod** (`alembic_version` verificada) |
 
 `Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
 
 ## Deploy
 
-**En vivo en https://facturador.mx y al día con `1d5e5d0`** (cierre de la tarde del 01-sep).
-No se redesplegó porque ya estaba al día, y eso se comprobó **por contenido, no por la fecha
-de la imagen**: `precios.py`, `remisiones.py` y `facturas.py` dentro del contenedor son byte
-por byte iguales a `origin/main`, la imagen de frontend contiene la cadena que introdujo el
-último commit (`todas las plazas`), y `alembic_version` está en `0062`. Deploys previos del
-día: `7f02ce9` (rediseño de plazas) y `7a9c689` (sugerir-sat-batch).
+**En vivo en https://facturador.mx y al día con `6d22c4b`** (noche del 01-sep). `./deploy.sh`
+reconstruyó las tres imágenes y los cinco contenedores quedaron sanos; sin migraciones nuevas
+(head sigue `0062`). Verificado por respuesta, no por fecha de imagen: `/vocabulario` contesta
+200 y `GET /api/v1/productos/vocabulario` contesta 401 (existe y pide sesión). Deploys previos
+del día: `1d5e5d0`, `7f02ce9` (rediseño de plazas) y `7a9c689` (sugerir-sat-batch).
+
+## El vocabulario de alias ya se ve y se edita (`6d22c4b`, PR #74)
+
+Hasta ahora los alias solo se podían **crear** —importación, IA, el bot, la captura— y no había
+ninguna pantalla donde verlos: un alias mal apuntado dejaba órdenes sin cotizar en silencio.
+Entró **`Catálogo › Vocabulario`**, una tabla puente **Cliente · Producto · «si la orden dice…»**
+con el texto editable en línea, alta de equivalencias nuevas y buscador que pega a los dos lados
+(texto y producto). En la ficha del producto quedó la pestaña **«Así lo escriben»**, la misma
+información agrupada por cliente, avisando cuando un texto lleva además a otro producto.
+Endpoints: `GET /productos/vocabulario`, `GET /productos/{id}/alias`, `PATCH` y `DELETE` sobre
+`/productos/alias/{id}`. Sin migración. El permiso reusa la regla que ya estaba escrita: el
+vocabulario **de un cliente** lo corrige quien captura; el **global** exige `producto:gestionar`
+porque ahí caen los clientes nuevos que aún no tienen vocabulario propio.
+
+⚠️ **La pantalla nueva no se ha visto funcionando.** Compila, la ruta responde 200 y no hay
+errores de consola, pero nadie la ha operado — el preview local pide credenciales. Es lo primero
+que hay que mirar al retomar.
 
 ## EHMO Tabasco ya tiene lista de precios (01-sep, tarde) — solo DATOS, sin código
 
