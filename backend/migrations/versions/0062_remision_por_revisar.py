@@ -23,7 +23,7 @@ viajan aparte en vez de perderse: la pantalla de la remisión las enseña para
 que alguien las cruce a mano.
 
 Revision ID: 0062_remision_por_revisar
-Revises: 0059_categoria_sin_categorizar
+Revises: 0061_fusion_plazas
 """
 from typing import Union
 
@@ -32,7 +32,7 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
 revision: str = "0062_remision_por_revisar"
-down_revision: Union[str, None] = "0059_categoria_sin_categorizar"
+down_revision: Union[str, None] = "0061_fusion_plazas"
 branch_labels = None
 depends_on = None
 
