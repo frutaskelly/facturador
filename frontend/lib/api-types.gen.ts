@@ -2823,6 +2823,35 @@ export interface paths {
         patch: operations["update_producto_api_v1_productos__producto_id__patch"];
         trace?: never;
     };
+    "/api/v1/productos/{producto_id}/alias": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Listar Alias
+         * @description Cómo escriben los clientes este producto.
+         *
+         *     Hasta ahora los alias solo se PODÍAN CREAR: se acumulaban por importación,
+         *     IA, el bot y la captura, y no había ninguna pantalla donde verlos. Un alias
+         *     apuntando al producto equivocado dejaba órdenes sin cotizar sin que nada lo
+         *     dijera (pasó con «CALABAZA CRIOLLA TIERNA», que iba a un producto sin
+         *     precio en ninguna lista).
+         *
+         *     Se ordena global primero y luego por cliente, que es como se leen: lo
+         *     global aplica a todos y es lo que hay que mirar con más cuidado.
+         */
+        get: operations["listar_alias_api_v1_productos__producto_id__alias_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/{producto_id}/presentaciones": {
         parameters: {
             query?: never;
@@ -3568,6 +3597,49 @@ export interface components {
             producto_id: string;
             /** Sucursal Id */
             sucursal_id?: string | null;
+            /** Texto */
+            texto: string;
+        };
+        /**
+         * AliasOut
+         * @description Un alias como se lee en pantalla: con su alcance ya resuelto a nombres.
+         *
+         *     `ambiguo` marca que el MISMO texto normalizado apunta a otro producto en
+         *     otro alcance. A veces es correcto —EHMO pide «limón» y le toca el agrio,
+         *     Jubran pide «limón» y le toca el liso— y a veces es el error que nadie
+         *     veía, así que la pantalla lo señala y deja que la persona decida.
+         */
+        AliasOut: {
+            /**
+             * Ambiguo
+             * @default false
+             */
+            ambiguo: boolean;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Origen */
+            origen: string;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
+            /**
+             * Tambien En
+             * @default []
+             */
+            tambien_en: string[];
             /** Texto */
             texto: string;
         };
@@ -15214,6 +15286,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listar_alias_api_v1_productos__producto_id__alias_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                producto_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AliasOut"][];
                 };
             };
             /** @description Validation Error */

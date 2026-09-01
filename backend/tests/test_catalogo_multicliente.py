@@ -188,6 +188,42 @@ def test_alias_global_por_defecto_y_alcance_en_conflicto(client, env, auth_as):
         db.close()
 
 
+def test_la_ficha_del_producto_enseña_sus_alias_y_marca_los_ambiguos(client, env, auth_as):
+    """Hasta ahora los alias solo se podían crear: no había dónde verlos, y un
+    alias mal apuntado dejaba órdenes sin cotizar en silencio."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "chile del monte", "producto_id": env["serrano"]})
+    # El MISMO texto, como vocabulario privado de EHMO, hacia otro producto.
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "chile del monte", "producto_id": env["jalapeno"],
+                      "cliente_id": env["ehmo"]})
+    # Y uno que solo vive en el serrano: no tiene por qué salir marcado.
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "serranito", "producto_id": env["serrano"]})
+
+    r = client.get(f"/api/v1/productos/{env['serrano']}/alias", headers=h)
+    assert r.status_code == 200
+    por_texto = {a["texto"]: a for a in r.json()}
+
+    ambiguo = por_texto["chile del monte"]
+    assert ambiguo["ambiguo"] is True
+    assert ambiguo["tambien_en"] == ["CHILE JALAPENO"]
+    assert ambiguo["cliente_id"] is None            # este es el GLOBAL
+    assert ambiguo["origen"] == "MANUAL"
+
+    solo_suyo = por_texto["serranito"]
+    assert solo_suyo["ambiguo"] is False
+    assert solo_suyo["tambien_en"] == []
+
+    # El alias con alcance se lee desde SU producto, con el cliente resuelto a nombre.
+    r = client.get(f"/api/v1/productos/{env['jalapeno']}/alias", headers=h)
+    del_cliente = {a["texto"]: a for a in r.json()}["chile del monte"]
+    assert del_cliente["cliente_id"] == env["ehmo"]
+    assert del_cliente["cliente_nombre"]
+    assert del_cliente["tambien_en"] == ["CHILE SERRANO"]
+
+
 def test_el_cruce_de_la_bandeja_prefiere_el_vocabulario_del_cliente(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
     client.post("/api/v1/productos/alias", headers=h,

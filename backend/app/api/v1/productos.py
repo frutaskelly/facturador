@@ -39,6 +39,7 @@ from ...models import (
 from ...schemas.producto import (
     PresentacionCreate,
     AliasIn,
+    AliasOut,
     CandidatoOut,
     CatalogoClienteBatchIn,
     CatalogoClienteBatchOut,
@@ -1438,6 +1439,66 @@ def get_producto(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     return get_or_404(db, Producto, producto_id)
+
+
+@router.get("/{producto_id}/alias", response_model=list[AliasOut])
+def listar_alias(
+    producto_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Cómo escriben los clientes este producto.
+
+    Hasta ahora los alias solo se PODÍAN CREAR: se acumulaban por importación,
+    IA, el bot y la captura, y no había ninguna pantalla donde verlos. Un alias
+    apuntando al producto equivocado dejaba órdenes sin cotizar sin que nada lo
+    dijera (pasó con «CALABAZA CRIOLLA TIERNA», que iba a un producto sin
+    precio en ninguna lista).
+
+    Se ordena global primero y luego por cliente, que es como se leen: lo
+    global aplica a todos y es lo que hay que mirar con más cuidado.
+    """
+    get_or_404(db, Producto, producto_id)     # 404 y alcance de tenant por RLS
+    filas = (
+        db.query(ProductoAlias, Cliente.legal_name, Sucursal.nombre)
+        .outerjoin(Cliente, Cliente.id == ProductoAlias.cliente_id)
+        .outerjoin(Sucursal, Sucursal.id == ProductoAlias.sucursal_id)
+        .filter(ProductoAlias.producto_id == producto_id)
+        .order_by(ProductoAlias.cliente_id.nullsfirst(), ProductoAlias.alias)
+        .all()
+    )
+    if not filas:
+        return []
+    # ¿Alguno de estos textos apunta ADEMÁS a otro producto? Una sola consulta
+    # para todos, en vez de una por alias.
+    normalizados = {a.alias_normalizado for a, _, _ in filas}
+    otros: dict[str, list[str]] = {}
+    for norm, nombre in (
+        db.query(ProductoAlias.alias_normalizado, Producto.nombre)
+        .join(Producto, Producto.id == ProductoAlias.producto_id)
+        .filter(
+            ProductoAlias.alias_normalizado.in_(normalizados),
+            ProductoAlias.producto_id != producto_id,
+        )
+        .distinct()
+        .all()
+    ):
+        otros.setdefault(norm, []).append(nombre)
+    return [
+        AliasOut(
+            id=a.id,
+            texto=a.alias,
+            origen=a.origen,
+            cliente_id=a.cliente_id,
+            cliente_nombre=cliente,
+            sucursal_id=a.sucursal_id,
+            sucursal_nombre=sucursal,
+            ambiguo=a.alias_normalizado in otros,
+            tambien_en=sorted(otros.get(a.alias_normalizado, [])),
+            created_at=a.created_at,
+        )
+        for a, cliente, sucursal in filas
+    ]
 
 
 @router.patch("/{producto_id}", response_model=ProductoOut)

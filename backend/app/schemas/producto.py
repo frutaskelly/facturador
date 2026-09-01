@@ -148,6 +148,27 @@ class LineaPegadaOut(BaseModel):
     candidatos: list[CandidatoOut]
 
 
+class AliasOut(BaseModel):
+    """Un alias como se lee en pantalla: con su alcance ya resuelto a nombres.
+
+    `ambiguo` marca que el MISMO texto normalizado apunta a otro producto en
+    otro alcance. A veces es correcto —EHMO pide «limón» y le toca el agrio,
+    Jubran pide «limón» y le toca el liso— y a veces es el error que nadie
+    veía, así que la pantalla lo señala y deja que la persona decida.
+    """
+    id: uuid.UUID
+    texto: str
+    origen: str
+    cliente_id: Optional[uuid.UUID] = None
+    cliente_nombre: Optional[str] = None
+    sucursal_id: Optional[uuid.UUID] = None
+    sucursal_nombre: Optional[str] = None
+    ambiguo: bool = False
+    # Los otros productos a los que va el mismo texto, para explicar el aviso.
+    tambien_en: list[str] = []
+    created_at: datetime
+
+
 class AliasIn(BaseModel):
     texto: str = Field(min_length=1, max_length=254)
     producto_id: uuid.UUID

@@ -122,6 +122,96 @@
     "title": "AliasIn",
     "type": "object"
    },
+   "AliasOut": {
+    "description": "Un alias como se lee en pantalla: con su alcance ya resuelto a nombres.\n\n`ambiguo` marca que el MISMO texto normalizado apunta a otro producto en\notro alcance. A veces es correcto —EHMO pide «limón» y le toca el agrio,\nJubran pide «limón» y le toca el liso— y a veces es el error que nadie\nveía, así que la pantalla lo señala y deja que la persona decida.",
+    "properties": {
+     "ambiguo": {
+      "default": false,
+      "title": "Ambiguo",
+      "type": "boolean"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "cliente_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nombre"
+     },
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     },
+     "sucursal_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Nombre"
+     },
+     "tambien_en": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Tambien En",
+      "type": "array"
+     },
+     "texto": {
+      "title": "Texto",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "texto",
+     "origen",
+     "created_at"
+    ],
+    "title": "AliasOut",
+    "type": "object"
+   },
    "AlmacenCreate": {
     "properties": {
      "calle": {
@@ -28953,6 +29043,75 @@
      }
     ],
     "summary": "Update Producto",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/{producto_id}/alias": {
+   "get": {
+    "description": "Cómo escriben los clientes este producto.\n\nHasta ahora los alias solo se PODÍAN CREAR: se acumulaban por importación,\nIA, el bot y la captura, y no había ninguna pantalla donde verlos. Un alias\napuntando al producto equivocado dejaba órdenes sin cotizar sin que nada lo\ndijera (pasó con «CALABAZA CRIOLLA TIERNA», que iba a un producto sin\nprecio en ninguna lista).\n\nSe ordena global primero y luego por cliente, que es como se leen: lo\nglobal aplica a todos y es lo que hay que mirar con más cuidado.",
+    "operationId": "listar_alias_api_v1_productos__producto_id__alias_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "producto_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Producto Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/AliasOut"
+         },
+         "title": "Response Listar Alias Api V1 Productos  Producto Id  Alias Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar Alias",
     "tags": [
      "productos"
     ]
