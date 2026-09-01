@@ -75,6 +75,7 @@ from ...services.importar_productos import (
     parsear_plantilla,
 )
 from ...services.sat_catalogo import sugerir_batch
+from ...services.catalogos_default import categoria_sin_categorizar
 from ...services.sugerir_esquema import match_categorias, sugerir_categorias, sugerir_esquemas
 from ...services.producto_match import (
     Candidato,
@@ -1014,6 +1015,10 @@ def _ejecutar_import(
         e for (e,) in db.query(EsquemaImpuesto.id)
         .filter(EsquemaImpuesto.deleted_at.is_(None)).all()
     }
+    # Destino de las filas que se crean sin categoría: se resuelve UNA vez para
+    # todo el lote (crearla por fila sería un viaje a la base por renglón).
+    cat_default = categoria_sin_categorizar(db, ctx.tenant_id)
+    cats_validas.add(cat_default.id)
 
     # SKUs secuenciales sin re-consultar el máximo en cada fila.
     siguiente_sku = _max_sku_num(db)
@@ -1106,6 +1111,8 @@ def _ejecutar_import(
                         categorias_creadas += 1
                     if cat is not None:
                         categoria_id = cat.id
+                if categoria_id is None and fila.accion != "vincular":
+                    categoria_id = cat_default.id
 
                 # Esquema: id explícito → código/nombre del archivo → default
                 # del lote (ver `_esquema_de`, que es lo que ya se revisó arriba).
@@ -1370,6 +1377,10 @@ def create_producto(
     )
     data = payload.model_dump()
     forzar = data.pop("forzar", False)
+    # Sin categoría elegida cae en la del sistema: así el producto se puede
+    # listar y repartir desde Categorías en vez de quedar en un hueco invisible.
+    if data.get("categoria_id") is None:
+        data["categoria_id"] = categoria_sin_categorizar(db, ctx.tenant_id).id
     if data.get("nombre"):
         data["nombre"] = data["nombre"].strip().upper()   # nombres siempre en mayúsculas
 

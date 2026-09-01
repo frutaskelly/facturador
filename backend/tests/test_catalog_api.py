@@ -543,6 +543,43 @@ def test_producto_no_se_queda_sin_esquema_al_editar(client, env, auth_as):
     assert r.status_code == 200 and r.json()["esquema_impuesto_id"] == otro["id"]
 
 
+def test_producto_sin_categoria_cae_en_sin_categorizar(client, env, auth_as):
+    """Un producto sin categoría no se queda en un hueco invisible: cae en la
+    categoría por defecto del sistema, y así se puede listar y repartir desde
+    la pantalla de Categorías."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    prod = client.post("/api/v1/productos", headers=h, json={
+        "sku": "91000062", "nombre": "SIN CATEGORIA",
+        "esquema_impuesto_id": _esquema(env["tenant_a"]),
+        "clave_sat": "01010101", "unidad_sat": "KGM"}).json()
+    assert prod["categoria_id"] is not None
+
+    cats = client.get("/api/v1/categorias", headers=h).json()["items"]
+    default = next(c for c in cats if c["id"] == prod["categoria_id"])
+    assert default["nombre"] == "Sin categorizar"
+    # Se crea UNA sola vez: el segundo producto reusa la misma. Nombre bien
+    # distinto a propósito — parecido dispara el detector de duplicados (409).
+    r = client.post("/api/v1/productos", headers=h, json={
+        "sku": "91000063", "nombre": "MANGO ATAULFO",
+        "esquema_impuesto_id": _esquema(env["tenant_a"]),
+        "clave_sat": "01010101", "unidad_sat": "KGM"})
+    assert r.status_code == 201, r.text
+    assert r.json()["categoria_id"] == prod["categoria_id"]
+    assert sum(1 for c in cats if c["nombre"] == "Sin categorizar") == 1
+
+
+def test_producto_con_categoria_no_la_pierde(client, env, auth_as):
+    """El default es solo para el hueco: la categoría elegida se respeta."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    cat = client.post("/api/v1/categorias", headers=h,
+                      json={"codigo": "CX", "nombre": "Frutas"}).json()
+    prod = client.post("/api/v1/productos", headers=h, json={
+        "sku": "91000064", "nombre": "CON CATEGORIA", "categoria_id": cat["id"],
+        "esquema_impuesto_id": _esquema(env["tenant_a"]),
+        "clave_sat": "01010101", "unidad_sat": "KGM"}).json()
+    assert prod["categoria_id"] == cat["id"]
+
+
 def test_producto_soft_delete(client, env, auth_as):
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
