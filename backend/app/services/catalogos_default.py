@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from ..models import EsquemaImpuesto
+from ..models import CategoriaProducto, EsquemaImpuesto
 
 # Los 8 esquemas de Aspel SAE (tabla IMPU02), con el código que usa SAE.
 #
@@ -68,3 +68,41 @@ def sembrar_esquemas_impuesto(db: Session, tenant_id) -> list[EsquemaImpuesto]:
         db.add(obj)
         creados.append(obj)
     return creados
+
+
+# La categoría a la que caen los productos que se dan de alta sin elegir una.
+# Existe como categoría REAL y no como un hueco en blanco para que se puedan
+# listar, contar y repartir después desde la pantalla de Categorías.
+CATEGORIA_SIN_CATEGORIZAR = "Sin categorizar"
+
+
+def categoria_sin_categorizar(db: Session, tenant_id) -> CategoriaProducto:
+    """La categoría por defecto del tenant; la crea si aún no existe.
+
+    Se busca por NOMBRE y no por código: el código lo deriva el servidor del
+    nombre (`categoria_codigo.py`) y podría llevar sufijo anticolisión. No hace
+    commit — lo hace el llamador dentro de su propia transacción.
+    """
+    from .categoria_codigo import generate_unique_codigo
+
+    obj = (
+        db.query(CategoriaProducto)
+        .filter(
+            CategoriaProducto.tenant_id == tenant_id,
+            CategoriaProducto.nombre == CATEGORIA_SIN_CATEGORIZAR,
+            CategoriaProducto.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if obj is not None:
+        return obj
+    obj = CategoriaProducto(
+        tenant_id=tenant_id,
+        codigo=generate_unique_codigo(db, tenant_id, CATEGORIA_SIN_CATEGORIZAR),
+        nombre=CATEGORIA_SIN_CATEGORIZAR,
+        descripcion="Productos que aún no se clasifican. Es la categoría por defecto del sistema.",
+        activo=True,
+    )
+    db.add(obj)
+    db.flush()
+    return obj

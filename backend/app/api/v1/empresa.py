@@ -42,7 +42,10 @@ from ...schemas.empresa import (
     EmpresaUpdate,
 )
 from ...services.facturama import FacturamaClient, FacturamaError, csd_public_fields
-from ...services.catalogos_default import sembrar_esquemas_impuesto
+from ...services.catalogos_default import (
+    categoria_sin_categorizar,
+    sembrar_esquemas_impuesto,
+)
 from ...services.csd_validador import validar_csd
 from ...services.rfc import validar_rfc_local
 from ...services.onboarding import compute_status, rfc_valido
@@ -283,6 +286,9 @@ def crear_empresa_hija(
     # Catálogos base, igual que en el registro autoservicio: la empresa nueva
     # arranca con sus esquemas de impuesto listos (editables).
     sembrar_esquemas_impuesto(db, hija.id)
+    # La categoría por defecto: los productos que se den de alta sin elegir una
+    # caen aquí, y así se pueden listar y repartir en vez de ser un hueco.
+    categoria_sin_categorizar(db, hija.id)
     try:
         db.commit()
     except IntegrityError:
