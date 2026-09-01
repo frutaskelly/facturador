@@ -20,11 +20,7 @@ así que puede desplegarse sin tocar comportamiento:
 La parte 2 (0061) fusiona las plazas duplicadas y tira las columnas viejas.
 
 Revision ID: 0060_sucursal_unidad_negocio
-Revises: 0058_proyecto_sucursales
-
-OJO al mergear: otra sesión trae 0059_categoria_sin_categorizar (también hija
-de 0058). La que llegue después a main debe reapuntar su down_revision para
-que la cadena quede lineal.
+Revises: 0059_categoria_sin_categorizar
 """
 from typing import Union
 
@@ -33,7 +29,7 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision: str = "0060_sucursal_unidad_negocio"
-down_revision: Union[str, None] = "0058_proyecto_sucursales"
+down_revision: Union[str, None] = "0059_categoria_sin_categorizar"
 branch_labels = None
 depends_on = None
 
