@@ -2571,6 +2571,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/alias/{alias_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Borrar Alias
+         * @description Quita el texto del vocabulario. Se borra de verdad: un alias no es un
+         *     documento, y dejarlo en `deleted_at` obligaría a filtrarlo en cada cruce.
+         */
+        delete: operations["borrar_alias_api_v1_productos_alias__alias_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Reapuntar Alias
+         * @description Corrige el renglón: el texto, el producto, o los dos.
+         */
+        patch: operations["reapuntar_alias_api_v1_productos_alias__alias_id__patch"];
+        trace?: never;
+    };
     "/api/v1/productos/catalogo-cliente-batch": {
         parameters: {
             query?: never;
@@ -2804,6 +2829,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/vocabulario": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Vocabulario
+         * @description La tabla puente: qué escribe cada cliente = qué producto es.
+         *
+         *     Declarada ANTES de `/{producto_id}` para no capturarse como UUID.
+         *
+         *     `q` busca en los dos lados a la vez —el texto del cliente y el nombre o SKU
+         *     del producto— porque la pregunta real es «enséñame todo lo que tenga que ver
+         *     con limón», y quien pregunta no sabe de qué lado está lo que busca.
+         */
+        get: operations["vocabulario_api_v1_productos_vocabulario_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/{producto_id}": {
         parameters: {
             query?: never;
@@ -2821,6 +2872,35 @@ export interface paths {
         head?: never;
         /** Update Producto */
         patch: operations["update_producto_api_v1_productos__producto_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/productos/{producto_id}/alias": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Listar Alias
+         * @description Cómo escriben los clientes este producto.
+         *
+         *     Hasta ahora los alias solo se PODÍAN CREAR: se acumulaban por importación,
+         *     IA, el bot y la captura, y no había ninguna pantalla donde verlos. Un alias
+         *     apuntando al producto equivocado dejaba órdenes sin cotizar sin que nada lo
+         *     dijera (pasó con «CALABAZA CRIOLLA TIERNA», que iba a un producto sin
+         *     precio en ninguna lista).
+         *
+         *     Se ordena global primero y luego por cliente, que es como se leen: lo
+         *     global aplica a todos y es lo que hay que mirar con más cuidado.
+         */
+        get: operations["listar_alias_api_v1_productos__producto_id__alias_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/productos/{producto_id}/presentaciones": {
@@ -3570,6 +3650,63 @@ export interface components {
             sucursal_id?: string | null;
             /** Texto */
             texto: string;
+        };
+        /**
+         * AliasOut
+         * @description Un alias como se lee en pantalla: con su alcance ya resuelto a nombres.
+         *
+         *     `ambiguo` marca que el MISMO texto normalizado apunta a otro producto en
+         *     otro alcance. A veces es correcto —EHMO pide «limón» y le toca el agrio,
+         *     Jubran pide «limón» y le toca el liso— y a veces es el error que nadie
+         *     veía, así que la pantalla lo señala y deja que la persona decida.
+         */
+        AliasOut: {
+            /**
+             * Ambiguo
+             * @default false
+             */
+            ambiguo: boolean;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Origen */
+            origen: string;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
+            /**
+             * Tambien En
+             * @default []
+             */
+            tambien_en: string[];
+            /** Texto */
+            texto: string;
+        };
+        /**
+         * AliasReapuntarIn
+         * @description Corrige una fila del vocabulario: el texto, el producto, o los dos.
+         *
+         *     El ALCANCE no se toca aquí: pasar el alias de un cliente al global
+         *     convertiría su corrección en una regla para todos, y esa es otra decisión
+         *     (con otro permiso). Para eso se quita y se vuelve a escribir.
+         */
+        AliasReapuntarIn: {
+            /** Producto Id */
+            producto_id?: string | null;
+            /** Texto */
+            texto?: string | null;
         };
         /** AlmacenCreate */
         AlmacenCreate: {
@@ -7258,6 +7395,17 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** Page[VocabularioOut] */
+        Page_VocabularioOut_: {
+            /** Items */
+            items: components["schemas"]["VocabularioOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
         /** PagoIn */
         PagoIn: {
             /** Forma */
@@ -9032,6 +9180,43 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /**
+         * VocabularioOut
+         * @description Una fila de la tabla puente: «lo que escribe el cliente» = «qué es».
+         */
+        VocabularioOut: {
+            /**
+             * Ambiguo
+             * @default false
+             */
+            ambiguo: boolean;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Origen */
+            origen: string;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Producto Nombre */
+            producto_nombre: string;
+            /** Producto Sku */
+            producto_sku: string;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
+            /** Texto */
+            texto: string;
         };
     };
     responses: never;
@@ -14782,6 +14967,72 @@ export interface operations {
             };
         };
     };
+    borrar_alias_api_v1_productos_alias__alias_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                alias_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reapuntar_alias_api_v1_productos_alias__alias_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                alias_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AliasReapuntarIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     catalogo_cliente_batch_api_v1_productos_catalogo_cliente_batch_post: {
         parameters: {
             query?: never;
@@ -15126,6 +15377,43 @@ export interface operations {
             };
         };
     };
+    vocabulario_api_v1_productos_vocabulario_get: {
+        parameters: {
+            query?: {
+                q?: string;
+                cliente_id?: string | null;
+                solo_global?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_VocabularioOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_producto_api_v1_productos__producto_id__get: {
         parameters: {
             query?: never;
@@ -15214,6 +15502,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listar_alias_api_v1_productos__producto_id__alias_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                producto_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AliasOut"][];
                 };
             };
             /** @description Validation Error */

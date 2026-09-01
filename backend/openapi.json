@@ -122,6 +122,128 @@
     "title": "AliasIn",
     "type": "object"
    },
+   "AliasOut": {
+    "description": "Un alias como se lee en pantalla: con su alcance ya resuelto a nombres.\n\n`ambiguo` marca que el MISMO texto normalizado apunta a otro producto en\notro alcance. A veces es correcto —EHMO pide «limón» y le toca el agrio,\nJubran pide «limón» y le toca el liso— y a veces es el error que nadie\nveía, así que la pantalla lo señala y deja que la persona decida.",
+    "properties": {
+     "ambiguo": {
+      "default": false,
+      "title": "Ambiguo",
+      "type": "boolean"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "cliente_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nombre"
+     },
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     },
+     "sucursal_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Nombre"
+     },
+     "tambien_en": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Tambien En",
+      "type": "array"
+     },
+     "texto": {
+      "title": "Texto",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "texto",
+     "origen",
+     "created_at"
+    ],
+    "title": "AliasOut",
+    "type": "object"
+   },
+   "AliasReapuntarIn": {
+    "description": "Corrige una fila del vocabulario: el texto, el producto, o los dos.\n\nEl ALCANCE no se toca aquí: pasar el alias de un cliente al global\nconvertiría su corrección en una regla para todos, y esa es otra decisión\n(con otro permiso). Para eso se quita y se vuelve a escribir.",
+    "properties": {
+     "producto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
+     },
+     "texto": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Texto"
+     }
+    },
+    "title": "AliasReapuntarIn",
+    "type": "object"
+   },
    "AlmacenCreate": {
     "properties": {
      "calle": {
@@ -10511,6 +10633,37 @@
     "title": "Page[SucursalOut]",
     "type": "object"
    },
+   "Page_VocabularioOut_": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/VocabularioOut"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "offset": {
+      "title": "Offset",
+      "type": "integer"
+     },
+     "total": {
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "items",
+     "total",
+     "limit",
+     "offset"
+    ],
+    "title": "Page[VocabularioOut]",
+    "type": "object"
+   },
    "PagoIn": {
     "properties": {
      "forma": {
@@ -15912,6 +16065,98 @@
      "type"
     ],
     "title": "ValidationError",
+    "type": "object"
+   },
+   "VocabularioOut": {
+    "description": "Una fila de la tabla puente: «lo que escribe el cliente» = «qué es».",
+    "properties": {
+     "ambiguo": {
+      "default": false,
+      "title": "Ambiguo",
+      "type": "boolean"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "cliente_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nombre"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     },
+     "producto_nombre": {
+      "title": "Producto Nombre",
+      "type": "string"
+     },
+     "producto_sku": {
+      "title": "Producto Sku",
+      "type": "string"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     },
+     "sucursal_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Nombre"
+     },
+     "texto": {
+      "title": "Texto",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "texto",
+     "producto_id",
+     "producto_sku",
+     "producto_nombre",
+     "origen"
+    ],
+    "title": "VocabularioOut",
     "type": "object"
    }
   },
@@ -28104,6 +28349,130 @@
     ]
    }
   },
+  "/api/v1/productos/alias/{alias_id}": {
+   "delete": {
+    "description": "Quita el texto del vocabulario. Se borra de verdad: un alias no es un\ndocumento, y dejarlo en `deleted_at` obligaría a filtrarlo en cada cruce.",
+    "operationId": "borrar_alias_api_v1_productos_alias__alias_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "alias_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Alias Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Borrar Alias",
+    "tags": [
+     "productos"
+    ]
+   },
+   "patch": {
+    "description": "Corrige el renglón: el texto, el producto, o los dos.",
+    "operationId": "reapuntar_alias_api_v1_productos_alias__alias_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "alias_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Alias Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AliasReapuntarIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Reapuntar Alias",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
   "/api/v1/productos/catalogo-cliente-batch": {
    "post": {
     "description": "Guarda de golpe el código/nombre/presentación que usan uno o varios\nclientes para una lista de productos — el último paso de la importación,\ncuando el usuario ya decidió de quién era la lista.\n\nEscribe por lotes (una consulta para leer lo existente, un flush al final):\ncon 500 productos × 2 clientes, hacerlo uno por uno serían miles de viajes.",
@@ -28767,6 +29136,122 @@
     ]
    }
   },
+  "/api/v1/productos/vocabulario": {
+   "get": {
+    "description": "La tabla puente: qué escribe cada cliente = qué producto es.\n\nDeclarada ANTES de `/{producto_id}` para no capturarse como UUID.\n\n`q` busca en los dos lados a la vez —el texto del cliente y el nombre o SKU\ndel producto— porque la pregunta real es «enséñame todo lo que tenga que ver\ncon limón», y quien pregunta no sabe de qué lado está lo que busca.",
+    "operationId": "vocabulario_api_v1_productos_vocabulario_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "default": "",
+       "maxLength": 120,
+       "title": "Q",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "solo_global",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Solo Global",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 100,
+       "maximum": 500,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Page_VocabularioOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Vocabulario",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
   "/api/v1/productos/{producto_id}": {
    "delete": {
     "operationId": "delete_producto_api_v1_productos__producto_id__delete",
@@ -28953,6 +29438,75 @@
      }
     ],
     "summary": "Update Producto",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/{producto_id}/alias": {
+   "get": {
+    "description": "Cómo escriben los clientes este producto.\n\nHasta ahora los alias solo se PODÍAN CREAR: se acumulaban por importación,\nIA, el bot y la captura, y no había ninguna pantalla donde verlos. Un alias\napuntando al producto equivocado dejaba órdenes sin cotizar sin que nada lo\ndijera (pasó con «CALABAZA CRIOLLA TIERNA», que iba a un producto sin\nprecio en ninguna lista).\n\nSe ordena global primero y luego por cliente, que es como se leen: lo\nglobal aplica a todos y es lo que hay que mirar con más cuidado.",
+    "operationId": "listar_alias_api_v1_productos__producto_id__alias_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "producto_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Producto Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/AliasOut"
+         },
+         "title": "Response Listar Alias Api V1 Productos  Producto Id  Alias Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar Alias",
     "tags": [
      "productos"
     ]

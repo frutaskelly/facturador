@@ -39,6 +39,8 @@ from ...models import (
 from ...schemas.producto import (
     PresentacionCreate,
     AliasIn,
+    AliasOut,
+    AliasReapuntarIn,
     CandidatoOut,
     CatalogoClienteBatchIn,
     CatalogoClienteBatchOut,
@@ -63,6 +65,7 @@ from ...schemas.producto import (
     SugerirCategoriaBatchIn,
     SugerirEsquemaBatchIn,
     SugerirSatBatchIn,
+    VocabularioOut,
 )
 from ...schemas.common import Page
 from ...services.categoria_codigo import slugify_codigo
@@ -385,6 +388,131 @@ def crear_alias(
         )
     aprender_alias(db, ctx.tenant_id, payload.texto, payload.producto_id, origen="MANUAL", user_id=ctx.user_id)
     return {"ok": True}
+
+
+@router.get("/vocabulario", response_model=Page[VocabularioOut])
+def vocabulario(
+    q: str = Query("", max_length=120),
+    cliente_id: Optional[UUID] = None,
+    solo_global: bool = False,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """La tabla puente: qué escribe cada cliente = qué producto es.
+
+    Declarada ANTES de `/{producto_id}` para no capturarse como UUID.
+
+    `q` busca en los dos lados a la vez —el texto del cliente y el nombre o SKU
+    del producto— porque la pregunta real es «enséñame todo lo que tenga que ver
+    con limón», y quien pregunta no sabe de qué lado está lo que busca.
+    """
+    base = (
+        db.query(ProductoAlias, Producto, Cliente.legal_name, Sucursal.nombre)
+        .join(Producto, Producto.id == ProductoAlias.producto_id)
+        .outerjoin(Cliente, Cliente.id == ProductoAlias.cliente_id)
+        .outerjoin(Sucursal, Sucursal.id == ProductoAlias.sucursal_id)
+        .filter(Producto.deleted_at.is_(None))
+    )
+    if solo_global:
+        base = base.filter(ProductoAlias.cliente_id.is_(None))
+    elif cliente_id is not None:
+        base = base.filter(ProductoAlias.cliente_id == cliente_id)
+    termino = (q or "").strip()
+    if termino:
+        like = f"%{normalizar(termino)}%"
+        base = base.filter(
+            ProductoAlias.alias_normalizado.ilike(like)
+            | Producto.nombre.ilike(f"%{termino}%")
+            | Producto.sku.ilike(f"%{termino}%")
+        )
+    total = base.order_by(None).count()
+    filas = (
+        base.order_by(Producto.nombre, ProductoAlias.cliente_id.nullsfirst(), ProductoAlias.alias)
+        .offset(offset).limit(limit).all()
+    )
+    # ¿Cuáles de estos textos llevan a más de un producto? Una consulta para todos.
+    normas = {a.alias_normalizado for a, _, _, _ in filas}
+    ambiguos = set()
+    if normas:
+        ambiguos = {
+            n for (n,) in db.query(ProductoAlias.alias_normalizado)
+            .filter(ProductoAlias.alias_normalizado.in_(normas))
+            .group_by(ProductoAlias.alias_normalizado)
+            .having(func.count(func.distinct(ProductoAlias.producto_id)) > 1)
+            .all()
+        }
+    return Page[VocabularioOut](
+        items=[
+            VocabularioOut(
+                id=a.id, texto=a.alias, origen=a.origen,
+                producto_id=p.id, producto_sku=p.sku, producto_nombre=p.nombre,
+                cliente_id=a.cliente_id, cliente_nombre=cli,
+                sucursal_id=a.sucursal_id, sucursal_nombre=suc,
+                ambiguo=a.alias_normalizado in ambiguos,
+            )
+            for a, p, cli, suc in filas
+        ],
+        total=total, limit=limit, offset=offset,
+    )
+
+
+def _alias_editable(db: Session, alias_id: UUID, ctx: AuthContext) -> ProductoAlias:
+    """El alias, si esta persona puede tocarlo.
+
+    Misma línea que `crear_alias` (decisión 2026-07-29): el vocabulario de UN
+    cliente lo corrige quien captura, porque equivocarse ahí solo afecta a ese
+    cliente y es el flujo natural del día. El GLOBAL lo heredan todos —incluido
+    el cliente nuevo que todavía no tiene vocabulario propio— así que moverlo
+    exige gestión de productos.
+    """
+    alias = get_or_404(db, ProductoAlias, alias_id)
+    if alias.cliente_id is None and _WRITE not in ctx.permissions and not ctx.is_owner:
+        raise HTTPException(
+            status_code=403,
+            detail=("Ese texto lo usan todos los clientes; cambiarlo requiere el "
+                    "permiso de gestión de productos"),
+        )
+    return alias
+
+
+@router.patch("/alias/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
+def reapuntar_alias(
+    alias_id: UUID,
+    payload: AliasReapuntarIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Corrige el renglón: el texto, el producto, o los dos."""
+    alias = _alias_editable(db, alias_id, ctx)
+    if payload.producto_id is not None:
+        ensure_fk(db, Producto, payload.producto_id, "producto_id")
+        alias.producto_id = payload.producto_id
+    if payload.texto is not None:
+        norm = normalizar(payload.texto)[:254]
+        if not norm:
+            raise HTTPException(status_code=422, detail="El texto no puede quedar vacío")
+        alias.alias = payload.texto.strip()[:254]
+        alias.alias_normalizado = norm
+    alias.origen = "MANUAL"        # lo decidió una persona: deja de ser importado
+    # El índice único es (tenant, cliente, sucursal, texto normalizado): al
+    # reescribir el texto se puede chocar con otro renglón del MISMO alcance.
+    flush_or_conflict(db, detail="Ese texto ya está en el vocabulario de ese alcance")
+    return None
+
+
+@router.delete("/alias/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
+def borrar_alias(
+    alias_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Quita el texto del vocabulario. Se borra de verdad: un alias no es un
+    documento, y dejarlo en `deleted_at` obligaría a filtrarlo en cada cruce."""
+    db.delete(_alias_editable(db, alias_id, ctx))
+    db.flush()
+    return None
 
 
 # ─── Importación masiva (plantilla o lista de precios del cliente) ───────────
@@ -1438,6 +1566,66 @@ def get_producto(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     return get_or_404(db, Producto, producto_id)
+
+
+@router.get("/{producto_id}/alias", response_model=list[AliasOut])
+def listar_alias(
+    producto_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Cómo escriben los clientes este producto.
+
+    Hasta ahora los alias solo se PODÍAN CREAR: se acumulaban por importación,
+    IA, el bot y la captura, y no había ninguna pantalla donde verlos. Un alias
+    apuntando al producto equivocado dejaba órdenes sin cotizar sin que nada lo
+    dijera (pasó con «CALABAZA CRIOLLA TIERNA», que iba a un producto sin
+    precio en ninguna lista).
+
+    Se ordena global primero y luego por cliente, que es como se leen: lo
+    global aplica a todos y es lo que hay que mirar con más cuidado.
+    """
+    get_or_404(db, Producto, producto_id)     # 404 y alcance de tenant por RLS
+    filas = (
+        db.query(ProductoAlias, Cliente.legal_name, Sucursal.nombre)
+        .outerjoin(Cliente, Cliente.id == ProductoAlias.cliente_id)
+        .outerjoin(Sucursal, Sucursal.id == ProductoAlias.sucursal_id)
+        .filter(ProductoAlias.producto_id == producto_id)
+        .order_by(ProductoAlias.cliente_id.nullsfirst(), ProductoAlias.alias)
+        .all()
+    )
+    if not filas:
+        return []
+    # ¿Alguno de estos textos apunta ADEMÁS a otro producto? Una sola consulta
+    # para todos, en vez de una por alias.
+    normalizados = {a.alias_normalizado for a, _, _ in filas}
+    otros: dict[str, list[str]] = {}
+    for norm, nombre in (
+        db.query(ProductoAlias.alias_normalizado, Producto.nombre)
+        .join(Producto, Producto.id == ProductoAlias.producto_id)
+        .filter(
+            ProductoAlias.alias_normalizado.in_(normalizados),
+            ProductoAlias.producto_id != producto_id,
+        )
+        .distinct()
+        .all()
+    ):
+        otros.setdefault(norm, []).append(nombre)
+    return [
+        AliasOut(
+            id=a.id,
+            texto=a.alias,
+            origen=a.origen,
+            cliente_id=a.cliente_id,
+            cliente_nombre=cliente,
+            sucursal_id=a.sucursal_id,
+            sucursal_nombre=sucursal,
+            ambiguo=a.alias_normalizado in otros,
+            tambien_en=sorted(otros.get(a.alias_normalizado, [])),
+            created_at=a.created_at,
+        )
+        for a, cliente, sucursal in filas
+    ]
 
 
 @router.patch("/{producto_id}", response_model=ProductoOut)

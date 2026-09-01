@@ -13,6 +13,7 @@ import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { ProductoAliasPanel } from "@/components/ProductoAliasPanel";
 import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { SatClaveCombobox } from "@/components/SatClaveCombobox";
 import { ApiError, apiFetch } from "@/lib/api";
@@ -144,6 +145,7 @@ export default function ProductosPage() {
 
   const [form, setForm] = useState<FormState | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [tab, setTab] = useState<"datos" | "alias">("datos");
   const [toDelete, setToDelete] = useState<Producto | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [satOpciones, setSatOpciones] = useState<SatOpcion[]>([]);
@@ -200,6 +202,7 @@ export default function ProductosPage() {
     setEditingId(p.id);
     setSatOpciones([]);
     setParecidos([]);
+    setTab("datos");        // abrir siempre en Datos, aunque el anterior se cerró en alias
     setForm(toForm(p));
   }
 
@@ -404,6 +407,9 @@ export default function ProductosPage() {
         open={form !== null}
         onClose={() => setForm(null)}
         title={editingId ? "Editar producto" : "Nuevo producto"}
+        // Ancho: el vocabulario de un producto se lee agrupado por cliente y en
+        // el modal angosto el texto se partía en vertical, una letra por renglón.
+        wide
         footer={
           <>
             <Button variant="secondary" onClick={() => setForm(null)}>
@@ -457,7 +463,38 @@ export default function ProductosPage() {
           </Alert>
         ) : null}
 
-        {form && (
+        {/* Las pestañas van sueltas y no con <Tabs/>: el pie del modal ("Guardar")
+            tiene que seguir atado al formulario, y meter todo el formulario dentro
+            del prop `content` de Tabs lo desconectaría. Mismas clases, mismo look. */}
+        {form && editingId && (
+          <div className="flex gap-1 border-b border-border">
+            {([
+              ["datos", "Datos"],
+              ["alias", "Así lo escriben"],
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTab(id)}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
+                  tab === id
+                    ? "border-accent text-foreground"
+                    : "border-transparent text-muted hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {form && editingId && tab === "alias" && (
+          <div className="mt-3">
+            <ProductoAliasPanel productoId={editingId} productoNombre={form.nombre} />
+          </div>
+        )}
+
+        {form && (!editingId || tab === "datos") && (
           <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
             {/* SKU — automático */}
             <div className="sm:col-span-2">
