@@ -1,4 +1,4 @@
-# Estado del proyecto — 01/09/2026 (cierre wrap-all: PRs #62–#71 + `ec59214` + `7a9c689`)
+# Estado del proyecto — 01/09/2026 (sucursal = unidad de negocio, `7f02ce9` desplegado)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,12 +7,12 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` — el commit de este archivo, sobre `7a9c689` (sugerir-sat-batch) — igual que `origin/main` salvo este commit de docs |
+| Rama base | `main` — el commit de este archivo, sobre `7f02ce9` (sucursal = plaza) — igual que `origin/main` salvo este commit de docs |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
 | Worktrees | TODAS las sesiones cerradas por el wrap-all del 01-sep; solo queda `amazing-gould-c9fa17` (la sesión del cotizador, vacía — se poda sola al cerrarla). Ramas viejas en origin por borrar cuando se quiera: `claude/cotizador-fcad7e` y `claude/focused-roentgen-b61e17` (ambas ya contenidas en `main`); `claude/estado-cierre-31ago` se conserva a propósito como respaldo |
 | PRs abiertos | ninguno |
-| Migración head | `0058_proyecto_sucursales` en `main` **y aplicada a prod** |
+| Migración head | `0061_fusion_plazas` en `main` **y aplicada a prod** |
 
 `Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
 
@@ -23,6 +23,38 @@ carpeta y leer este archivo.
 migraciones nuevas (head sigue `0058`), y los cinco contenedores quedaron arriba y sanos.
 Deploys previos del 31-ago: `ec59214` (cotizador; endpoint nuevo verificado con 401) y
 `1a0fd06` (PRs #67–#71, por la sesión que unificó este ESTADO).
+
+## La sucursal dejó de ser del cliente (01-sep, `7f02ce9` — DESPLEGADO)
+
+**La sucursal es ahora la PLAZA del negocio**, no una propiedad del cliente. Antes
+`sucursales.cliente_id` era `NOT NULL`, así que Pachuca existía **cuatro veces**, una por
+cliente. Ahora Pachuca es UNA fila y `cliente_sucursales` dice quién se surte de ella
+(en prod: EHMO, JUBRAN, MAFAN y BALLES). Ese vínculo carga la **serie de folios de la
+relación** — EHMO×Tabasco → ZEHMOVH, mientras Balles y Jubran comparten ZHGO en Pachuca —
+y su abanico vive en `cliente_sucursal_series`. El **almacén** se queda en la plaza: de ahí
+sale la mercancía de todos sus clientes.
+
+**Proyectos: uno por plaza** (decisión del dueño). `proyectos.sucursal_id` sustituye al
+alcance m2m de la 0058, que se eliminó. Los 6 históricos quedaron en Pachuca y nació
+`P-HOSPITALES-TAB` (HOSPITALES · Tabasco), el hueco que el dueño detectó.
+
+**Overrides**: el CHECK pasó de XOR a "al menos una dimensión". (cliente + sucursal) juntos
+es el precio MÁS específico; solo sucursal = para todos los que surte la plaza.
+
+**Migraciones 0060 (aditiva + backfill) y 0061 (fusión + drops).** La 0061 no es reversible
+a propósito; **la 0060 sí baja limpio**, que es el escalón que importa si el deploy tropieza.
+
+⚠️ **Prod tiene DOS tenants con los mismos clientes**: `cristian-gerardo-zarate-orozco` (la
+operación real: las OCs, los 6 proyectos) y `frutas-kelly`. La fusión es POR TENANT, así que
+cada uno quedó consistente — pero **toda consulta o arreglo manual a la base debe acotar el
+tenant**. Un `INSERT` sin acotar sembró de más durante esta sesión y hubo que limpiarlo.
+
+**Una revisión adversarial de 41 agentes tumbó dos veces esta rama antes de embarcarla**: 13
+defectos en la primera pasada (entre ellos, la fusión regalaba los precios negociados de un
+cliente a los demás de la plaza, y el router nuevo había perdido el candado por cliente) y 3
+más en la segunda, de los cuales **dos abortaban la migración a media aplicación**
+(`proyecto_sucursales` reapuntada antes de deduplicar, y la renumeración `SUC-xx` generando
+códigos repetidos). Todo corregido con fixtures que reproducen cada fallo.
 
 ## Cierre wrap-all (01-sep, madrugada)
 
@@ -226,19 +258,17 @@ podarla.
    y el slidedown usa `?vistazo=true` que salta cruce y precios (~27 s → ~2 s). Un test de
    paridad corre ambos resolutores sobre una matriz de escenarios bajo RLS y exige el mismo
    resultado campo por campo.
-7. ~~Cruce de proyecto sin respetar la sucursal~~ — **RESUELTO en código y desplegado** el
-   31-ago (PRs #56 + #61, ver arriba). **Queda la configuración de DATOS en prod** (decisión
-   del dueño: negociación por plaza), en este orden desde la UI ya desplegada:
-   (a) crear proyecto **HOSPITALES VILLAHERMOSA** (dueño EHMO, alcance SUC-02 Tabasco) y
-   restringir HOSPITALES e IMSS BIENESTAR a SUC-01 Pachuca en Catálogos → Proyectos;
-   (b) reapuntar la equivalencia `villahermosa:HOSPITALES` corrigiendo una OC de VH desde la
-   bandeja con «Guardar asignación»; (c) crear la asignación cliente EHMO + HOSPITALES
-   VILLAHERMOSA → «Lista EHMO Villahermosa 08_2026» y **borrar la especificidad-11 provisional**
-   (EHMO+Tabasco+HOSPITALES, id `da5e658b…`, creada el 31-ago como puente); (d) `POST
-   /oc-recibidas/{id}/reabrir` en las PENDIENTE de Tabasco con `resuelto_via != 'MANUAL'`.
-   Diferido a propósito: la defensa dentro del resolutor de precios (tras #61 el par inválido ya
-   no se puede crear; la alternativa barata sería validar con el helper en `create_remision` y
-   el cotizador). Limpieza aparte detectada: SUC-03/SUC-04 «HIDALGO EHMO» duplicadas en prod.
+7. ~~Cruce de proyecto sin respetar la sucursal~~ — **RESUELTO Y DESPLEGADO** el 01-sep con
+   el rediseño de sucursales (`7f02ce9`). La configuración de datos que quedaba pendiente se
+   aplicó casi toda: HIDALGO EHMO reconocida como Pachuca y fusionada, las 8 sucursales de
+   demo borradas, Chiapas dada de alta, `P-HOSPITALES-TAB` creado para Tabasco y los 6
+   proyectos históricos anclados a Pachuca. **Faltan dos escrituras** que el classifier
+   bloqueó en la sesión (el SQL exacto está en `backend/scripts/datos_post_deploy_sucursales.sql`):
+   (a) mover la asignación `da5e658b…` (EHMOVH0826, la espec-11 provisional del 31-ago) del
+   HOSPITALES de Pachuca al `P-HOSPITALES-TAB`; (b) borrar lógicamente el `P-HOSPITALES-TAB`
+   que quedó de más en el tenant `frutas-kelly` (ese tenant no opera Tabasco). Aparte, ya con
+   la pantalla nueva, hay que **capturar las series por vínculo** que hoy no existen: ZHGO
+   para Balles y Jubran en Pachuca, y EHCHHO para EHMO×Chiapas.
 8. **183 OCs de la migración sin `archivo_url`** (31-ago, tras el PR #54). El #54 deja al
    sistema listo para absorber los links: la cura de fondo es un script en `SmartSupply/bot`
    que reenvíe esas órdenes por la ingesta con su URL de Drive — se completan sin tocar la
