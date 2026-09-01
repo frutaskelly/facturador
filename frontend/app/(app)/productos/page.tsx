@@ -284,7 +284,7 @@ export default function ProductosPage() {
 
   const columns: Column<Producto>[] = [
     { header: "SKU", cell: (p) => <span className="font-medium">{p.sku}</span> },
-    { header: "Nombre", cell: (p) => p.nombre },
+    { header: "Nombre", truncate: true, cell: (p) => <span title={p.nombre}>{p.nombre}</span> },
     { header: "Categoría", cell: (p) => (p.categoria_id ? catName[p.categoria_id] ?? "—" : "—") },
     {
       header: "Esquema de impuesto",
@@ -301,7 +301,8 @@ export default function ProductosPage() {
       // (el producto solo guarda la clave). Sin ella, los 8 dígitos no dicen
       // nada al revisar si la clave que quedó es la correcta.
       header: "Descripción SAT",
-      cell: (p) => <span className="text-muted">{p.clave_sat_descripcion || "—"}</span>,
+      truncate: true,
+      cell: (p) => <span className="text-muted" title={p.clave_sat_descripcion ?? ""}>{p.clave_sat_descripcion || "—"}</span>,
     },
     {
       header: "Estado",

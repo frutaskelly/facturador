@@ -116,6 +116,7 @@ export default function InventarioPage() {
   const columns: Column<ExistenciaRow>[] = [
     {
       header: "Producto",
+      truncate: true,
       cell: (r) => (
         <span className="font-medium">
           {r.producto_nombre ?? prodName[r.producto_id] ?? r.producto_id}
