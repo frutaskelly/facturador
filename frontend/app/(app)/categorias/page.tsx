@@ -34,8 +34,7 @@ const config: CrudConfig<Categoria> = {
       // donde caen los productos que se dan de alta sin elegir categoría
       // (ver services/catalogos_default.py). Ofrecerla como sugerencia sería
       // pedir que se dé de alta algo que ya existe.
-      ["Frutas", "Fruta fresca de temporada"],
-      ["Verduras", "Verdura y hortaliza fresca"],
+      ["Frutas y Verduras", "Fruta, verdura y hortaliza fresca de temporada"],
       ["Abarrotes", "Despensa y productos secos"],
       ["Lácteos", "Leche, queso, crema y yogurt"],
       ["Carnes", "Res, cerdo, pollo y pavo"],
