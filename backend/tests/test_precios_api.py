@@ -404,3 +404,104 @@ def test_cotizar_reporta_el_tramo_aplicado(client, env, auth_as):
     # Un override no es una lista: sin tramo que actualizar.
     ov = _cot(client, h, pid, cliente_id=env["cli1"])
     assert ov["origen"] == "override_cliente" and ov["cantidad_minima"] is None
+
+
+# ── presentaciones: la lista no guarda precios que nadie puede cobrar ─────────
+#
+# El desplegable de presentación (en la remisión y en la propia lista) se arma
+# de `producto.presentaciones`. Un precio en CAJA sobre un producto que solo
+# maneja KILO es una fila que se ve configurada y no se cobra jamás.
+
+
+def test_precio_rechaza_presentacion_que_el_producto_no_declara(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post(f"/api/v1/listas-precios/{env['unico']}/precios", headers=h, json={
+        "producto_id": env["aguacate"], "presentacion": "CAJA",
+        "precio_unitario": "400", "cantidad_minima": 1,
+    })
+    assert r.status_code == 422
+    assert "CAJA" in r.json()["detail"]
+
+
+def test_bulk_rechaza_presentacion_que_el_producto_no_declara(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post(f"/api/v1/listas-precios/{env['unico']}/precios/bulk", headers=h, json={
+        "items": [{"producto_id": env["aguacate"], "presentacion": "CAJA",
+                   "precio_unitario": "400", "cantidad_minima": 1}],
+    })
+    assert r.status_code == 422
+
+
+def test_override_rechaza_presentacion_que_el_producto_no_declara(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/precios/overrides", headers=h, json={
+        "cliente_id": env["cli1"], "producto_id": env["aguacate"],
+        "presentacion": "CAJA", "precio_unitario": "400",
+    })
+    assert r.status_code == 422
+
+
+def test_agregar_presentacion_abre_su_precio_propio(client, env, auth_as):
+    """La historia completa: CAJA de 20 KILO, primero derivada y luego negociada."""
+    auth_as(env["admin"]); h = _hdr(env["admin"]); pid = env["aguacate"]
+
+    r = client.post(f"/api/v1/productos/{pid}/presentaciones", headers=h,
+                    json={"nombre": "caja", "factor": "20"})
+    assert r.status_code == 200
+    pres = r.json()["presentaciones"]
+    assert pres["CAJA"]["factor"] == 20            # se normaliza a mayúsculas
+    assert pres["CAJA"]["sat"] == "XBX"            # unidad SAT deducida
+    assert "KILO" in pres                          # no pisó lo que ya tenía
+
+    # Sin renglón propio, la caja vale el kilo × el factor.
+    assert float(_cot(client, h, pid, presentacion="CAJA")["precio"]) == 500.0
+
+    # Con renglón propio, manda el negociado (la caja sale más barata por kilo).
+    r = client.post(f"/api/v1/listas-precios/{env['unico']}/precios", headers=h, json={
+        "producto_id": pid, "presentacion": "CAJA",
+        "precio_unitario": "400", "cantidad_minima": 1,
+    })
+    assert r.status_code == 201
+    caja = _cot(client, h, pid, presentacion="CAJA")
+    assert float(caja["precio"]) == 400.0
+    assert caja["cantidad_minima"] == 1             # tramo que habló: el de CAJA
+    # Y el kilo sigue costando lo de siempre.
+    assert float(_cot(client, h, pid)["precio"]) == 25.0
+
+
+def test_agregar_presentacion_rechaza_la_que_ya_existe(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post(f"/api/v1/productos/{env['aguacate']}/presentaciones", headers=h,
+                    json={"nombre": "KILO", "factor": "1"})
+    assert r.status_code == 422
+
+
+def test_agregar_presentacion_exige_factor_positivo(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post(f"/api/v1/productos/{env['aguacate']}/presentaciones", headers=h,
+                    json={"nombre": "CAJA", "factor": "0"})
+    assert r.status_code == 422
+
+
+def test_override_se_reescribe_en_vez_de_apilarse(client, env, auth_as):
+    """Corregir el precio especial dos veces deja UN renglón, no tres.
+
+    La tabla no tiene índice único y el resolutor lee el más reciente: sin esto
+    cada corrección dejaba basura que se relee en cada cotización.
+    """
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    cuerpo = {"cliente_id": env["cli1"], "producto_id": env["aguacate"],
+              "presentacion": "KILO", "precio_unitario": "18"}
+
+    primero = client.post("/api/v1/precios/overrides", headers=h, json=cuerpo)
+    assert primero.status_code == 201
+    segundo = client.post("/api/v1/precios/overrides", headers=h,
+                          json={**cuerpo, "precio_unitario": "17"})
+    assert segundo.status_code == 201
+    assert segundo.json()["id"] == primero.json()["id"]
+    assert float(segundo.json()["precio_unitario"]) == 17.0
+
+    listado = client.get("/api/v1/precios/overrides", headers=h, params={
+        "cliente_id": env["cli1"], "producto_id": env["aguacate"]}).json()
+    assert listado["total"] == 1
+    assert float(_cot(client, h, env["aguacate"], cliente_id=env["cli1"])["precio"]) == 17.0

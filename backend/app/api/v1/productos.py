@@ -37,6 +37,7 @@ from ...models import (
     Sucursal,
 )
 from ...schemas.producto import (
+    PresentacionCreate,
     AliasIn,
     CandidatoOut,
     CatalogoClienteBatchIn,
@@ -1477,6 +1478,44 @@ def update_producto(
     for key, value in data.items():
         setattr(obj, key, value)
     flush_or_conflict(db, detail=_DUP)
+    db.refresh(obj)
+    return obj
+
+
+@router.post("/{producto_id}/presentaciones", response_model=ProductoOut)
+def agregar_presentacion(
+    producto_id: UUID,
+    payload: PresentacionCreate,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Agrega UNA presentación al producto, sin pisar las que ya tiene.
+
+    Existe para que las pantallas que no son Productos (la remisión, la lista de
+    precios) puedan dar de alta CAJA sobre la marcha sin leer-modificar-escribir
+    el diccionario entero, que es como dos capturistas a la vez se borran la
+    presentación el uno al otro.
+    """
+    obj = get_or_404(db, Producto, producto_id)
+    nombre = payload.nombre.strip().upper()
+    if not nombre:
+        raise HTTPException(status_code=422, detail="La presentación necesita nombre")
+    conocidas = {(obj.unidad_base or "").upper()} | {
+        str(k).upper() for k in (obj.presentaciones or {})
+    }
+    if nombre in conocidas:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{obj.nombre} ya maneja {nombre}; edítala en Productos si el factor cambió",
+        )
+    sat = (payload.unidad_sat or "").strip().upper() or _UNIDAD_A_SAT.get(nombre) or obj.unidad_sat
+    # Asignar un dict NUEVO: mutar el que trae el ORM no marca el JSONB sucio y
+    # el cambio se pierde sin error.
+    obj.presentaciones = {
+        **(obj.presentaciones or {}),
+        nombre: {"factor": float(payload.factor), "sat": sat},
+    }
+    db.flush()
     db.refresh(obj)
     return obj
 

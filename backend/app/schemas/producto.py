@@ -9,6 +9,18 @@ from pydantic import BaseModel, Field
 from .common import ORMModel
 
 
+class PresentacionCreate(BaseModel):
+    """Alta de UNA presentación sobre un producto que ya existe.
+
+    El `factor` no es cosmético: el inventario descuenta en unidad base
+    multiplicando por él (una CAJA de 20 saca 20 KILO), así que se pide siempre
+    y nunca se asume 1.
+    """
+    nombre: str = Field(min_length=1, max_length=20)
+    factor: Decimal = Field(gt=0)
+    unidad_sat: Optional[str] = Field(default=None, max_length=3)
+
+
 class ProductoBase(BaseModel):
     sku: str = Field(max_length=50)
     nombre: str = Field(max_length=254)

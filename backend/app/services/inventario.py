@@ -52,6 +52,22 @@ def presentacion_factor(producto: Optional[Producto], presentacion: Optional[str
     return factor if factor > 0 else ONE
 
 
+def presentacion_declarada(producto: Optional[Producto], presentacion: Optional[str]) -> bool:
+    """¿El producto sabe vender en esta presentación?
+
+    Un precio en una presentación que el producto no declara es una fila MUERTA:
+    los desplegables se arman de `presentaciones`, así que nadie la pedirá nunca
+    y el renglón se queda en la lista aparentando estar configurado. Vacío se
+    acepta — el documento sin presentación cae en la unidad base.
+    """
+    if not presentacion:
+        return True
+    conocidas = {(getattr(producto, "unidad_base", None) or "").upper()}
+    conocidas |= {str(k).upper() for k in (getattr(producto, "presentaciones", None) or {})}
+    conocidas.discard("")
+    return presentacion.strip().upper() in conocidas
+
+
 def presentacion_sat(producto: Optional[Producto], presentacion: Optional[str]) -> Optional[str]:
     """The CFDI clave_unidad (unidad SAT) for a presentation. When the rich shape
     carries a `sat`, it wins (so the same product can bill KGM por kilo y H87 por

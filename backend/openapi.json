@@ -11137,6 +11137,47 @@
     "title": "PrecioUpdate",
     "type": "object"
    },
+   "PresentacionCreate": {
+    "description": "Alta de UNA presentación sobre un producto que ya existe.\n\nEl `factor` no es cosmético: el inventario descuenta en unidad base\nmultiplicando por él (una CAJA de 20 saca 20 KILO), así que se pide siempre\ny nunca se asume 1.",
+    "properties": {
+     "factor": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Factor"
+     },
+     "nombre": {
+      "maxLength": 20,
+      "minLength": 1,
+      "title": "Nombre",
+      "type": "string"
+     },
+     "unidad_sat": {
+      "anyOf": [
+       {
+        "maxLength": 3,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Sat"
+     }
+    },
+    "required": [
+     "nombre",
+     "factor"
+    ],
+    "title": "PresentacionCreate",
+    "type": "object"
+   },
    "PreviewLineaIn": {
     "properties": {
      "cantidad": {
@@ -27284,6 +27325,7 @@
     ]
    },
    "post": {
+    "description": "Precio especial de un cliente (o de una sucursal) para un producto.\n\nReescribe el que ya exista con la MISMA llave y vigencia en vez de apilar\notro renglón: la tabla no tiene índice único y el resolutor se queda con el\nmás reciente, así que sin esto cada corrección dejaba basura que nadie\nvolvía a mirar pero que sí se lee en cada cotización.",
     "operationId": "create_override_api_v1_precios_overrides_post",
     "parameters": [
      {
@@ -28607,6 +28649,81 @@
      }
     ],
     "summary": "Update Producto",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/{producto_id}/presentaciones": {
+   "post": {
+    "description": "Agrega UNA presentación al producto, sin pisar las que ya tiene.\n\nExiste para que las pantallas que no son Productos (la remisión, la lista de\nprecios) puedan dar de alta CAJA sobre la marcha sin leer-modificar-escribir\nel diccionario entero, que es como dos capturistas a la vez se borran la\npresentación el uno al otro.",
+    "operationId": "agregar_presentacion_api_v1_productos__producto_id__presentaciones_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "producto_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Producto Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PresentacionCreate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProductoOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Agregar Presentacion",
     "tags": [
      "productos"
     ]

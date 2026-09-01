@@ -51,6 +51,7 @@ from ...schemas.lista_precios import (
     PrecioUpdate,
 )
 from ...schemas.common import Page
+from ...services.inventario import presentacion_declarada
 from ...services.precios import resolver_asignacion
 from ...services.proyecto_alcance import proyecto_aplica
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
@@ -205,6 +206,42 @@ def list_precios(
     return paginate(query, PrecioOut, limit, offset)
 
 
+def _productos_validados(db: Session, producto_ids) -> dict:
+    """Los productos del payload en UNA consulta, ya filtrados por el alcance.
+
+    Sustituye al `ensure_fk` por renglón y de paso deja a mano las
+    `presentaciones` de cada uno, que es lo que hay que mirar para no guardar
+    precios muertos.
+    """
+    ids = {i for i in producto_ids if i}
+    if not ids:
+        return {}
+    return {
+        p.id: p
+        for p in db.query(Producto)
+        .filter(Producto.id.in_(ids), Producto.deleted_at.is_(None))
+        .all()
+    }
+
+
+def _exigir_presentacion(prod: Optional[Producto], presentacion: str) -> None:
+    """Un precio en una presentación que el producto no declara nunca se cobra.
+
+    Los desplegables de la remisión y de la propia lista se arman de
+    `producto.presentaciones`, así que la fila quedaría ahí aparentando estar
+    configurada sin que nadie pueda pedirla. Se corta al guardar, no después.
+    """
+    if prod is None or presentacion_declarada(prod, presentacion):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=(
+            f"{prod.nombre} no maneja la presentación {presentacion}. "
+            "Agrégasela al producto (con cuántas unidades base trae) y vuelve a guardar."
+        ),
+    )
+
+
 @router.post(
     "/{lista_id}/precios",
     response_model=PrecioOut,
@@ -218,6 +255,10 @@ def create_precio(
 ):
     get_or_404(db, ListaPrecios, lista_id)
     ensure_fk(db, Producto, payload.producto_id, "producto_id")
+    _exigir_presentacion(
+        _productos_validados(db, [payload.producto_id]).get(payload.producto_id),
+        payload.presentacion,
+    )
     obj = Precio(
         **payload.model_dump(),
         tenant_id=ctx.tenant_id,
@@ -249,14 +290,18 @@ def bulk_upsert_precios(
         (p.producto_id, p.presentacion, p.cantidad_minima): p
         for p in db.query(Precio).filter(Precio.lista_id == lista_id).all()
     }
-    validated_productos: set = set()
+    productos = _productos_validados(db, [i.producto_id for i in payload.items])
 
     created = 0
     updated = 0
     for item in payload.items:
-        if item.producto_id not in validated_productos:
-            ensure_fk(db, Producto, item.producto_id, "producto_id")
-            validated_productos.add(item.producto_id)
+        prod = productos.get(item.producto_id)
+        if prod is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="producto_id inválido o fuera de alcance",
+            )
+        _exigir_presentacion(prod, item.presentacion)
         key = (item.producto_id, item.presentacion, item.cantidad_minima)
         current = existing.get(key)
         if current is not None:

@@ -21,6 +21,7 @@ from ...models import Cliente, Producto, PrecioOverride, Sucursal
 from ...schemas.common import Page
 from ...schemas.sucursal import CotizacionOut, PrecioOverrideCreate, PrecioOverrideOut
 from ...models import Tenant
+from ...services.inventario import presentacion_declarada
 from ...services.precios import resolver_asignaciones, resolver_precio
 from ._helpers import ensure_fk, get_or_404, paginate
 
@@ -293,9 +294,50 @@ def create_override(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE_OVR)),
 ):
+    """Precio especial de un cliente (o de una sucursal) para un producto.
+
+    Reescribe el que ya exista con la MISMA llave y vigencia en vez de apilar
+    otro renglón: la tabla no tiene índice único y el resolutor se queda con el
+    más reciente, así que sin esto cada corrección dejaba basura que nadie
+    volvía a mirar pero que sí se lee en cada cotización.
+    """
     ensure_fk(db, Producto, payload.producto_id, "producto_id")
     ensure_fk(db, Cliente, payload.cliente_id, "cliente_id")
     ensure_fk(db, Sucursal, payload.sucursal_id, "sucursal_id")
+    prod = (
+        db.query(Producto)
+        .filter(Producto.id == payload.producto_id, Producto.deleted_at.is_(None))
+        .one_or_none()
+    )
+    if prod is not None and not presentacion_declarada(prod, payload.presentacion):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{prod.nombre} no maneja la presentación {payload.presentacion}. "
+                "Agrégasela al producto (con cuántas unidades base trae) y vuelve a guardar."
+            ),
+        )
+    previo = (
+        db.query(PrecioOverride)
+        .filter(
+            PrecioOverride.cliente_id == payload.cliente_id,
+            PrecioOverride.sucursal_id == payload.sucursal_id,
+            PrecioOverride.producto_id == payload.producto_id,
+            PrecioOverride.presentacion == payload.presentacion,
+            PrecioOverride.vigencia_desde.is_(payload.vigencia_desde)
+            if payload.vigencia_desde is None
+            else PrecioOverride.vigencia_desde == payload.vigencia_desde,
+            PrecioOverride.vigencia_hasta.is_(payload.vigencia_hasta)
+            if payload.vigencia_hasta is None
+            else PrecioOverride.vigencia_hasta == payload.vigencia_hasta,
+        )
+        .one_or_none()
+    )
+    if previo is not None:
+        previo.precio_unitario = payload.precio_unitario
+        db.flush()
+        db.refresh(previo)
+        return previo
     obj = PrecioOverride(**payload.model_dump(), tenant_id=ctx.tenant_id)
     db.add(obj)
     db.flush()

@@ -26,6 +26,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from ..models import ListaPrecios, Precio, Producto
+from .inventario import presentacion_declarada
 
 HDR = ["SKU", "PRODUCTO", "PRESENTACION", "DESDE CANTIDAD", "PRECIO"]
 
@@ -91,8 +92,10 @@ def importar_xlsx(db: Session, tenant_id: UUID, lista: ListaPrecios, data: bytes
                                       f"({' | '.join(HDR)}) — baja el Excel de la lista y edítalo"}
 
     skus = {}
+    prods = {}
     for p in db.query(Producto).filter(Producto.tenant_id == tenant_id, Producto.deleted_at.is_(None)):
         skus[(p.sku or "").strip()] = p.id
+        prods[p.id] = p
 
     existentes = {
         (pr.producto_id, pr.presentacion, Decimal(pr.cantidad_minima)): pr
@@ -116,6 +119,14 @@ def importar_xlsx(db: Session, tenant_id: UUID, lista: ListaPrecios, data: bytes
         if pid is None:
             res["errores"].append(f"fila {i}: el SKU {sku} no existe en el catálogo "
                                   "(los productos nuevos se dan de alta en Productos → Importar)")
+            continue
+        # Misma regla que el alta por pantalla: un precio en una presentación
+        # que el producto no declara no lo cobra nadie, y aquí llegan archivos
+        # editados a mano donde escribir CAJA en vez de KILO es un teclazo.
+        if not presentacion_declarada(prods.get(pid), pres):
+            res["errores"].append(
+                f"fila {i}: {prods[pid].nombre} no maneja la presentación {pres} "
+                "(agrégasela al producto, con cuántas unidades base trae)")
             continue
         llave = (pid, pres, cant)
         actual = existentes.get(llave)

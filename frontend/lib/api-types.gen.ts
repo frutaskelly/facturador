@@ -2437,7 +2437,15 @@ export interface paths {
         /** List Overrides */
         get: operations["list_overrides_api_v1_precios_overrides_get"];
         put?: never;
-        /** Create Override */
+        /**
+         * Create Override
+         * @description Precio especial de un cliente (o de una sucursal) para un producto.
+         *
+         *     Reescribe el que ya exista con la MISMA llave y vigencia en vez de apilar
+         *     otro renglón: la tabla no tiene índice único y el resolutor se queda con el
+         *     más reciente, así que sin esto cada corrección dejaba basura que nadie
+         *     volvía a mirar pero que sí se lee en cada cotización.
+         */
         post: operations["create_override_api_v1_precios_overrides_post"];
         delete?: never;
         options?: never;
@@ -2782,6 +2790,31 @@ export interface paths {
         head?: never;
         /** Update Producto */
         patch: operations["update_producto_api_v1_productos__producto_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/productos/{producto_id}/presentaciones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Agregar Presentacion
+         * @description Agrega UNA presentación al producto, sin pisar las que ya tiene.
+         *
+         *     Existe para que las pantallas que no son Productos (la remisión, la lista de
+         *     precios) puedan dar de alta CAJA sobre la marcha sin leer-modificar-escribir
+         *     el diccionario entero, que es como dos capturistas a la vez se borran la
+         *     presentación el uno al otro.
+         */
+        post: operations["agregar_presentacion_api_v1_productos__producto_id__presentaciones_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/proveedores": {
@@ -7416,6 +7449,22 @@ export interface components {
             vigencia_desde?: string | null;
             /** Vigencia Hasta */
             vigencia_hasta?: string | null;
+        };
+        /**
+         * PresentacionCreate
+         * @description Alta de UNA presentación sobre un producto que ya existe.
+         *
+         *     El `factor` no es cosmético: el inventario descuenta en unidad base
+         *     multiplicando por él (una CAJA de 20 saca 20 KILO), así que se pide siempre
+         *     y nunca se asume 1.
+         */
+        PresentacionCreate: {
+            /** Factor */
+            factor: number | string;
+            /** Nombre */
+            nombre: string;
+            /** Unidad Sat */
+            unidad_sat?: string | null;
         };
         /** PreviewLineaIn */
         PreviewLineaIn: {
@@ -14978,6 +15027,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ProductoUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    agregar_presentacion_api_v1_productos__producto_id__presentaciones_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                producto_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PresentacionCreate"];
             };
         };
         responses: {
