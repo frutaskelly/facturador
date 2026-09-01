@@ -71,6 +71,30 @@ function puedeFacturar(r: Remision): boolean {
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
                "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
+// "RZMAFAN9" solo, o "RZMAFAN9 al 22" cuando el lote comparte prefijo: así
+// nombra el dueño un lote de remisiones. Es el nombre de respaldo del archivo
+// de SAE; el bueno lo manda el backend en Content-Disposition (misma regla en
+// services/export_sae.rango_folios).
+function rangoFolios(folios: string[]): string {
+  const limpios = [...new Set(folios.map((f) => (f ?? "").trim()).filter(Boolean))];
+  const partir = (f: string) => /^(.*?)(\d+)$/.exec(f);
+  limpios.sort((a, b) => {
+    const [ma, mb] = [partir(a), partir(b)];
+    const pa = ma ? ma[1] : a, pb = mb ? mb[1] : b;
+    if (pa !== pb) return pa < pb ? -1 : 1;
+    return (ma ? Number(ma[2]) : -1) - (mb ? Number(mb[2]) : -1);
+  });
+  if (limpios.length === 0) return "SIN_FOLIO";
+  if (limpios.length === 1) return limpios[0];
+  const partidos = limpios.map(partir);
+  const prefijos = new Set(partidos.map((m, i) => (m ? m[1] : limpios[i])));
+  if (prefijos.size === 1 && partidos.every(Boolean)) {
+    const nums = partidos.map((m) => Number(m![2])).sort((a, b) => a - b);
+    return `${partidos[0]![1]}${nums[0]} al ${nums[nums.length - 1]}`;
+  }
+  return `${limpios[0]} al ${limpios[limpios.length - 1]}`;
+}
+
 export default function RemisionesPage() {
   const { me } = useAuth();
   const toast = useToast();
@@ -1222,20 +1246,27 @@ export default function RemisionesPage() {
 
   async function confirmarExportSae() {
     if (!exportSae?.preview?.ok) return;
+    // El folio inicial se confirma contra SAE en los DOS tipos: la serie de la
+    // factura, y el consecutivo de pedidos de la empresa (llave "PEDIDO").
     const folios: Record<string, number> = {};
-    if (exportSae.tipo === "FACTURA") {
-      for (const [serie, v] of Object.entries(exportSae.folios)) {
-        const n = Number(v);
-        if (!(n > 0)) { toast.error(`Falta el folio inicial de la serie ${serie}`); return; }
-        folios[serie] = n;
+    for (const [serie, v] of Object.entries(exportSae.folios)) {
+      const n = Number(v);
+      if (!(n > 0)) {
+        toast.error(
+          serie === "PEDIDO"
+            ? "Falta el folio inicial de pedidos (tómalo de SAE)"
+            : `Falta el folio inicial de la serie ${serie}`
+        );
+        return;
       }
+      folios[serie] = n;
     }
     setExportBusy(true);
     try {
       await apiDownloadPost(
         "/api/v1/remisiones/export-sae",
         { ids: selected.map((r) => r.id), tipo: exportSae.tipo, folios },
-        `${exportSae.tipo === "FACTURA" ? "FACTURA_massiva" : "PEDIDO_massivo"}_SAE.xls`
+        `${exportSae.tipo} ${rangoFolios(selected.map((r) => r.folio_interno))}.xls`
       );
       toast.success(
         exportSae.tipo === "FACTURA"
@@ -2185,12 +2216,18 @@ export default function RemisionesPage() {
                     </ul>
                   </div>
                 )}
-                {exportSae.tipo === "FACTURA" ? (
-                  <div className="space-y-3">
-                    {exportSae.preview.series.map((s) => (
+                {/* El folio inicial se confirma contra SAE en los dos tipos: la
+                    serie de la factura y el consecutivo de pedidos de la empresa. */}
+                <div className="space-y-3">
+                  {exportSae.preview.series.map((s) => {
+                    const esPedido = s.serie === "PEDIDO";
+                    return (
                       <div key={s.serie} className="flex items-end gap-3">
                         <div className="w-40">
-                          <Field label={`Folio inicial ${s.serie}`} hint={`${s.remisiones} factura(s)`}>
+                          <Field
+                            label={esPedido ? "Folio inicial de pedido" : `Folio inicial ${s.serie}`}
+                            hint={`${s.remisiones} ${esPedido ? "pedido(s)" : "factura(s)"}`}
+                          >
                             <Input
                               inputMode="numeric"
                               value={exportSae.folios[s.serie] ?? ""}
@@ -2204,7 +2241,7 @@ export default function RemisionesPage() {
                         </div>
                         {s.folio_sugerido ? (
                           <span className="pb-2 text-xs text-muted">
-                            sugerido: {s.folio_sugerido} (del espejo)
+                            sugerido: {s.folio_sugerido} {esPedido ? "(del último archivo)" : "(del espejo)"}
                           </span>
                         ) : (
                           <span className="pb-2 text-xs text-muted">
@@ -2212,18 +2249,26 @@ export default function RemisionesPage() {
                           </span>
                         )}
                       </div>
-                    ))}
-                    <Alert tone="info">
-                      Confirma el folio inicial contra SAE antes de generar: un folio ya usado hace
-                      fallar la importación. El folio del archivo es una propuesta: se confirmará en
-                      cada remisión solo cuando la factura exista en SAE (espejo).
-                    </Alert>
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted">
-                    El pedido lleva la OC del cliente como folio; SAE asigna su consecutivo al importar.
-                  </p>
-                )}
+                    );
+                  })}
+                  <Alert tone="info">
+                    {exportSae.tipo === "FACTURA" ? (
+                      <>
+                        Confirma el folio inicial contra SAE antes de generar: un folio ya usado hace
+                        fallar la importación. El folio del archivo es una propuesta: se confirmará en
+                        cada remisión solo cuando la factura exista en SAE (espejo).
+                      </>
+                    ) : (
+                      <>
+                        El folio del pedido es el consecutivo de pedidos de la empresa SAE{" "}
+                        <span className="tabular-nums">{exportSae.preview.empresa}</span> (el último + 1),
+                        no la OC del cliente: esa va en la columna «Su pedido» y en la observación.
+                        Confírmalo contra SAE antes de generar — un folio ya usado hace fallar la
+                        importación.
+                      </>
+                    )}
+                  </Alert>
+                </div>
               </>
             )}
           </div>
