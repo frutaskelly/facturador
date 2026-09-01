@@ -68,7 +68,7 @@ from ...services.onboarding import compute_status
 from ...services.inventario import build_movimiento, presentacion_factor, presentacion_sat, resolve_lote
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import ensure_fk, get_or_404, paginate
-from .remisiones import _validar_destinatarios, reservar_stock_remision
+from .remisiones import _validar_destinatarios, exigir_precios, reservar_stock_remision
 
 log = logging.getLogger(__name__)
 
@@ -400,6 +400,10 @@ def factura_desde_remisiones(
             raise HTTPException(status_code=409, detail=f"La remisión {r.folio_interno} ya está facturada")
         if r.estado not in ("BORRADOR", "CONFIRMADA"):
             raise HTTPException(status_code=422, detail=f"La remisión {r.folio_interno} no se puede facturar (estado {r.estado})")
+        # Las CONFIRMADAS ya no pasan por reservar_stock_remision, así que el
+        # candado de precios se revisa aquí para todas — y antes de reservar
+        # nada, para no dejar inventario movido por una factura que no sale.
+        exigir_precios(r)
 
     # Facturar auto-confirma las remisiones en BORRADOR (reserva inventario y
     # registra la salida) para que la factura salga contra existencias reales,

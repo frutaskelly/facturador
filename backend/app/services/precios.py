@@ -178,9 +178,16 @@ def origen_de(a: ListaAsignacion) -> str:
 
 
 def _lista_default(db):
-    # 1) la marcada explícitamente como default (wizard de importación /
-    # administración de listas); 2) la convención histórica codigo='UNICO';
-    # 3) la más vieja activa.
+    """La lista base del negocio, o None si no hay ninguna DECLARADA.
+
+    Solo dos formas de serlo: la marcada con `es_default`, o la convención
+    histórica codigo='UNICO'. Antes había una tercera —"la más vieja activa"—
+    y era una trampa: sin ninguna marcada, el negocio terminaba cobrando la
+    primera lista que alguien creó, que en la práctica es una negociación de un
+    cliente (1-sep-2026: a todos se les cotizaba con la lista de Balles y
+    Jubran solo por ser la más antigua). Cobrar de más o de menos con la
+    negociación ajena es peor que no tener precio: sin precio se ve el hueco.
+    """
     marcada = (
         db.query(ListaPrecios)
         .filter(ListaPrecios.es_default.is_(True), ListaPrecios.deleted_at.is_(None))
@@ -189,19 +196,12 @@ def _lista_default(db):
     )
     if marcada is not None:
         return marcada
-    base = (
+    return (
         db.query(ListaPrecios)
         .filter(ListaPrecios.codigo == "UNICO", ListaPrecios.deleted_at.is_(None))
-        .one_or_none()
+        .order_by(ListaPrecios.created_at.asc())
+        .first()
     )
-    if base is None:
-        base = (
-            db.query(ListaPrecios)
-            .filter(ListaPrecios.status == "ACTIVO", ListaPrecios.deleted_at.is_(None))
-            .order_by(ListaPrecios.created_at.asc())
-            .first()
-        )
-    return base
 
 
 def _factor(v) -> Decimal:

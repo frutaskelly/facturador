@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
-import { Field, Input, Select } from "@/components/ui/Field";
+import { Field, Input, Select, Switch } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
@@ -68,7 +68,7 @@ export default function ListasPreciosPage() {
   );
 
   // ── editor de lista ──
-  const [listaForm, setListaForm] = useState<{ id?: string; codigo: string; nombre: string; status: string; copiarDe: string } | null>(null);
+  const [listaForm, setListaForm] = useState<{ id?: string; codigo: string; nombre: string; status: string; es_default: boolean; copiarDe: string } | null>(null);
 
   async function saveLista() {
     if (!listaForm) return;
@@ -76,7 +76,8 @@ export default function ListasPreciosPage() {
       toast.error("Código y nombre son obligatorios");
       return;
     }
-    const body = { codigo: listaForm.codigo.trim(), nombre: listaForm.nombre.trim(), status: listaForm.status };
+    const body = { codigo: listaForm.codigo.trim(), nombre: listaForm.nombre.trim(),
+                   status: listaForm.status, es_default: listaForm.es_default };
     try {
       if (listaForm.id) {
         await patch(`/api/v1/listas-precios/${listaForm.id}`, body);
@@ -267,6 +268,7 @@ export default function ListasPreciosPage() {
     { header: "Código", cell: (l) => <span className="font-medium">{l.codigo}</span> },
     { header: "Nombre", cell: (l) => l.nombre },
     { header: "Estado", cell: (l) => <Badge tone={l.status === "ACTIVO" ? "success" : "muted"}>{l.status}</Badge> },
+    { header: "Base", cell: (l) => (l.es_default ? <Badge tone="accent">★ Base</Badge> : <span className="text-muted">—</span>) },
     { header: "Moneda", cell: (l) => <span className="text-muted">{l.moneda}</span> },
     {
       header: "",
@@ -278,7 +280,7 @@ export default function ListasPreciosPage() {
           </Button>
           {canWrite && (
             <button
-              onClick={(e) => { e.stopPropagation(); setListaForm({ id: l.id, codigo: l.codigo, nombre: l.nombre, status: l.status, copiarDe: "" }); }}
+              onClick={(e) => { e.stopPropagation(); setListaForm({ id: l.id, codigo: l.codigo, nombre: l.nombre, status: l.status, es_default: !!l.es_default, copiarDe: "" }); }}
               className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground" aria-label="Editar">
               <Pencil size={16} />
             </button>
@@ -301,7 +303,7 @@ export default function ListasPreciosPage() {
         title="Listas de precios"
         subtitle="Niveles de venta (único, menudeo, mayoreo…) con precios por presentación y volumen."
         actions={canWrite ? (
-          <Button onClick={() => setListaForm({ codigo: "", nombre: "", status: "ACTIVO", copiarDe: "" })}>
+          <Button onClick={() => setListaForm({ codigo: "", nombre: "", status: "ACTIVO", es_default: false, copiarDe: "" })}>
             <Plus size={16} /> Nueva lista de precios
           </Button>
         ) : undefined}
@@ -342,6 +344,19 @@ export default function ListasPreciosPage() {
                 <option value="ACTIVO">Activo</option>
                 <option value="INACTIVO">Inactivo</option>
               </Select>
+            </Field>
+            {/* Marcarla es una DECISIÓN de negocio: la base la cobra cualquier
+                cliente cuyo producto no esté en su lista negociada. Sin ninguna
+                marcada no hay precio base, que es lo correcto — antes el sistema
+                adivinaba con la lista más vieja y cobraba con la de otro. */}
+            <Field
+              label="Lista base del negocio"
+              hint="La que se cobra cuando el producto no está en la lista negociada del cliente. No la actives en una lista negociada."
+            >
+              <Switch
+                checked={listaForm.es_default}
+                onChange={(v) => setListaForm({ ...listaForm, es_default: v })}
+              />
             </Field>
             {!listaForm.id && (
               <Field label="Copiar precios de" hint="Opcional: copia todos los precios de una lista existente.">

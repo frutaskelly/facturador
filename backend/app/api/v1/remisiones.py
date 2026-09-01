@@ -276,12 +276,10 @@ def create_remision(
                 serie_id=rem.serie_id, proyecto_id=rem.proyecto_id,
                 lista_id=rem.lista_precios_id,
             )
-            if not res or res.get("precio") is None:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"No se encontró precio para el producto de la línea {i}; indícalo manualmente",
-                )
-            precio = res["precio"]
+            # Sin precio no se detiene la captura: la línea entra en 0 y se ve.
+            # El candado está más adelante — una remisión con líneas en 0 se
+            # guarda como borrador pero no se confirma ni se factura.
+            precio = res["precio"] if res and res.get("precio") is not None else _ZERO
         importe = ln.cantidad_solicitada * precio
         subtotal += importe
         prod, esq = fiscal.get(ln.producto_id, (None, None))
@@ -586,12 +584,7 @@ def update_remision(
                     serie_id=rem.serie_id, proyecto_id=rem.proyecto_id,
                     lista_id=rem.lista_precios_id,
                 )
-                if not res or res.get("precio") is None:
-                    raise HTTPException(
-                        status_code=422,
-                        detail=f"No se encontró precio para el producto de la línea {i}; indícalo manualmente",
-                    )
-                precio = res["precio"]
+                precio = res["precio"] if res and res.get("precio") is not None else _ZERO
             importe = ln["cantidad_solicitada"] * precio
             subtotal += importe
             prod, esq = fiscal.get(ln["producto_id"], (None, None))
@@ -628,6 +621,28 @@ def update_remision(
     return rem
 
 
+def exigir_precios(rem: Remision) -> None:
+    """Una remisión con líneas en $0 no sale ni se factura.
+
+    Capturar sin precio es legítimo mientras es borrador (el precio puede no
+    estar negociado todavía). Mover inventario o timbrar con esa línea en cero
+    es regalar mercancía y emitir un CFDI mal, así que el candado vive aquí, en
+    el paso que compromete, y no en el que captura.
+    """
+    sin_precio = [ln for ln in rem.lineas if (ln.precio_unitario or 0) <= 0]
+    if not sin_precio:
+        return
+    detalle = ", ".join(str(ln.numero_linea) for ln in sorted(sin_precio, key=lambda x: x.numero_linea))
+    plural = "las líneas" if len(sin_precio) > 1 else "la línea"
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"La remisión {rem.folio_interno} tiene {plural} {detalle} sin precio. "
+            "Captúralo, o agrega el producto a la lista del cliente, antes de confirmar o facturar."
+        ),
+    )
+
+
 def reservar_stock_remision(
     db: Session,
     ctx: AuthContext,
@@ -647,6 +662,7 @@ def reservar_stock_remision(
     """
     if rem.almacen_id is None:
         raise HTTPException(status_code=422, detail="La remisión requiere un almacén para reservar inventario")
+    exigir_precios(rem)
     pesos = pesos or {}
     prod_ids = {ln.producto_id for ln in rem.lineas}
     productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}

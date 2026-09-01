@@ -181,13 +181,57 @@ def test_auto_precio_desde_lista(client, env, auth_as):
     assert float(rem["subtotal"]) == 30.0  # 4 × 7.50
 
 
-def test_auto_precio_sin_precio_disponible_422(client, env, auth_as):
-    """Sin precio en línea ni lista ni override → 422 (pide precio manual)."""
+def test_sin_precio_entra_en_cero_pero_no_confirma_ni_factura(client, env, auth_as):
+    """Sin precio en línea ni lista ni override: la captura NO se detiene.
+
+    Regla del dueño (1-sep-2026): la línea entra en $0 y el borrador se guarda
+    —el hueco se ve—, pero confirmar y facturar quedan cerrados hasta que
+    alguien ponga el precio. Antes esto era un 422 al guardar, que obligaba a
+    inventar un precio para no perder la captura.
+    """
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     r = client.post("/api/v1/remisiones", headers=h, json={
         "cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
         "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "1"}]})
-    assert r.status_code == 422
+    assert r.status_code == 201, r.text
+    rem = r.json()
+    assert float(rem["lineas"][0]["precio_unitario"]) == 0.0
+    assert rem["estado"] == "BORRADOR"
+
+    confirmar = client.post(f"/api/v1/remisiones/{rem['id']}/confirmar", headers=h)
+    assert confirmar.status_code == 422
+    assert "sin precio" in confirmar.json()["detail"]
+
+    facturar = client.post("/api/v1/facturas/desde-remisiones", headers=h,
+                           json={"remision_ids": [rem["id"]]})
+    assert facturar.status_code == 422
+    assert "sin precio" in facturar.json()["detail"]
+
+    # Con el precio puesto a mano, el mismo borrador ya confirma.
+    parche = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={
+        "lineas": [{"producto_id": env["prod_a"], "presentacion": "KILO",
+                    "cantidad_solicitada": "1", "precio_unitario": "9.00"}]})
+    assert parche.status_code == 200, parche.text
+    assert client.post(f"/api/v1/remisiones/{rem['id']}/confirmar", headers=h,
+                       json={"permitir_negativos": True}).status_code == 200
+
+
+def test_lista_base_no_se_adivina(client, env, auth_as):
+    """Una lista cualquiera NO se vuelve la base del negocio por ser la más vieja.
+
+    Es el error del 1-sep-2026: sin ninguna marcada, el resolutor tomaba la
+    primera lista creada —una negociación de un cliente— y le cobraba con ella
+    a todo el mundo. Solo `es_default` (o la convención UNICO) hace base.
+    """
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    lista = client.post("/api/v1/listas-precios", headers=h,
+                        json={"codigo": "NEGOCIADA", "nombre": "Negociada con otro"}).json()
+    client.post(f"/api/v1/listas-precios/{lista['id']}/precios", headers=h,
+                json={"producto_id": env["prod_a"], "precio_unitario": "99", "cantidad_minima": 1})
+
+    cot = client.get("/api/v1/precios/cotizar", headers=h,
+                     params={"producto_id": env["prod_a"], "cliente_id": env["cli_a"]}).json()
+    assert cot["precio"] is None, "una lista sin asignar no debe cobrarle a nadie"
 
 
 def test_confirm_with_real_weight_catch_weight(client, env, auth_as):

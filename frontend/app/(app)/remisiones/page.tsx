@@ -622,6 +622,13 @@ export default function RemisionesPage() {
   const puedePrecios = can(me, "lista_precios:gestionar");
   const puedeProductos = can(me, "producto:gestionar");
   const [aprender, setAprender] = useState<PrecioDivergente[] | null>(null);
+  // Líneas capturadas que se quedaron en $0 — porque el producto no está en la
+  // lista del cliente y ya no se inventa un precio base. El borrador se guarda
+  // (el hueco se ve), pero confirmar y facturar quedan cerrados.
+  const sinPrecio = useMemo(
+    () => lineas.filter((l) => l.producto_id && Number(l.cantidad) > 0 && !(Number(l.precio) > 0)),
+    [lineas],
+  );
   // Alta de presentación desde la línea: guarda a qué línea volver.
   const [nuevaPres, setNuevaPres] = useState<{ key: string; producto_id: string } | null>(null);
 
@@ -1817,9 +1824,18 @@ export default function RemisionesPage() {
                   {/* Lo que dice el catálogo, cuando se está cobrando otra cosa.
                       Solo informa: llevarlo al catálogo se decide al guardar. */}
                   {(() => {
-                    if (!l.producto_id || !l.precioManual || !l.precio.trim()) return null;
+                    if (!l.producto_id) return null;
                     const v = Number(l.precio);
-                    if (!Number.isFinite(v) || v <= 0) return null;
+                    // Sin precio no se detiene la captura, pero se ve y se dice
+                    // qué falta hacer: es lo que traba confirmar y facturar.
+                    if (!l.precio.trim() || !Number.isFinite(v) || v <= 0) {
+                      return (
+                        <div className="mt-0.5 text-[11px] text-warning">
+                          sin precio — captúralo para poder confirmar
+                        </div>
+                      );
+                    }
+                    if (!l.precioManual) return null;
                     if (l.precioLista == null) {
                       return <div className="mt-0.5 text-[11px] text-muted">sin precio en el catálogo</div>;
                     }
@@ -1933,10 +1949,24 @@ export default function RemisionesPage() {
             <>
               <Button variant="secondary" onClick={() => setGuardarChoiceOpen(false)} disabled={saving}>Cancelar</Button>
               <Button variant="secondary" onClick={guardarBorrador} disabled={saving}>Borrador</Button>
-              <Button variant="secondary" onClick={guardarYConfirmar} disabled={saving}>Confirmar salida (Inventario)</Button>
-              <Button onClick={guardarYTimbrar} disabled={saving}>Timbrar</Button>
+              <Button variant="secondary" onClick={guardarYConfirmar} disabled={saving || sinPrecio.length > 0}>Confirmar salida (Inventario)</Button>
+              <Button onClick={guardarYTimbrar} disabled={saving || sinPrecio.length > 0}>Timbrar</Button>
             </>
           }>
+          {/* El borrador siempre se puede guardar; lo que compromete mercancía o
+              emite un CFDI no, mientras haya una línea en $0. El backend lo
+              vuelve a exigir: esto solo evita el viaje. */}
+          {sinPrecio.length > 0 && (
+            <div className="mb-3">
+            <Alert tone="warning">
+              {sinPrecio.length === 1
+                ? `${sinPrecio[0].label || sinPrecio[0].texto} va sin precio.`
+                : `${sinPrecio.length} líneas van sin precio: ${sinPrecio.slice(0, 3).map((l) => l.label || l.texto).join(", ")}${sinPrecio.length > 3 ? "…" : ""}.`}{" "}
+              Se puede guardar como <strong>borrador</strong>, pero no confirmar ni timbrar hasta
+              que tengan precio — captúralo en la línea o agrega el producto a la lista del cliente.
+            </Alert>
+            </div>
+          )}
           <p className="mb-2 text-sm text-muted">Elige cómo guardar la remisión:</p>
           <ul className="ml-4 list-disc space-y-1 text-sm text-muted">
             <li><strong>Borrador</strong>: se guarda sin afectar el inventario.</li>
