@@ -407,6 +407,9 @@ export default function ProductosPage() {
         open={form !== null}
         onClose={() => setForm(null)}
         title={editingId ? "Editar producto" : "Nuevo producto"}
+        // Ancho: el vocabulario de un producto se lee agrupado por cliente y en
+        // el modal angosto el texto se partía en vertical, una letra por renglón.
+        wide
         footer={
           <>
             <Button variant="secondary" onClick={() => setForm(null)}>
@@ -487,7 +490,7 @@ export default function ProductosPage() {
 
         {form && editingId && tab === "alias" && (
           <div className="mt-3">
-            <ProductoAliasPanel productoId={editingId} />
+            <ProductoAliasPanel productoId={editingId} productoNombre={form.nombre} />
           </div>
         )}
 

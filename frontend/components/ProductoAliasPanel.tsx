@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -42,7 +42,42 @@ function fecha(iso: string) {
     : d.toLocaleDateString("es-MX", { day: "numeric", month: "short" });
 }
 
-export function ProductoAliasPanel({ productoId }: { productoId: string }) {
+type Grupo = {
+  clave: string;
+  esGlobal: boolean;
+  titulo: string;
+  sucursal: string | null;
+  alias: ProductoAlias[];
+};
+
+/** Un grupo por alcance: primero el global, luego cada cliente. */
+function agrupar(alias: ProductoAlias[]): Grupo[] {
+  const mapa = new Map<string, Grupo>();
+  for (const a of alias) {
+    const clave = `${a.cliente_id ?? "global"}|${a.sucursal_id ?? ""}`;
+    if (!mapa.has(clave)) {
+      mapa.set(clave, {
+        clave,
+        esGlobal: a.cliente_id === null,
+        titulo: a.cliente_id ? a.cliente_nombre ?? "Cliente" : "Todos los clientes",
+        sucursal: a.sucursal_nombre,
+        alias: [],
+      });
+    }
+    mapa.get(clave)!.alias.push(a);
+  }
+  return [...mapa.values()].sort((x, y) =>
+    x.esGlobal === y.esGlobal ? x.titulo.localeCompare(y.titulo) : x.esGlobal ? -1 : 1
+  );
+}
+
+export function ProductoAliasPanel({
+  productoId,
+  productoNombre,
+}: {
+  productoId: string;
+  productoNombre: string;
+}) {
   const { me } = useAuth();
   const toast = useToast();
   const { patch, del, loading: saving } = useMutation();
@@ -55,10 +90,14 @@ export function ProductoAliasPanel({ productoId }: { productoId: string }) {
   const [reapuntando, setReapuntando] = useState<string | null>(null);
   const [aQuitar, setAQuitar] = useState<ProductoAlias | null>(null);
 
-  async function reapuntar(alias: ProductoAlias, nuevoProductoId: string) {
+  const alias = useMemo(() => data ?? [], [data]);
+  const grupos = useMemo(() => agrupar(alias), [alias]);
+  const revisar = alias.filter((a) => a.ambiguo);
+
+  async function reapuntar(a: ProductoAlias, nuevoProductoId: string) {
     try {
-      await patch(`/api/v1/productos/alias/${alias.id}`, { producto_id: nuevoProductoId });
-      toast.success(`«${alias.texto}» ahora cruza al producto elegido`);
+      await patch(`/api/v1/productos/alias/${a.id}`, { producto_id: nuevoProductoId });
+      toast.success(`«${a.texto}» ahora cruza al producto elegido`);
       setReapuntando(null);
       reload();
     } catch (e) {
@@ -87,7 +126,6 @@ export function ProductoAliasPanel({ productoId }: { productoId: string }) {
   }
   if (error) return <p className="py-6 text-sm text-danger">{error}</p>;
 
-  const alias = data ?? [];
   if (alias.length === 0) {
     return (
       <EmptyState
@@ -97,108 +135,117 @@ export function ProductoAliasPanel({ productoId }: { productoId: string }) {
     );
   }
 
-  const revisar = alias.filter((a) => a.ambiguo);
-
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      <p className="text-sm text-muted">
+        Cuando llegue una orden —por WhatsApp, PDF o foto— y una partida diga alguno de
+        estos textos, se surtirá{" "}
+        <b className="text-foreground">{productoNombre}</b>.
+      </p>
+
       {revisar.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           <b>
             {revisar.length === 1
-              ? "1 texto lleva además a otro producto"
-              : `${revisar.length} textos llevan además a otro producto`}
+              ? "1 de estos textos también se usa para otro producto"
+              : `${revisar.length} de estos textos también se usan para otro producto`}
           </b>
           . A veces está bien —cada cliente le dice distinto a cosas distintas— y a veces es
-          el cruce equivocado. Revísalos abajo.
+          el cruce equivocado.
         </div>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-surface-2 text-xs uppercase tracking-wide text-muted">
-              <th className="px-3 py-2 text-left font-medium">Texto</th>
-              <th className="px-3 py-2 text-left font-medium">Aplica a</th>
-              <th className="px-3 py-2 text-left font-medium">Origen</th>
-              <th className="px-3 py-2" />
-            </tr>
-          </thead>
-          <tbody>
-            {alias.map((a) => {
+      {grupos.map((g) => (
+        <section key={g.clave} className="overflow-hidden rounded-lg border border-border">
+          <header className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-2 px-4 py-2">
+            {g.esGlobal ? (
+              <Badge tone="accent">Todos los clientes</Badge>
+            ) : (
+              <>
+                <span className="text-xs uppercase tracking-wide text-muted">Cliente</span>
+                <span className="text-sm font-semibold">{g.titulo}</span>
+                {g.sucursal && <Badge tone="warning">{g.sucursal}</Badge>}
+              </>
+            )}
+            <span className="ml-auto text-xs text-muted">
+              {g.alias.length === 1 ? "1 forma de escribirlo" : `${g.alias.length} formas de escribirlo`}
+            </span>
+          </header>
+
+          <ul className="divide-y divide-surface-2">
+            {g.alias.map((a) => {
               const editable = a.cliente_id !== null || puedeGlobal;
               return (
-                <tr
+                <li
                   key={a.id}
-                  className={`border-t border-surface-2 ${a.ambiguo ? "bg-amber-50/60" : ""}`}
+                  className={`px-4 py-3 ${a.ambiguo ? "bg-amber-50/60" : ""}`}
                 >
-                  <td className="px-3 py-2">
-                    <span className="font-medium">{a.texto}</span>
-                    {a.ambiguo && (
-                      <div className="mt-0.5 text-xs text-muted">
-                        También lleva a {a.tambien_en.join(", ")}
-                      </div>
-                    )}
-                    {reapuntando === a.id && (
-                      <div className="mt-2 max-w-sm">
-                        <ProductoCombobox
-                          autoFocus
-                          placeholder="¿A qué producto debe ir?"
-                          onSelect={(p) => {
-                            if (p) reapuntar(a, p.producto_id);
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="mt-1 text-xs text-muted hover:text-foreground"
-                          onClick={() => setReapuntando(null)}
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    {a.cliente_id ? (
-                      <Badge tone="warning">
-                        {a.cliente_nombre ?? "Cliente"}
-                        {a.sucursal_nombre ? ` · ${a.sucursal_nombre}` : ""}
-                      </Badge>
-                    ) : (
-                      <Badge tone="accent">Global</Badge>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-xs text-muted">
-                    {ORIGEN[a.origen] ?? a.origen} · {fecha(a.created_at)}
-                  </td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">
-                    {editable ? (
-                      <span className="inline-flex gap-1">
-                        <Button
-                          variant="secondary"
-                          onClick={() => setReapuntando(reapuntando === a.id ? null : a.id)}
-                          disabled={saving}
-                        >
-                          Reapuntar
-                        </Button>
-                        <Button variant="secondary" onClick={() => setAQuitar(a)} disabled={saving}>
-                          Quitar
-                        </Button>
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted">Solo gestión</span>
-                    )}
-                  </td>
-                </tr>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium break-words">{a.texto}</p>
+                      {a.ambiguo && (
+                        <p className="mt-1 text-xs text-amber-700">
+                          Para otro alcance este mismo texto lleva a{" "}
+                          {a.tambien_en.join(", ")}
+                        </p>
+                      )}
+                      <p className="mt-1 text-xs text-muted">
+                        {ORIGEN[a.origen] ?? a.origen} · {fecha(a.created_at)}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      {editable ? (
+                        <>
+                          <Button
+                            variant="secondary"
+                            onClick={() => setReapuntando(reapuntando === a.id ? null : a.id)}
+                            disabled={saving}
+                          >
+                            Reapuntar
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            onClick={() => setAQuitar(a)}
+                            disabled={saving}
+                          >
+                            Quitar
+                          </Button>
+                        </>
+                      ) : (
+                        <span className="self-center text-xs text-muted">Solo gestión</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {reapuntando === a.id && (
+                    <div className="mt-3 max-w-md">
+                      <ProductoCombobox
+                        autoFocus
+                        placeholder="¿A qué producto debe ir este texto?"
+                        onSelect={(p) => {
+                          if (p) reapuntar(a, p.producto_id);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="mt-1 text-xs text-muted hover:text-foreground"
+                        onClick={() => setReapuntando(null)}
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
+                </li>
               );
             })}
-          </tbody>
-        </table>
-      </div>
+          </ul>
+        </section>
+      ))}
 
       <p className="text-xs text-muted">
-        <b>Global</b> aplica a todos los clientes — es ortografía, abreviaturas o la clave del
-        SAE, y cambiarlo pide permiso de gestión. <b>Por cliente</b> es su vocabulario: el
-        mismo texto puede llevar a otro producto para otro cliente, y eso suele ser correcto.
+        <b>Todos los clientes</b> es ortografía, abreviaturas o la clave del SAE, y cambiarlo
+        pide permiso de gestión. <b>Por cliente</b> es su vocabulario: el mismo texto puede
+        llevar a otro producto para otro cliente, y eso suele ser correcto.
       </p>
 
       <ConfirmDialog
