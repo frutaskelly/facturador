@@ -136,6 +136,23 @@ def _similar_filter(query, term: str):
     )
 
 
+def _con_descripcion_sat(db: Session, filas: list[Producto]) -> None:
+    """Adjunta la descripción oficial del catálogo SAT a cada producto.
+
+    En UNA consulta para toda la página: hacerlo por renglón serían 50 viajes a
+    la base solo para poder leer la clave. La clave que no exista en el catálogo
+    se queda sin descripción (no se inventa: el listado la muestra vacía)."""
+    claves = {f.clave_sat for f in filas if f.clave_sat}
+    if not claves:
+        return
+    desc = {
+        c.clave: c.descripcion
+        for c in db.query(SatClaveProdServ).filter(SatClaveProdServ.clave.in_(claves)).all()
+    }
+    for f in filas:
+        f.clave_sat_descripcion = desc.get(f.clave_sat or "")
+
+
 @router.get("", response_model=Page[ProductoOut])
 def list_productos(
     q: Optional[str] = Query(default=None, max_length=254),
@@ -157,7 +174,8 @@ def list_productos(
     if activo is not None:
         query = query.filter(Producto.activo.is_(activo))
     query = query.order_by(Producto.nombre.asc())
-    return paginate(query, ProductoOut, limit, offset)
+    return paginate(query, ProductoOut, limit, offset,
+                    preparar=lambda rows: _con_descripcion_sat(db, rows))
 
 
 @router.get("/similares", response_model=list[ProductoOut])

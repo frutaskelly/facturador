@@ -11639,6 +11639,17 @@
       "title": "Clave Sat",
       "type": "string"
      },
+     "clave_sat_descripcion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sat Descripcion"
+     },
      "codigo_barras": {
       "anyOf": [
        {

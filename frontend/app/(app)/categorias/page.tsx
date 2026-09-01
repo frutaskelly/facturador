@@ -30,6 +30,10 @@ const config: CrudConfig<Categoria> = {
     hint: "Elige las que uses en tu negocio. Podrás editarlas o agregar más después.",
     keyOf: (c) => c.nombre.trim().toLowerCase(),
     items: [
+      // Primera a propósito: es el destino de los productos que llegan sin
+      // categoría (importaciones, altas rápidas). Tenerla como categoría real
+      // —en vez de un hueco en blanco— deja filtrarlos y repartirlos después.
+      ["Sin categoría", "Productos que aún no se clasifican"],
       ["Frutas", "Fruta fresca de temporada"],
       ["Verduras", "Verdura y hortaliza fresca"],
       ["Abarrotes", "Despensa y productos secos"],

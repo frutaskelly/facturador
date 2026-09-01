@@ -85,6 +85,10 @@ class ProductoOut(ORMModel, ProductoBase):
     tenant_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+    # Derivado del catálogo SAT oficial a partir de `clave_sat` — no se guarda
+    # en el producto: la clave es el dato, la descripción es cómo se lee. La
+    # resuelve el listado en una sola consulta (ver `preparar` en la ruta).
+    clave_sat_descripcion: Optional[str] = None
 
 
 # ─── Cruce de productos (match / alias aprendidos) ───────────────────────────

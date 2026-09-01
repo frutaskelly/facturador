@@ -7591,6 +7591,8 @@ export interface components {
             categoria_id?: string | null;
             /** Clave Sat */
             clave_sat: string;
+            /** Clave Sat Descripcion */
+            clave_sat_descripcion?: string | null;
             /** Codigo Barras */
             codigo_barras?: string | null;
             /**

@@ -53,6 +53,11 @@ const UNIDADES = Object.keys(UNIDAD_SAT);
 type Accion = "vincular" | "crear" | "omitir";
 type Paso = "subir" | "columnas" | "revisar" | "preview" | "resultado";
 
+/** Los recuentos del encabezado del preview son también filtros: al pulsarlos
+ *  la tabla se acota a esas filas, que es como se revisa qué falta para dar la
+ *  lista por completa. */
+type FiltroId = "variantes" | "sinClaveSat" | "sinEsquema" | "sinPrecio";
+
 type Fila = ImportFilaPreview & {
   accion: Accion;
   producto_sel: string;
@@ -88,6 +93,16 @@ function esVarianteNueva(f: Fila): boolean {
   );
   return !conocidas.has(f.unidad.toUpperCase());
 }
+
+/** Espejo de los recuentos de `resumen`: cada filtro muestra exactamente las
+ *  filas que su número cuenta. Se definen juntos a propósito — si el recuento y
+ *  el filtro se calcularan por separado, el chip diría 10 y la tabla otra cosa. */
+const FALTA: Record<FiltroId, (f: Fila) => boolean> = {
+  variantes: esVarianteNueva,
+  sinClaveSat: (f) => f.accion === "crear" && !f.clave_sat,
+  sinEsquema: (f) => f.accion === "crear" && !f.esq_id,
+  sinPrecio: (f) => !f.precio,
+};
 
 /** La equivalencia tal como la escribió el usuario, aceptando coma decimal. */
 function factorDe(f: Fila): string {
@@ -163,6 +178,9 @@ export default function ImportarProductosPage() {
   // el trabajo sigue en pantalla y basta reintentar (pasa si el servidor se
   // reinicia a media aprobación).
   const [falloImport, setFalloImport] = useState("");
+  // Filtro activo del encabezado del preview (uno a la vez: son preguntas
+  // distintas —"¿qué no tiene precio?"— y cruzarlas escondía filas sin decirlo).
+  const [filtro, setFiltro] = useState<FiltroId | null>(null);
 
   // Paso 3 — decisiones de lote
   const [p1, setP1] = useState<"sugerida" | "generica">("sugerida");
@@ -232,20 +250,64 @@ export default function ImportarProductosPage() {
     const crear = activas.filter((f) => f.accion === "crear").length;
     const vincular = activas.filter((f) => f.accion === "vincular").length;
     const omitir = filas.length - activas.length;
-    // Solo las que se CREAN reciben esquema: al vincular se conserva el del
-    // producto que ya existe (el backend no lo toca).
-    const sinEsquema = activas.filter((f) => f.accion === "crear" && !f.esq_id).length;
+    // Solo las que se CREAN reciben esquema / clave SAT: al vincular se conserva
+    // lo del producto que ya existe (el backend no lo toca). Ese matiz vive en
+    // `FALTA`, que es también lo que filtra la tabla.
+    const sinEsquema = activas.filter(FALTA.sinEsquema).length;
     // Solo las que se CREAN llevan categoría: al vincular se conserva la del
     // producto que ya existe.
     const sinCategoria = activas.filter((f) => f.accion === "crear" && !f.cat_id).length;
-    const sinClaveSat = activas.filter((f) => f.accion === "crear" && !f.clave_sat).length;
+    const sinClaveSat = activas.filter(FALTA.sinClaveSat).length;
     const conPrecio = activas.filter((f) => f.precio).length;
-    const variantes = activas.filter(esVarianteNueva).length;
-    return { crear, vincular, omitir, sinEsquema, sinCategoria, sinClaveSat, conPrecio, variantes };
+    const sinPrecio = activas.filter(FALTA.sinPrecio).length;
+    const variantes = activas.filter(FALTA.variantes).length;
+    return { crear, vincular, omitir, sinEsquema, sinCategoria, sinClaveSat, conPrecio, sinPrecio, variantes };
   }, [filas, incluidas]);
 
   // Sugerencias de IA corriendo en segundo plano (la tabla se llena sola).
   const analizandoFondo = sugiriendoSat || sugiriendoEsq || sugiriendoCat;
+
+  /** Los chips del encabezado del preview, en orden. `visible` repite la regla
+   *  vieja de los badges: un "sin dato" solo se anuncia cuando su análisis ya
+   *  terminó, porque a media asignación sería una alarma falsa de todo el lote.
+   *  `sinPrecio` solo aplica si el archivo trae columna de precio; si no, todas
+   *  estarían "sin precio" y el chip no diría nada. */
+  const chips = useMemo(() => {
+    const traePrecios = Boolean(meta?.tiene_precios);
+    return ([
+      { id: "variantes", n: resumen.variantes, tono: "accent",
+        label: `${resumen.variantes} presentaciones nuevas`, visible: resumen.variantes > 0 },
+      { id: "sinClaveSat", n: resumen.sinClaveSat, tono: "danger",
+        label: `${resumen.sinClaveSat} sin clave SAT`, visible: !sugiriendoSat && resumen.sinClaveSat > 0 },
+      { id: "sinEsquema", n: resumen.sinEsquema, tono: "danger",
+        label: `${resumen.sinEsquema} sin esquema de impuesto`,
+        visible: !sugiriendoSat && !sugiriendoEsq && resumen.sinEsquema > 0 },
+      { id: "sinPrecio", n: resumen.sinPrecio, tono: "danger",
+        label: `${resumen.sinPrecio} sin precio`, visible: traePrecios && resumen.sinPrecio > 0 },
+    ] as const).filter((c) => c.visible);
+  }, [resumen, meta, sugiriendoSat, sugiriendoEsq]);
+
+  // Un filtro cuyo chip ya no está (se resolvió, o la IA volvió a correr) dejaría
+  // la tabla vacía sin explicar por qué: se suelta solo.
+  useEffect(() => {
+    if (filtro && !chips.some((c) => c.id === filtro)) setFiltro(null);
+  }, [chips, filtro]);
+
+  // Al salir del preview el filtro no debe sobrevivir: se vuelve con la tabla
+  // recortada y sin el encabezado que lo explica.
+  useEffect(() => {
+    if (paso !== "preview") setFiltro(null);
+  }, [paso]);
+
+  /** ¿A esta fila le falta algo de lo que se está anunciando? Pinta la partida
+   *  en rojo. Solo mira los chips visibles, así que respeta la misma espera a
+   *  que la IA termine y nunca pinta por algo que no se le está señalando. */
+  const filaIncompleta = useCallback(
+    (f: Fila) =>
+      incluidas.has(f.fila) &&
+      chips.some((c) => c.tono === "danger" && FALTA[c.id](f)),
+    [chips, incluidas],
+  );
   const tareasFondo = [
     sugiriendoSat && "claves SAT",
     sugiriendoEsq && "esquemas de impuesto",
@@ -1421,8 +1483,39 @@ export default function ImportarProductosPage() {
             <Button variant="secondary" onClick={() => setPaso("revisar")} disabled={cargando}>
               Regresar
             </Button>
-            {resumen.variantes > 0 ? (
-              <Badge tone="accent">{resumen.variantes} presentaciones nuevas</Badge>
+            {/* Cada recuento es un filtro: pulsarlo deja en la tabla justo esas
+                filas, que es como se revisa qué falta para dar la lista por
+                completa. Vuelve a pulsarlo (o "Ver todas") para soltarlo.
+                Cuáles se muestran y cuándo lo decide `chips`. */}
+            {chips.map((c) => {
+              const activo = filtro === c.id;
+              const base =
+                c.tono === "danger"
+                  ? "bg-red-50 text-red-700 hover:bg-red-100"
+                  : "bg-blue-50 text-blue-700 hover:bg-blue-100";
+              const anillo =
+                c.tono === "danger" ? "ring-2 ring-red-500" : "ring-2 ring-blue-500";
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setFiltro(activo ? null : c.id)}
+                  aria-pressed={activo}
+                  title={activo ? "Quitar el filtro" : `Ver solo estas ${c.n} filas`}
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium transition ${base} ${activo ? anillo : ""}`}
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+            {filtro ? (
+              <button
+                type="button"
+                onClick={() => setFiltro(null)}
+                className="text-xs font-medium text-muted underline underline-offset-2 hover:text-foreground"
+              >
+                Ver todas ({filas.length})
+              </button>
             ) : null}
             {analizandoFondo ? (
               <span className="flex items-center gap-2 text-sm text-muted">
@@ -1430,16 +1523,6 @@ export default function ImportarProductosPage() {
                 Se siguen asignando {tareasFondo} — la tabla se llena sola;
                 puedes revisar y editar mientras.
               </span>
-            ) : null}
-            {/* Los "sin dato" en rojo solo cuando su análisis ya terminó:
-                mientras corre serían alarmas falsas de todo el lote. Los
-                esquemas se asignan DESPUÉS de las claves SAT, así que su badge
-                también espera a esa fase. */}
-            {!sugiriendoSat && resumen.sinClaveSat > 0 ? (
-              <Badge tone="danger">{resumen.sinClaveSat} sin clave SAT</Badge>
-            ) : null}
-            {!sugiriendoSat && !sugiriendoEsq && resumen.sinEsquema > 0 ? (
-              <Badge tone="danger">{resumen.sinEsquema} sin esquema de impuesto</Badge>
             ) : null}
             {resumen.conPrecio > 0 ? (
               <span className="text-sm text-muted">{resumen.conPrecio} con precio</span>
@@ -1464,6 +1547,12 @@ export default function ImportarProductosPage() {
               rescatarOmitidas(rows.map((f) => f.fila));
             }}
             selectionResetKey={resetSeleccion}
+            // Filtro SOLO de presentación: `rows` sigue completa, así que ocultar
+            // filas no las des-selecciona (si menguara `rows`, la tabla avisaría
+            // de una selección más chica y esas filas se irían a "omitidas").
+            rowFilter={filtro ? (f) => incluidas.has(f.fila) && FALTA[filtro](f) : undefined}
+            rowFilterKey={filtro ?? ""}
+            rowClassName={(f) => (filaIncompleta(f) ? "bg-red-50/60" : undefined)}
             // Desde `incluidas`, NO el default: al ir a Revisar y volver, la
             // tabla se re-monta y con el default perdía en silencio las
             // casillas que el usuario ya había cambiado.
