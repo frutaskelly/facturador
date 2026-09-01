@@ -64,7 +64,11 @@ def upgrade() -> None:
         ("cliente_externos", "sucursal_id"),
         ("precio_overrides", "sucursal_id"),
         ("proyectos", "sucursal_id"),
-        ("proyecto_sucursales", "sucursal_id"),
+        # `proyecto_sucursales` NO se reapunta: 0060 ya volcó su contenido a
+        # proyectos.sucursal_id (que sí va en esta lista) y esta tabla se tira
+        # al final de la migración. Reapuntarla solo servía para chocar con
+        # uq_proyecto_sucursal, que Postgres valida fila por fila: dos filas del
+        # mismo proyecto en plazas que se fusionan abortaban la migración entera.
     ):
         op.execute(
             f"UPDATE {tabla} t SET {col} = m.keep_id FROM _suc_map m WHERE t.{col} = m.old_id"
@@ -180,24 +184,6 @@ def upgrade() -> None:
         "UPDATE cliente_sucursales t SET sucursal_id = m.keep_id FROM _suc_map m WHERE t.sucursal_id = m.old_id"
     )
 
-    # ── proyecto_sucursales: deduplicar tras el reapunte (uq proyecto+sucursal)
-    # La tabla se tira más abajo; el dedupe existe solo para no violar su UNIQUE
-    # con el UPDATE de arriba en bases donde aún tenga filas.
-    op.execute(
-        """
-        DELETE FROM proyecto_sucursales ps
-         WHERE ps.id IN (
-            SELECT id FROM (
-                SELECT id, row_number() OVER (
-                           PARTITION BY proyecto_id, sucursal_id
-                           ORDER BY id ASC
-                       ) AS rn
-                  FROM proyecto_sucursales
-            ) d WHERE d.rn > 1
-         )
-        """
-    )
-
     # ── el almacén de las perdedoras no se tira ──
     # La superviviente es la fila más ANTIGUA, que puede no tener almacén
     # mientras una perdedora sí lo tenía; sin esto las remisiones de ese cliente
@@ -248,25 +234,34 @@ def upgrade() -> None:
           FROM dups d WHERE s.id = d.id AND d.rn > 1
         """
     )
+    # Se reparten los HUECOS libres, no `count(*) + n`: los códigos vivos no son
+    # SUC-01..SUC-N sin saltos (esta misma migración deja huecos al borrar las
+    # perdedoras), y suponerlo generaba códigos repetidos que después reventaban
+    # el índice único de abajo. Mismo criterio que `_generate_codigo` del router.
     op.execute(
         """
-        WITH tomados AS (
-            SELECT tenant_id, codigo FROM sucursales
-             WHERE deleted_at IS NULL AND codigo IS NOT NULL
+        WITH libres AS (
+            SELECT t.id AS tenant_id, n,
+                   row_number() OVER (PARTITION BY t.id ORDER BY n) AS slot
+              FROM tenants t
+              CROSS JOIN generate_series(1, 999) AS n
+             WHERE NOT EXISTS (
+                    SELECT 1 FROM sucursales s
+                     WHERE s.tenant_id = t.id
+                       AND s.deleted_at IS NULL
+                       AND s.codigo = 'SUC-' || lpad(n::text, 2, '0')
+                   )
         ), faltantes AS (
             SELECT id, tenant_id,
                    row_number() OVER (PARTITION BY tenant_id ORDER BY created_at, id) AS rn
               FROM sucursales
              WHERE deleted_at IS NULL AND codigo IS NULL
-        ), numerados AS (
-            SELECT f.id,
-                   'SUC-' || lpad((f.rn + g.base)::text, 2, '0') AS nuevo
-              FROM faltantes f
-              JOIN LATERAL (
-                    SELECT count(*) AS base FROM tomados t WHERE t.tenant_id = f.tenant_id
-                   ) g ON true
         )
-        UPDATE sucursales s SET codigo = n.nuevo FROM numerados n WHERE s.id = n.id
+        UPDATE sucursales s
+           SET codigo = 'SUC-' || lpad(l.n::text, 2, '0')
+          FROM faltantes f
+          JOIN libres l ON l.tenant_id = f.tenant_id AND l.slot = f.rn
+         WHERE s.id = f.id
         """
     )
     op.create_index(

@@ -165,6 +165,28 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Deshacer el anclaje ANTES de reponer el XOR: el upgrade dejó filas con
+    # cliente_id Y sucursal_id, que es justo lo que el CHECK viejo prohíbe.
+    # Sin esto el downgrade truena — y esta es la vía de recuperación si 0061
+    # falla a media aplicación, o sea precisamente cuando hay que poder bajar.
+    op.execute(
+        """
+        UPDATE precio_overrides po
+           SET cliente_id = NULL
+          FROM sucursales s
+         WHERE s.id = po.sucursal_id
+           AND po.cliente_id = s.cliente_id
+        """
+    )
+    op.execute(
+        """
+        UPDATE lista_asignaciones la
+           SET cliente_id = NULL
+          FROM sucursales s
+         WHERE s.id = la.sucursal_id
+           AND la.cliente_id = s.cliente_id
+        """
+    )
     op.drop_constraint("ck_override_alguna_dimension", "precio_overrides", type_="check")
     op.create_check_constraint(
         "ck_override_cliente_xor_sucursal",

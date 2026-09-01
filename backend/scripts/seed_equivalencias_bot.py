@@ -32,7 +32,7 @@ from pathlib import Path
 
 from app.core.db import SessionLocal
 from app.core.rbac import tenant_session
-from app.models import Cliente, Sucursal, Tenant
+from app.models import Cliente, ClienteSucursal, Sucursal, Tenant
 from app.services import cliente_match
 from app.services.producto_match import normalizar
 
@@ -334,8 +334,12 @@ def main() -> None:
 
 
 def _sucursal(db, cliente_id, codigo, nombre):
-    q = db.query(Sucursal).filter(
-        Sucursal.cliente_id == cliente_id, Sucursal.deleted_at.is_(None)
+    # La sucursal es la PLAZA del negocio y ya no tiene dueño: "las del cliente"
+    # son las que tiene VINCULADAS (rediseño 01-sep-2026).
+    q = (
+        db.query(Sucursal)
+        .join(ClienteSucursal, ClienteSucursal.sucursal_id == Sucursal.id)
+        .filter(ClienteSucursal.cliente_id == cliente_id, Sucursal.deleted_at.is_(None))
     )
     if codigo:
         hit = q.filter(Sucursal.codigo == codigo).one_or_none()
