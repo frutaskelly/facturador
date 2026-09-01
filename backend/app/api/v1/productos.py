@@ -1032,6 +1032,42 @@ def _ejecutar_import(
         else:
             fase.append(obj)
 
+    def _esquema_de(fila) -> Optional[UUID]:
+        """Qué esquema le toca a la fila: id explícito → código/nombre del
+        archivo → default del lote. Una sola definición, para que la revisión
+        previa y el alta no puedan diferir."""
+        if fila.esquema_impuesto_id is not None:
+            return fila.esquema_impuesto_id
+        if (fila.esquema or "").strip():
+            esq = esquemas_por_clave.get(normalizar(fila.esquema))
+            if esq is not None:
+                return esq.id
+        return payload.esquema_default_id
+
+    # ── Nada se da de alta sin esquema de impuesto ──────────────────────────
+    # Sin esquema el producto nace sin IVA/IEPS y el CFDI sale mal; el alta
+    # manual tampoco lo permite. Se revisa ANTES de escribir nada y se nombran
+    # TODAS las filas que faltan: fallar en la 57 dejaría el lote a medias y
+    # obligaría a descubrirlas de una en una. Las que se VINCULAN no entran —
+    # conservan el esquema del producto que ya existe.
+    sin_esquema = [
+        (n, (fila.nombre or fila.sku or "").strip())
+        for n, fila in enumerate(payload.filas, start=1)
+        if fila.accion == "crear" and _esquema_de(fila) is None
+    ]
+    if sin_esquema:
+        muestra = "; ".join(f"fila {n}: {d}" for n, d in sin_esquema[:8])
+        if len(sin_esquema) > 8:
+            muestra += f"; …y {len(sin_esquema) - 8} más"
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{len(sin_esquema)} productos nuevos no traen esquema de impuesto y "
+                f"no se pueden dar de alta así ({muestra}). Asígnaselo en la columna "
+                "«Esquema» o elige un esquema para todo el lote antes de aprobar."
+            ),
+        )
+
     resultados_filas: list[ImportProductoResultado] = []
 
     creados = vinculados = alias_guardados = precios_guardados = omitidos = 0
@@ -1071,14 +1107,9 @@ def _ejecutar_import(
                     if cat is not None:
                         categoria_id = cat.id
 
-                # Esquema: id explícito → código/nombre del archivo → default del lote.
-                esquema_id = fila.esquema_impuesto_id
-                if esquema_id is None and (fila.esquema or "").strip():
-                    esq = esquemas_por_clave.get(normalizar(fila.esquema))
-                    if esq is not None:
-                        esquema_id = esq.id
-                if esquema_id is None:
-                    esquema_id = payload.esquema_default_id
+                # Esquema: id explícito → código/nombre del archivo → default
+                # del lote (ver `_esquema_de`, que es lo que ya se revisó arriba).
+                esquema_id = _esquema_de(fila)
 
                 if fila.accion == "vincular":
                     if fila.producto_id is None:

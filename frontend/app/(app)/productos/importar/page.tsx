@@ -1474,7 +1474,18 @@ export default function ImportarProductosPage() {
           {/* Acción principal arriba: con cientos de filas, el pie queda lejos.
               Desmarcar una casilla la omite — el conteo lo refleja al vuelo. */}
           <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-3 border-b border-border bg-background px-1 py-3">
-            <Button onClick={importar} disabled={cargando}>
+            {/* Sin esquema el producto nace sin IVA/IEPS y el CFDI sale mal, así
+                que el alta no lo permite (el backend lo rechaza igual). Se frena
+                aquí para no gastar el viaje y para poder señalar cuáles son. */}
+            <Button
+              onClick={importar}
+              disabled={cargando || resumen.sinEsquema > 0}
+              title={
+                resumen.sinEsquema > 0
+                  ? `${resumen.sinEsquema} productos nuevos no traen esquema de impuesto`
+                  : undefined
+              }
+            >
               {cargando ? <Spinner className="h-4 w-4" /> : null}
               {cargando
                 ? "Importando…"
@@ -1530,6 +1541,25 @@ export default function ImportarProductosPage() {
             {falloImport ? (
               <span className="text-sm text-danger">
                 {falloImport} — tus decisiones siguen aquí: vuelve a intentarlo.
+              </span>
+            ) : null}
+            {resumen.sinEsquema > 0 ? (
+              <span className="w-full text-sm text-danger">
+                {analizandoFondo
+                  ? "Espera a que termine de asignar: aún hay productos sin esquema de impuesto."
+                  : "No se puede aprobar: un producto sin esquema de impuesto nace sin IVA y su factura saldría mal. "}
+                {!analizandoFondo ? (
+                  <button
+                    type="button"
+                    onClick={() => setFiltro("sinEsquema")}
+                    className="font-medium underline underline-offset-2"
+                  >
+                    Ver los {resumen.sinEsquema} que faltan
+                  </button>
+                ) : null}
+                {!analizandoFondo
+                  ? " — asígnaselo en la columna «Esquema», o elige uno para todo el lote en Regresar."
+                  : null}
               </span>
             ) : null}
           </div>
