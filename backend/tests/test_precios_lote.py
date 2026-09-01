@@ -18,6 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
+from .conftest import crear_sucursal
 from app.models import (
     Cliente, ListaAsignacion, ListaPrecios, Precio, PrecioOverride,
     Producto, Proyecto, Serie, Sucursal, Tenant,
@@ -26,7 +27,7 @@ from app.services.precios import resolver_precio, resolver_precios_lote
 
 _PURGE = (
     "lista_asignaciones", "precio_overrides", "precios", "listas_precios",
-    "proyectos", "sucursales", "series", "productos", "clientes",
+    "proyectos", "cliente_sucursales", "sucursales", "series", "productos", "clientes",
 )
 
 
@@ -58,11 +59,11 @@ def env(db_engine):
 
         cli = Cliente(tenant_id=tid, codigo="C1", legal_name="Cliente SA", rfc="XAXX010101000")
         db.add(cli); db.flush()
-        suc = Sucursal(tenant_id=tid, cliente_id=cli.id, nombre="Tabasco")
+        suc = crear_sucursal(db, tenant_id=tid, cliente_id=cli.id, nombre="Tabasco")
         serie = Serie(tenant_id=tid, codigo=f"S{suffix[:3].upper()}", tipo_documento="REMISION")
         proy = Proyecto(tenant_id=tid, codigo=f"P{suffix[:3].upper()}", nombre="Hospitales",
                         cliente_id=cli.id)
-        db.add_all([suc, serie, proy]); db.flush()
+        db.add_all([serie, proy]); db.flush()
 
         base = ListaPrecios(tenant_id=tid, codigo="UNICO", nombre="Base")
         l_cli = ListaPrecios(tenant_id=tid, codigo="LCLI", nombre="Del cliente")

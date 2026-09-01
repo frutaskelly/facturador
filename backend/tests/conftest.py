@@ -46,3 +46,21 @@ def db_engine():
     except Exception as exc:  # pragma: no cover - environment dependent
         pytest.skip(f"No migrated database available: {exc}")
     return engine
+
+
+def crear_sucursal(db, *, tenant_id, cliente_id=None, nombre, serie_factura_id=None,
+                   serie_remision_id=None, **kw):
+    """Alta de plaza + vínculo en un paso (lo que antes era una Sucursal con
+    dueño). Los tests que digan "la sucursal del cliente X" pasan por aquí."""
+    from app.models import ClienteSucursal, Sucursal
+
+    s = Sucursal(tenant_id=tenant_id, nombre=nombre, **kw)
+    db.add(s)
+    db.flush()
+    if cliente_id is not None:
+        db.add(ClienteSucursal(
+            tenant_id=tenant_id, cliente_id=cliente_id, sucursal_id=s.id,
+            serie_factura_id=serie_factura_id, serie_remision_id=serie_remision_id,
+        ))
+        db.flush()
+    return s

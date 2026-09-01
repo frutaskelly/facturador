@@ -16,12 +16,13 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
-from app.models import Cliente, Membership, Producto, Role, Sucursal, Tenant, User
+from .conftest import crear_sucursal
+from app.models import Cliente, Membership, Producto, Role, Tenant, User
 
 _PURGE = (
     "oc_recibidas", "cliente_externos", "lineas_remision", "remisiones",
     "lista_asignaciones", "precios", "listas_precios", "producto_alias",
-    "productos", "proyecto_sucursales", "proyectos", "sucursales", "clientes",
+    "productos", "proyectos", "cliente_sucursales", "sucursales", "clientes",
 )
 
 
@@ -47,11 +48,11 @@ def env(db_engine):
                        rfc="GOA180712SF5")
         db.add(ehmo); db.flush()
         # Las dos plazas del caso real: la negociación de una no cobra en la otra.
-        tabasco = Sucursal(tenant_id=t.id, cliente_id=ehmo.id, codigo="TAB", nombre="Tabasco")
-        pachuca = Sucursal(tenant_id=t.id, cliente_id=ehmo.id, codigo="PAC", nombre="Pachuca")
+        tabasco = crear_sucursal(db, tenant_id=t.id, cliente_id=ehmo.id, codigo="TAB", nombre="Tabasco")
+        pachuca = crear_sucursal(db, tenant_id=t.id, cliente_id=ehmo.id, codigo="PAC", nombre="Pachuca")
         prod = Producto(tenant_id=t.id, sku="ALC-P", nombre="Jitomate Saladet",
                         clave_sat="01010101", unidad_sat="KGM")
-        db.add_all([tabasco, pachuca, prod]); db.flush()
+        db.add(prod); db.flush()
         db.commit()
         yield {"admin": admin, "ehmo": str(ehmo.id),
                "tabasco": str(tabasco.id), "pachuca": str(pachuca.id),
@@ -99,7 +100,7 @@ def _oc(**over):
     return body
 
 
-def _setup(client, env, *, sucursal_ids=None, nombre="HOSPITALES VH"):
+def _setup(client, env, *, sucursal_id=None, nombre="HOSPITALES VH"):
     """RFC→EHMO + un proyecto (con el alcance dado) + la equivalencia PROYECTO
     aprendida corrigiendo UNA orden desde la bandeja — el flujo real."""
     h = _hdr(env["admin"])
@@ -108,7 +109,7 @@ def _setup(client, env, *, sucursal_ids=None, nombre="HOSPITALES VH"):
     assert r.status_code == 201, r.text
     r = client.post("/api/v1/proyectos", headers=h, json={
         "nombre": nombre, "cliente_id": env["ehmo"],
-        "sucursal_ids": sucursal_ids or []})
+        "sucursal_id": sucursal_id})
     assert r.status_code == 201, r.text
     return r.json()["id"]
 
@@ -124,9 +125,9 @@ def _aprender(client, h, oc_id, *, cliente, sucursal, proyecto):
 # ─── ingesta ─────────────────────────────────────────────────────────────────
 
 def test_ingesta_estampa_proyecto_sin_restriccion(client, env, auth_as):
-    """Regresión: un proyecto sin sucursales asignadas cruza como siempre."""
+    """Regresión: un proyecto sin plaza asignada cruza como siempre."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
-    proy = _setup(client, env, sucursal_ids=[])
+    proy = _setup(client, env, sucursal_id=None)
     oc1 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
     _aprender(client, h, oc1["id"], cliente=env["ehmo"], sucursal=env["tabasco"], proyecto=proy)
 
@@ -140,7 +141,7 @@ def test_ingesta_estampa_cuando_la_sucursal_esta_en_su_alcance(client, env, auth
     proyecto se evaluara primero (sucursal aún None), este restringido a
     Tabasco no cruzaría nunca."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
-    proy = _setup(client, env, sucursal_ids=[env["tabasco"]])
+    proy = _setup(client, env, sucursal_id=env["tabasco"])
     oc1 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
     _aprender(client, h, oc1["id"], cliente=env["ehmo"], sucursal=env["tabasco"], proyecto=proy)
 
@@ -153,7 +154,7 @@ def test_ingesta_no_estampa_fuera_de_plaza(client, env, auth_as):
     """El caso VH-35COM-MAR: la equivalencia apunta a la negociación de OTRA
     plaza. La orden entra sin proyecto (y por lo tanto sin sus precios)."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
-    proy = _setup(client, env, sucursal_ids=[env["pachuca"]], nombre="HOSPITALES PAC")
+    proy = _setup(client, env, sucursal_id=env["pachuca"], nombre="HOSPITALES PAC")
     oc1 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(ubicacion="Pachuca")).json()
     _aprender(client, h, oc1["id"], cliente=env["ehmo"], sucursal=env["pachuca"], proyecto=proy)
 
@@ -166,7 +167,7 @@ def test_ingesta_no_estampa_fuera_de_plaza(client, env, auth_as):
 
 def test_patch_rechaza_el_par_incompatible(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
-    proy = _setup(client, env, sucursal_ids=[env["pachuca"]], nombre="HOSPITALES PAC")
+    proy = _setup(client, env, sucursal_id=env["pachuca"], nombre="HOSPITALES PAC")
     oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
 
     r = client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h, json={
@@ -192,10 +193,10 @@ def test_aprender_reapunta_la_equivalencia(client, env, auth_as):
     """La auto-reparación: la orden entra sin proyecto (equivalencia de otra
     plaza), el operador elige el bueno, y la siguiente ya entra etiquetada."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
-    proy_pac = _setup(client, env, sucursal_ids=[env["pachuca"]], nombre="HOSPITALES PAC")
+    proy_pac = _setup(client, env, sucursal_id=env["pachuca"], nombre="HOSPITALES PAC")
     r = client.post("/api/v1/proyectos", headers=h, json={
         "nombre": "HOSPITALES VH", "cliente_id": env["ehmo"],
-        "sucursal_ids": [env["tabasco"]]})
+        "sucursal_id": env["tabasco"]})
     proy_vh = r.json()["id"]
     oc1 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(ubicacion="Pachuca")).json()
     _aprender(client, h, oc1["id"], cliente=env["ehmo"], sucursal=env["pachuca"], proyecto=proy_pac)
@@ -214,14 +215,14 @@ def test_auto_bloquea_la_orden_con_par_incompatible(client, env, auth_as):
     """Una orden estampada ANTES de restringir el proyecto no puede volverse
     remisión de un clic: el guard la detiene con el motivo escrito."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
-    proy = _setup(client, env, sucursal_ids=[])
+    proy = _setup(client, env, sucursal_id=None)
     oc1 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
     _aprender(client, h, oc1["id"], cliente=env["ehmo"], sucursal=env["tabasco"], proyecto=proy)
     oc2 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
     assert oc2["proyecto_id"] == proy
 
     r = client.patch(f"/api/v1/proyectos/{proy}", headers=h,
-                     json={"sucursal_ids": [env["pachuca"]]})
+                     json={"sucursal_id": env["pachuca"]})
     assert r.status_code == 200, r.text
 
     d = client.get(f"/api/v1/oc-recibidas/{oc2['id']}", headers=h).json()
@@ -231,14 +232,14 @@ def test_auto_bloquea_la_orden_con_par_incompatible(client, env, auth_as):
 
 def test_reabrir_despega_el_proyecto_que_dejo_de_aplicar(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
-    proy = _setup(client, env, sucursal_ids=[env["tabasco"]])
+    proy = _setup(client, env, sucursal_id=env["tabasco"])
     oc1 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
     _aprender(client, h, oc1["id"], cliente=env["ehmo"], sucursal=env["tabasco"], proyecto=proy)
     oc2 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
     assert oc2["proyecto_id"] == proy
 
     client.patch(f"/api/v1/proyectos/{proy}", headers=h,
-                 json={"sucursal_ids": [env["pachuca"]]})
+                 json={"sucursal_id": env["pachuca"]})
     r = client.post(f"/api/v1/oc-recibidas/{oc2['id']}/reabrir", headers=h)
     assert r.status_code == 200, r.text
     assert r.json()["proyecto_id"] is None
@@ -248,7 +249,7 @@ def test_reabrir_despega_el_proyecto_que_dejo_de_aplicar(client, env, auth_as):
 
 def test_asignacion_de_precios_respeta_el_alcance(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
-    proy_pac = _setup(client, env, sucursal_ids=[env["pachuca"]], nombre="HOSPITALES PAC")
+    proy_pac = _setup(client, env, sucursal_id=env["pachuca"], nombre="HOSPITALES PAC")
     r = client.post("/api/v1/listas-precios", headers=h,
                     json={"codigo": "ALCVH", "nombre": "Lista VH"})
     assert r.status_code == 201, r.text

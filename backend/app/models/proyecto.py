@@ -8,6 +8,11 @@ cliente, en la misma sucursal, cobra distinto según el proyecto al que entrega.
 `cliente_id` es opcional a propósito: casi siempre el proyecto es de un cliente,
 pero un mismo programa de gobierno puede comprarse a través de varias razones
 sociales, y forzar el dueño obligaría a duplicarlo.
+
+`sucursal_id` es LA plaza del proyecto (decisión del dueño 01-sep-2026: un
+proyecto por plaza — «HOSPITALES» de Pachuca y «HOSPITALES» de Tabasco son dos
+filas). NULL = sin restricción de plaza, aplica donde sea; sustituye al alcance
+multi-sucursal de la migración 0058.
 """
 from sqlalchemy import Boolean, Column, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
@@ -15,21 +20,6 @@ from sqlalchemy.orm import relationship
 
 from ..core.db import Base
 from .base import SoftDeleteMixin, TimestampMixin, tenant_fk, uuid_pk
-
-
-class ProyectoSucursal(Base):
-    """Sucursal ASIGNADA al proyecto (migración 0058). El alcance del proyecto:
-    a qué plazas entrega. Si el proyecto tiene dueño, sus sucursales son de ese
-    cliente; uno del grupo puede abarcar sucursales de varios clientes."""
-    __tablename__ = "proyecto_sucursales"
-    __table_args__ = (
-        UniqueConstraint("proyecto_id", "sucursal_id", name="uq_proyecto_sucursal"),
-    )
-
-    id = uuid_pk()
-    tenant_id = tenant_fk()
-    proyecto_id = Column(UUID(as_uuid=True), ForeignKey("proyectos.id", ondelete="CASCADE"), nullable=False, index=True)
-    sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id", ondelete="CASCADE"), nullable=False)
 
 
 class Proyecto(Base, TimestampMixin, SoftDeleteMixin):
@@ -46,11 +36,20 @@ class Proyecto(Base, TimestampMixin, SoftDeleteMixin):
     cliente_id = Column(
         UUID(as_uuid=True), ForeignKey("clientes.id", ondelete="CASCADE"), index=True
     )
+    # La plaza del proyecto. NULL = aplica en cualquier plaza.
+    sucursal_id = Column(
+        UUID(as_uuid=True), ForeignKey("sucursales.id", ondelete="SET NULL"), index=True
+    )
     activo = Column(Boolean, nullable=False, server_default="true")
     notas = Column(Text)
 
     cliente = relationship("Cliente")
+    sucursal = relationship("Sucursal")
 
     @property
     def cliente_nombre(self):
         return self.cliente.legal_name if self.cliente else None
+
+    @property
+    def sucursal_nombre(self):
+        return self.sucursal.nombre if self.sucursal else None

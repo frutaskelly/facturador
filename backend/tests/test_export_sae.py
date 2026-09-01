@@ -11,6 +11,7 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
+from .conftest import crear_sucursal
 from app.models import (
     Cliente,
     ClienteExterno,
@@ -329,8 +330,7 @@ def test_empresa_sae_se_decide_por_sucursal(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
     db = SessionLocal()
     try:
-        suc = Sucursal(tenant_id=env["tenant"], cliente_id=env["cli"], nombre="Tabasco")
-        db.add(suc); db.flush()
+        suc = crear_sucursal(db, tenant_id=env["tenant"], cliente_id=env["cli"], nombre="Tabasco")
         db.add(ClienteExterno(tenant_id=env["tenant"], sistema="SAE", clave="03:1",
                               clave_normalizada="03 1", cliente_id=env["cli"],
                               sucursal_id=suc.id, origen="MANUAL", confianza="CONFIRMADA"))

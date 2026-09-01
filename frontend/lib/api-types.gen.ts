@@ -3434,6 +3434,48 @@ export interface paths {
         patch: operations["update_sucursal_api_v1_sucursales__sucursal_id__patch"];
         trace?: never;
     };
+    "/api/v1/sucursales/{sucursal_id}/clientes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Vinculos */
+        get: operations["list_vinculos_api_v1_sucursales__sucursal_id__clientes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sucursales/{sucursal_id}/clientes/{cliente_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Upsert Vinculo
+         * @description Vincula al cliente con la plaza (o actualiza sus series). Idempotente.
+         */
+        put: operations["upsert_vinculo_api_v1_sucursales__sucursal_id__clientes__cliente_id__put"];
+        post?: never;
+        /**
+         * Delete Vinculo
+         * @description Desvincula al cliente de la plaza. El histórico (remisiones, órdenes)
+         *     conserva su sucursal_id: esto solo cierra la relación hacia adelante.
+         */
+        delete: operations["delete_vinculo_api_v1_sucursales__sucursal_id__clientes__cliente_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -4211,6 +4253,45 @@ export interface components {
             uso_cfdi_default?: string | null;
             /** Ventas Ytd */
             ventas_ytd: string;
+        };
+        /** ClienteSucursalOut */
+        ClienteSucursalOut: {
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Cliente Nombre */
+            cliente_nombre?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Serie Factura Id */
+            serie_factura_id?: string | null;
+            /** Serie Remision Id */
+            serie_remision_id?: string | null;
+            /** Series Factura Ids */
+            series_factura_ids?: string[];
+            /** Series Remision Ids */
+            series_remision_ids?: string[];
+            /**
+             * Sucursal Id
+             * Format: uuid
+             */
+            sucursal_id: string;
+        };
+        /** ClienteSucursalUpsert */
+        ClienteSucursalUpsert: {
+            /** Serie Factura Id */
+            serie_factura_id?: string | null;
+            /** Serie Remision Id */
+            serie_remision_id?: string | null;
+            /** Series Factura Ids */
+            series_factura_ids?: string[] | null;
+            /** Series Remision Ids */
+            series_remision_ids?: string[] | null;
         };
         /** ClienteUpdate */
         ClienteUpdate: {
@@ -7902,8 +7983,8 @@ export interface components {
             nombre: string;
             /** Notas */
             notas?: string | null;
-            /** Sucursal Ids */
-            sucursal_ids?: string[];
+            /** Sucursal Id */
+            sucursal_id?: string | null;
         };
         /** ProyectoOut */
         ProyectoOut: {
@@ -7929,10 +8010,10 @@ export interface components {
             nombre: string;
             /** Notas */
             notas?: string | null;
-            /** Sucursal Ids */
-            sucursal_ids?: string[];
-            /** Sucursales Nombres */
-            sucursales_nombres?: string[];
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
             /**
              * Tenant Id
              * Format: uuid
@@ -7954,8 +8035,8 @@ export interface components {
             nombre?: string | null;
             /** Notas */
             notas?: string | null;
-            /** Sucursal Ids */
-            sucursal_ids?: string[] | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
         };
         /** PruebaOut */
         PruebaOut: {
@@ -8668,11 +8749,8 @@ export interface components {
             activo: boolean;
             /** Almacen Id */
             almacen_id?: string | null;
-            /**
-             * Cliente Id
-             * Format: uuid
-             */
-            cliente_id: string;
+            /** Cliente Id */
+            cliente_id?: string | null;
             /** Codigo */
             codigo?: string | null;
             /** Contacto */
@@ -8701,11 +8779,10 @@ export interface components {
             activo: boolean;
             /** Almacen Id */
             almacen_id?: string | null;
-            /**
-             * Cliente Id
-             * Format: uuid
-             */
-            cliente_id: string;
+            /** Clientes Ids */
+            clientes_ids?: string[];
+            /** Clientes Nombres */
+            clientes_nombres?: string[];
             /** Codigo */
             codigo?: string | null;
             /** Contacto */
@@ -8759,14 +8836,6 @@ export interface components {
             domicilio?: Record<string, never> | null;
             /** Nombre */
             nombre?: string | null;
-            /** Serie Factura Id */
-            serie_factura_id?: string | null;
-            /** Serie Remision Id */
-            serie_remision_id?: string | null;
-            /** Series Factura Ids */
-            series_factura_ids?: string[] | null;
-            /** Series Remision Ids */
-            series_remision_ids?: string[] | null;
             /** Telefono */
             telefono?: string | null;
         };
@@ -16681,7 +16750,9 @@ export interface operations {
     };
     get_sucursal_api_v1_sucursales__sucursal_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                cliente_id?: string | null;
+            };
             header?: {
                 "X-Tenant-Id"?: string | null;
             };
@@ -16768,6 +16839,109 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SucursalOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_vinculos_api_v1_sucursales__sucursal_id__clientes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                sucursal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClienteSucursalOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_vinculo_api_v1_sucursales__sucursal_id__clientes__cliente_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                sucursal_id: string;
+                cliente_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClienteSucursalUpsert"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClienteSucursalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_vinculo_api_v1_sucursales__sucursal_id__clientes__cliente_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                sucursal_id: string;
+                cliente_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

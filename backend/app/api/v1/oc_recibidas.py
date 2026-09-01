@@ -50,6 +50,7 @@ from ...models import ProductoCliente
 from ...services import cliente_match
 from ...services.precios import resolver_precios_lote
 from ...services.proyecto_alcance import proyecto_aplica
+from ...services.sucursales import es_sucursal_de
 from ...services.series import resolver_almacen, resolver_serie
 from ...services.producto_match import (
     aprender_alias_con_alcance,
@@ -855,10 +856,10 @@ def asignar(
         oc.resuelto_via = "MANUAL"
     if "sucursal_id" in data:
         if data["sucursal_id"] is not None:
-            suc = get_or_404(db, Sucursal, data["sucursal_id"])
-            if suc.cliente_id != oc.cliente_id:
+            get_or_404(db, Sucursal, data["sucursal_id"])
+            if not es_sucursal_de(db, data["sucursal_id"], oc.cliente_id):
                 raise HTTPException(
-                    status_code=422, detail="La sucursal no pertenece al cliente de la orden"
+                    status_code=422, detail="El cliente de la orden no se surte de esa sucursal"
                 )
         oc.sucursal_id = data["sucursal_id"]
     if "proyecto_id" in data:

@@ -107,9 +107,9 @@ export type Proyecto = {
   cliente_nombre?: string | null;
   activo: boolean;
   notas?: string | null;
-  /** Alcance: en qué sucursales entrega (0058). Si hay dueño, son suyas. */
-  sucursal_ids?: string[];
-  sucursales_nombres?: string[];
+  /** LA plaza del proyecto (un proyecto por plaza). null = aplica en todas. */
+  sucursal_id?: string | null;
+  sucursal_nombre?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -140,10 +140,11 @@ export type ListaAsignacion = {
   updated_at: string;
 };
 
+/** Plaza del negocio (Pachuca, Tabasco). Los clientes se VINCULAN a ella;
+ *  al listar con ?cliente_id= las series vienen del vínculo con ese cliente. */
 export type Sucursal = {
   id: string;
   tenant_id: string;
-  cliente_id: string;
   codigo?: string | null;
   nombre: string;
   domicilio: Record<string, unknown>;
@@ -151,13 +152,28 @@ export type Sucursal = {
   telefono?: string | null;
   activo: boolean;
   almacen_id?: string | null;
+  /** Qué clientes se surten de la plaza. */
+  clientes_ids?: string[];
+  clientes_nombres?: string[];
+  /** Series DEL VÍNCULO con el cliente del filtro (vacías sin ?cliente_id=). */
   serie_factura_id?: string | null;
   serie_remision_id?: string | null;
-  // El abanico de series DISPONIBLES en la sucursal (la default va en los FK).
   series_factura_ids?: string[];
   series_remision_ids?: string[];
   created_at: string;
   updated_at: string;
+};
+
+/** El vínculo cliente ↔ plaza, con la serie de folios de la relación. */
+export type ClienteSucursal = {
+  id: string;
+  cliente_id: string;
+  sucursal_id: string;
+  cliente_nombre?: string | null;
+  serie_factura_id?: string | null;
+  serie_remision_id?: string | null;
+  series_factura_ids?: string[];
+  series_remision_ids?: string[];
 };
 
 export type TipoSerie = "FISCAL" | "NO_FISCAL";

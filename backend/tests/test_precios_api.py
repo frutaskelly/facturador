@@ -13,6 +13,7 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
+from .conftest import crear_sucursal
 from app.models import (
     Cliente, ListaAsignacion, ListaPrecios, Membership, Precio, PrecioOverride,
     Producto, Proyecto, Role, Serie, Sucursal, Tenant, User,
@@ -20,7 +21,7 @@ from app.models import (
 
 _PURGE = (
     "lista_asignaciones", "precio_overrides", "precios", "listas_precios",
-    "proyectos", "sucursales", "series", "productos", "clientes",
+    "proyectos", "cliente_sucursales", "sucursales", "series", "productos", "clientes",
 )
 
 
@@ -68,10 +69,10 @@ def env(db_engine):
         db.add(ListaAsignacion(tenant_id=tid, lista_id=menudeo.id, cliente_id=cli3.id))
         db.flush()  # nivel del cliente 3 = menudeo
 
-        slp = Sucursal(tenant_id=tid, cliente_id=cli1.id, nombre="SLP")
-        qro = Sucursal(tenant_id=tid, cliente_id=cli1.id, nombre="QRO")
-        otra = Sucursal(tenant_id=tid, cliente_id=cli1.id, nombre="Otra")
-        db.add_all([slp, qro, otra]); db.flush()
+        slp = crear_sucursal(db, tenant_id=tid, cliente_id=cli1.id, nombre="SLP")
+        qro = crear_sucursal(db, tenant_id=tid, cliente_id=cli1.id, nombre="QRO")
+        otra = crear_sucursal(db, tenant_id=tid, cliente_id=cli1.id, nombre="Otra")
+        db.flush()
 
         # overrides: cliente fija $20; SLP $15; QRO $12 (otra hereda del cliente)
         db.add(PrecioOverride(tenant_id=tid, cliente_id=cli1.id, producto_id=prod.id, presentacion="KILO", precio_unitario=Decimal("20")))
@@ -128,8 +129,9 @@ def test_resolucion_por_prioridad(client, env, auth_as):
     qro = _cot(client, h, pid, sucursal_id=env["qro"])
     assert float(qro["precio"]) == 12.0
 
-    # sucursal sin override → hereda el precio del cliente ($20)
-    otra = _cot(client, h, pid, sucursal_id=env["otra"])
+    # sucursal sin override → hereda el precio del cliente ($20). La plaza ya
+    # no tiene dueño: el cliente viaja explícito, como en los flujos reales.
+    otra = _cot(client, h, pid, cliente_id=env["cli1"], sucursal_id=env["otra"])
     assert float(otra["precio"]) == 20.0 and otra["origen"] == "override_cliente"
 
 
@@ -150,18 +152,26 @@ def test_sucursal_crud(client, env, auth_as):
     assert client.delete(f"/api/v1/sucursales/{sid}", headers=h).status_code == 204
 
 
-def test_override_xor_validation(client, env, auth_as):
-    auth_as(env["admin"]); h = _hdr(env["admin"])
+def test_override_dimensiones(client, env, auth_as):
+    """Al menos una dimensión; ambas = el precio de ESE cliente en ESA plaza
+    (rediseño 01-sep-2026: la plaza es compartida, así que el par es el override
+    más específico y le gana al de la plaza sola)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"]); pid = env["aguacate"]
     # ni cliente ni sucursal → 422
     assert client.post("/api/v1/precios/overrides", headers=h, json={
-        "producto_id": env["aguacate"], "precio_unitario": "10"}).status_code == 422
-    # ambos → 422
-    assert client.post("/api/v1/precios/overrides", headers=h, json={
-        "cliente_id": env["cli1"], "sucursal_id": env["slp"],
-        "producto_id": env["aguacate"], "precio_unitario": "10"}).status_code == 422
+        "producto_id": pid, "precio_unitario": "10"}).status_code == 422
     # solo cliente → 201
     assert client.post("/api/v1/precios/overrides", headers=h, json={
-        "cliente_id": env["cli3"], "producto_id": env["aguacate"], "precio_unitario": "10"}).status_code == 201
+        "cliente_id": env["cli3"], "producto_id": pid, "precio_unitario": "10"}).status_code == 201
+    # ambos → 201, y gana sobre el de la plaza sola ($15) SOLO para ese cliente
+    assert client.post("/api/v1/precios/overrides", headers=h, json={
+        "cliente_id": env["cli1"], "sucursal_id": env["slp"],
+        "producto_id": pid, "precio_unitario": "10"}).status_code == 201
+    exacto = _cot(client, h, pid, cliente_id=env["cli1"], sucursal_id=env["slp"])
+    assert float(exacto["precio"]) == 10.0 and exacto["origen"] == "override_sucursal"
+    # otro cliente en la misma plaza sigue viendo el de la plaza
+    plaza = _cot(client, h, pid, cliente_id=env["cli3"], sucursal_id=env["slp"])
+    assert float(plaza["precio"]) == 15.0 and plaza["origen"] == "override_sucursal"
 
 
 def test_copiar_precios(client, env, auth_as):
@@ -273,18 +283,18 @@ def test_asignacion_gana_la_mas_especifica(client, env, auth_as):
     assert _cot(client, h, pid, cliente_id=ehmo)["origen"] == "lista_cliente"
 
     asignar("PLAZA", cliente_id=ehmo, sucursal_id=suc)
-    plaza = _cot(client, h, pid, sucursal_id=suc)
+    plaza = _cot(client, h, pid, cliente_id=ehmo, sucursal_id=suc)
     assert float(plaza["precio"]) == 28.0 and plaza["origen"] == "lista_sucursal"
     # …y un documento SIN sucursal sigue en la del cliente: el renglón de plaza
     # tiene la dimensión llena, así que no aplica a lo que no la trae.
     assert float(_cot(client, h, pid, cliente_id=ehmo)["precio"]) == 30.0
 
     asignar("SERIE", cliente_id=ehmo, serie_id=serie["id"])
-    con_serie = _cot(client, h, pid, sucursal_id=suc, serie_id=serie["id"])
+    con_serie = _cot(client, h, pid, cliente_id=ehmo, sucursal_id=suc, serie_id=serie["id"])
     assert float(con_serie["precio"]) == 26.0 and con_serie["origen"] == "lista_serie"
 
     asignar("PROY", cliente_id=ehmo, proyecto_id=proyecto["id"])
-    con_proy = _cot(client, h, pid, sucursal_id=suc, serie_id=serie["id"],
+    con_proy = _cot(client, h, pid, cliente_id=ehmo, sucursal_id=suc, serie_id=serie["id"],
                     proyecto_id=proyecto["id"])
     assert float(con_proy["precio"]) == 24.0 and con_proy["origen"] == "lista_proyecto"
 

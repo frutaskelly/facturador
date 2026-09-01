@@ -96,7 +96,7 @@ export default function AsignacionesPreciosPage() {
   // cliente crea un renglón que no puede aplicar nunca (el backend lo rechaza,
   // pero ofrecerlo ya sería mentir).
   const sucursalesDelCliente = useMemo(
-    () => (form?.cliente_id ? sucursales.filter((s) => s.cliente_id === form.cliente_id) : []),
+    () => (form?.cliente_id ? sucursales.filter((s) => (s.clientes_ids ?? []).includes(form.cliente_id)) : []),
     [form?.cliente_id, sucursales],
   );
   const proyectosDelCliente = useMemo(
@@ -173,7 +173,7 @@ export default function AsignacionesPreciosPage() {
   const [simCargando, setSimCargando] = useState(false);
 
   const simSucursales = sim.cliente_id
-    ? sucursales.filter((s) => s.cliente_id === sim.cliente_id)
+    ? sucursales.filter((s) => (s.clientes_ids ?? []).includes(sim.cliente_id))
     : [];
   const simProyectos = sim.cliente_id
     ? proyectos.filter((p) => !p.cliente_id || p.cliente_id === sim.cliente_id)
@@ -454,8 +454,8 @@ export default function AsignacionesPreciosPage() {
                     .filter(
                       (s) =>
                         !!form.id ||
-                        !proyectoForm?.sucursal_ids?.length ||
-                        proyectoForm.sucursal_ids.includes(s.id)
+                        !proyectoForm?.sucursal_id ||
+                        proyectoForm.sucursal_id === s.id
                     )
                     .map((s) => (
                       <option key={s.id} value={s.id}>
@@ -482,7 +482,7 @@ export default function AsignacionesPreciosPage() {
                 label="Proyecto"
                 hint={
                   form.proyecto_id && !form.sucursal_id
-                    ? "Sin sucursal, el renglón aplica en todas las plazas donde entrega el proyecto; si la negociación es por plaza, elige también la sucursal."
+                    ? "Sin sucursal, el renglón aplica donde entregue el proyecto; si la negociación es por plaza, elige también la sucursal."
                     : undefined
                 }
               >
@@ -497,8 +497,8 @@ export default function AsignacionesPreciosPage() {
                       (p) =>
                         !!form.id ||
                         !form.sucursal_id ||
-                        !p.sucursal_ids?.length ||
-                        p.sucursal_ids.includes(form.sucursal_id)
+                        !p.sucursal_id ||
+                        p.sucursal_id === form.sucursal_id
                     )
                     .map((p) => (
                       <option key={p.id} value={p.id}>

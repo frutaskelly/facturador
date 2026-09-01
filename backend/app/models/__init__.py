@@ -22,14 +22,14 @@ from .precio import ListaAsignacion, ListaPrecios, Precio
 from .producto import Producto
 from .producto_alias import ProductoAlias
 from .producto_cliente import ProductoCliente
-from .proyecto import Proyecto, ProyectoSucursal
+from .proyecto import Proyecto
 from .sat_catalogo import SatClaveProdServ, SatClaveUnidad
 from .proveedor import Proveedor
 from .remision import LineaRemision, Remision
 from .role import Role
 from .role_permission import RolePermission
 from .serie import Serie
-from .sucursal import PrecioOverride, Sucursal, SucursalSerie
+from .sucursal import ClienteSucursal, ClienteSucursalSerie, PrecioOverride, Sucursal
 from .tenant import Membership, Tenant, User
 
 __all__ = [
@@ -51,7 +51,6 @@ __all__ = [
     "ListaAsignacion",
     "Precio",
     "Proyecto",
-    "ProyectoSucursal",
     "Cliente",
     "ClienteExterno",
     "Conexion",
@@ -79,6 +78,8 @@ __all__ = [
     "PosCorte",
     "TimbradoIntento",
     # ── precios v2 ──
+    "ClienteSucursal",
+    "ClienteSucursalSerie",
     "Sucursal",
     "PrecioOverride",
     # ── series / folios ──

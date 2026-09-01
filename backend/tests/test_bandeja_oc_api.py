@@ -20,13 +20,14 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
+from .conftest import crear_sucursal
 from app.models import Almacen, Cliente, Membership, Producto, Role, Sucursal, Tenant, User
 
 _PURGE = (
     "grupos_whatsapp",
     "oc_recibidas", "cliente_externos", "lineas_remision", "remisiones",
     "movimientos_inventario", "lotes_inventario", "producto_alias",
-    "precios", "listas_precios", "productos", "almacenes", "sucursales", "clientes",
+    "precios", "listas_precios", "productos", "almacenes", "cliente_sucursales", "sucursales", "clientes",
 )
 
 
@@ -67,16 +68,18 @@ def env(db_engine):
                          rfc="DAP250922PY2")
         db.add_all([ehmo, mafan, balles, jubran]); db.flush()
         # La SUCURSAL es la operación regional; el hospital es un punto DENTRO.
-        suc = Sucursal(tenant_id=tenant_a.id, cliente_id=ehmo.id, codigo="TAB",
-                       nombre="Tabasco")
-        suc_balles = Sucursal(tenant_id=tenant_a.id, cliente_id=balles.id, codigo="HGO",
-                              nombre="Hidalgo")
-        suc_jubran = Sucursal(tenant_id=tenant_a.id, cliente_id=jubran.id, codigo="HGO",
-                              nombre="Hidalgo")
+        suc = crear_sucursal(db, tenant_id=tenant_a.id, cliente_id=ehmo.id, codigo="TAB",
+                             nombre="Tabasco")
+        # La MISMA plaza Hidalgo surte a Balles y a Jubran (modelo nuevo).
+        suc_balles = crear_sucursal(db, tenant_id=tenant_a.id, cliente_id=balles.id, codigo="HGO",
+                                    nombre="Hidalgo")
+        suc_jubran = suc_balles
+        from app.models import ClienteSucursal
+        db.add(ClienteSucursal(tenant_id=tenant_a.id, cliente_id=jubran.id, sucursal_id=suc_balles.id))
         prod = Producto(tenant_id=tenant_a.id, sku="OC-P", nombre="Jitomate Saladet",
                         clave_sat="01010101", unidad_sat="KGM")
         alm = Almacen(tenant_id=tenant_a.id, codigo="OC-BG", nombre="Bodega OC")
-        db.add_all([suc, suc_balles, suc_jubran, prod, alm]); db.flush()
+        db.add_all([prod, alm]); db.flush()
         db.commit()
         yield {"admin_a": admin_a, "admin_b": admin_b,
                "ehmo": str(ehmo.id), "mafan": str(mafan.id), "suc": str(suc.id),

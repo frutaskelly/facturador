@@ -1,9 +1,11 @@
-"""Alcance del proyecto (migración 0058): a qué sucursales entrega.
+"""La plaza del proyecto (`proyectos.sucursal_id`, rediseño 01-sep-2026).
 
-La regla de negocio: si el proyecto tiene dueño (`cliente_id`), sus sucursales
-deben ser de ese cliente — mezclar plazas ajenas cobraría con la negociación
-equivocada. Un proyecto del grupo (sin dueño) sí puede abarcar sucursales de
-varios clientes. Todo por la API real (RLS + RBAC), como test_catalog_api.
+Un proyecto por plaza: «HOSPITALES» de Pachuca y de Tabasco son dos filas. La
+regla de negocio: si el proyecto tiene dueño (`cliente_id`), su plaza debe
+estar VINCULADA a ese cliente — un proyecto en una plaza que no lo surte
+cobraría con la negociación equivocada. Un proyecto del grupo (sin dueño)
+acepta cualquier plaza. Todo por la API real (RLS + RBAC), como
+test_catalog_api.
 """
 import uuid
 
@@ -13,14 +15,15 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
-from app.models import Cliente, Membership, Role, Sucursal, Tenant, User
+from app.models import Cliente, Membership, Role, Tenant, User
+from .conftest import crear_sucursal
 
-_PURGE = ("proyecto_sucursales", "proyectos", "sucursales", "clientes")
+_PURGE = ("proyectos", "cliente_sucursales", "sucursales", "clientes")
 
 
 @pytest.fixture
 def env(db_engine):
-    """Un tenant con ADMIN, dos clientes y sus sucursales."""
+    """Un tenant con ADMIN, dos clientes y sus plazas vinculadas."""
     suffix = uuid.uuid4().hex[:8]
     db = SessionLocal()
     created = {"memberships": [], "users": [], "tenants": []}
@@ -44,10 +47,10 @@ def env(db_engine):
         cli2 = Cliente(tenant_id=tid, codigo="C2", legal_name="Cliente 2 SA", rfc="XEXX010101000")
         db.add_all([cli1, cli2]); db.flush()
 
-        s1a = Sucursal(tenant_id=tid, cliente_id=cli1.id, nombre="Pachuca")
-        s1b = Sucursal(tenant_id=tid, cliente_id=cli1.id, nombre="Tulancingo")
-        s2a = Sucursal(tenant_id=tid, cliente_id=cli2.id, nombre="Actopan")
-        db.add_all([s1a, s1b, s2a]); db.flush()
+        # cli1 se surte de Pachuca y Tulancingo; cli2 solo de Actopan.
+        s1a = crear_sucursal(db, tenant_id=tid, cliente_id=cli1.id, nombre="Pachuca")
+        s1b = crear_sucursal(db, tenant_id=tid, cliente_id=cli1.id, nombre="Tulancingo")
+        s2a = crear_sucursal(db, tenant_id=tid, cliente_id=cli2.id, nombre="Actopan")
         db.commit()
 
         yield {
@@ -87,96 +90,110 @@ def _hdr(user):
     return {"X-Tenant-Id": str(user["tenant_id"])}
 
 
-def test_create_con_sucursales_del_cliente(client, env, auth_as):
+def test_create_con_plaza_del_cliente(client, env, auth_as):
     auth_as(env["admin"])
     r = client.post("/api/v1/proyectos", headers=_hdr(env["admin"]), json={
         "nombre": "Hospitales", "cliente_id": env["cli1"],
-        "sucursal_ids": [env["s1a"], env["s1b"]],
+        "sucursal_id": env["s1a"],
     })
     assert r.status_code == 201, r.text
     body = r.json()
-    assert sorted(body["sucursal_ids"]) == sorted([env["s1a"], env["s1b"]])
-    assert sorted(body["sucursales_nombres"]) == ["Pachuca", "Tulancingo"]
+    assert body["sucursal_id"] == env["s1a"]
+    assert body["sucursal_nombre"] == "Pachuca"
 
-    # La lista también las trae (hidratación en paginado).
+    # La lista también la trae (hidratación en paginado).
     r = client.get("/api/v1/proyectos", headers=_hdr(env["admin"]))
     fila = next(p for p in r.json()["items"] if p["id"] == body["id"])
-    assert sorted(fila["sucursales_nombres"]) == ["Pachuca", "Tulancingo"]
+    assert fila["sucursal_nombre"] == "Pachuca"
 
 
-def test_create_rechaza_sucursal_de_otro_cliente(client, env, auth_as):
+def test_un_proyecto_por_plaza_caso_ehmo(client, env, auth_as):
+    """El mismo nombre en dos plazas son DOS proyectos (códigos distintos)."""
+    auth_as(env["admin"])
+    r1 = client.post("/api/v1/proyectos", headers=_hdr(env["admin"]), json={
+        "nombre": "Hospitales", "cliente_id": env["cli1"], "sucursal_id": env["s1a"],
+    })
+    r2 = client.post("/api/v1/proyectos", headers=_hdr(env["admin"]), json={
+        "nombre": "Hospitales", "cliente_id": env["cli1"], "sucursal_id": env["s1b"],
+    })
+    assert r1.status_code == 201 and r2.status_code == 201, (r1.text, r2.text)
+    assert r1.json()["codigo"] != r2.json()["codigo"]
+    assert {r1.json()["sucursal_nombre"], r2.json()["sucursal_nombre"]} == {"Pachuca", "Tulancingo"}
+
+
+def test_create_rechaza_plaza_que_no_surte_al_cliente(client, env, auth_as):
     auth_as(env["admin"])
     r = client.post("/api/v1/proyectos", headers=_hdr(env["admin"]), json={
         "nombre": "Cruzado", "cliente_id": env["cli1"],
-        "sucursal_ids": [env["s2a"]],
+        "sucursal_id": env["s2a"],
     })
     assert r.status_code == 422
-    assert "no es del cliente" in r.json()["detail"]
+    assert "no se surte" in r.json()["detail"]
 
 
-def test_create_rechaza_sucursal_inexistente(client, env, auth_as):
+def test_create_rechaza_plaza_inexistente(client, env, auth_as):
     auth_as(env["admin"])
     r = client.post("/api/v1/proyectos", headers=_hdr(env["admin"]), json={
         "nombre": "Fantasma", "cliente_id": env["cli1"],
-        "sucursal_ids": [str(uuid.uuid4())],
+        "sucursal_id": str(uuid.uuid4()),
     })
     assert r.status_code == 422
     assert "no existe" in r.json()["detail"]
 
 
-def test_proyecto_del_grupo_acepta_varios_clientes(client, env, auth_as):
+def test_proyecto_del_grupo_acepta_cualquier_plaza(client, env, auth_as):
     auth_as(env["admin"])
     r = client.post("/api/v1/proyectos", headers=_hdr(env["admin"]), json={
         "nombre": "Programa Estatal", "cliente_id": None,
-        "sucursal_ids": [env["s1a"], env["s2a"]],
+        "sucursal_id": env["s2a"],
     })
     assert r.status_code == 201, r.text
-    assert sorted(r.json()["sucursales_nombres"]) == ["Actopan", "Pachuca"]
+    assert r.json()["sucursal_nombre"] == "Actopan"
 
 
-def test_update_reemplaza_y_omitir_no_toca(client, env, auth_as):
+def test_update_cambia_y_omitir_no_toca(client, env, auth_as):
     auth_as(env["admin"])
     r = client.post("/api/v1/proyectos", headers=_hdr(env["admin"]), json={
         "nombre": "Rotativo", "cliente_id": env["cli1"],
-        "sucursal_ids": [env["s1a"]],
+        "sucursal_id": env["s1a"],
     })
     pid = r.json()["id"]
 
-    # PATCH sin sucursal_ids: el alcance queda como estaba.
+    # PATCH sin sucursal_id: la plaza queda como estaba.
     r = client.patch(f"/api/v1/proyectos/{pid}", headers=_hdr(env["admin"]),
-                     json={"notas": "sin tocar alcance"})
+                     json={"notas": "sin tocar la plaza"})
     assert r.status_code == 200, r.text
-    assert r.json()["sucursal_ids"] == [env["s1a"]]
+    assert r.json()["sucursal_id"] == env["s1a"]
 
-    # PATCH con la lista: reemplaza el set completo.
+    # PATCH con otra plaza: la reemplaza.
     r = client.patch(f"/api/v1/proyectos/{pid}", headers=_hdr(env["admin"]),
-                     json={"sucursal_ids": [env["s1b"]]})
+                     json={"sucursal_id": env["s1b"]})
     assert r.status_code == 200, r.text
-    assert r.json()["sucursal_ids"] == [env["s1b"]]
+    assert r.json()["sucursal_nombre"] == "Tulancingo"
 
-    # Lista vacía = quitar todas (explícito, no un olvido).
+    # NULL explícito = sin restricción de plaza.
     r = client.patch(f"/api/v1/proyectos/{pid}", headers=_hdr(env["admin"]),
-                     json={"sucursal_ids": []})
+                     json={"sucursal_id": None})
     assert r.status_code == 200, r.text
-    assert r.json()["sucursal_ids"] == []
+    assert r.json()["sucursal_id"] is None
 
 
-def test_cambiar_dueno_valida_el_alcance(client, env, auth_as):
+def test_cambiar_dueno_valida_la_plaza(client, env, auth_as):
     auth_as(env["admin"])
     r = client.post("/api/v1/proyectos", headers=_hdr(env["admin"]), json={
         "nombre": "Mudanza", "cliente_id": env["cli1"],
-        "sucursal_ids": [env["s1a"]],
+        "sucursal_id": env["s1a"],
     })
     pid = r.json()["id"]
 
-    # Cambiar el dueño sin retocar sucursales → 422 (no se sueltan en silencio).
+    # Cambiar el dueño sin retocar la plaza → 422 (el nuevo no se surte de ella).
     r = client.patch(f"/api/v1/proyectos/{pid}", headers=_hdr(env["admin"]),
                      json={"cliente_id": env["cli2"]})
     assert r.status_code == 422
-    assert "nuevo" in r.json()["detail"]
+    assert "no se surte" in r.json()["detail"]
 
-    # Con el alcance nuevo en el mismo PATCH sí pasa.
+    # Con la plaza correcta en el mismo PATCH sí pasa.
     r = client.patch(f"/api/v1/proyectos/{pid}", headers=_hdr(env["admin"]),
-                     json={"cliente_id": env["cli2"], "sucursal_ids": [env["s2a"]]})
+                     json={"cliente_id": env["cli2"], "sucursal_id": env["s2a"]})
     assert r.status_code == 200, r.text
-    assert r.json()["sucursales_nombres"] == ["Actopan"]
+    assert r.json()["sucursal_nombre"] == "Actopan"

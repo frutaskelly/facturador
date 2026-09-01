@@ -4,8 +4,9 @@ Devuelve el precio unitario para (cliente, sucursal, serie, proyecto, producto,
 presentación, cantidad, fecha) aplicando prioridad MÁS-ESPECÍFICO-GANA (estándar
 wholesale, no "precio más bajo"):
 
-  1. Override de la sucursal + producto
-  2. Override del cliente + producto
+  1. Override de la sucursal + producto — el de (cliente, sucursal) exacto le
+     gana al de la plaza sola (cliente NULL = para todos los que surte)
+  2. Override del cliente + producto (sin plaza)
   3. Lista FORZADA a mano en el documento (`remisiones.lista_precios_id`)
   4. Lista asignada — el renglón de `lista_asignaciones` que coincide en las
      dimensiones más específicas (proyecto 8 · serie 4 · sucursal 2 · cliente 1)
@@ -36,7 +37,6 @@ from ..models import (
     Precio,
     PrecioOverride,
     Producto,
-    Sucursal,
 )
 
 
@@ -52,13 +52,29 @@ def _override(db, *, producto_id, presentacion, fecha, cliente_id=None, sucursal
         PrecioOverride.producto_id == producto_id,
         PrecioOverride.presentacion == presentacion,
     )
-    q = q.filter(PrecioOverride.sucursal_id == sucursal_id) if sucursal_id else q.filter(PrecioOverride.cliente_id == cliente_id)
+    if sucursal_id:
+        # Paso sucursal: los de esta plaza — el del cliente exacto o el de la
+        # plaza para todos (cliente NULL). La plaza es compartida: uno anclado a
+        # OTRO cliente no debe hablar aquí.
+        q = q.filter(
+            PrecioOverride.sucursal_id == sucursal_id,
+            or_(PrecioOverride.cliente_id.is_(None), PrecioOverride.cliente_id == cliente_id),
+        )
+        orden_especifico = [PrecioOverride.cliente_id.is_(None).asc()]
+    else:
+        # Paso cliente: solo los SIN plaza — uno de (cliente, otra plaza) no
+        # aplica a un documento que no está en ella.
+        q = q.filter(
+            PrecioOverride.cliente_id == cliente_id,
+            PrecioOverride.sucursal_id.is_(None),
+        )
+        orden_especifico = []
     # id como desempate: dos overrides capturados en la misma transacción traen
     # el MISMO created_at (func.now() es por transacción) y sin llave secundaria
     # el ganador dependía del plan de la consulta — aquí y en el lote debe ser
     # el mismo.
     q = _vigente(q, PrecioOverride, fecha).order_by(
-        PrecioOverride.created_at.desc(), PrecioOverride.id.desc()
+        *orden_especifico, PrecioOverride.created_at.desc(), PrecioOverride.id.desc()
     )
     row = q.first()
     return row[0] if row else None
@@ -217,12 +233,6 @@ def resolver_precio(
     fecha = fecha or date.today()
     cantidad = Decimal(cantidad)
 
-    suc = None
-    if sucursal_id:
-        suc = db.query(Sucursal).filter(Sucursal.id == sucursal_id, Sucursal.deleted_at.is_(None)).one_or_none()
-        if suc and cliente_id is None:
-            cliente_id = suc.cliente_id
-
     # Intentos de presentación: exacta primero; si falla, la unidad base × factor.
     # Cada intento es (presentacion, multiplicador_del_precio, cantidad_para_el_tramo).
     intentos: list[tuple[str, Decimal, Decimal]] = [(presentacion, Decimal(1), cantidad)]
@@ -247,9 +257,9 @@ def resolver_precio(
                 return p if mult == 1 else (p * mult).quantize(Decimal("0.01"))
         return None
 
-    # 1. override sucursal
+    # 1. override sucursal (con el cliente: el exacto gana al de la plaza sola)
     if sucursal_id:
-        p = _resolver(lambda pr, _c: _override(db, sucursal_id=sucursal_id, producto_id=producto_id, presentacion=pr, fecha=fecha))
+        p = _resolver(lambda pr, _c: _override(db, sucursal_id=sucursal_id, cliente_id=cliente_id, producto_id=producto_id, presentacion=pr, fecha=fecha))
         if p is not None:
             return {"precio": p, "origen": "override_sucursal"}
     # 2. override cliente
@@ -314,12 +324,6 @@ def resolver_precios_lote(
         return []
     fecha = fecha or date.today()
 
-    suc = None
-    if sucursal_id:
-        suc = db.query(Sucursal).filter(Sucursal.id == sucursal_id, Sucursal.deleted_at.is_(None)).one_or_none()
-        if suc and cliente_id is None:
-            cliente_id = suc.cliente_id
-
     producto_ids = {it["producto_id"] for it in items}
     prods = {
         p.id: p
@@ -348,22 +352,29 @@ def resolver_precios_lote(
     # Overrides de sucursal y de cliente: una consulta por dimensión, indexada
     # por (producto, presentación); el orden created_at desc hace que el primero
     # visto sea el que resolver_precio elegiría (el más reciente).
-    def _overrides(**dim) -> dict[tuple, Decimal]:
+    def _overrides(*filtros, orden=()) -> dict[tuple, Decimal]:
         q = db.query(
             PrecioOverride.producto_id, PrecioOverride.presentacion, PrecioOverride.precio_unitario
-        ).filter(PrecioOverride.producto_id.in_(producto_ids))
-        for col, val in dim.items():
-            q = q.filter(getattr(PrecioOverride, col) == val)
+        ).filter(PrecioOverride.producto_id.in_(producto_ids), *filtros)
         q = _vigente(q, PrecioOverride, fecha).order_by(
-            PrecioOverride.created_at.desc(), PrecioOverride.id.desc()
+            *orden, PrecioOverride.created_at.desc(), PrecioOverride.id.desc()
         )
         out: dict[tuple, Decimal] = {}
         for pid, pres, precio in q.all():
             out.setdefault((pid, pres), precio)
         return out
 
-    ov_sucursal = _overrides(sucursal_id=sucursal_id) if sucursal_id else {}
-    ov_cliente = _overrides(cliente_id=cliente_id) if cliente_id else {}
+    # Mismos filtros y orden que _override: el de (cliente, plaza) exacto gana
+    # al de la plaza sola; el paso cliente solo ve los SIN plaza.
+    ov_sucursal = _overrides(
+        PrecioOverride.sucursal_id == sucursal_id,
+        or_(PrecioOverride.cliente_id.is_(None), PrecioOverride.cliente_id == cliente_id),
+        orden=[PrecioOverride.cliente_id.is_(None).asc()],
+    ) if sucursal_id else {}
+    ov_cliente = _overrides(
+        PrecioOverride.cliente_id == cliente_id,
+        PrecioOverride.sucursal_id.is_(None),
+    ) if cliente_id else {}
 
     asignaciones = resolver_asignaciones(
         db, cliente_id=cliente_id, sucursal_id=sucursal_id,

@@ -2117,6 +2117,145 @@
     "title": "ClienteOut",
     "type": "object"
    },
+   "ClienteSucursalOut": {
+    "properties": {
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "cliente_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Nombre"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "serie_factura_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Factura Id"
+     },
+     "serie_remision_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Remision Id"
+     },
+     "series_factura_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Series Factura Ids",
+      "type": "array"
+     },
+     "series_remision_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Series Remision Ids",
+      "type": "array"
+     },
+     "sucursal_id": {
+      "format": "uuid",
+      "title": "Sucursal Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "cliente_id",
+     "sucursal_id"
+    ],
+    "title": "ClienteSucursalOut",
+    "type": "object"
+   },
+   "ClienteSucursalUpsert": {
+    "properties": {
+     "serie_factura_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Factura Id"
+     },
+     "serie_remision_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Remision Id"
+     },
+     "series_factura_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "format": "uuid",
+         "type": "string"
+        },
+        "maxItems": 20,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Series Factura Ids"
+     },
+     "series_remision_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "format": "uuid",
+         "type": "string"
+        },
+        "maxItems": 20,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Series Remision Ids"
+     }
+    },
+    "title": "ClienteSucursalUpsert",
+    "type": "object"
+   },
    "ClienteUpdate": {
     "properties": {
      "almacen_id": {
@@ -12622,14 +12761,17 @@
       ],
       "title": "Notas"
      },
-     "sucursal_ids": {
-      "items": {
-       "format": "uuid",
-       "type": "string"
-      },
-      "maxItems": 100,
-      "title": "Sucursal Ids",
-      "type": "array"
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
      }
     },
     "required": [
@@ -12696,20 +12838,28 @@
       ],
       "title": "Notas"
      },
-     "sucursal_ids": {
-      "items": {
-       "format": "uuid",
-       "type": "string"
-      },
-      "title": "Sucursal Ids",
-      "type": "array"
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
      },
-     "sucursales_nombres": {
-      "items": {
-       "type": "string"
-      },
-      "title": "Sucursales Nombres",
-      "type": "array"
+     "sucursal_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Nombre"
      },
      "tenant_id": {
       "format": "uuid",
@@ -12782,21 +12932,17 @@
       ],
       "title": "Notas"
      },
-     "sucursal_ids": {
+     "sucursal_id": {
       "anyOf": [
        {
-        "items": {
-         "format": "uuid",
-         "type": "string"
-        },
-        "maxItems": 100,
-        "type": "array"
+        "format": "uuid",
+        "type": "string"
        },
        {
         "type": "null"
        }
       ],
-      "title": "Sucursal Ids"
+      "title": "Sucursal Id"
      }
     },
     "title": "ProyectoUpdate",
@@ -15004,9 +15150,16 @@
       "title": "Almacen Id"
      },
      "cliente_id": {
-      "format": "uuid",
-      "title": "Cliente Id",
-      "type": "string"
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
      },
      "codigo": {
       "anyOf": [
@@ -15097,7 +15250,6 @@
      }
     },
     "required": [
-     "cliente_id",
      "nombre"
     ],
     "title": "SucursalCreate",
@@ -15122,10 +15274,20 @@
       ],
       "title": "Almacen Id"
      },
-     "cliente_id": {
-      "format": "uuid",
-      "title": "Cliente Id",
-      "type": "string"
+     "clientes_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Clientes Ids",
+      "type": "array"
+     },
+     "clientes_nombres": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Clientes Nombres",
+      "type": "array"
      },
      "codigo": {
       "anyOf": [
@@ -15234,7 +15396,6 @@
      }
     },
     "required": [
-     "cliente_id",
      "nombre",
      "id",
      "tenant_id",
@@ -15315,62 +15476,6 @@
        }
       ],
       "title": "Nombre"
-     },
-     "serie_factura_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Serie Factura Id"
-     },
-     "serie_remision_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Serie Remision Id"
-     },
-     "series_factura_ids": {
-      "anyOf": [
-       {
-        "items": {
-         "format": "uuid",
-         "type": "string"
-        },
-        "maxItems": 20,
-        "type": "array"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Series Factura Ids"
-     },
-     "series_remision_ids": {
-      "anyOf": [
-       {
-        "items": {
-         "format": "uuid",
-         "type": "string"
-        },
-        "maxItems": 20,
-        "type": "array"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Series Remision Ids"
      },
      "telefono": {
       "anyOf": [
@@ -32117,6 +32222,23 @@
       }
      },
      {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
       "in": "header",
       "name": "X-Tenant-Id",
       "required": false,
@@ -32233,6 +32355,225 @@
      }
     ],
     "summary": "Update Sucursal",
+    "tags": [
+     "sucursales"
+    ]
+   }
+  },
+  "/api/v1/sucursales/{sucursal_id}/clientes": {
+   "get": {
+    "operationId": "list_vinculos_api_v1_sucursales__sucursal_id__clientes_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "sucursal_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Sucursal Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ClienteSucursalOut"
+         },
+         "title": "Response List Vinculos Api V1 Sucursales  Sucursal Id  Clientes Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "List Vinculos",
+    "tags": [
+     "sucursales"
+    ]
+   }
+  },
+  "/api/v1/sucursales/{sucursal_id}/clientes/{cliente_id}": {
+   "delete": {
+    "description": "Desvincula al cliente de la plaza. El histórico (remisiones, órdenes)\nconserva su sucursal_id: esto solo cierra la relación hacia adelante.",
+    "operationId": "delete_vinculo_api_v1_sucursales__sucursal_id__clientes__cliente_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "sucursal_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Sucursal Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Delete Vinculo",
+    "tags": [
+     "sucursales"
+    ]
+   },
+   "put": {
+    "description": "Vincula al cliente con la plaza (o actualiza sus series). Idempotente.",
+    "operationId": "upsert_vinculo_api_v1_sucursales__sucursal_id__clientes__cliente_id__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "sucursal_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Sucursal Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ClienteSucursalUpsert"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ClienteSucursalOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Upsert Vinculo",
     "tags": [
      "sucursales"
     ]

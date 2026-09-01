@@ -38,7 +38,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models import Cliente, ClienteExterno, Sucursal
+from ..models import Cliente, ClienteExterno, ClienteSucursal, Sucursal
 from .producto_match import normalizar
 
 # Sistemas que IDENTIFICAN al cliente, de mayor a menor especificidad. El
@@ -258,17 +258,19 @@ def _sucursal_viva(db: Session, sucursal_id, cliente_id: UUID):
     """La sucursal, solo si vive Y es de ese cliente.
 
     Lo segundo importa: los puntos de entrega se comparten entre razones
-    sociales (Balles/Jubran), así que una equivalencia puede apuntar a la
-    sucursal de otro cliente si alguien la reapuntó. Mandar la remisión ahí
-    resolvería la serie y los precios con datos mezclados.
+    sociales (Balles/Jubran), así que una equivalencia puede apuntar a una
+    plaza que no surte a este cliente si alguien la reapuntó. Mandar la
+    remisión ahí resolvería la serie y los precios con datos mezclados. «Ser de
+    ese cliente» hoy significa: existe el vínculo en `cliente_sucursales`.
     """
     if sucursal_id is None:
         return None
     hit = (
         db.query(Sucursal.id)
+        .join(ClienteSucursal, ClienteSucursal.sucursal_id == Sucursal.id)
         .filter(
             Sucursal.id == sucursal_id,
-            Sucursal.cliente_id == cliente_id,
+            ClienteSucursal.cliente_id == cliente_id,
             Sucursal.deleted_at.is_(None),
         )
         .first()
@@ -355,7 +357,8 @@ def resolver_sucursal_por_texto(
         return None
     sucs = (
         db.query(Sucursal)
-        .filter(Sucursal.cliente_id == cliente_id, Sucursal.deleted_at.is_(None))
+        .join(ClienteSucursal, ClienteSucursal.sucursal_id == Sucursal.id)
+        .filter(ClienteSucursal.cliente_id == cliente_id, Sucursal.deleted_at.is_(None))
         .all()
     )
     codigo = norm.replace(" ", "").upper()

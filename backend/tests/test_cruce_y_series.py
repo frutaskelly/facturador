@@ -8,13 +8,14 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
+from .conftest import crear_sucursal
 from app.models import (
     Almacen, Cliente, Membership, Producto, Role, Serie, Sucursal, Tenant,
 )
 
 _PURGE = (
     "producto_alias", "lineas_factura", "facturas", "lineas_remision", "remisiones",
-    "movimientos_inventario", "lotes_inventario", "series", "sucursales",
+    "movimientos_inventario", "lotes_inventario", "series", "cliente_sucursales", "sucursales",
     "productos", "almacenes", "clientes",
 )
 
@@ -43,13 +44,13 @@ def env(db_engine):
         cli = Cliente(tenant_id=t.id, codigo="CL1", legal_name="Cliente 1", rfc="XAXX010101000")
         alm = Almacen(tenant_id=t.id, codigo="BG", nombre="Bodega")
         db.add_all([zan, chi, cli, alm]); db.flush()
-        suc = Sucursal(tenant_id=t.id, cliente_id=cli.id, codigo="S1", nombre="Sucursal Norte")
+        suc = crear_sucursal(db, tenant_id=t.id, cliente_id=cli.id, codigo="S1", nombre="Sucursal Norte")
         # series: default R (remisión) y A (factura)
         rdef = Serie(tenant_id=t.id, codigo="R", tipo="NO_FISCAL", tipo_documento="REMISION", es_default=True)
         adef = Serie(tenant_id=t.id, codigo="A", tipo="FISCAL", tipo_documento="FACTURA", es_default=True)
         rc = Serie(tenant_id=t.id, codigo="RC", tipo="NO_FISCAL", tipo_documento="REMISION")
         rs = Serie(tenant_id=t.id, codigo="RS", tipo="NO_FISCAL", tipo_documento="REMISION")
-        db.add_all([suc, rdef, adef, rc, rs]); db.flush()
+        db.add_all([rdef, adef, rc, rs]); db.flush()
         db.commit()
         out = {
             "user": {"sub": sub, "email": u.email, "tenant_id": t.id},

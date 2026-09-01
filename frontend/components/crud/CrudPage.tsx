@@ -17,6 +17,11 @@ import { useMutation, useResource, type Page } from "@/lib/hooks";
 
 export type FormValues = Record<string, string | boolean>;
 
+/** ¿El tag (posible CSV) de una opción contiene el valor del filtro? */
+function _tagIncluye(tag: string | undefined, filtro: string): boolean {
+  return !!tag && tag.split(",").includes(filtro);
+}
+
 export type CrudField = {
   name: string;
   label: string;
@@ -31,7 +36,7 @@ export type CrudField = {
   options?: { value: string; label: string; tag?: string }[];
   colSpan?: 1 | 2;
   /**
-   * Solo `multiselect`: nombre de OTRO campo del formulario que filtra las
+   * `multiselect` y `select`: nombre de OTRO campo del formulario que filtra las
    * opciones — quedan las cuyo `tag` (ver Lookup) coincide con su valor; con
    * el campo vacío se ofrecen todas. Al cambiar ese campo, las palomeadas que
    * queden fuera se sueltan solas (si no, viajarían ids de otro dueño y el
@@ -103,8 +108,9 @@ export type Lookup = {
   path: string;
   value: (row: Record<string, unknown>) => string;
   label: (row: Record<string, unknown>) => string;
-  /** Valor con el que un `multiselect` con `filterBy` filtra esta opción
-   *  (p. ej. el cliente_id de la sucursal). */
+  /** Valor con el que un campo con `filterBy` filtra esta opción. Puede ser
+   *  un CSV de valores (p. ej. los clientes_ids de una plaza: basta que uno
+   *  coincida). */
   tag?: (row: Record<string, unknown>) => string;
 };
 
@@ -249,11 +255,13 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
   useEffect(() => {
     if (form === null) return;
     for (const f of config.fields) {
-      if (f.type !== "multiselect" || !f.filterBy) continue;
+      if ((f.type !== "multiselect" && f.type !== "select") || !f.filterBy) continue;
       const filtro = String(form[f.filterBy] ?? "");
       const opciones = lookupOpts[f.name];
       if (!filtro || !opciones) continue;
-      const permitidos = new Set(opciones.filter((o) => o.tag === filtro).map((o) => o.value));
+      const permitidos = new Set(
+        opciones.filter((o) => _tagIncluye(o.tag, filtro)).map((o) => o.value)
+      );
       const sel = String(form[f.name] ?? "").split(",").filter(Boolean);
       const podados = sel.filter((x) => permitidos.has(x));
       if (podados.length !== sel.length) {
@@ -492,18 +500,24 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                     {f.type === "textarea" ? (
                       <Textarea rows={2} value={String(val ?? "")} onChange={(e) => setField(f.name, e.target.value)} />
                     ) : f.type === "select" ? (
-                      <Select value={String(val ?? "")} onChange={(e) => setField(f.name, e.target.value)}>
-                        <option value="">— Selecciona —</option>
-                        {opts.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </Select>
+                      (() => {
+                        const filtro = f.filterBy ? String(form[f.filterBy] ?? "") : "";
+                        const visibles = filtro ? opts.filter((o) => _tagIncluye(o.tag, filtro)) : opts;
+                        return (
+                          <Select value={String(val ?? "")} onChange={(e) => setField(f.name, e.target.value)}>
+                            <option value="">— Selecciona —</option>
+                            {visibles.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </Select>
+                        );
+                      })()
                     ) : f.type === "multiselect" ? (
                       (() => {
                         const filtro = f.filterBy ? String(form[f.filterBy] ?? "") : "";
-                        const visibles = filtro ? opts.filter((o) => o.tag === filtro) : opts;
+                        const visibles = filtro ? opts.filter((o) => _tagIncluye(o.tag, filtro)) : opts;
                         const sel = String(val ?? "").split(",").filter(Boolean);
                         const toggle = (id: string, on: boolean) =>
                           setField(f.name, (on ? [...sel, id] : sel.filter((x) => x !== id)).join(","));
@@ -512,7 +526,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                         // anexa el dueño, sacado del lookup del campo filtro.
                         const etiqueta = (o: { label: string; tag?: string }) => {
                           if (!f.filterBy || filtro) return o.label;
-                          const dueno = lookupOpts[f.filterBy]?.find((c) => c.value === o.tag)?.label;
+                          const dueno = lookupOpts[f.filterBy]?.find((c) => _tagIncluye(o.tag, c.value))?.label;
                           return dueno ? `${o.label} · ${dueno}` : o.label;
                         };
                         return (

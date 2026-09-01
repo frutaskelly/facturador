@@ -99,13 +99,13 @@ export default function Page() {
   }, [clienteSel]);
 
   /** ¿El proyecto elegido NO entrega en la sucursal elegida? (regla de alcance:
-   *  un proyecto sin sucursales asignadas aplica en cualquier plaza). Guardar
-   *  un par incompatible falla con 422 en el backend; esto avisa antes. */
+   *  un proyecto sin plaza asignada aplica en cualquiera). Guardar un par
+   *  incompatible falla con 422 en el backend; esto avisa antes. */
   const proyectoFueraDePlaza = useMemo(() => {
     if (!proyectoSel) return null;
     const p = proyectos.find((x) => x.id === proyectoSel);
-    if (!p?.sucursal_ids?.length) return null;
-    return sucursalSel && p.sucursal_ids.includes(sucursalSel) ? null : p;
+    if (!p?.sucursal_id) return null;
+    return sucursalSel && p.sucursal_id === sucursalSel ? null : p;
   }, [proyectos, proyectoSel, sucursalSel]);
 
   /** ¿El operador cambió cliente/sucursal y todavía no se ha guardado? */
@@ -567,15 +567,15 @@ export default function Page() {
               <option value="">— Sin proyecto —</option>
               {proyectos
                 .filter((p) => !p.cliente_id || !clienteSel || p.cliente_id === clienteSel)
-                // La negociación es de su plaza: los proyectos con sucursales
-                // asignadas solo se ofrecen cuando la sucursal elegida está en
-                // su alcance. El ya seleccionado se queda visible aunque no
-                // aplique — ocultarlo dejaría al select con un valor fantasma.
+                // La negociación es de su plaza: los proyectos con plaza
+                // asignada solo se ofrecen cuando la sucursal elegida es la
+                // suya. El ya seleccionado se queda visible aunque no aplique
+                // — ocultarlo dejaría al select con un valor fantasma.
                 .filter(
                   (p) =>
                     p.id === proyectoSel ||
-                    !p.sucursal_ids?.length ||
-                    (sucursalSel !== "" && p.sucursal_ids.includes(sucursalSel))
+                    !p.sucursal_id ||
+                    (sucursalSel !== "" && p.sucursal_id === sucursalSel)
                 )
                 .map((p) => (
                   <option key={p.id} value={p.id}>

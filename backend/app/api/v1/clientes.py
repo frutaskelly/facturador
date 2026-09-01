@@ -36,6 +36,7 @@ from ...schemas.common import Page
 from ...schemas.producto import ProductoClienteOut, ProductoClienteUpsert
 from ...services.cliente_codigo import generate_cliente_codigo
 from ...services import cliente_match
+from ...services.sucursales import es_sucursal_de
 from ...services.producto_match import aprender_alias
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.rfc import validar_rfc_local
@@ -305,10 +306,10 @@ def crear_externo(
     """Registra (o reapunta) una equivalencia. Idempotente por clave normalizada."""
     ensure_fk(db, Cliente, payload.cliente_id, "cliente_id")
     if payload.sucursal_id is not None:
-        suc = get_or_404(db, Sucursal, payload.sucursal_id)
-        if suc.cliente_id != payload.cliente_id:
+        get_or_404(db, Sucursal, payload.sucursal_id)
+        if not es_sucursal_de(db, payload.sucursal_id, payload.cliente_id):
             raise HTTPException(
-                status_code=422, detail="La sucursal no pertenece al cliente de la equivalencia"
+                status_code=422, detail="El cliente de la equivalencia no se surte de esa sucursal"
             )
     # Una SUGERIDA no puede tocar una CONFIRMADA que ya puso una persona. Si se
     # intenta, la respuesta tiene que decirlo: devolver 201 con el cliente ANTERIOR

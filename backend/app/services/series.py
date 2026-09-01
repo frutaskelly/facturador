@@ -1,9 +1,11 @@
 """Resolución y reserva de folios consecutivos sin huecos.
 
 `resolver_serie` elige qué serie usar al emitir un documento, de mayor a menor
-prioridad: (1) serie elegida manualmente, (2) serie de la sucursal, (3) serie
-del cliente, (4) serie predeterminada del inquilino (`es_default`). Devuelve el
-objeto `Serie` (activo) o None si no hay ninguna aplicable.
+prioridad: (1) serie elegida manualmente, (2) serie del VÍNCULO cliente×sucursal
+(la plaza es compartida — EHMO factura en Tabasco con ZEHMOVH mientras Balles y
+Jubran usan ZHGO en Pachuca, así que la sucursal sola no puede decidir), (3)
+serie del cliente, (4) serie predeterminada del inquilino (`es_default`).
+Devuelve el objeto `Serie` (activo) o None si no hay ninguna aplicable.
 
 `consumir_folio` incrementa el contador de una serie de forma atómica
 (`UPDATE … RETURNING`, fila bloqueada por la transacción), así dos emisiones
@@ -19,7 +21,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ..models import Cliente, Serie, Sucursal
+from ..models import Cliente, ClienteSucursal, Serie, Sucursal
 
 
 def resolver_serie(
@@ -31,7 +33,7 @@ def resolver_serie(
     sucursal_id: Optional[UUID] = None,
     cliente_id: Optional[UUID] = None,
 ) -> Optional[Serie]:
-    """Devuelve la `Serie` activa a usar según prioridad override→sucursal→cliente→default."""
+    """Devuelve la `Serie` activa a usar según prioridad override→vínculo→cliente→default."""
     campo = "serie_factura_id" if tipo_documento == "FACTURA" else "serie_remision_id"
 
     def _activa(sid: Optional[UUID]) -> Optional[Serie]:
@@ -45,11 +47,18 @@ def resolver_serie(
     if s:
         return s
 
-    # 2) serie de la sucursal
-    if sucursal_id:
-        suc = db.query(Sucursal).filter(Sucursal.id == sucursal_id).one_or_none()
-        if suc:
-            s = _activa(getattr(suc, campo))
+    # 2) serie del vínculo cliente×sucursal
+    if sucursal_id and cliente_id:
+        vinc = (
+            db.query(ClienteSucursal)
+            .filter(
+                ClienteSucursal.cliente_id == cliente_id,
+                ClienteSucursal.sucursal_id == sucursal_id,
+            )
+            .one_or_none()
+        )
+        if vinc:
+            s = _activa(getattr(vinc, campo))
             if s:
                 return s
 

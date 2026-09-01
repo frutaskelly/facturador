@@ -67,6 +67,7 @@ from ...services.producto_match import (
 )
 from ...services.precios import resolver_precio
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
+from ...services.sucursales import es_sucursal_de
 from ...schemas.common import Page
 from ...schemas.remision import (
     ConfirmarRemisionIn,
@@ -208,9 +209,9 @@ def create_remision(
     ensure_fk(db, ListaPrecios, payload.lista_precios_id, "lista_precios_id")
     ensure_fk(db, Proyecto, payload.proyecto_id, "proyecto_id")
     if payload.sucursal_id is not None:
-        suc = get_or_404(db, Sucursal, payload.sucursal_id)
-        if suc.cliente_id != payload.cliente_facturacion_id:
-            raise HTTPException(status_code=422, detail="La sucursal no pertenece al cliente de la remisión")
+        get_or_404(db, Sucursal, payload.sucursal_id)
+        if not es_sucursal_de(db, payload.sucursal_id, payload.cliente_facturacion_id):
+            raise HTTPException(status_code=422, detail="El cliente de la remisión no se surte de esa sucursal")
     for ln in payload.lineas:
         ensure_fk(db, Producto, ln.producto_id, "producto_id")
 
@@ -476,19 +477,19 @@ def update_remision(
     if data.get("cliente_facturacion_id") is not None:
         ensure_fk(db, Cliente, data["cliente_facturacion_id"], "cliente_facturacion_id")
 
-    # Cliente/sucursal coherentes (la sucursal debe ser del cliente). Se valida
-    # también la sucursal HEREDADA: cambiar solo el cliente no debe dejar una
-    # sucursal de otro cliente (precio/serie se resolverían con datos mezclados).
+    # Cliente/sucursal coherentes (el cliente debe surtirse de la plaza). Se
+    # valida también la sucursal HEREDADA: cambiar solo el cliente no debe dejar
+    # una plaza que no lo surte (precio/serie se resolverían con datos mezclados).
     nuevo_cliente = data.get("cliente_facturacion_id", rem.cliente_facturacion_id)
     sucursal_efectiva = data["sucursal_id"] if "sucursal_id" in data else rem.sucursal_id
     if sucursal_efectiva is not None and ("sucursal_id" in data or "cliente_facturacion_id" in data):
-        suc = get_or_404(db, Sucursal, sucursal_efectiva)
-        if suc.cliente_id != nuevo_cliente:
+        get_or_404(db, Sucursal, sucursal_efectiva)
+        if not es_sucursal_de(db, sucursal_efectiva, nuevo_cliente):
             if "sucursal_id" in data:
-                raise HTTPException(status_code=422, detail="La sucursal no pertenece al cliente de la remisión")
+                raise HTTPException(status_code=422, detail="El cliente de la remisión no se surte de esa sucursal")
             raise HTTPException(
                 status_code=422,
-                detail="La sucursal actual no pertenece al nuevo cliente; cámbiala o quítala en la misma edición",
+                detail="El nuevo cliente no se surte de la sucursal actual; cámbiala o quítala en la misma edición",
             )
 
     for key, value in data.items():

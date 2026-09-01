@@ -54,6 +54,7 @@ from ...schemas.common import Page
 from ...services.inventario import presentacion_declarada
 from ...services.precios import resolver_asignacion
 from ...services.proyecto_alcance import proyecto_aplica
+from ...services.sucursales import es_sucursal_de
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 router = APIRouter(prefix="/listas-precios", tags=["listas de precios"])
@@ -520,13 +521,11 @@ def _validar_coherencia(db: Session, cliente_id, sucursal_id, proyecto_id) -> No
     renglón que jamás coincide con ningún documento: se guarda, se ve en la
     tabla y no cobra nada. Es peor que un error, porque parece configurado.
     """
-    if cliente_id and sucursal_id:
-        suc = db.query(Sucursal.cliente_id).filter(Sucursal.id == sucursal_id).first()
-        if suc and suc[0] != cliente_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Esa sucursal no es del cliente elegido",
-            )
+    if cliente_id and sucursal_id and not es_sucursal_de(db, sucursal_id, cliente_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Ese cliente no se surte de la sucursal elegida",
+        )
     if cliente_id and proyecto_id:
         pro = db.query(Proyecto.cliente_id).filter(Proyecto.id == proyecto_id).first()
         if pro and pro[0] is not None and pro[0] != cliente_id:

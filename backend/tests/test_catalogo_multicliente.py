@@ -19,6 +19,7 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
+from .conftest import crear_sucursal
 from app.models import (
     Almacen,
     Cliente,
@@ -41,7 +42,7 @@ _PURGE = (
     "oc_recibidas", "cliente_externos", "lineas_remision", "remisiones",
     "movimientos_inventario", "lotes_inventario", "producto_alias",
     "producto_clientes", "lista_asignaciones", "precios", "listas_precios",
-    "productos", "almacenes", "sucursales", "clientes",
+    "productos", "almacenes", "cliente_sucursales", "sucursales", "clientes",
 )
 
 
@@ -79,7 +80,7 @@ def env(db_engine):
         ehmo = Cliente(tenant_id=t.id, codigo="EH", legal_name="GRUPO EHMO",
                        rfc="GOA180712SF5")
         db.add_all([balles, ehmo]); db.flush()
-        suc_tab = Sucursal(tenant_id=t.id, cliente_id=ehmo.id, codigo="TAB", nombre="Tabasco")
+        suc_tab = crear_sucursal(db, tenant_id=t.id, cliente_id=ehmo.id, codigo="TAB", nombre="Tabasco")
         cilantro = Producto(tenant_id=t.id, sku="00000282", nombre="CILANTRO",
                             clave_sat="50403700", unidad_sat="KGM",
                             unidad_base="KILO", presentaciones={"KILO": 1, "MANOJO": 0.1})
@@ -90,7 +91,7 @@ def env(db_engine):
                             clave_sat="50402600", unidad_sat="KGM",
                             unidad_base="KILO", presentaciones={"KILO": 1})
         alm = Almacen(tenant_id=t.id, codigo="MC-BG", nombre="Bodega MC")
-        db.add_all([suc_tab, cilantro, serrano, jalapeno, alm]); db.flush()
+        db.add_all([cilantro, serrano, jalapeno, alm]); db.flush()
         # La clave con la que Balles conoce el cilantro (su catálogo).
         db.add(ProductoCliente(
             tenant_id=t.id, cliente_id=balles.id, producto_id=cilantro.id,

@@ -28,7 +28,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
-from ..models import Cliente, EsquemaImpuesto, Precio, PrecioOverride, Producto, ProductoCliente, Sucursal
+from ..models import Cliente, EsquemaImpuesto, Precio, PrecioOverride, Producto, ProductoCliente
 from . import producto_match
 from .fiscal import calcular_linea_producto
 from .importar_productos import _MIME_POR_EXT, _tabla_a_texto
@@ -177,9 +177,8 @@ def productos_cotizables(db: Session, tenant_id: UUID, cliente_id: UUID) -> Opti
             .filter(Precio.tenant_id == tenant_id, Precio.lista_id.in_(listas))
             .distinct()
         )
-    sucs = [s for (s,) in db.query(Sucursal.id).filter(
-        Sucursal.tenant_id == tenant_id, Sucursal.cliente_id == cliente_id,
-        Sucursal.deleted_at.is_(None))]
+    from .sucursales import sucursales_de_cliente
+    sucs = sucursales_de_cliente(db, cliente_id)
     from sqlalchemy import or_ as _or
     ovr = db.query(PrecioOverride.producto_id).filter(
         PrecioOverride.tenant_id == tenant_id,
