@@ -1,4 +1,4 @@
-# Estado del proyecto — 01/09/2026 (cierre wrap-all: PRs #62–#71 + `ec59214` + `7a9c689`)
+# Estado del proyecto — 01/09/2026 (cierre wrap-all PRs #62–#71 + lista de precios de EHMO Tabasco)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,7 +7,7 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` — el commit de este archivo, sobre `7a9c689` (sugerir-sat-batch) — igual que `origin/main` salvo este commit de docs |
+| Rama base | `main` — el commit de este archivo, sobre `13e1dad` (fruta y verdura juntas en el catálogo de una empresa nueva). Entre `7a9c689` y `13e1dad` entraron 6 commits de otras sesiones del 01-sep; **su despliegue no lo verificó esta sesión** |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
 | Worktrees | TODAS las sesiones cerradas por el wrap-all del 01-sep; solo queda `amazing-gould-c9fa17` (la sesión del cotizador, vacía — se poda sola al cerrarla). Ramas viejas en origin por borrar cuando se quiera: `claude/cotizador-fcad7e` y `claude/focused-roentgen-b61e17` (ambas ya contenidas en `main`); `claude/estado-cierre-31ago` se conserva a propósito como respaldo |
@@ -23,6 +23,33 @@ carpeta y leer este archivo.
 migraciones nuevas (head sigue `0058`), y los cinco contenedores quedaron arriba y sanos.
 Deploys previos del 31-ago: `ec59214` (cotizador; endpoint nuevo verificado con 401) y
 `1a0fd06` (PRs #67–#71, por la sesión que unificó este ESTADO).
+
+## EHMO Tabasco ya tiene lista de precios (01-sep, tarde) — solo DATOS, sin código
+
+**No hubo cambios de código: todo fue en la base del SAE y en la de prod del Facturador.**
+
+**SAE empresa 03: se creó la lista 4 «EHMO TABASCO» con 196 productos.** Antes solo tenía las
+3 listas de fábrica en cero, así que Tabasco llevaba de febrero a agosto facturando sin lista y
+sacando el precio del historial. Se armó con la regla de siempre —precio vigente = último
+facturado en factura no cancelada (`PAR_FACTF03`+`FACTF03`)— para 194 claves, más 2 sin
+ninguna factura (pipián y tuna verde) que conservaron su precio capturado a mano. Las 196
+claves cruzaron exacto contra `INVE03`. Todo es esquema de impuesto 3 (IVA 0), así que
+`PRECIOCIMP = PRECIO`.
+
+**Facturador: la lista `EHMOVH0826` quedó sincronizada** (194 → 197 renglones). Se agregaron
+cúrcuma, camote amarillo y tomate verde limpio, y se corrigieron 3 precios: **manzana en caja
+$67.21 → $1,485.00** (el renglón de CAJA traía cargado un precio por kilo; lleva desde julio
+facturándose a $1,485), albahaca $175.00 → $322.25 y calabaza de castilla $57.20 → $36.19.
+
+**Repropagado a las remisiones NO facturadas de Tabasco** (`factura_id` y `factura_sae` en
+NULL; una remisión facturada no se reprecia nunca): 10 líneas de calabaza a $36.19 y la única
+manzana por caja (RZEHMOVH40) pasó de presentación KILO a CAJA. Totales de las 11 remisiones
+recalculados y verificados contra la suma de sus líneas. La albahaca no tenía ninguna remisión
+sin factura — su única aparición es RZHGO43, de Pachuca y ya facturada, que quedó intacta.
+
+El puente SAE ↔ Facturador es `producto_alias`: la importación guardó unas veces la clave del
+SAE (`AJOKG`) y otras la descripción (`ACELGAS`), así que hay que probar las dos formas o el
+cruce se queda a la mitad.
 
 ## Cierre wrap-all (01-sep, madrugada)
 
@@ -259,3 +286,19 @@ podarla.
     empujó (llegaron por el grupo Interno SM) y por qué el job de 6 h no alertó — y OJO: el
     repo del bot tiene cambios sin commitear (`index.js`, `sheets_push.py`) de otra sesión en
     esas mismas fechas. Revisarlo desde la sesión que trabaja ese repo.
+11. **8 remisiones de Tabasco se repreciaron DESPUÉS de que su Excel salió al SAE** (01-sep).
+    Al bajar la calabaza a $36.19 y marcar la manzana como CAJA, ocho de las once remisiones
+    tocadas ya tenían `export_sae_at` — RZEHMOVH3, 10, 12, 13, 16, 27, 29 y la 40. Ninguna
+    tiene `factura_sae`, así que seguían en BORRADOR y por eso entraban en la corrección, pero
+    **si ese Excel ya se capturó en el SAE con $57.20, el SAE quedó con el importe viejo**.
+    Falta cotejar esas ocho contra lo capturado del otro lado. Las no exportadas (RZEHMOVH33,
+    35 y 37) no tienen ese riesgo.
+12. **El SAE de Tabasco tiene la misma mercancía con dos claves vivas** (01-sep).
+    `CALABAZACASTILKG` $36.19 con 524 partidas facturadas vs `CALABAZACASTIKG` $57.20 con 49 —
+    la misma calabaza, dos precios; y `NOPALKG` vs `NOPALSINESPINAKG`, ahí las dos al mismo
+    precio. En el Facturador ambas caen en UN solo renglón, así que al sincronizar hay que
+    desempatar por número de partidas o el precio se queda oscilando. Del lado del Facturador
+    hay duplicados equivalentes: CAMOTE AMARILLO (`00010005`) vs CAMOTE AMARILLO KG
+    (`00010068`), TOMATE VERDE GRANDE Y LIMPIO (`00010048`) vs TOMATE VERDE LIMPIO
+    (`00010049`), y tres jamaicas (`00010022`, `10110023` sin precios, `00000338`). Decidir qué
+    clave sobrevive y dar de baja la otra.
