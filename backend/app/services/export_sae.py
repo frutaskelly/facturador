@@ -280,6 +280,15 @@ def preparar(
         if rem.estado == "CANCELADA":
             res.errores.append(f"{rem.folio_interno}: está CANCELADA")
             continue
+        if getattr(rem, "revision_pendiente", False):
+            # Llegó de la bandeja sin que nadie la mirara. Mandarla a SAE es
+            # darle a Aspel unas unidades y unos precios sin revisar, y de ahí
+            # sale una factura de verdad.
+            res.errores.append(
+                f"{rem.folio_interno}: llegó de la bandeja sin revisar; "
+                "revísala antes de exportarla"
+            )
+            continue
         nativa = nativas_vivas.get(rem.factura_id)
         if nativa is not None:
             res.errores.append(

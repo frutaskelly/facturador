@@ -30,7 +30,7 @@ import {
   nuevaLinea, pegarLocalFallback, unidadBaseDesde,
   type FiscalPreview, type LineaForm,
 } from "@/lib/lineas";
-import type { Almacen, Cliente, LineaPegada, MatchResult, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
+import type { Almacen, Cliente, LineaPegada, LineaRemision, MatchResult, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "remision:gestionar";
 
@@ -110,13 +110,17 @@ export default function RemisionesPage() {
   const [fDesde, setFDesde] = useState("");
   const [fHasta, setFHasta] = useState("");
   const [fCliente, setFCliente] = useState("");
+  // Las que llegaron de la bandeja sin revisar: es la cola de trabajo del
+  // revisor, y sin filtro se pierden entre el histórico.
+  const [fPorRevisar, setFPorRevisar] = useState(false);
   const listPath = useMemo(() => {
     const p = new URLSearchParams({ limit: "200" });
     if (fDesde) p.set("fecha_desde", fDesde);
     if (fHasta) p.set("fecha_hasta", fHasta);
     if (fCliente) p.set("cliente_id", fCliente);
+    if (fPorRevisar) p.set("revision_pendiente", "true");
     return `/api/v1/remisiones?${p.toString()}`;
-  }, [fDesde, fHasta, fCliente]);
+  }, [fDesde, fHasta, fCliente, fPorRevisar]);
 
   // lista
   const { data, loading, error, reload } = useResource<Page<Remision>>(listPath);
@@ -786,7 +790,52 @@ export default function RemisionesPage() {
           <div><span className="text-muted">Cliente:</span> {cliName[d.cliente_facturacion_id] ?? "—"}</div>
           <div><span className="text-muted">Fecha:</span> {fmtDate(d.fecha_remision)}</div>
           <div><span className="text-muted">Estado:</span> <Badge tone={ESTADO_TONE[d.estado] ?? "muted"}>{d.estado}</Badge></div>
+          {d.revision_pendiente ? <Badge tone="warning">POR REVISAR</Badge> : null}
         </div>
+        {d.revision_pendiente ? (
+          <Alert tone="warning">
+            Llegó de la bandeja tal como venía: nadie ha revisado sus unidades ni sus precios. Cada
+            línea trae anotado en su nota lo que venía en el documento y qué hay que mirar. No se
+            confirma, no se factura y no sale a SAE hasta que la des por revisada — ábrela con
+            «Editar» para hacerlo.
+          </Alert>
+        ) : null}
+        {(d.partidas_por_cruzar?.length ?? 0) > 0 ? (
+          <div className="mt-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
+            <div className="mb-1 font-medium">
+              {d.partidas_por_cruzar!.length === 1
+                ? "1 partida de la orden sin cruzar"
+                : `${d.partidas_por_cruzar!.length} partidas de la orden sin cruzar`}
+            </div>
+            <p className="mb-2 text-xs text-muted">
+              No encontraron producto en el catálogo, así que no pudieron ser líneas. Están aquí tal
+              como venían: agrégalas como líneas desde «Editar» (o descártalas) para poder dar la
+              remisión por revisada.
+            </p>
+            <ul className="space-y-0.5">
+              {d.partidas_por_cruzar!.map((pc) => (
+                <li key={pc.numero} className="flex items-center gap-2 tabular-nums">
+                  <span>
+                    <span className="text-muted">{pc.numero}.</span> {pc.descripcion || "sin descripción"}
+                    {pc.cantidad ? ` — ${fmtNumber(pc.cantidad)}` : ""}
+                    {pc.unidad ? ` ${pc.unidad}` : ""}
+                    {pc.clave ? ` · clave ${pc.clave}` : ""}
+                    {pc.precio ? ` · ${fmtMoney(pc.precio)}` : ""}
+                  </span>
+                  {canWrite ? (
+                    <button
+                      onClick={() => { void quitarPartidaPorCruzar(d, pc.numero); }}
+                      className="text-xs text-muted underline hover:text-foreground"
+                      title="Ya la agregué como línea, o no va"
+                    >
+                      quitar
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <DataTable
           rows={d.lineas}
           rowKey={(l) => l.id}
@@ -799,6 +848,15 @@ export default function RemisionesPage() {
             { header: "IEPS", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.ieps_importe ?? 0) },
             { header: "IVA", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.iva_importe ?? 0) },
             { header: "Importe", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.importe) },
+            ...(d.revision_pendiente
+              ? [{
+                  header: "Qué revisar",
+                  cell: (l: LineaRemision) =>
+                    l.notas
+                      ? <span className="block max-w-96 text-xs text-muted">{l.notas}</span>
+                      : <span className="text-xs text-muted">—</span>,
+                }]
+              : []),
           ]}
         />
         <div className="mt-3 flex flex-col items-end gap-1 text-sm">
@@ -842,6 +900,35 @@ export default function RemisionesPage() {
       }
       toast.error(e instanceof ApiError ? e.message : "No se pudo confirmar");
       return false;
+    }
+  }
+  /** Quita una partida de la lista de «sin cruzar»: o ya se agregó como línea
+   *  desde «Editar», o se decidió que no va. Se reenvía la lista completa menos
+   *  esa — mientras no quede vacía, la remisión no se da por revisada. */
+  async function quitarPartidaPorCruzar(r: Remision, numero: number) {
+    const pendientes = detalles[r.id]?.partidas_por_cruzar ?? [];
+    try {
+      await patch(`/api/v1/remisiones/${r.id}`, {
+        partidas_por_cruzar: pendientes.filter((pc) => pc.numero !== numero),
+      });
+      invalidarDetalles([r.id]);
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo quitar la partida");
+    }
+  }
+
+  /** Da por revisada una remisión que llegó de la bandeja tal como venía: es lo
+   *  que le quita el freno para confirmarse, facturarse y salir a SAE. El
+   *  backend la rechaza mientras queden partidas de la orden sin cruzar. */
+  async function darPorRevisada(r: Remision) {
+    try {
+      await patch(`/api/v1/remisiones/${r.id}`, { revision_pendiente: false });
+      invalidarDetalles([r.id]);
+      toast.success(`Remisión ${r.folio_interno} dada por revisada`);
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo dar por revisada");
     }
   }
   async function confirmar() {
@@ -1516,7 +1603,20 @@ export default function RemisionesPage() {
     },
     { header: "Cliente", sortable: true, sortValue: (r) => cliName[r.cliente_facturacion_id] ?? "", cell: (r) => cliName[r.cliente_facturacion_id] ?? "—" },
     { header: "Fecha", sortable: true, sortValue: (r) => r.fecha_remision, cell: (r) => fmtDate(r.fecha_remision) },
-    { header: "Estado", sortable: true, sortValue: (r) => r.estado, cell: (r) => <Badge tone={ESTADO_TONE[r.estado] ?? "muted"}>{r.estado}</Badge> },
+    {
+      header: "Estado",
+      sortable: true,
+      sortValue: (r) => r.estado,
+      // «Por revisar» va JUNTO al estado, no en su lugar: la remisión sigue
+      // siendo un BORRADOR con todo lo que eso implica; lo que añade la marca
+      // es que nadie ha mirado sus unidades ni sus precios todavía.
+      cell: (r) => (
+        <div className="flex flex-wrap items-center gap-1">
+          <Badge tone={ESTADO_TONE[r.estado] ?? "muted"}>{r.estado}</Badge>
+          {r.revision_pendiente ? <Badge tone="warning">POR REVISAR</Badge> : null}
+        </div>
+      ),
+    },
     { header: "Subtotal", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.subtotal) },
     { header: "IEPS", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.ieps) },
     { header: "IVA", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.iva) },
@@ -1531,6 +1631,9 @@ export default function RemisionesPage() {
     { id: "confirmar", label: "Confirmar", icon: <Check size={15} />, tone: "success",
       onClick: (r) => setToConfirm(r),
       hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "RESERVADO")) },
+    { id: "revisada", label: "Dar por revisada", icon: <Check size={15} />, tone: "success",
+      onClick: (r) => { void darPorRevisada(r); },
+      hidden: (r) => !(canWrite && r.revision_pendiente) },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
       onClick: (r) => setToCancel(r), hidden: (r) => !(canWrite && r.estado !== "CANCELADA" && r.estado !== "FACTURADA") },
     { id: "devolucion", label: "Devolución", icon: <Undo2 size={15} />,
@@ -1886,8 +1989,20 @@ export default function RemisionesPage() {
             ))}
           </Select>
         </Field>
-        {(fDesde || fHasta || fCliente) && (
-          <Button variant="secondary" onClick={() => { setFDesde(""); setFHasta(""); setFCliente(""); }}>
+        <label className="flex h-9 cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={fPorRevisar}
+            onChange={(e) => setFPorRevisar(e.target.checked)}
+            className="h-4 w-4 rounded border-border"
+          />
+          Solo por revisar
+        </label>
+        {(fDesde || fHasta || fCliente || fPorRevisar) && (
+          <Button
+            variant="secondary"
+            onClick={() => { setFDesde(""); setFHasta(""); setFCliente(""); setFPorRevisar(false); }}
+          >
             Limpiar filtros
           </Button>
         )}

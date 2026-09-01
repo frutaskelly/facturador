@@ -172,6 +172,8 @@ def list_remisiones(
     cliente_id: Optional[UUID] = Query(default=None),
     fecha_desde: Optional[date] = Query(default=None),
     fecha_hasta: Optional[date] = Query(default=None),
+    # Solo las que llegaron sin revisar: es la bandeja de trabajo del revisor.
+    revision_pendiente: Optional[bool] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_tenant_db),
@@ -187,6 +189,8 @@ def list_remisiones(
         query = query.filter(Remision.cliente_facturacion_id.in_(ctx.cliente_scope))
     if estado:
         query = query.filter(Remision.estado == estado)
+    if revision_pendiente is not None:
+        query = query.filter(Remision.revision_pendiente.is_(revision_pendiente))
     if cliente_id is not None:
         query = query.filter(Remision.cliente_facturacion_id == cliente_id)
     if fecha_desde:
@@ -466,6 +470,11 @@ def update_remision(
     data = payload.model_dump(exclude_unset=True)
     lineas_in = data.pop("lineas", None)
     permitir_negativos = bool(data.pop("permitir_negativos", False))
+    # «Dar por revisada» no es un campo más: solo se puede APAGAR (la marca la
+    # pone la bandeja al pasar la orden sin revisar, no se enciende a mano) y no
+    # se apaga mientras queden partidas sin cruzar — son justamente lo que
+    # faltaba por hacer.
+    revisada = data.pop("revision_pendiente", None)
     almacen_cambio = "almacen_id" in data and data["almacen_id"] != almacen_anterior
 
     if data.get("almacen_id") is not None:
@@ -494,6 +503,17 @@ def update_remision(
 
     for key, value in data.items():
         setattr(rem, key, value)
+
+    if revisada is False:
+        if rem.partidas_por_cruzar:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Quedan {len(rem.partidas_por_cruzar)} partidas de la orden sin cruzar; "
+                    "agrégalas como líneas o descártalas antes de dar la remisión por revisada"
+                ),
+            )
+        rem.revision_pendiente = False
 
     # El folio de SAE manda sobre el estado mientras la remisión no haya salido:
     # ponerlo la reserva, quitarlo la regresa a borrador. Una CONFIRMADA o
@@ -662,6 +682,24 @@ def reservar_stock_remision(
     rem.updated_by = ctx.user_id
 
 
+def _exigir_revisada(rem: Remision, accion: str) -> None:
+    """Una remisión que llegó sin revisar no avanza sola.
+
+    Confirmar reserva inventario, facturar la manda al SAT y el export la manda
+    a SAE: las tres cosas dan por buenas unas unidades y unos precios que nadie
+    miró. Poder pasar la orden sin revisar solo es defendible con este freno
+    puesto — si no, «sin revisar» sería un atajo hasta el timbrado.
+    """
+    if rem.revision_pendiente:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"La remisión {rem.folio_interno} llegó sin revisar; "
+                f"revísala y dala por revisada antes de {accion}"
+            ),
+        )
+
+
 @router.post("/{rem_id}/confirmar", response_model=RemisionDetailOut)
 def confirmar_remision(
     rem_id: UUID,
@@ -675,6 +713,7 @@ def confirmar_remision(
             status_code=409,
             detail=f"Solo se confirma desde BORRADOR o RESERVADO (actual: {rem.estado})",
         )
+    _exigir_revisada(rem, "confirmar")
 
     # Optional per-line real weights (catch-weight); override the estimate.
     pesos = {p.linea_id: p.cantidad_base for p in (payload.pesos or [])} if payload else {}

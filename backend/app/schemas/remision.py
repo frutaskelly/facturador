@@ -60,6 +60,23 @@ class RemisionCreate(BaseModel):
     lineas: list[LineaRemisionCreate] = Field(min_length=1)
 
 
+class PartidaPorCruzarOut(BaseModel):
+    """Una partida de la orden que no encontró producto en el catálogo, tal
+    como venía en el documento. No es una línea de la remisión (esas exigen
+    producto): es lo que falta por cruzar a mano para dar la remisión por
+    revisada."""
+    numero: int
+    descripcion: str
+    # Cifras como TEXTO a propósito: esto vive en una columna JSONB y un Decimal
+    # no es serializable ahí. Además son lo que decía el documento, no un número
+    # que el sistema vaya a operar — quien lo cruce decidirá la cantidad real.
+    cantidad: Optional[str] = None
+    unidad: Optional[str] = None
+    clave: Optional[str] = None
+    precio: Optional[str] = None
+    notas: Optional[str] = None
+
+
 class RemisionUpdate(BaseModel):
     # Edición de una remisión en BORRADOR. Si se envían `lineas`, se reemplazan
     # todas y se recalculan los totales. El folio NO cambia (la serie ya se
@@ -79,6 +96,13 @@ class RemisionUpdate(BaseModel):
     factura_sae: Optional[str] = Field(default=None, max_length=30)
     su_pedido: Optional[str] = Field(default=None, max_length=30)
     lineas: Optional[list[LineaRemisionCreate]] = None
+    # Dar la remisión por revisada (solo `False` tiene efecto: la marca la pone
+    # la bandeja, no se enciende a mano). `None` no toca el dato.
+    revision_pendiente: Optional[bool] = None
+    # Las partidas de la orden que siguen sin cruzar. Se reenvía la lista
+    # completa (menos la que se acaba de resolver): mientras no quede vacía, la
+    # remisión no se puede dar por revisada.
+    partidas_por_cruzar: Optional[list[PartidaPorCruzarOut]] = None
     # Sobregiro autorizado al re-descontar inventario de una CONFIRMADA
     # (misma política que confirmar/facturar — decisión 2026-07-29 #5).
     permitir_negativos: bool = False
@@ -110,6 +134,9 @@ class RemisionOut(ORMModel):
     factura_sae: Optional[str] = None
     # Orden de compra del cliente ("su pedido").
     su_pedido: Optional[str] = None
+    # Llegó de la bandeja sin que nadie la revisara: la lista la marca y ni se
+    # confirma ni se factura hasta que alguien la dé por revisada.
+    revision_pendiente: bool = False
     # La OC original en la bandeja de órdenes: su id y el documento con el que
     # llegó, para abrirlo desde la lista sin ir a buscarlo.
     oc_id: Optional[uuid.UUID] = None
@@ -144,6 +171,7 @@ class DevolucionOut(ORMModel):
 class RemisionDetailOut(RemisionOut):
     lineas: list[LineaRemisionOut] = []
     devoluciones: list[DevolucionOut] = []
+    partidas_por_cruzar: list[PartidaPorCruzarOut] = []
 
 
 class PesoLinea(BaseModel):

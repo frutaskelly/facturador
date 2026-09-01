@@ -363,6 +363,16 @@ def factura_desde_remisiones(
     if len(clientes) != 1:
         raise HTTPException(status_code=422, detail="Todas las remisiones deben ser del mismo cliente")
     _rechazar_cliente_en_espejo(db, next(iter(clientes)))
+    # Una remisión que llegó de la bandeja sin revisar no se timbra: sus
+    # unidades y sus precios no los ha visto nadie, y el CFDI es definitivo.
+    sin_revisar = [r for r in rems if r.revision_pendiente]
+    if sin_revisar:
+        lista = ", ".join(r.folio_interno for r in sin_revisar[:5])
+        raise HTTPException(
+            status_code=409,
+            detail=f"Sin revisar: {lista} — llegaron de la bandeja tal como venían; "
+                   "revísalas y dalas por revisadas antes de facturar",
+        )
     # Una remisión ESTAMPADA para SAE (factura_sae) ya está amparada —o va a
     # estarlo en horas— por un CFDI que SAE emite. El estado no alcanza como
     # candado: el export deja las CONFIRMADAS en CONFIRMADA, que este endpoint

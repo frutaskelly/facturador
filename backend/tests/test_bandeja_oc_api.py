@@ -826,3 +826,161 @@ def test_el_detalle_trae_la_serie_prevista(client, env, auth_as):
     assert "serie_prevista_id" in d
     v = client.get(f"/api/v1/oc-recibidas/{oc_id}", headers=h, params={"vistazo": "true"}).json()
     assert v["serie_prevista_id"] is None
+
+
+# ─── pasar a Remisiones sin revisar ──────────────────────────────────────────
+# El atajo de un clic solo acepta la orden perfecta. Esto la pasa igual y deja
+# la revisión para la pantalla de Remisiones — con el freno de que, hasta que
+# alguien la mire, la remisión no se confirma, no se factura y no sale a SAE.
+
+def _oc_mixta(client, h, env):
+    """Una orden con una partida que cruza y otra que no existe en el catálogo."""
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(lineas=[
+        {"descripcion": "JITOMATE SALADET", "cantidad": "25", "unidad": "KG",
+         "precio": "18.50", "clave": "C-77"},
+        {"descripcion": "ZZZ ARTICULO QUE NO ESTA EN EL CATALOGO", "cantidad": "3",
+         "unidad": "CAJA", "clave": "C-99"},
+    ])).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+    return oc
+
+
+def test_sin_revisar_pasa_lo_que_cruza_y_conserva_lo_que_no(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    oc = _oc_mixta(client, h, env)
+
+    r = client.post(
+        f"/api/v1/oc-recibidas/{oc['id']}/crear-remision-sin-revisar?almacen_id={env['alm']}",
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    hecho = r.json()
+    assert hecho["estado"] == "ASIGNADA"
+    assert hecho["remision_id"] and hecho["remision_folio"]
+
+    rem = client.get(f"/api/v1/remisiones/{hecho['remision_id']}", headers=h).json()
+    assert rem["revision_pendiente"] is True
+    # La que cruzó es línea; la que no, viaja aparte tal como venía.
+    assert len(rem["lineas"]) == 1
+    assert [p["numero"] for p in rem["partidas_por_cruzar"]] == [2]
+    sin_cruzar = rem["partidas_por_cruzar"][0]
+    assert sin_cruzar["descripcion"] == "ZZZ ARTICULO QUE NO ESTA EN EL CATALOGO"
+    assert sin_cruzar["cantidad"] == "3"
+    assert sin_cruzar["unidad"] == "CAJA"
+    assert sin_cruzar["clave"] == "C-99"
+
+    # La línea se lleva escrito lo que venía y qué hay que mirar: es lo único
+    # que el revisor tendrá enfrente cuando la abra.
+    notas = rem["lineas"][0]["notas"] or ""
+    assert "Como venía: «JITOMATE SALADET»" in notas
+    assert "clave C-77" in notas
+    assert "Revisar:" in notas
+    # Sin lista de precios, el precio que entra es el del documento (anotado).
+    assert float(rem["lineas"][0]["precio_unitario"]) == 18.5
+
+
+def test_sin_revisar_no_le_ensena_nada_al_catalogo(client, env, auth_as):
+    """Un cruce que nadie confirmó no aprende alias ni estampa código de cliente.
+
+    `crear-remision` sí aprende, porque ahí un humano acaba de validar la
+    partida. Aquí no ha mirado nadie: aprender sería repetir para siempre un
+    falso positivo, y `codigo_cliente` es el NoIdentificacion de sus CFDI.
+    """
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    oc = _oc_mixta(client, h, env)
+    assert client.post(
+        f"/api/v1/oc-recibidas/{oc['id']}/crear-remision-sin-revisar", headers=h
+    ).status_code == 200
+
+    db = SessionLocal()
+    try:
+        tid = env["admin_a"]["tenant_id"]
+        alias = db.execute(
+            text("SELECT count(*) FROM producto_alias WHERE tenant_id = :t"), {"t": tid}
+        ).scalar()
+        codigos = db.execute(
+            text("SELECT count(*) FROM producto_clientes WHERE tenant_id = :t"), {"t": tid}
+        ).scalar()
+    finally:
+        db.close()
+    assert alias == 0
+    assert codigos == 0
+
+
+def test_sin_revisar_no_se_confirma_ni_se_factura(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    oc = _oc_mixta(client, h, env)
+    rid = client.post(
+        f"/api/v1/oc-recibidas/{oc['id']}/crear-remision-sin-revisar?almacen_id={env['alm']}",
+        headers=h,
+    ).json()["remision_id"]
+
+    r = client.post(f"/api/v1/remisiones/{rid}/confirmar", headers=h, json={})
+    assert r.status_code == 409
+    assert "sin revisar" in r.json()["detail"].lower()
+
+    f = client.post("/api/v1/facturas/desde-remisiones", headers=h,
+                    json={"remision_ids": [rid]})
+    assert f.status_code == 409
+    assert "sin revisar" in f.json()["detail"].lower()
+
+
+def test_no_se_da_por_revisada_con_partidas_sin_cruzar(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    oc = _oc_mixta(client, h, env)
+    rid = client.post(
+        f"/api/v1/oc-recibidas/{oc['id']}/crear-remision-sin-revisar?almacen_id={env['alm']}",
+        headers=h,
+    ).json()["remision_id"]
+
+    # Queda una partida sin cruzar: darla por revisada sería tirarla en silencio.
+    r = client.patch(f"/api/v1/remisiones/{rid}", headers=h,
+                     json={"revision_pendiente": False})
+    assert r.status_code == 409
+    assert "sin cruzar" in r.json()["detail"].lower()
+
+    # Resuelta (agregada como línea o descartada a mano), ya se puede.
+    r = client.patch(f"/api/v1/remisiones/{rid}", headers=h,
+                     json={"partidas_por_cruzar": [], "revision_pendiente": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["revision_pendiente"] is False
+
+    # Y con eso se levanta el freno.
+    assert client.post(
+        f"/api/v1/remisiones/{rid}/confirmar", headers=h, json={}
+    ).status_code != 409
+
+
+def test_sin_revisar_no_quema_folio_si_nada_cruza(client, env, auth_as):
+    """Una remisión sin líneas no es un documento a medias: es un folio perdido."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(lineas=[
+        {"descripcion": "ZZZ NADA DE ESTO EXISTE", "cantidad": "1", "unidad": "PZA"},
+    ])).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+
+    r = client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision-sin-revisar", headers=h)
+    assert r.status_code == 409
+    assert "ninguna partida" in r.json()["detail"].lower()
+    assert client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()["remision_id"] is None
+
+
+def test_la_lista_de_remisiones_filtra_las_que_faltan_por_revisar(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    oc = _oc_mixta(client, h, env)
+    rid = client.post(
+        f"/api/v1/oc-recibidas/{oc['id']}/crear-remision-sin-revisar", headers=h
+    ).json()["remision_id"]
+
+    por_revisar = client.get("/api/v1/remisiones?revision_pendiente=true", headers=h).json()
+    assert [x["id"] for x in por_revisar["items"]] == [rid]
+    revisadas = client.get("/api/v1/remisiones?revision_pendiente=false", headers=h).json()
+    assert rid not in [x["id"] for x in revisadas["items"]]

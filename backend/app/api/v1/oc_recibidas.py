@@ -1161,6 +1161,208 @@ def crear_remision_auto(
     return crear_remision(oc_id, payload, db=db, ctx=ctx)
 
 
+def _sin_revisar_de(db: Session, oc: OCRecibida, lineas: list[dict]) -> tuple[list, list[dict]]:
+    """Parte las partidas de la orden en lo que SÍ puede ser línea y lo que no.
+
+    Es la hermana permisiva de `_auto_de`: aquella exige que todo cruce por vía
+    determinista, con unidad vendible y precio de lista negociada, y ante la
+    menor duda no devuelve nada. Aquí la duda no detiene nada — se anota. Cada
+    línea se lleva en sus notas lo que venía en el documento y por qué hay que
+    mirarla, porque la remisión nace marcada «por revisar» y ese texto es lo
+    único que el revisor tendrá enfrente.
+
+    Lo que NO se hace aquí, a propósito: `texto_original` y `clave` viajan
+    vacíos. `crear_remision` los usa para aprender el alias del producto y para
+    estampar el código del cliente (que es el NoIdentificacion de sus CFDI
+    futuros). Un cruce que nadie confirmó no puede enseñarle nada al catálogo:
+    sería el falso positivo papa/papaya, aprendido y repetido para siempre. El
+    texto original no se pierde — va en las notas de la línea.
+
+    Devuelve `(lineas, partidas_por_cruzar)`: las que encontraron producto y
+    las que no, estas últimas tal como venían.
+    """
+    from ...schemas.oc_recibida import LineaCrearIn
+
+    por_cruzar: list[dict] = []
+    # Solo los productos que realmente se van a usar: `_detalle` ya cruzó contra
+    # el catálogo completo, aquí basta releer los que quedaron arriba.
+    ids = {
+        (ln.get("candidatos") or [{}])[0].get("producto_id")
+        for ln in lineas
+        if ln.get("candidatos")
+    }
+    ids.discard(None)
+    by_id = {
+        pr.id: pr
+        for pr in (db.query(Producto).filter(Producto.id.in_(ids)).all() if ids else [])
+    }
+
+    # Primera pasada: producto, presentación y por qué habría que mirar la línea.
+    pendientes: list[tuple[dict, object, str, list[str]]] = []
+    for ln in lineas:
+        cands = ln.get("candidatos") or []
+        top = cands[0] if cands else None
+        prod = by_id.get(top["producto_id"]) if top else None
+        if prod is None:
+            # Sin producto no hay línea posible: `lineas_remision.producto_id`
+            # es NOT NULL y de él cuelgan precio, impuesto e inventario.
+            por_cruzar.append({
+                "numero": ln["numero"],
+                "descripcion": ln.get("descripcion") or "",
+                "cantidad": str(ln.get("cantidad") or "") or None,
+                "unidad": ln.get("unidad"),
+                "clave": ln.get("clave"),
+                "precio": str(ln.get("precio")) if ln.get("precio") is not None else None,
+                "notas": ln.get("notas"),
+            })
+            continue
+
+        motivos: list[str] = []
+        if top["origen"] not in _ORIGENES_DETERMINISTAS or top["score"] < 100:
+            motivos.append(f"el cruce con «{prod.nombre}» es un parecido, no una clave ni un alias")
+        else:
+            empatados = {
+                c["producto_id"] for c in cands
+                if c["score"] >= 100 and c["origen"] in _ORIGENES_DETERMINISTAS
+            }
+            if len(empatados) > 1:
+                motivos.append(f"cruza al 100 con {len(empatados)} productos distintos")
+
+        presentaciones = set((prod.presentaciones or {}).keys()) | {prod.unidad_base}
+        pres = ln.get("presentacion_sugerida")
+        if not pres or pres not in presentaciones:
+            # La unidad del documento no la vende el producto: entra con la suya
+            # y se anota. El factor cambia cantidad y precio — 10 MANOJO no es
+            # 10 KILO — así que esto es justo lo que el revisor viene a ver.
+            pres = prod.presentacion_default or prod.unidad_base
+            motivos.append(
+                f"la unidad del documento ({ln.get('unidad') or 'sin unidad'}) no la vende "
+                f"el producto: entró como {pres}"
+            )
+        elif ln.get("presentacion_adivinada") and len(presentaciones) > 1:
+            motivos.append(f"el documento no dijo unidad: se supuso {pres}")
+        pendientes.append((ln, prod, pres, motivos))
+
+    # Los precios en UN lote, con la misma serie con la que `create_remision` va
+    # a foliar: la serie decide qué lista aplica, y cotizar con otra daría un
+    # precio que la remisión no va a usar.
+    p = oc.payload or {}
+    serie_id = cliente_match.serie_del_grupo(
+        db, oc.tenant_id, str(p.get("jid") or ""), oc.cliente_id, "serie_remision_id"
+    )
+    if serie_id is None and oc.cliente_id is not None:
+        serie = resolver_serie(
+            db, oc.tenant_id, "REMISION",
+            sucursal_id=oc.sucursal_id, cliente_id=oc.cliente_id,
+        )
+        serie_id = serie.id if serie is not None else None
+    resultados = resolver_precios_lote(
+        db,
+        items=[
+            {
+                "producto_id": prod.id,
+                "presentacion": pres,
+                "cantidad": Decimal(str(ln.get("cantidad") or 1)),
+            }
+            for ln, prod, pres, _ in pendientes
+        ],
+        cliente_id=oc.cliente_id,
+        sucursal_id=oc.sucursal_id,
+        serie_id=serie_id,
+        proyecto_id=oc.proyecto_id,
+    )
+
+    out: list = []
+    for (ln, prod, pres, motivos), res in zip(pendientes, resultados, strict=True):
+        precio_doc = ln.get("precio")
+        if res is not None and res.get("precio") is not None:
+            precio = Decimal(str(res["precio"]))
+            if res.get("origen") == "lista_base":
+                motivos.append("el precio sale de la lista base, no de una negociada")
+            if precio_doc is not None and abs(Decimal(str(precio_doc)) - precio) > Decimal("0.01"):
+                # La casa cobra lo suyo y la diferencia se anota: cambiar el
+                # precio pactado porque lo dijo una foto de WhatsApp es
+                # exactamente lo que la revisión viene a decidir.
+                motivos.append(f"el documento decía {precio_doc} y la lista dice {precio:.2f}")
+        elif precio_doc is not None:
+            precio = Decimal(str(precio_doc))
+            motivos.append(f"sin precio en ninguna lista: entró con los {precio_doc} del documento")
+        else:
+            # Ni lista ni documento. Entra en cero para no perder la partida; el
+            # freno de «por revisar» impide que un cero llegue a facturarse.
+            precio = Decimal("0")
+            motivos.append("sin precio en ninguna lista ni en el documento: entró en cero")
+
+        venia = (ln.get("descripcion") or "").strip()
+        clave = (ln.get("clave") or "").strip()
+        partes = []
+        if venia or clave:
+            partes.append(
+                "Como venía: «" + (venia or "sin descripción") + "»"
+                + (f" (clave {clave})" if clave else "")
+            )
+        if motivos:
+            partes.append("Revisar: " + "; ".join(motivos))
+        if (ln.get("notas") or "").strip():
+            partes.append(ln["notas"].strip())
+
+        out.append(LineaCrearIn(
+            producto_id=prod.id,
+            cantidad=Decimal(str(ln.get("cantidad") or 1)),
+            presentacion=pres,
+            precio_unitario=precio,
+            notas=" · ".join(partes) or None,
+            # Vacíos a propósito: ver el docstring. Nadie confirmó este cruce.
+            texto_original=None,
+            clave=None,
+        ))
+    return out, por_cruzar
+
+
+@router.post("/{oc_id}/crear-remision-sin-revisar", response_model=OCRecibidaDetailOut)
+def crear_remision_sin_revisar(
+    oc_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    almacen_id: Optional[UUID] = Query(default=None),
+):
+    """Pasa la orden a Remisiones tal como está, para revisarla allá.
+
+    El atajo de un clic (`crear-remision-auto`) solo acepta la orden perfecta;
+    cuando algo no cuadra, la orden se quedaba en la bandeja acumulándose. Esto
+    la pasa igual: cada partida entra con el producto que mejor cruzó, la
+    unidad que se pudo y el precio de su lista, y lo dudoso queda escrito en las
+    notas de su línea. Las partidas que no cruzaron a ningún producto viajan
+    aparte, en `partidas_por_cruzar`, para cruzarlas a mano en la remisión.
+
+    La remisión nace marcada `revision_pendiente`, y con eso no se confirma, no
+    se factura y no sale al export de SAE hasta que alguien la mire. Sin ese
+    freno esto sería una manera de mandar al SAT lo que dijo una foto.
+    """
+    oc = get_or_404(db, OCRecibida, oc_id, soft=False, for_update=True)
+    det = _detalle(db, oc)
+    lineas, por_cruzar = _sin_revisar_de(db, oc, det.get("lineas") or [])
+    if not lineas:
+        # Una remisión sin líneas no es un documento a medias: es un folio de la
+        # serie quemado a cambio de nada, y el folio no se recupera.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Ninguna partida de la orden cruzó a un producto del catálogo; "
+                "crúzalas aquí antes de pasarla"
+            ),
+        )
+    out = crear_remision(
+        oc_id, CrearRemisionIn(almacen_id=almacen_id, lineas=lineas), db=db, ctx=ctx
+    )
+    rem = db.get(Remision, oc.remision_id)
+    if rem is not None:
+        rem.revision_pendiente = True
+        rem.partidas_por_cruzar = por_cruzar
+        db.flush()
+    return out
+
+
 @router.post("/{oc_id}/descartar", response_model=OCRecibidaOut)
 def descartar(
     oc_id: UUID,

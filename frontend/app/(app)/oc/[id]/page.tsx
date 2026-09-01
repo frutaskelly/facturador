@@ -425,6 +425,30 @@ export default function Page() {
     }
   }
 
+  /** Pasarla a Remisiones TAL COMO ESTÁ, para revisarla allá. Es el mismo
+   *  atajo que «de un clic» pero sin exigir que la orden sea perfecta: lo que
+   *  no cuadra viaja anotado en la línea y la remisión nace «por revisar». */
+  const [confirmaPasar, setConfirmaPasar] = useState(false);
+  async function pasarSinRevisar() {
+    if (!oc) return;
+    setConfirmaPasar(false);
+    setGuardando(true);
+    try {
+      const d = await apiFetch<OCRecibidaDetalle>(
+        `/api/v1/oc-recibidas/${oc.id}/crear-remision-sin-revisar` +
+          (almacenSel ? `?almacen_id=${almacenSel}` : ""),
+        { method: "POST" }
+      );
+      toast.success(`Remisión ${d.remision_folio ?? ""} creada — te espera en Remisiones para revisar`);
+      router.push("/oc");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo pasar la orden");
+      void cargar();
+    } finally {
+      setGuardando(false);
+    }
+  }
+
   async function descartar() {
     if (!oc) return;
     try {
@@ -985,6 +1009,14 @@ export default function Page() {
                   Crear remisión de un clic
                 </Button>
               ) : null}
+              <Button
+                variant="secondary"
+                onClick={() => setConfirmaPasar(true)}
+                disabled={guardando}
+                title="La remisión se crea tal como está y se revisa en Remisiones"
+              >
+                Pasar sin revisar
+              </Button>
               <Button onClick={clicCrear} disabled={guardando}>
                 {guardando ? "Creando…" : "Crear remisión"}
               </Button>
@@ -992,6 +1024,21 @@ export default function Page() {
           ) : null}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmaPasar}
+        title="Pasar a Remisiones sin revisar"
+        message={
+          `La OC ${oc.folio_externo ?? ""} se vuelve remisión TAL COMO ESTÁ: cada partida entra con el ` +
+          "producto que mejor cruzó, la unidad que se pudo y el precio de su lista, y lo dudoso queda " +
+          "anotado en la línea. Las partidas que no cruzaron a ningún producto viajan aparte, para " +
+          "cruzarlas allá. La remisión queda marcada «por revisar»: no se confirma, no se factura y no " +
+          "sale a SAE hasta que la revises. Se consume un folio de la serie."
+        }
+        confirmLabel={guardando ? "Pasando…" : "Pasar sin revisar"}
+        onClose={() => setConfirmaPasar(false)}
+        onConfirm={pasarSinRevisar}
+      />
 
       <ConfirmDialog
         open={confirmaDescartar}
