@@ -1,4 +1,4 @@
-# Estado del proyecto — 31/08/2026 (unificado: PRs #62–#69 + cotizador `ec59214`)
+# Estado del proyecto — 01/09/2026 (cierre wrap-all: PRs #62–#71 + `ec59214` + `7a9c689`)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,10 +7,10 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` — el commit de este archivo, sobre `0e67b05` (#64) — igual que `origin/main` |
+| Rama base | `main` — el commit de este archivo, sobre `7a9c689` (sugerir-sat-batch) — igual que `origin/main` salvo este commit de docs |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
-| Worktrees | 3 activos + 1 bloqueado: `listaprecios-a35db8` (embarcado por #61, se poda al cerrar su sesión), `subida-productos-102286` y `bandeja-filtros` (sesiones NUEVAS abiertas durante el wrap — no tocar), y `new-session-7acb50` (rama `claude/estado-cierre-31ago`: conflicta con este ESTADO y su contenido ya está incorporado aquí — ver nota abajo) |
+| Worktrees | TODAS las sesiones cerradas por el wrap-all del 01-sep; solo queda `amazing-gould-c9fa17` (la sesión del cotizador, vacía — se poda sola al cerrarla). Ramas viejas en origin por borrar cuando se quiera: `claude/cotizador-fcad7e` y `claude/focused-roentgen-b61e17` (ambas ya contenidas en `main`); `claude/estado-cierre-31ago` se conserva a propósito como respaldo |
 | PRs abiertos | ninguno |
 | Migración head | `0058_proyecto_sucursales` en `main` **y aplicada a prod** |
 
@@ -18,11 +18,24 @@ carpeta y leer este archivo.
 
 ## Deploy
 
-**En vivo en https://facturador.mx**: el 31-ago por la noche la sesión del cotizador desplegó
-`ec59214` (verificó el endpoint nuevo con 401) y, tras unificar este ESTADO, se corre
-`./deploy.sh` de nuevo para subir los PRs #67–#69 (precio al cruzar con serie y tramo, el
-aviso que nombra partidas, y estos docs). El resultado del deploy queda verificado por
-contenido dentro de los contenedores, como manda la regla de abajo.
+**En vivo en https://facturador.mx y al día con `7a9c689`**: el wrap-all del 01-sep corrió
+`./deploy.sh` desde este checkout en `7a9c689` — reconstruyó las tres imágenes, sin
+migraciones nuevas (head sigue `0058`), y los cinco contenedores quedaron arriba y sanos.
+Deploys previos del 31-ago: `ec59214` (cotizador; endpoint nuevo verificado con 401) y
+`1a0fd06` (PRs #67–#71, por la sesión que unificó este ESTADO).
+
+## Cierre wrap-all (01-sep, madrugada)
+
+**Embarcado: `7a9c689` — sugerir-sat-batch en 3 queries.** Con 118–160 productos el endpoint
+hacía ~200–600 round-trips secuenciales vía pooler (25–60 s); ahora los candidatos de TODOS
+los productos salen en dos queries (FTS rankeado con `unnest`+LATERAL y luego ILIKE solo por
+los tokens que el FTS no llenó) y las unidades se validan en una. Mismo resultado verificado
+A/B (30 textos idénticos, 79→5 queries). Suite completa en verde antes y después del rebase.
+
+**Sesiones cerradas:** `listaprecios-a35db8` y `subida-productos-102286` — contenido byte por
+byte YA en `main` (verificado con `git merge-tree`); `new-session-7acb50` (estado-cierre-31ago)
+— superseded, rama respaldada en origin; `oc-precio-flujo`, `bandeja-filtros` y `roles-filter…`
+— cerradas por sus propias sesiones durante la noche.
 
 ⚠️ **La marca de tiempo de la imagen no sirve para saber si el deploy está al día.** Una imagen
 construida segundos antes de fusionar un PR "parece" atrasada sin estarlo, y una imagen vieja
