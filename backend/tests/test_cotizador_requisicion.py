@@ -85,40 +85,63 @@ _CATALOGO = [
 ]
 
 
+def _sembrar(db, tenants, slug, *, precio_de, es_default=False):
+    """Un tenant completo con ESTE catálogo, su lista y su cliente Balles.
+
+    `precio_de(sku, precio_del_catalogo)` decide el precio de cada producto
+    (None = sin precio en la lista, como en SAE).
+    """
+    suffix = uuid.uuid4().hex[:8]
+    tenant = Tenant(slug=f"{slug}-{suffix}", legal_name="EMISOR REQ SA", rfc=f"R{suffix.upper()}X"[:13],
+                    regimen_fiscal_sat="601", domicilio_fiscal_cp="78390",
+                    domicilio_fiscal={"calle": "LEGUMBRES No. 302", "colonia": "ABASTOS",
+                                      "ciudad": "SAN LUIS POTOSI", "estado": "SLP"},
+                    tier="PRINCIPAL", status="ACTIVE")
+    db.add(tenant); db.flush(); tenants.append(tenant.id)
+    tid = tenant.id
+    esq = EsquemaImpuesto(tenant_id=tid, codigo="E0", nombre="0%", iva_tasa=0, ieps_tasa=0)
+    db.add(esq); db.flush()
+    lista = ListaPrecios(tenant_id=tid, codigo="BALLES", nombre="BALLES JUBRAN",
+                         es_default=es_default)
+    db.add(lista); db.flush()
+    for sku, nombre, unidad, precio in _CATALOGO:
+        p = Producto(tenant_id=tid, sku=sku, nombre=nombre, esquema_impuesto_id=esq.id,
+                     clave_sat="01010101", unidad_sat="KGM" if unidad == "KILO" else "H87",
+                     unidad_base=unidad, presentaciones={unidad: 1},
+                     presentacion_default=unidad)
+        db.add(p); db.flush()
+        monto = precio_de(sku, precio)
+        if monto is not None:
+            db.add(Precio(tenant_id=tid, lista_id=lista.id, producto_id=p.id,
+                          presentacion=unidad, precio_unitario=Decimal(monto),
+                          cantidad_minima=1))
+    cli = Cliente(tenant_id=tid, codigo="7", legal_name="OPERADORA BALLES VEGA DE HIDALGO",
+                  rfc="OBV191007BS1",
+                  domicilio_fiscal={"calle": "SANTA CATARINA No. PARC 81",
+                                    "colonia": "Santiago Tlapacoya Centro", "cp": "42110",
+                                    "ciudad": "Pachuca de Soto", "estado": "Hidalgo"})
+    db.add(cli); db.flush()
+    db.add(ListaAsignacion(tenant_id=tid, lista_id=lista.id, cliente_id=cli.id))
+    return tid
+
+
 @pytest.fixture
 def env(db_engine):
-    suffix = uuid.uuid4().hex[:8]
+    """El tenant del test — y un VECINO con las mismas claves, a propósito.
+
+    El vecino se siembra primero y trae precio para las nueve claves (todos
+    $1.00) y su lista marcada como default: si alguna consulta del cotizador
+    se olvida de filtrar por tenant, el cruce por SKU se lleva su producto y el
+    resultado cambia entero. Así el test no depende de que la base de pruebas
+    esté limpia (que no lo está: arrastra tenants de otras corridas) ni del
+    orden en que Postgres devuelva las filas.
+    """
     db = SessionLocal()
     tenants = []
     try:
-        tenant = Tenant(slug=f"cotreq-{suffix}", legal_name="EMISOR REQ SA", rfc=f"R{suffix.upper()}X"[:13],
-                        regimen_fiscal_sat="601", domicilio_fiscal_cp="78390",
-                        domicilio_fiscal={"calle": "LEGUMBRES No. 302", "colonia": "ABASTOS",
-                                          "ciudad": "SAN LUIS POTOSI", "estado": "SLP"},
-                        tier="PRINCIPAL", status="ACTIVE")
-        db.add(tenant); db.flush(); tenants.append(tenant.id)
-        tid = tenant.id
-        esq = EsquemaImpuesto(tenant_id=tid, codigo="E0", nombre="0%", iva_tasa=0, ieps_tasa=0)
-        db.add(esq); db.flush()
-        lista = ListaPrecios(tenant_id=tid, codigo="BALLES", nombre="BALLES JUBRAN")
-        db.add(lista); db.flush()
-        for sku, nombre, unidad, precio in _CATALOGO:
-            p = Producto(tenant_id=tid, sku=sku, nombre=nombre, esquema_impuesto_id=esq.id,
-                         clave_sat="01010101", unidad_sat="KGM" if unidad == "KILO" else "H87",
-                         unidad_base=unidad, presentaciones={unidad: 1},
-                         presentacion_default=unidad)
-            db.add(p); db.flush()
-            if precio is not None:
-                db.add(Precio(tenant_id=tid, lista_id=lista.id, producto_id=p.id,
-                              presentacion=unidad, precio_unitario=Decimal(precio),
-                              cantidad_minima=1))
-        cli = Cliente(tenant_id=tid, codigo="7", legal_name="OPERADORA BALLES VEGA DE HIDALGO",
-                      rfc="OBV191007BS1",
-                      domicilio_fiscal={"calle": "SANTA CATARINA No. PARC 81",
-                                        "colonia": "Santiago Tlapacoya Centro", "cp": "42110",
-                                        "ciudad": "Pachuca de Soto", "estado": "Hidalgo"})
-        db.add(cli); db.flush()
-        db.add(ListaAsignacion(tenant_id=tid, lista_id=lista.id, cliente_id=cli.id))
+        _sembrar(db, tenants, "cotreq-vecino",
+                 precio_de=lambda sku, precio: "1.00", es_default=True)
+        tid = _sembrar(db, tenants, "cotreq", precio_de=lambda sku, precio: precio)
         db.commit()
         yield {"tenant": tid}
     finally:

@@ -257,8 +257,8 @@ def match_productos(
     if payload.usar_ia:
         # La rama IA manda el catálogo completo como contexto (cuesta dinero).
         enforce(f"producto-ia:{ctx.tenant_id}", 120, 3600)
-    catalogo = productos_activos(db)   # una sola carga para todos los textos
-    aliases = alias_del_tenant(db)     # idem: sin esto era un SELECT por texto
+    catalogo = productos_activos(db, ctx.tenant_id)   # una sola carga para todos los textos
+    aliases = alias_del_tenant(db, ctx.tenant_id)     # idem: sin esto era un SELECT por texto
     norms = normalizar_catalogo(catalogo)   # y sin esto, O(textos × productos)
     cats_por_id, esquemas_por_id = _mapas_catalogo(db)
     resultados: list[dict] = []
@@ -314,8 +314,8 @@ def _cruzar_filas(
     Cuando la fila trae `clave` (las requisiciones de SAE la traen) se cruza
     primero contra el SKU: es exacta y no hay que adivinar por descripción.
     """
-    catalogo = productos_activos(db)   # una sola carga para todas las filas
-    aliases = alias_del_tenant(db)     # idem: sin esto era un SELECT por fila
+    catalogo = productos_activos(db, ctx.tenant_id)   # una sola carga para todas las filas
+    aliases = alias_del_tenant(db, ctx.tenant_id)     # idem: sin esto era un SELECT por fila
     norms = normalizar_catalogo(catalogo)   # y sin esto, O(filas × productos)
     cats_por_id, esquemas_por_id = _mapas_catalogo(db)
     por_sku: dict[str, Producto] = {}
@@ -769,8 +769,8 @@ def importar_preview(
     filas_sin_nombre = int(filas[0].pop("_saltadas", 0)) if filas else 0
 
     # Cruce contra el catálogo, una sola carga para todas las filas.
-    catalogo = productos_activos(db)
-    aliases = alias_del_tenant(db)     # una sola carga: sin esto, un SELECT por fila
+    catalogo = productos_activos(db, ctx.tenant_id)
+    aliases = alias_del_tenant(db, ctx.tenant_id)     # una sola carga: sin esto, un SELECT por fila
     norms = normalizar_catalogo(catalogo)   # y sin esto, O(filas × productos)
     por_sku = {p.sku.strip().upper(): p for p in catalogo if p.sku}
     por_id = {p.id: p for p in catalogo}
@@ -1216,7 +1216,7 @@ def _ejecutar_import(
     if lista_id is not None:
         for pr in db.query(Precio).filter(Precio.lista_id == lista_id).all():
             precios_previos[(pr.producto_id, pr.presentacion, pr.cantidad_minima)] = pr
-    alias_previos = alias_del_tenant(db)          # {alias_normalizado: producto_id}
+    alias_previos = alias_del_tenant(db, ctx.tenant_id)   # {alias_normalizado: producto_id}
     # Productos a vincular: se traen de una sola vez.
     ids_vincular = {f.producto_id for f in payload.filas
                     if f.accion == "vincular" and f.producto_id}
@@ -1515,7 +1515,7 @@ def catalogo_cliente_batch(
         )
         .all()
     }
-    alias_previos = alias_del_tenant(db)
+    alias_previos = alias_del_tenant(db, ctx.tenant_id)
     # Los alias que ya tienen estos clientes, para no chocar con su índice único.
     alias_cliente_previos = {
         (a.cliente_id, a.alias_normalizado)

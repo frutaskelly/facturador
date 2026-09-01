@@ -812,9 +812,9 @@ def importar_preview(
     # Alias y catálogo normalizado se cargan UNA vez: sin esto, cada línea sin
     # cruce hace un SELECT de alias y renormaliza el catálogo entero (1,125
     # líneas del master = minutos contra la base en la nube).
-    catalogo = productos_activos(db)
+    catalogo = productos_activos(db, ctx.tenant_id)
     por_sku = {p.sku.strip().upper(): p for p in catalogo if p.sku}
-    aliases = alias_del_tenant(db)
+    aliases = alias_del_tenant(db, ctx.tenant_id)
     norms = normalizar_catalogo(catalogo)
     cache_candidatos: dict[tuple, list[dict]] = {}
     por_id = {p.id: p for p in catalogo}
