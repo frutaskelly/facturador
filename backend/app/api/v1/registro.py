@@ -33,6 +33,7 @@ from ...schemas.registro import RegistroIn, RegistroOut
 from ...services import supabase_admin, turnstile
 from ...services.catalogos_default import (
     categoria_sin_categorizar,
+    sembrar_categorias,
     sembrar_esquemas_impuesto,
 )
 from ...services.onboarding import rfc_valido
@@ -161,6 +162,7 @@ def registro(payload: RegistroIn, request: Request, db: Session = Depends(get_db
         # La categoría por defecto: los productos que se den de alta sin elegir una
         # caen aquí, y así se pueden listar y repartir en vez de ser un hueco.
         categoria_sin_categorizar(db, tenant.id)
+        sembrar_categorias(db, tenant.id)
         db.commit()
     except Exception:
         db.rollback()
