@@ -198,6 +198,30 @@ def upgrade() -> None:
         """
     )
 
+    # ── el almacén de las perdedoras no se tira ──
+    # La superviviente es la fila más ANTIGUA, que puede no tener almacén
+    # mientras una perdedora sí lo tenía; sin esto las remisiones de ese cliente
+    # empezarían a salir del almacén default sin que nadie lo pidiera.
+    op.execute(
+        """
+        UPDATE sucursales keep
+           SET almacen_id = (
+                SELECT s.almacen_id
+                  FROM sucursales s
+                  JOIN _suc_map m ON m.old_id = s.id
+                 WHERE m.keep_id = keep.id AND s.almacen_id IS NOT NULL
+                 ORDER BY s.created_at ASC, s.id ASC
+                 LIMIT 1
+               ),
+               updated_at = now()
+         WHERE keep.almacen_id IS NULL
+           AND EXISTS (
+                SELECT 1 FROM sucursales s JOIN _suc_map m ON m.old_id = s.id
+                 WHERE m.keep_id = keep.id AND s.almacen_id IS NOT NULL
+               )
+        """
+    )
+
     # ── las perdedoras se van (borrado lógico: el histórico ya no las apunta) ──
     op.execute(
         """

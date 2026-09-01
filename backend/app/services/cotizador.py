@@ -179,12 +179,18 @@ def productos_cotizables(db: Session, tenant_id: UUID, cliente_id: UUID) -> Opti
         )
     from .sucursales import sucursales_de_cliente
     sucs = sucursales_de_cliente(db, cliente_id)
-    from sqlalchemy import or_ as _or
+    from sqlalchemy import and_ as _and, or_ as _or
+    # La plaza es COMPARTIDA: un override anclado a OTRO cliente en la misma
+    # plaza no es una negociación de este, y colarlo aquí le abriría a cotizar
+    # un producto que no tiene pactado (y a precio de lista base).
     ovr = db.query(PrecioOverride.producto_id).filter(
         PrecioOverride.tenant_id == tenant_id,
         _or(
             PrecioOverride.cliente_id == cliente_id,
-            PrecioOverride.sucursal_id.in_(sucs or [None]),
+            _and(
+                PrecioOverride.sucursal_id.in_(sucs or [None]),
+                PrecioOverride.cliente_id.is_(None),
+            ),
         ),
     ).distinct()
     overrides = {p for (p,) in ovr}

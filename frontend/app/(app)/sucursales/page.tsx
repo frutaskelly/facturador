@@ -67,8 +67,11 @@ export default function SucursalesPage() {
   const seriesFacRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
   const seriesRemRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=REMISION&activa=true&limit=200");
   const overridesRes = useResource<Page<PrecioOverride>>(
-    // El endpoint topa `limit` en 200.
-    verOvr ? "/api/v1/precios/overrides?limit=200" : null,
+    // El endpoint topa `limit` en 200. Con ?cliente= la vista es de ESE cliente,
+    // así que sus precios especiales también.
+    verOvr
+      ? `/api/v1/precios/overrides?limit=200${clienteParam ? `&cliente_id=${clienteParam}` : ""}`
+      : null,
   );
 
   const clientes = clientesRes.data?.items ?? [];
@@ -112,7 +115,13 @@ export default function SucursalesPage() {
       setDetalle((d) => ({ ...d, [sucursalId]: { vinculos: vincs, loading: false } }));
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo cargar el detalle de la sucursal");
-      setDetalle((d) => ({ ...d, [sucursalId]: { vinculos: [], loading: false } }));
+      // El error NO se cachea como "no tiene clientes": se suelta la entrada
+      // para que volver a expandir reintente. Decir "ninguno" cuando en
+      // realidad falló la red invita a revincular y pisar lo que ya existía.
+      setDetalle((d) => {
+        const { [sucursalId]: _fuera, ...resto } = d;
+        return resto;
+      });
     }
   }
 
@@ -168,7 +177,12 @@ export default function SucursalesPage() {
   const [vinc, setVinc] = useState<FormVinculo>(emptyVinc);
 
   function openVincular(sucursalId: string) {
-    setVinc({ ...emptyVinc, cliente_id: clienteParam ?? "" });
+    // El cliente del ?cliente= se preselecciona SOLO si aún no está vinculado:
+    // si ya lo está, dejarlo puesto haría que "Vincular" pisara su vínculo con
+    // series vacías (o sea, le borrara la serie con la que folia).
+    const yaVinculado = (detalle[sucursalId]?.vinculos ?? [])
+      .some((v) => v.cliente_id === clienteParam);
+    setVinc({ ...emptyVinc, cliente_id: clienteParam && !yaVinculado ? clienteParam : "" });
     setVincModal({ sucursalId, existente: false });
   }
   function openEditarVinculo(sucursalId: string, v: ClienteSucursal) {
@@ -185,6 +199,11 @@ export default function SucursalesPage() {
   async function saveVinculo() {
     if (!vincModal) return;
     if (!vinc.cliente_id) { toast.error("Elige el cliente a vincular"); return; }
+    if (!vincModal.existente
+        && (detalle[vincModal.sucursalId]?.vinculos ?? []).some((v) => v.cliente_id === vinc.cliente_id)) {
+      toast.error("Ese cliente ya está vinculado: edítalo con el lápiz para no borrarle sus series");
+      return;
+    }
     try {
       await put(`/api/v1/sucursales/${vincModal.sucursalId}/clientes/${vinc.cliente_id}`, {
         serie_factura_id: vinc.serie_factura_id || null,
@@ -262,7 +281,8 @@ export default function SucursalesPage() {
         (s.clientes_nombres ?? []).length
           ? (s.clientes_nombres ?? []).join(", ")
           : <span className="text-muted">(sin clientes vinculados)</span>,
-      sortValue: (s) => (s.clientes_nombres ?? []).length,
+      // Texto, no cuenta: es lo que el buscador indexa y lo que sale al Excel.
+      sortValue: (s) => (s.clientes_nombres ?? []).join(", "),
     },
     { header: "Almacén", cell: (s) => (s.almacen_id ? almName[s.almacen_id] ?? "—" : "(predeterminado)") },
     {

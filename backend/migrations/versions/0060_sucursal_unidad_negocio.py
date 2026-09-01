@@ -15,7 +15,10 @@ así que puede desplegarse sin tocar comportamiento:
     de exactamente una.
   * El CHECK de `precio_overrides` se relaja de XOR a "al menos uno": con la
     plaza compartida, (cliente, sucursal) juntos es el override MÁS específico
-    y (NULL, sucursal) significa "para todos los que surte la plaza".
+    y (NULL, sucursal) significa "para todos los que surte la plaza". Por eso
+    mismo, los overrides y las asignaciones que solo decían "sucursal" se ANCLAN
+    al dueño que tenía esa sucursal: sin eso, la fusión de 0061 le regalaría el
+    precio negociado de un cliente a los demás de la plaza.
 
 La parte 2 (0061) fusiona las plazas duplicadas y tira las columnas viejas.
 
@@ -131,6 +134,33 @@ def upgrade() -> None:
         "ck_override_alguna_dimension",
         "precio_overrides",
         "cliente_id IS NOT NULL OR sucursal_id IS NOT NULL",
+    )
+    # Un override que solo decía "sucursal" significaba, con el modelo viejo,
+    # "ese cliente en esa plaza" — la sucursal tenía dueño. Con la plaza
+    # COMPARTIDA, cliente_id NULL pasa a significar "todos los clientes que
+    # surte", así que hay que ANCLAR el dueño de entonces o la fusión de 0061
+    # le regalaría el precio a los demás. Va aquí y no en 0061 porque debe
+    # ocurrir mientras sucursales.cliente_id todavía existe.
+    op.execute(
+        """
+        UPDATE precio_overrides po
+           SET cliente_id = s.cliente_id
+          FROM sucursales s
+         WHERE s.id = po.sucursal_id
+           AND po.cliente_id IS NULL
+        """
+    )
+    # Lo MISMO para las asignaciones de lista: un renglón (cliente NULL,
+    # sucursal X) quería decir "ese cliente en esa plaza", y sin anclar pasaría
+    # a cobrarle su lista negociada a todos los que surte la plaza fusionada.
+    op.execute(
+        """
+        UPDATE lista_asignaciones la
+           SET cliente_id = s.cliente_id
+          FROM sucursales s
+         WHERE s.id = la.sucursal_id
+           AND la.cliente_id IS NULL
+        """
     )
 
 

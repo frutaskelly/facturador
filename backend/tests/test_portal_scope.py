@@ -22,7 +22,8 @@ from app.models import (
 
 _PURGE = (
     "lineas_factura", "facturas", "lineas_remision", "remisiones",
-    "lista_asignaciones", "precios", "listas_precios", "productos", "clientes",
+    "lista_asignaciones", "precios", "listas_precios", "productos",
+    "cliente_sucursales", "sucursales", "clientes",
 )
 
 
@@ -66,6 +67,14 @@ def env(db_engine):
                       precio_unitario=Decimal("30"), cantidad_minima=1))
         db.add(ListaAsignacion(tenant_id=tid, lista_id=lista.id, cliente_id=cli_a.id))
 
+        # Una plaza COMPARTIDA por el cliente del candado y uno ajeno: es el
+        # caso que el rediseño 01-sep introduce y el que hay que blindar.
+        from .conftest import crear_sucursal
+        from app.models import ClienteSucursal
+        plaza = crear_sucursal(db, tenant_id=tid, cliente_id=cli_a.id, nombre="Plaza Compartida")
+        db.add(ClienteSucursal(tenant_id=tid, cliente_id=cli_b.id, sucursal_id=plaza.id))
+        db.flush()
+
         fa = Factura(tenant_id=tid, serie="AA", folio=1, cliente_id=cli_a.id,
                      estado="TIMBRADA", origen="ESPEJO_SAE", espejo_empresa="02",
                      subtotal=100, total=116)
@@ -80,7 +89,8 @@ def env(db_engine):
                "lista": str(lista.id), "ajena": str(ajena.id),
                "cli_a": str(cli_a.id), "cli_b": str(cli_b.id),
                "prod_a": str(prod_a.id), "prod_x": str(prod_x.id),
-               "fact_a": str(fa.id), "fact_b": str(fb.id)}
+               "fact_a": str(fa.id), "fact_b": str(fb.id),
+               "plaza": str(plaza.id)}
     finally:
         for table in _PURGE:
             for t in created["tenants"]:
@@ -300,3 +310,37 @@ def test_fugas_cerradas_cobranza_y_directorio(client, env, auth_as):
     filas = cuerpo["items"] if isinstance(cuerpo, dict) else cuerpo
     ajenos = [x for x in filas if x["cliente_id"] != env["cli_a"]]
     assert ajenos == []
+
+
+def test_plaza_compartida_no_filtra_ni_se_deja_administrar(client, env, auth_as):
+    """La plaza es de VARIOS clientes (rediseño 01-sep). Para un usuario con
+    candado eso no puede convertirse en una ventana a la cartera del negocio ni
+    en un botón para tocar lo que comparten los demás."""
+    auth_as(env["portal"]); hp = _hdr(env["portal"])
+
+    # La ve (se surte de ella), pero solo se enumera SU cliente — no el ajeno.
+    r = client.get("/api/v1/sucursales", headers=hp)
+    assert r.status_code == 200, r.text
+    fila = next(s for s in r.json()["items"] if s["id"] == env["plaza"])
+    assert fila["clientes_ids"] == [env["cli_a"]]
+    assert env["cli_b"] not in fila["clientes_ids"]
+
+    # Pedir las series del vínculo de un cliente ajeno: cerrado.
+    assert client.get("/api/v1/sucursales", headers=hp,
+                      params={"cliente_id": env["cli_b"]}).status_code == 403
+    assert client.get(f"/api/v1/sucursales/{env['plaza']}", headers=hp,
+                      params={"cliente_id": env["cli_b"]}).status_code == 403
+
+    # El detalle de vínculos tampoco enumera al ajeno.
+    r = client.get(f"/api/v1/sucursales/{env['plaza']}/clientes", headers=hp)
+    assert r.status_code == 200, r.text
+    assert [v["cliente_id"] for v in r.json()] == [env["cli_a"]]
+
+    # Y no puede administrar lo compartido: ni la plaza, ni el vínculo ajeno.
+    assert client.patch(f"/api/v1/sucursales/{env['plaza']}", headers=hp,
+                        json={"nombre": "Secuestrada"}).status_code in (403, 404)
+    assert client.delete(f"/api/v1/sucursales/{env['plaza']}", headers=hp).status_code in (403, 404)
+    assert client.put(f"/api/v1/sucursales/{env['plaza']}/clientes/{env['cli_b']}", headers=hp,
+                      json={}).status_code in (403, 404)
+    assert client.delete(f"/api/v1/sucursales/{env['plaza']}/clientes/{env['cli_b']}",
+                         headers=hp).status_code in (403, 404)

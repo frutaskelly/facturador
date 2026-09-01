@@ -258,7 +258,10 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
       if ((f.type !== "multiselect" && f.type !== "select") || !f.filterBy) continue;
       const filtro = String(form[f.filterBy] ?? "");
       const opciones = lookupOpts[f.name];
-      if (!filtro || !opciones) continue;
+      // Un lookup VACÍO no es "no hay nada permitido": es "no cargó" (o falló
+      // la red). Podar con esa lista borraría el valor de un registro recién
+      // abierto — y en un `select` eso significa perder el dato al guardar.
+      if (!filtro || !opciones || !opciones.length) continue;
       const permitidos = new Set(
         opciones.filter((o) => _tagIncluye(o.tag, filtro)).map((o) => o.value)
       );

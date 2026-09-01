@@ -102,19 +102,22 @@ def _abanicos(db, vinculo_ids) -> dict:
     return out
 
 
-def _hidratar(db, rows, *, cliente_id: Optional[UUID] = None):
+def _hidratar(db, rows, *, cliente_id: Optional[UUID] = None, ctx=None):
     """Cuelga a cada plaza sus clientes vinculados y, si la lista se pidió PARA
     un cliente, las series del vínculo con ese cliente (compatibilidad con los
-    selectores de emisión). Un puñado de consultas, no una por renglón."""
+    selectores de emisión). Un puñado de consultas, no una por renglón.
+
+    Con candado por cliente solo se enumeran los clientes DENTRO del candado: la
+    plaza es compartida, y decir quién más se surte de ella le revelaría a un
+    usuario de portal la cartera del negocio."""
     filas = list(rows)
     ids = [r.id for r in filas]
     if not ids:
         return
-    vincs = (
-        db.query(ClienteSucursal)
-        .filter(ClienteSucursal.sucursal_id.in_(ids))
-        .all()
-    )
+    q = db.query(ClienteSucursal).filter(ClienteSucursal.sucursal_id.in_(ids))
+    if ctx is not None and ctx.cliente_scope:
+        q = q.filter(ClienteSucursal.cliente_id.in_(ctx.cliente_scope))
+    vincs = q.all()
     nombres = dict(
         db.query(Cliente.id, Cliente.legal_name)
         .filter(Cliente.id.in_({v.cliente_id for v in vincs} or {None}))
@@ -164,6 +167,17 @@ def _vinculo_out(db, vincs) -> list[ClienteSucursalOut]:
     return out
 
 
+def _solo_sin_candado(ctx, verbo: str) -> None:
+    """La PLAZA es infraestructura del negocio: la comparten varios clientes, así
+    que editarla o borrarla afecta a todos. Un usuario acotado a sus clientes
+    (portal) administra sus VÍNCULOS, no la plaza."""
+    if ctx.cliente_scope:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Tu usuario no puede {verbo} una sucursal: la comparten varios clientes",
+        )
+
+
 def _visible(db, ctx, sucursal_id: UUID) -> bool:
     """Con candado por cliente, una plaza se ve solo si surte a alguno suyo."""
     if not ctx.cliente_scope:
@@ -195,6 +209,8 @@ def list_sucursales(
             .distinct()
         )
     if cliente_id is not None:
+        if not ctx.cliente_permitido(cliente_id):
+            raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
         # Las plazas VINCULADAS a ese cliente (join propio: el del candado, si
         # lo hubo, filtra por otros clientes).
         query = query.filter(
@@ -207,7 +223,7 @@ def list_sucursales(
     query = query.order_by(Sucursal.nombre.asc())
     return paginate(
         query, SucursalOut, limit, offset,
-        preparar=lambda rows: _hidratar(db, rows, cliente_id=cliente_id),
+        preparar=lambda rows: _hidratar(db, rows, cliente_id=cliente_id, ctx=ctx),
     )
 
 
@@ -221,7 +237,9 @@ def get_sucursal(
     obj = get_or_404(db, Sucursal, sucursal_id)
     if not _visible(db, ctx, obj.id):
         raise HTTPException(status_code=404, detail="Sucursal no encontrada")
-    _hidratar(db, [obj], cliente_id=cliente_id)
+    if cliente_id is not None and not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
+    _hidratar(db, [obj], cliente_id=cliente_id, ctx=ctx)
     return obj
 
 
@@ -244,6 +262,8 @@ def create_sucursal(
     # Conveniencia de alta: crear la plaza ya vinculada a un cliente (es el
     # flujo de la pantalla de clientes) — las series van al vínculo.
     if payload.cliente_id is not None:
+        if not ctx.cliente_permitido(payload.cliente_id):
+            raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
         ensure_fk(db, Cliente, payload.cliente_id, "cliente_id")
         vinc = ClienteSucursal(
             tenant_id=ctx.tenant_id,
@@ -257,7 +277,7 @@ def create_sucursal(
         _sync_series_vinculo(db, ctx, vinc, payload.series_factura_ids, payload.series_remision_ids)
         db.flush()
     db.refresh(obj)
-    _hidratar(db, [obj], cliente_id=payload.cliente_id)
+    _hidratar(db, [obj], cliente_id=payload.cliente_id, ctx=ctx)
     return obj
 
 
@@ -269,12 +289,13 @@ def update_sucursal(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     obj = get_or_404(db, Sucursal, sucursal_id)
+    _solo_sin_candado(ctx, "editar")
     data = payload.model_dump(exclude_unset=True)
     for key, value in data.items():
         setattr(obj, key, value)
     db.flush()
     db.refresh(obj)
-    _hidratar(db, [obj])
+    _hidratar(db, [obj], ctx=ctx)
     return obj
 
 
@@ -285,6 +306,7 @@ def delete_sucursal(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     obj = get_or_404(db, Sucursal, sucursal_id)
+    _solo_sin_candado(ctx, "eliminar")
     obj.deleted_at = func.now()
     db.flush()
     return None
@@ -322,6 +344,8 @@ def upsert_vinculo(
 ):
     """Vincula al cliente con la plaza (o actualiza sus series). Idempotente."""
     get_or_404(db, Sucursal, sucursal_id)
+    if not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
     ensure_fk(db, Cliente, cliente_id, "cliente_id")
     vinc = (
         db.query(ClienteSucursal)
@@ -364,6 +388,8 @@ def delete_vinculo(
 ):
     """Desvincula al cliente de la plaza. El histórico (remisiones, órdenes)
     conserva su sucursal_id: esto solo cierra la relación hacia adelante."""
+    if not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
     vinc = (
         db.query(ClienteSucursal)
         .filter(
