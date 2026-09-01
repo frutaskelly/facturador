@@ -437,12 +437,12 @@ def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
     # (texto, cantidad, unidad, clave) — cargar el catálogo, cruzar candidatos y
     # evaluar precios para eso es pagar la pantalla completa por un renglón.
     # Con el catálogo vacío, todo el cruce de abajo se vuelve gratis.
-    catalogo = productos_activos(db) if (lineas_raw and not vistazo) else []
+    catalogo = productos_activos(db, oc.tenant_id) if (lineas_raw and not vistazo) else []
     # Precalculado una vez para las N partidas: si no, el cruce es
     # O(partidas × productos) normalizaciones por cada apertura de la orden.
     norms = normalizar_catalogo(catalogo) if catalogo else {}
-    aliases = alias_del_tenant(db) if catalogo else {}
-    aliases_cli = alias_de_cliente(db, oc.cliente_id, oc.sucursal_id) if catalogo else {}
+    aliases = alias_del_tenant(db, oc.tenant_id) if catalogo else {}
+    aliases_cli = alias_de_cliente(db, oc.tenant_id, oc.cliente_id, oc.sucursal_id) if catalogo else {}
     cods_cli, cods_otros, pres_cli = (
         _codigos_para(db, oc.cliente_id) if catalogo else ({}, {}, {})
     )

@@ -121,11 +121,23 @@ def _cand(p: Producto, score: int, origen: str) -> "Candidato":
     )
 
 
-def productos_activos(db: Session) -> list[Producto]:
-    return db.query(Producto).filter(Producto.deleted_at.is_(None), Producto.activo.is_(True)).all()
+def productos_activos(db: Session, tenant_id: UUID) -> list[Producto]:
+    """El catálogo vivo DE ESE TENANT.
+
+    El `tenant_id` va explícito aunque las tablas tengan RLS: la política solo
+    protege cuando la conexión baja a `app_user`, y los scripts y los tests
+    corren como superusuario (BYPASSRLS). Sin el filtro, el catálogo trae
+    productos de otro tenant y el cruce por SKU se lleva el ajeno — con la
+    clave correcta pero sin ningún precio de ESTE tenant.
+    """
+    return db.query(Producto).filter(
+        Producto.tenant_id == tenant_id,
+        Producto.deleted_at.is_(None),
+        Producto.activo.is_(True),
+    ).all()
 
 
-def alias_del_tenant(db: Session) -> dict[str, UUID]:
+def alias_del_tenant(db: Session, tenant_id: UUID) -> dict[str, UUID]:
     """Los alias GLOBALES del tenant: {alias_normalizado: producto_id}.
 
     Se carga UNA vez y se pasa a `buscar` cuando se cruzan muchos textos (la
@@ -140,13 +152,17 @@ def alias_del_tenant(db: Session) -> dict[str, UUID]:
     return {
         a.alias_normalizado: a.producto_id
         for a in db.query(ProductoAlias.alias_normalizado, ProductoAlias.producto_id)
-        .filter(ProductoAlias.cliente_id.is_(None))
+        .filter(
+            ProductoAlias.tenant_id == tenant_id,
+            ProductoAlias.cliente_id.is_(None),
+        )
         .all()
     }
 
 
 def alias_de_cliente(
-    db: Session, cliente_id: Optional[UUID], sucursal_id: Optional[UUID] = None
+    db: Session, tenant_id: UUID, cliente_id: Optional[UUID],
+    sucursal_id: Optional[UUID] = None,
 ) -> dict[str, UUID]:
     """El vocabulario privado del cliente: {alias_normalizado: producto_id}.
 
@@ -156,7 +172,10 @@ def alias_de_cliente(
         return {}
     filas = (
         db.query(ProductoAlias)
-        .filter(ProductoAlias.cliente_id == cliente_id)
+        .filter(
+            ProductoAlias.tenant_id == tenant_id,
+            ProductoAlias.cliente_id == cliente_id,
+        )
         .all()
     )
     out: dict[str, UUID] = {}
@@ -221,7 +240,7 @@ def buscar(
     variantes = variantes_de(norm)
 
     if prods is None:
-        prods = productos_activos(db)
+        prods = productos_activos(db, tenant_id)
     by_id = {p.id: p for p in prods}
 
     out: list[Candidato] = []
@@ -248,6 +267,7 @@ def buscar(
             fila = (
                 db.query(ProductoAlias.producto_id)
                 .filter(
+                    ProductoAlias.tenant_id == tenant_id,
                     ProductoAlias.alias_normalizado == norm,
                     ProductoAlias.cliente_id.is_(None),
                 )
@@ -309,13 +329,17 @@ def buscar(
     return out[:limit]
 
 
-def _alias_en_alcance(db: Session, norm: str, cliente_id, sucursal_id) -> Optional[ProductoAlias]:
+def _alias_en_alcance(db: Session, tenant_id: UUID, norm: str, cliente_id,
+                      sucursal_id) -> Optional[ProductoAlias]:
     """El alias de ESE alcance exacto (NULL cuenta como valor), o None.
 
     El lookup filtra por cliente/sucursal a propósito: aprender el alias de un
     cliente jamás debe reapuntar el global — eso rompería el vocabulario de
     todos los demás."""
-    q = db.query(ProductoAlias).filter(ProductoAlias.alias_normalizado == norm)
+    q = db.query(ProductoAlias).filter(
+        ProductoAlias.tenant_id == tenant_id,
+        ProductoAlias.alias_normalizado == norm,
+    )
     q = q.filter(ProductoAlias.cliente_id == cliente_id) if cliente_id is not None \
         else q.filter(ProductoAlias.cliente_id.is_(None))
     q = q.filter(ProductoAlias.sucursal_id == sucursal_id) if sucursal_id is not None \
@@ -338,7 +362,7 @@ def aprender_alias(
     norm = normalizar(texto)[:254]
     if not norm:
         return None
-    existing = _alias_en_alcance(db, norm, cliente_id, sucursal_id)
+    existing = _alias_en_alcance(db, tenant_id, norm, cliente_id, sucursal_id)
     if existing is not None:
         existing.producto_id = producto_id
         existing.origen = origen
@@ -357,7 +381,7 @@ def aprender_alias(
             db.flush()
         return alias
     except IntegrityError:
-        existing = _alias_en_alcance(db, norm, cliente_id, sucursal_id)
+        existing = _alias_en_alcance(db, tenant_id, norm, cliente_id, sucursal_id)
         if existing is not None:
             existing.producto_id = producto_id
             existing.origen = origen
@@ -366,7 +390,7 @@ def aprender_alias(
 
 
 def _alias_vigente_de_cliente(
-    db: Session, norm: str, cliente_id, sucursal_id
+    db: Session, tenant_id: UUID, norm: str, cliente_id, sucursal_id
 ) -> Optional[ProductoAlias]:
     """El alias CON ALCANCE que `buscar` usaría para este documento, o None.
 
@@ -378,6 +402,7 @@ def _alias_vigente_de_cliente(
     filas = (
         db.query(ProductoAlias)
         .filter(
+            ProductoAlias.tenant_id == tenant_id,
             ProductoAlias.alias_normalizado == norm,
             ProductoAlias.cliente_id == cliente_id,
         )
@@ -411,13 +436,13 @@ def aprender_alias_con_alcance(
         return None
     # Lo que HOY resuelve para este documento: si el cliente tiene su propio
     # alias, es el que manda en `buscar` y el que hay que corregir.
-    vigente = _alias_vigente_de_cliente(db, norm, cliente_id, sucursal_id)
+    vigente = _alias_vigente_de_cliente(db, tenant_id, norm, cliente_id, sucursal_id)
     if vigente is not None and vigente.producto_id != producto_id:
         return aprender_alias(
             db, tenant_id, texto, producto_id, origen=origen, user_id=user_id,
             cliente_id=vigente.cliente_id, sucursal_id=vigente.sucursal_id,
         )
-    global_ = _alias_en_alcance(db, norm, None, None)
+    global_ = _alias_en_alcance(db, tenant_id, norm, None, None)
     if global_ is None:
         return aprender_alias(
             db, tenant_id, texto, producto_id, origen=origen, user_id=user_id
@@ -468,7 +493,7 @@ def sugerir_con_ia(db: Session, tenant_id: UUID, textos: list[str]) -> dict[str,
     except ImportError:  # pragma: no cover
         return {}
 
-    prods = productos_activos(db)
+    prods = productos_activos(db, tenant_id)
     by_sku = {p.sku: p.id for p in prods}
     catalogo = "\n".join(
         f"- {p.sku}: {p.nombre}" + (f" (sinónimos: {', '.join(p.sinonimos)})" if p.sinonimos else "")

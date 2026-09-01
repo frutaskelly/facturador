@@ -233,7 +233,7 @@ def cotizar_documento(
         if pc.presentacion:
             presentacion_cliente[pc.producto_id] = pc.presentacion
 
-    prods = producto_match.productos_activos(db)
+    prods = producto_match.productos_activos(db, tenant_id)
     por_id = {p.id: p for p in prods}
     esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(
         EsquemaImpuesto.tenant_id == tenant_id, EsquemaImpuesto.deleted_at.is_(None))}
@@ -381,7 +381,7 @@ def cotizar_requisicion(
     # ── cruce: clave contra el SKU del catálogo (las claves de la requisición
     # SON las claves SAE = sku), luego la clave que el cliente le puso al
     # producto, y al final la cascada por descripción (alias/exacto/difuso).
-    prods = producto_match.productos_activos(db)
+    prods = producto_match.productos_activos(db, tenant_id)
     por_id = {p.id: p for p in prods}
     por_sku = {}
     for p in prods:
