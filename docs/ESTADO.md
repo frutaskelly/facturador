@@ -1,4 +1,4 @@
-# Estado del proyecto — 01/09/2026 (noche: `ff728f7` en vivo — el folio del pedido lo pone el SAE)
+# Estado del proyecto — 01/09/2026 (noche: `2a8b29f` en vivo — Match IA editable y medio kilo con precio)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,24 +7,49 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` — el commit de este archivo, sobre `ff728f7` (folio de pedido + nombre del masivo, PR #75) — igual que `origin/main` salvo este commit de docs |
+| Rama base | `main` — el commit de este archivo, sobre `2a8b29f` (Match IA + tramos de precio) — igual que `origin/main` salvo este commit de docs |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
-| Worktrees | Quedan `nifty-wright-842100` (la del vocabulario: su trabajo YA está en `main` vía squash #74, se puede podar) y `amazing-gould-c9fa17`, vacía. `remisiones-filenames-folios-3263f5` se cerró con este deploy |
-| PRs abiertos | ninguno (#74 por squash, #75 por merge) |
-| Migración head | `0063_export_pedido_rastro` en `main` **y aplicada a prod** por el deploy de la noche (cabeza única: el PR #74 no traía migración) |
+| Worktrees | Ninguno. El `wrap-all` de esta noche cerró `amazing-gould` (vacía), `nervous-poincare` (squash #78) y `remision-file-upload` (ya en `main`), y removió `facturador-remision-productos` al subir su trabajo |
+| PRs abiertos | ninguno (#78 por squash; `2a8b29f` entró por fast-forward directo) |
+| Migración head | `0063_export_pedido_rastro`, sin cambios: ni #78 ni `2a8b29f` traen migración |
 
 `Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
 
 ## Deploy
 
-**En vivo en https://facturador.mx y al día con `ff728f7`** (noche del 01-sep, segundo deploy).
-`./deploy.sh` reconstruyó las tres imágenes, aplicó la **migración `0063`** a Supabase y los
-cinco contenedores quedaron sanos. Verificado por respuesta, no por fecha de imagen:
-`/health` contesta `{"status":"ok"}` y su cabecera trae
-`access-control-expose-headers: … Content-Disposition` — la línea que introdujo este deploy, así
-que el backend que corre ES el nuevo. Deploys previos del día: `6d22c4b` (vocabulario de alias),
-`1d5e5d0`, `7f02ce9` (rediseño de plazas) y `7a9c689` (sugerir-sat-batch).
+**En vivo en https://facturador.mx y al día con `2a8b29f`** (noche del 01-sep, tercer deploy).
+`./deploy.sh` reconstruyó las tres imágenes y los cinco contenedores quedaron sanos. Verificado
+contra los dominios reales: `facturador.mx` 200, `api.facturador.mx/health` 200,
+`admin.facturador.mx` 200 y `app.facturador.mx` 307 (redirige a login, que es lo correcto).
+Sin migración nueva que aplicar. Deploys previos del día: `ff728f7` (folio de pedido),
+`6d22c4b` (vocabulario de alias), `1d5e5d0`, `7f02ce9` (rediseño de plazas) y `7a9c689`.
+
+## Match IA editable y medio kilo con precio (`2a8b29f`)
+
+Dos arreglos que salieron de pegar una orden real de 24 renglones.
+
+**La columna Match IA era un desplegable cerrado** con los candidatos ≥80%. Si la IA se
+equivocaba y el producto correcto no calificaba, no había forma de corregirla: el caso que lo
+destapó fue `MANZANA GOLDEN SIN PICADURAS NI MAGULLADURAS` cruzada como `MANZANA GALA · 85%`,
+siendo en realidad manzana amarilla. Ahora esa celda es el buscador del catálogo completo, con
+alta de producto nuevo, y **aprende el alias con el texto ORIGINAL del cliente**: antes usaba lo
+tecleado, así que buscar el nombre exacto no aprendía nada y el mismo error volvía en la
+siguiente remisión. La columna Producto pasó a mostrar el texto del cliente, que es contra lo
+que se juzga el cruce. La subida de orden por archivo (`d13822f`) hereda lo mismo, porque sus
+partidas entran por el mismo camino.
+
+**Los tramos de una lista son descuentos por volumen, no una cantidad mínima de venta.** Con
+cantidad `0.5` y un tramo que arranca en 1, el resolutor devolvía `null` y la línea entraba sin
+precio, trabando confirmar la remisión. Ahora por debajo del tramo más chico se cobra ese mismo.
+La regla ya existía en el cotizador de órdenes (`cotizador.py`), pero nunca bajó al resolutor
+central: por eso el bot cotizaba bien las OCs y la pantalla de remisiones no. El arreglo va en
+`services/precios.py` (individual y lote) más el endpoint que reporta el tramo, así que cubre
+remisiones, facturas, POS y el preview de totales. Test de regresión en `test_precios_api.py`.
+
+**Sin verificación visual**: el backend local se cayó y el clasificador bloqueó levantarlo, así
+que el cambio de UI se subió con typecheck, build y suite de backend en verde, pero sin que
+nadie lo viera funcionando. **Conviene mirarlo en la primera remisión que se capture.**
 
 ## El folio del pedido lo pone el SAE, y el masivo se llama como su remisión (`ff728f7`, PR #75)
 
