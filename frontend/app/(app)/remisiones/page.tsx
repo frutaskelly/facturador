@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, Sparkles, Trash2, Undo2, X, FileSearch } from "lucide-react";
+import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, Sparkles, Trash2, Undo2, Upload, X, FileSearch } from "lucide-react";
 
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
@@ -466,17 +466,51 @@ export default function RemisionesPage() {
         filas = await pegarLocalFallback(raw); // backend sin el endpoint nuevo
       }
       if (filas.length === 0) { toast.error("No se detectaron líneas en el texto pegado"); return; }
-      const nuevas = filas.map(lineaDesdePegado);
-      setLineas((ls) => {
-        const base = ls.filter((l) => l.producto_id || l.texto);
-        return [...base, ...nuevas];
-      });
-      nuevas.forEach((l) => l.producto_id && cotizar(l.key, l.producto_id, l.presentacion, l.cantidad));
-      const porRevisar = nuevas.filter((l) => !l.producto_id).length;
       cerrarPaste();
-      toast.success(`${nuevas.length} líneas agregadas` + (porRevisar ? ` · ${porRevisar} por revisar en Match IA` : ""));
+      insertarFilas(filas);
     } finally {
       setProcesando(false);
+    }
+  }
+
+  /** Filas ya cruzadas por el backend —pegadas de Excel o leídas de un
+   *  archivo— → líneas de la tabla, con su cotización disparada y la columna
+   *  Match IA para lo que quedó sin producto. */
+  function insertarFilas(filas: LineaPegada[]) {
+    const nuevas = filas.map(lineaDesdePegado);
+    setLineas((ls) => {
+      const base = ls.filter((l) => l.producto_id || l.texto);
+      return [...base, ...nuevas];
+    });
+    nuevas.forEach((l) => l.producto_id && cotizar(l.key, l.producto_id, l.presentacion, l.cantidad));
+    const porRevisar = nuevas.filter((l) => !l.producto_id).length;
+    toast.success(`${nuevas.length} líneas agregadas` + (porRevisar ? ` · ${porRevisar} por revisar en Match IA` : ""));
+  }
+
+  // ── subir la orden del cliente como archivo ──
+  const archivoRef = useRef<HTMLInputElement | null>(null);
+  const [leyendoArchivo, setLeyendoArchivo] = useState(false);
+
+  /** PDF, foto o Excel de la orden → el backend lo lee (pdfplumber para el PDF
+   *  de SAE, IA de visión para una foto o un Excel) y sus partidas entran a la
+   *  tabla igual que al pegar. Leer un documento con IA tarda ~90 s, así que el
+   *  timeout se sube: con el default el navegador aborta una lectura que iba bien. */
+  async function subirArchivo(file: File) {
+    setLeyendoArchivo(true);
+    try {
+      const fd = new FormData();
+      fd.append("archivo", file);
+      const filas: LineaPegada[] = await apiFetch(
+        "/api/v1/productos/parse-archivo",
+        { method: "POST", body: fd },
+        { timeoutMs: 180_000 },
+      );
+      if (filas.length === 0) { toast.error("No se detectaron partidas en el archivo"); return; }
+      insertarFilas(filas);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo leer el archivo");
+    } finally {
+      setLeyendoArchivo(false);
     }
   }
 
@@ -1762,6 +1796,21 @@ export default function RemisionesPage() {
             <h2 className="text-sm font-semibold">Líneas</h2>
             <div className="flex gap-2">
               <Button variant="secondary" onClick={() => setPasteOpen(true)}><ClipboardPaste size={16} /> Pegar de Excel</Button>
+              {/* Un input oculto: el botón de la casa dispara el selector de archivos. */}
+              <input
+                ref={archivoRef}
+                type="file"
+                className="hidden"
+                accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,application/pdf,image/*"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";   // sin esto, reelegir el MISMO archivo no dispara onChange
+                  if (f) subirArchivo(f);
+                }}
+              />
+              <Button variant="secondary" onClick={() => archivoRef.current?.click()} disabled={leyendoArchivo}>
+                <Upload size={16} /> {leyendoArchivo ? <>Leyendo<LoadingDots /></> : "Subir archivo"}
+              </Button>
               <Button variant="secondary" onClick={() => setLineas((ls) => [...ls, nuevaLinea()])}><Plus size={16} /> Línea</Button>
             </div>
           </div>

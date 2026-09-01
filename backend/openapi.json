@@ -827,6 +827,25 @@
     "title": "Body_importar_preview_api_v1_remisiones_importar_preview_post",
     "type": "object"
    },
+   "Body_parse_archivo_api_v1_productos_parse_archivo_post": {
+    "properties": {
+     "archivo": {
+      "format": "binary",
+      "title": "Archivo",
+      "type": "string"
+     },
+     "usar_ia": {
+      "default": true,
+      "title": "Usar Ia",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "archivo"
+    ],
+    "title": "Body_parse_archivo_api_v1_productos_parse_archivo_post",
+    "type": "object"
+   },
    "Body_subir_csd_api_v1_empresa_csd_post": {
     "properties": {
      "cer": {
@@ -28732,6 +28751,75 @@
      }
     ],
     "summary": "Match Productos",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/parse-archivo": {
+   "post": {
+    "description": "PDF, foto o Excel de una orden del cliente → las MISMAS líneas que\n«Pegar de Excel», ya cruzadas contra el catálogo.\n\nReusa el lector del bot (`requisicion_parse.leer_documento`, el mismo del\n/cotizador): un PDF pasa por los acomodos deterministas de pdfplumber y\nsolo cae a la IA de visión si no sacaron partidas; una foto o un Excel van\ndirecto a la IA. Declarado antes de /{producto_id} para no capturarse como\nUUID.",
+    "operationId": "parse_archivo_api_v1_productos_parse_archivo_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_parse_archivo_api_v1_productos_parse_archivo_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/LineaPegadaOut"
+         },
+         "title": "Response Parse Archivo Api V1 Productos Parse Archivo Post",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Parse Archivo",
     "tags": [
      "productos"
     ]

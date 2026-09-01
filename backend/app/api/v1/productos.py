@@ -286,6 +286,81 @@ def match_productos(
     return resultados
 
 
+def _norm_sku(v: str) -> str:
+    """'PIÑA -FRUT-350' cruza con 'PINA-FRUT-350': mayúsculas, sin acentos ni
+    espacios. Misma tolerancia que el cruce por clave de la bandeja de OC."""
+    import unicodedata
+
+    s = unicodedata.normalize("NFKD", v or "").encode("ascii", "ignore").decode("ascii")
+    return "".join(ch for ch in s.upper() if ch.isalnum() or ch == "-")
+
+
+def _num_txt(v) -> str:
+    """Los números del lector vienen float; la línea los viaja como texto (el
+    front los formatea). 10.0 debe llegar como '10', no como '10.0'."""
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def _cruzar_filas(
+    db: Session, ctx: AuthContext, filas: list[dict], *, usar_ia: bool
+) -> list[dict]:
+    """Filas ya parseadas —pegadas de Excel o leídas de un archivo— → líneas con
+    sus candidatos del catálogo: exacto → alias → difuso → IA.
+
+    Cuando la fila trae `clave` (las requisiciones de SAE la traen) se cruza
+    primero contra el SKU: es exacta y no hay que adivinar por descripción.
+    """
+    catalogo = productos_activos(db)   # una sola carga para todas las filas
+    aliases = alias_del_tenant(db)     # idem: sin esto era un SELECT por fila
+    norms = normalizar_catalogo(catalogo)   # y sin esto, O(filas × productos)
+    cats_por_id, esquemas_por_id = _mapas_catalogo(db)
+    por_sku: dict[str, Producto] = {}
+    for p in catalogo:
+        if p.sku:
+            por_sku.setdefault(_norm_sku(p.sku), p)
+
+    resultados: list[dict] = []
+    sin_match: list[str] = []
+    for f in filas:
+        # Varios candidatos para poblar el desplegable Match IA (el front muestra ≥80%).
+        cands = buscar(db, ctx.tenant_id, f["producto"], limit=8, prods=catalogo, aliases=aliases, norms=norms)
+        # La clave del documento manda sobre la descripción: si existe en el
+        # catálogo va al frente como cruce exacto, sin duplicarse más abajo.
+        clave = _norm_sku(f.get("clave") or "")
+        exacto = por_sku.get(clave) if clave else None
+        if exacto is not None:
+            cands = [_cand_producto(exacto, 100, "exacto")] + [
+                c for c in cands if c.producto_id != exacto.id
+            ]
+        resultados.append({
+            "texto": f["producto"],
+            "cantidad": f["cantidad"],
+            "precio": f["precio"],
+            "presentacion": f["presentacion"],
+            "candidatos": [_candidato_out(c, cats_por_id, esquemas_por_id) for c in cands],
+        })
+        if not cands:
+            sin_match.append(f["producto"])
+
+    # IA solo para los que ni exacto/alias/difuso resolvieron (sinónimos regionales).
+    if usar_ia and sin_match:
+        ia = sugerir_con_ia(db, ctx.tenant_id, sin_match)
+        pids = {pid for pid in ia.values() if pid}
+        prods = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(pids)).all()} if pids else {}
+        for r in resultados:
+            pid = ia.get(r["texto"])
+            if not r["candidatos"] and pid and pid in prods:
+                p = prods[pid]
+                r["candidatos"] = [
+                    _candidato_out(_cand_producto(p, 85, "ia"), cats_por_id, esquemas_por_id)
+                ]
+    return resultados
+
+
 @router.post("/parse-pegado", response_model=list[LineaPegadaOut])
 def parse_pegado(
     payload: ParsePegadoIn,
@@ -301,39 +376,60 @@ def parse_pegado(
     filas = parsear_pegado(payload.texto, usar_ia=payload.usar_ia)
     if not filas:
         return []
+    return _cruzar_filas(db, ctx, filas, usar_ia=payload.usar_ia)
 
-    catalogo = productos_activos(db)   # una sola carga para todas las filas
-    aliases = alias_del_tenant(db)     # idem: sin esto era un SELECT por fila
-    norms = normalizar_catalogo(catalogo)   # y sin esto, O(filas × productos)
-    cats_por_id, esquemas_por_id = _mapas_catalogo(db)
-    resultados: list[dict] = []
-    sin_match: list[str] = []
-    for f in filas:
-        # Varios candidatos para poblar el desplegable Match IA (el front muestra ≥80%).
-        cands = buscar(db, ctx.tenant_id, f["producto"], limit=8, prods=catalogo, aliases=aliases, norms=norms)
-        resultados.append({
-            "texto": f["producto"],
-            "cantidad": f["cantidad"],
-            "precio": f["precio"],
-            "presentacion": f["presentacion"],
-            "candidatos": [_candidato_out(c, cats_por_id, esquemas_por_id) for c in cands],
+
+@router.post("/parse-archivo", response_model=list[LineaPegadaOut])
+def parse_archivo(
+    archivo: UploadFile = File(...),
+    usar_ia: bool = Form(default=True),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """PDF, foto o Excel de una orden del cliente → las MISMAS líneas que
+    «Pegar de Excel», ya cruzadas contra el catálogo.
+
+    Reusa el lector del bot (`requisicion_parse.leer_documento`, el mismo del
+    /cotizador): un PDF pasa por los acomodos deterministas de pdfplumber y
+    solo cae a la IA de visión si no sacaron partidas; una foto o un Excel van
+    directo a la IA. Declarado antes de /{producto_id} para no capturarse como
+    UUID."""
+    from ...services import requisicion_parse
+
+    # Leer un documento cuesta dinero de API (visión) — mismo tope por tenant
+    # que el cotizador, que corre exactamente este lector.
+    enforce(f"producto-archivo:{ctx.tenant_id}", 60, 3600)
+    _MAX = 10 * 1024 * 1024
+    data = archivo.file.read(_MAX + 1)
+    if not data:
+        raise HTTPException(status_code=422, detail="El archivo llegó vacío")
+    if len(data) > _MAX:
+        raise HTTPException(status_code=422, detail="El archivo no debe exceder 10 MB")
+    try:
+        doc = requisicion_parse.leer_documento(data, archivo.filename or "documento")
+    except Exception as exc:   # documento corrupto, o la IA no disponible
+        logger.warning("parse-archivo: no se pudo leer %s: %s", archivo.filename, exc)
+        raise HTTPException(status_code=422, detail=f"No se pudo leer el archivo: {str(exc)[:160]}")
+
+    filas: list[dict] = []
+    for it in doc.get("items") or []:
+        # La descripción es lo que se cruza; una partida sin ella no es línea.
+        descripcion = (it.get("descripcion") or "").strip()
+        if not descripcion:
+            continue
+        filas.append({
+            "producto": descripcion,
+            "cantidad": _num_txt(it.get("cantidad")),
+            "precio": _num_txt(it.get("costo_unitario")),
+            "presentacion": (it.get("unidad") or "").strip(),
+            "clave": (it.get("clave") or "").strip(),
         })
-        if not cands:
-            sin_match.append(f["producto"])
-
-    # IA solo para los que ni exacto/alias/difuso resolvieron (sinónimos regionales).
-    if payload.usar_ia and sin_match:
-        ia = sugerir_con_ia(db, ctx.tenant_id, sin_match)
-        pids = {pid for pid in ia.values() if pid}
-        prods = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(pids)).all()} if pids else {}
-        for r in resultados:
-            pid = ia.get(r["texto"])
-            if not r["candidatos"] and pid and pid in prods:
-                p = prods[pid]
-                r["candidatos"] = [
-                    _candidato_out(_cand_producto(p, 85, "ia"), cats_por_id, esquemas_por_id)
-                ]
-    return resultados
+    if not filas:
+        raise HTTPException(
+            status_code=422,
+            detail="No se encontraron partidas legibles en el documento",
+        )
+    return _cruzar_filas(db, ctx, filas, usar_ia=usar_ia)
 
 
 @router.post("/alias", status_code=status.HTTP_201_CREATED)

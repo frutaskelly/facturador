@@ -2693,6 +2693,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/parse-archivo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Parse Archivo
+         * @description PDF, foto o Excel de una orden del cliente → las MISMAS líneas que
+         *     «Pegar de Excel», ya cruzadas contra el catálogo.
+         *
+         *     Reusa el lector del bot (`requisicion_parse.leer_documento`, el mismo del
+         *     /cotizador): un PDF pasa por los acomodos deterministas de pdfplumber y
+         *     solo cae a la IA de visión si no sacaron partidas; una foto o un Excel van
+         *     directo a la IA. Declarado antes de /{producto_id} para no capturarse como
+         *     UUID.
+         */
+        post: operations["parse_archivo_api_v1_productos_parse_archivo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/parse-pegado": {
         parameters: {
             query?: never;
@@ -3889,6 +3916,19 @@ export interface components {
              * Format: binary
              */
             archivo: string;
+        };
+        /** Body_parse_archivo_api_v1_productos_parse_archivo_post */
+        Body_parse_archivo_api_v1_productos_parse_archivo_post: {
+            /**
+             * Archivo
+             * Format: binary
+             */
+            archivo: string;
+            /**
+             * Usar Ia
+             * @default true
+             */
+            usar_ia: boolean;
         };
         /** Body_subir_csd_api_v1_empresa_csd_post */
         Body_subir_csd_api_v1_empresa_csd_post: {
@@ -15160,6 +15200,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MatchResultOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    parse_archivo_api_v1_productos_parse_archivo_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_parse_archivo_api_v1_productos_parse_archivo_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LineaPegadaOut"][];
                 };
             };
             /** @description Validation Error */
