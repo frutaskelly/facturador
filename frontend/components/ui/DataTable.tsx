@@ -148,6 +148,16 @@ export type DataTableProps<T> = {
    *  Útil cuando la casilla significa "incluido" y lo normal es que todo lo
    *  esté: sin esto, la tabla arrancaría con todo desmarcado. */
   initialSelectedKeys?: (string | number)[];
+  /** Filtro externo que decide qué filas se VEN (se combina con el buscador).
+   *  Es solo de presentación: `rows` no cambia, así que la selección de las
+   *  filas ocultas se conserva intacta — filtrar no des-selecciona nada. */
+  rowFilter?: (row: T) => boolean;
+  /** Identidad del filtro externo. Al cambiar, se vuelve a la primera página.
+   *  Va aparte porque `rowFilter` suele ser una arrow inline (referencia nueva
+   *  en cada render) y no sirve como dependencia. */
+  rowFilterKey?: string | number;
+  /** Clases extra por fila (p. ej. resaltar en rojo las que faltan por completar). */
+  rowClassName?: (row: T) => string | undefined;
 };
 
 export function DataTable<T>({
@@ -177,6 +187,9 @@ export function DataTable<T>({
   onSelectionChange,
   selectionResetKey,
   initialSelectedKeys,
+  rowFilter,
+  rowFilterKey,
+  rowClassName,
 }: DataTableProps<T>) {
   // ── identidad estable de cada columna ──
   const cols = useMemo(() => {
@@ -363,16 +376,24 @@ export function DataTable<T>({
     });
   }, [rows, byId, sort]);
 
-  // ── búsqueda (cliente, todas las columnas, normalizada, por tokens) ──
+  // ── filtro externo + búsqueda (cliente, todas las columnas, normalizada) ──
+  // El filtro externo va primero: acota el universo y el buscador afina dentro.
+  const rowFilterRef = useRef(rowFilter);
+  rowFilterRef.current = rowFilter;
   const filteredRows = useMemo(() => {
+    const fn = rowFilterRef.current;
+    const base = fn ? sortedRows.filter((row) => fn(row)) : sortedRows;
     const q = norm(search.trim());
-    if (!q) return sortedRows;
+    if (!q) return base;
     const tokens = q.split(/\s+/).filter(Boolean);
-    return sortedRows.filter((row) => {
+    return base.filter((row) => {
       const text = norm(cols.map(({ col }) => exportText(col, row)).join("  "));
       return tokens.every((t) => text.includes(t));
     });
-  }, [sortedRows, search, cols]);
+    // `rowFilter` entra por ref + `rowFilterKey`: como arrow inline cambiaría
+    // de identidad en cada render y recalcularía este memo siempre.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedRows, search, cols, rowFilterKey]);
 
   // ── selección: derivados + notificación al padre ──
   // Objetos seleccionados: todas las filas (de `rows`) cuya clave esté marcada.
@@ -446,10 +467,11 @@ export function DataTable<T>({
   const pagedRows = paginated
     ? filteredRows.slice(safePage * pageSize, safePage * pageSize + pageSize)
     : filteredRows;
-  // volver a la primera página cuando cambia la búsqueda o el tamaño de página
+  // volver a la primera página cuando cambia la búsqueda, el filtro externo o
+  // el tamaño de página
   useEffect(() => {
     setPageIndex(0);
-  }, [search, pageSize]);
+  }, [search, pageSize, rowFilterKey]);
 
   function toggleSort(id: string) {
     setSort((s) => {
@@ -798,7 +820,7 @@ export function DataTable<T>({
                   <Fragment key={key}>
                     <tr
                       onClick={() => (expandable ? toggleExpand(key, row) : onRowClick?.(row))}
-                      className={`border-t border-border ${clickable ? "cursor-pointer hover:bg-surface-2" : ""} ${isOpen ? "bg-surface-2" : ""}`}
+                      className={`border-t border-border ${clickable ? "cursor-pointer hover:bg-surface-2" : ""} ${isOpen ? "bg-surface-2" : ""} ${rowClassName?.(row) ?? ""}`}
                     >
                       {selectable && (
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>

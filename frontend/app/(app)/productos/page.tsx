@@ -125,7 +125,15 @@ export default function ProductosPage() {
 
   // Esquemas de impuesto ya dados de alta (para asignarlos al producto).
   const esquemasRes = useResource<Page<EsquemaImpuesto>>("/api/v1/esquemas-impuesto?limit=200");
-  const esquemas = (esquemasRes.data?.items ?? []).filter((e) => e.activo);
+  const esquemasTodos = useMemo(() => esquemasRes.data?.items ?? [], [esquemasRes.data]);
+  const esquemas = esquemasTodos.filter((e) => e.activo);
+  // Para la columna se usan TODOS, no solo los activos: un producto puede
+  // seguir apuntando a un esquema dado de baja y la tabla debe poder nombrarlo
+  // en vez de dejar un guion que parece "sin esquema".
+  const esqName = useMemo(
+    () => Object.fromEntries(esquemasTodos.map((e) => [e.id, e.nombre || e.codigo])),
+    [esquemasTodos]
+  );
 
   // Se carga la lista completa: DataTableSmart se encarga de la paginación,
   // búsqueda y orden en cliente sobre todas las filas.
@@ -268,7 +276,23 @@ export default function ProductosPage() {
     { header: "SKU", cell: (p) => <span className="font-medium">{p.sku}</span> },
     { header: "Nombre", cell: (p) => p.nombre },
     { header: "Categoría", cell: (p) => (p.categoria_id ? catName[p.categoria_id] ?? "—" : "—") },
+    {
+      header: "Esquema de impuesto",
+      cell: (p) =>
+        p.esquema_impuesto_id ? (
+          esqName[p.esquema_impuesto_id] ?? "—"
+        ) : (
+          <span className="text-danger">Sin esquema</span>
+        ),
+    },
     { header: "Clave SAT", cell: (p) => <span className="text-muted">{p.clave_sat}</span> },
+    {
+      // La descripción oficial del SAT para esa clave: la resuelve el backend
+      // (el producto solo guarda la clave). Sin ella, los 8 dígitos no dicen
+      // nada al revisar si la clave que quedó es la correcta.
+      header: "Descripción SAT",
+      cell: (p) => <span className="text-muted">{p.clave_sat_descripcion || "—"}</span>,
+    },
     {
       header: "Estado",
       cell: (p) => <Badge tone={p.activo ? "success" : "muted"}>{p.activo ? "Activo" : "Inactivo"}</Badge>,

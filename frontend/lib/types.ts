@@ -627,6 +627,9 @@ export type Producto = {
   custom_fields: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  /** Descripción oficial del catálogo SAT para `clave_sat`. La resuelve el
+   *  listado del backend; no se guarda en el producto. */
+  clave_sat_descripcion?: string | null;
 };
 
 // ── Empresas del grupo (Ajustes › Empresas) ──
