@@ -9,7 +9,12 @@
 // arranca en "solo en esta remisión".
 //
 // Los dos destinos no son intercambiables:
-//   · precio especial  → `precio_overrides`, toca SOLO a este cliente.
+//   · precio especial  → `precio_overrides`, toca SOLO a este cliente. Se
+//     escribe SIEMPRE con el cliente; si el documento trae plaza se agrega
+//     además, que es el override más específico (ese cliente en esa plaza).
+//     Nunca solo la plaza: desde el rediseño del 1-sep la sucursal es del
+//     negocio, y un override sin cliente le fija el precio a TODOS los que se
+//     surten de ahí — justo lo que este diálogo existe para no hacer sin avisar.
 //   · toda la lista    → `precios`, toca a TODOS los que cuelgan de la lista.
 // Las listas se comparten entre clientes, así que la segunda opción dice a
 // cuántos alcanza antes de que le des clic.
@@ -90,7 +95,7 @@ export function AprenderPreciosDialog({
   lineas: PrecioDivergente[];
   clienteId: string;
   clienteNombre: string;
-  /** Cuando viene, el precio especial se guarda para ESA sucursal. */
+  /** Cuando viene, el precio especial se acota además a ESA plaza. */
   sucursalId?: string;
   sucursalNombre?: string;
   onCancel: () => void;
@@ -184,7 +189,8 @@ export function AprenderPreciosDialog({
           await apiFetch("/api/v1/precios/overrides", {
             method: "POST",
             body: JSON.stringify({
-              ...(sucursalId ? { sucursal_id: sucursalId } : { cliente_id: clienteId }),
+              cliente_id: clienteId,
+              ...(sucursalId ? { sucursal_id: sucursalId } : {}),
               producto_id: l.producto_id,
               presentacion: l.presentacion,
               precio_unitario: l.precio,
@@ -256,8 +262,8 @@ export function AprenderPreciosDialog({
                       de esa plaza, no del cliente entero. */}
                   <option value={OVERRIDE}>
                     {sucursalId
-                      ? `Precio especial de ${sucursalNombre || "esta sucursal"} (solo esa sucursal)`
-                      : `Precio especial de ${clienteNombre || "este cliente"} (todas sus sucursales)`}
+                      ? `Precio especial de ${clienteNombre || "este cliente"} en ${sucursalNombre || "esta plaza"}`
+                      : `Precio especial de ${clienteNombre || "este cliente"} (todas las plazas)`}
                   </option>
                   {listas.map((li) => (
                     <option key={li.lista_id} value={li.lista_id}>
