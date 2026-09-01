@@ -1,4 +1,4 @@
-# Estado del proyecto — 01/09/2026 (sucursal = unidad de negocio, `7f02ce9` desplegado)
+# Estado del proyecto — 01/09/2026 (cierre de la tarde: `1d5e5d0` en vivo y EHMO Tabasco con lista de precios)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -10,19 +10,43 @@ carpeta y leer este archivo.
 | Rama base | `main` — el commit de este archivo, sobre `7f02ce9` (sucursal = plaza) — igual que `origin/main` salvo este commit de docs |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio |
-| Worktrees | TODAS las sesiones cerradas por el wrap-all del 01-sep; solo queda `amazing-gould-c9fa17` (la sesión del cotizador, vacía — se poda sola al cerrarla). Ramas viejas en origin por borrar cuando se quiera: `claude/cotizador-fcad7e` y `claude/focused-roentgen-b61e17` (ambas ya contenidas en `main`); `claude/estado-cierre-31ago` se conserva a propósito como respaldo |
+| Worktrees | El wrap-all de la tarde cerró 5: `productos-52155f`, `quick-remision-button-9089b8`, `sucursales-cliente-relationship-71a3af`, `quci-e2f686` y `lista-precios-sae-fe7e71` — **verificados por CONTENIDO** (`git merge-tree` contra `origin/main` no aporta nada; entraron por squash). Quedan **`nifty-wright-842100` (sesión VIVA, no se tocó**: 3 commits del vocabulario de alias y un archivo a medio editar) y `amazing-gould-c9fa17`, desde donde corrió este cierre |
 | PRs abiertos | ninguno |
-| Migración head | `0061_fusion_plazas` en `main` **y aplicada a prod** |
+| Migración head | `0062_remision_por_revisar` en `main` **y aplicada a prod** (`alembic_version` verificada) |
 
 `Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
 
 ## Deploy
 
-**En vivo en https://facturador.mx y al día con `7a9c689`**: el wrap-all del 01-sep corrió
-`./deploy.sh` desde este checkout en `7a9c689` — reconstruyó las tres imágenes, sin
-migraciones nuevas (head sigue `0058`), y los cinco contenedores quedaron arriba y sanos.
-Deploys previos del 31-ago: `ec59214` (cotizador; endpoint nuevo verificado con 401) y
-`1a0fd06` (PRs #67–#71, por la sesión que unificó este ESTADO).
+**En vivo en https://facturador.mx y al día con `1d5e5d0`** (cierre de la tarde del 01-sep).
+No se redesplegó porque ya estaba al día, y eso se comprobó **por contenido, no por la fecha
+de la imagen**: `precios.py`, `remisiones.py` y `facturas.py` dentro del contenedor son byte
+por byte iguales a `origin/main`, la imagen de frontend contiene la cadena que introdujo el
+último commit (`todas las plazas`), y `alembic_version` está en `0062`. Deploys previos del
+día: `7f02ce9` (rediseño de plazas) y `7a9c689` (sugerir-sat-batch).
+
+## EHMO Tabasco ya tiene lista de precios (01-sep, tarde) — solo DATOS, sin código
+
+**SAE empresa 03: se creó la lista 4 «EHMO TABASCO» con 196 productos.** Antes solo tenía las
+3 listas de fábrica en cero, así que Tabasco llevaba de febrero a agosto facturando sin lista y
+sacando el precio del historial. Se armó con la regla de siempre —precio vigente = último
+facturado en factura no cancelada (`PAR_FACTF03`+`FACTF03`)— para 194 claves, más 2 sin ninguna
+factura (pipián y tuna verde) que conservaron su precio capturado a mano. Las 196 cruzaron
+exacto contra `INVE03`; todo es esquema de impuesto 3 (IVA 0), así que `PRECIOCIMP = PRECIO`.
+
+**En el Facturador, la lista `EHMOVH0826` quedó sincronizada** (194 → 197 renglones): se
+agregaron cúrcuma, camote amarillo y tomate verde limpio, y se corrigieron 3 precios —
+**manzana en caja $67.21 → $1,485.00** (el renglón de CAJA traía un precio por kilo; lleva
+desde julio facturándose a $1,485), albahaca $175.00 → $322.25 y calabaza de castilla
+$57.20 → $36.19. Se **repropagó a las remisiones NO facturadas de Tabasco** (`factura_id` y
+`factura_sae` en NULL; una remisión facturada no se reprecia nunca): 10 líneas de calabaza y la
+única manzana por caja (RZEHMOVH40, que pasó de KILO a CAJA). Los totales de las 11 remisiones
+se recalcularon y se verificaron contra la suma de sus líneas. Ver el **pendiente 11**, que
+salió de aquí.
+
+**El puente SAE ↔ Facturador es `producto_alias`**: la importación guardó unas veces la clave
+del SAE (`AJOKG`) y otras la descripción (`ACELGAS`), así que hay que probar las dos formas o
+el cruce se queda a la mitad.
 
 ## La sucursal dejó de ser del cliente (01-sep, `7f02ce9` — DESPLEGADO)
 
@@ -269,6 +293,16 @@ podarla.
    que quedó de más en el tenant `frutas-kelly` (ese tenant no opera Tabasco). Aparte, ya con
    la pantalla nueva, hay que **capturar las series por vínculo** que hoy no existen: ZHGO
    para Balles y Jubran en Pachuca, y EHCHHO para EHMO×Chiapas.
+   **Verificado el 01-sep por la tarde: falta más de lo que decía este punto.** La estructura
+   está (P-HOSPITALES-TAB existe y cuelga de Tabasco), pero el cruce sigue mandando las órdenes
+   de Villahermosa a la negociación de Pachuca: (c) la equivalencia `PROYECTO /
+   villahermosa:HOSPITALES` **todavía apunta al `HOSPITALES` de Pachuca** — cada OC nueva de VH
+   entra mal etiquetada; y (d) **las 35 OCs PENDIENTE de Tabasco siguen con ese proyecto**, así
+   que hay que reabrirlas (`POST /oc-recibidas/{id}/reabrir`) DESPUÉS de reapuntar la
+   equivalencia. **Orden que importa:** la asignación puente `da5e658b…` (espec-11, EHMO +
+   Tabasco + HOSPITALES-de-Pachuca → EHMOVH0826) es hoy lo ÚNICO que evita que Tabasco cobre la
+   lista 9; no se borra hasta que (c) y (d) estén hechos, o los precios de VH se rompen entre
+   un paso y otro. Las dos escrituras las volvió a bloquear el classifier de permisos.
 8. **183 OCs de la migración sin `archivo_url`** (31-ago, tras el PR #54). El #54 deja al
    sistema listo para absorber los links: la cura de fondo es un script en `SmartSupply/bot`
    que reenvíe esas órdenes por la ingesta con su URL de Drive — se completan sin tocar la
@@ -282,6 +316,12 @@ podarla.
    de SAE. Limpieza menor aparte: borrar el usuario de prueba `ok-833@test.local` en Supabase
    Auth → Users (lo creó por accidente una corrida de tests del 31-ago con credenciales
    reales; solo existe en Auth, sin datos).
+   ⚠️ **El (b) no es capturar un dato: hoy es imposible.** `clientes.codigo` se autogenera y el
+   backend lo DESCARTA tanto al crear como al editar (`data.pop("codigo")` en
+   `backend/app/api/v1/clientes.py`, altas y PATCH), así que BALLES es `CLI-001` y no hay forma
+   de dejarlo en `7` por la UI ni por la API. Hace falta una decisión: o el cotizador deja de
+   leer `clientes.codigo` y usa un campo aparte para la clave del SAE, o se abre el campo a
+   edición y se rompe la convención de la casa (código autogenerado, de solo lectura).
 10. **La conciliación de 6 h no avisó de 14 OCs perdidas** (Balles/Jubran, 28–31 ago, la
     25306 incluida). Se detectaron el 31-ago por la noche corriendo `facturador_conciliar.py`
     a mano y se recuperaron TODAS con `facturador_backfill.py` + contexto regenerado fresco de
@@ -289,3 +329,12 @@ podarla.
     empujó (llegaron por el grupo Interno SM) y por qué el job de 6 h no alertó — y OJO: el
     repo del bot tiene cambios sin commitear (`index.js`, `sheets_push.py`) de otra sesión en
     esas mismas fechas. Revisarlo desde la sesión que trabaja ese repo.
+11. **8 remisiones de Tabasco se repreciaron DESPUÉS de que su Excel salió al SAE** (01-sep, al
+    sincronizar la lista EHMOVH0826). Al bajar la calabaza a $36.19 y marcar la manzana como
+    CAJA, ocho de las once remisiones tocadas ya tenían `export_sae_at`: RZEHMOVH3, 10, 12, 13,
+    16, 27, 29 y la 40. Ninguna está facturada —por eso el reprecio las alcanzó—, pero su Excel
+    ya se había generado, así que **lo que el operador subió al SAE y lo que hoy dice el
+    Facturador pueden no coincidir**. Hay que decidir si se regeneran esos masivos o se corrigen
+    en el SAE a mano. Recordatorio de la regla de la casa: generar el masivo deja rastro
+    (`export_sae_at`/`export_sae_folio`) y nada más; `factura_sae` lo escribe el espejo o una
+    captura manual.
