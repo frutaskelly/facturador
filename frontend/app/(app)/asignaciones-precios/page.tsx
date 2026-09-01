@@ -8,7 +8,7 @@
 // prioridad lo calcula la base (proyecto 8 · serie 4 · sucursal 2 · cliente 1),
 // así que aquí solo se muestra, nunca se recalcula.
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2, Wand2 } from "lucide-react";
+import { Pencil, Plus, Trash2, Wand2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -34,6 +34,7 @@ import type {
 const WRITE = "lista_precios:gestionar";
 
 const VACIO = {
+  id: "",
   lista_id: "",
   cliente_id: "",
   sucursal_id: "",
@@ -61,7 +62,7 @@ export default function AsignacionesPreciosPage() {
   const { me } = useAuth();
   const toast = useToast();
   const canWrite = can(me, WRITE);
-  const { post, del, loading: saving } = useMutation();
+  const { post, patch, del, loading: saving } = useMutation();
 
   // ?cliente=<id> — se llega aquí desde la lista de Clientes.
   const clienteParam =
@@ -124,16 +125,27 @@ export default function AsignacionesPreciosPage() {
       return;
     }
     try {
-      await post("/api/v1/asignaciones-precios", {
-        lista_id: form.lista_id,
-        cliente_id: form.cliente_id || null,
-        sucursal_id: form.sucursal_id || null,
-        serie_id: form.serie_id || null,
-        proyecto_id: form.proyecto_id || null,
-        vigencia_desde: form.vigencia_desde || null,
-        vigencia_hasta: form.vigencia_hasta || null,
-        notas: form.notas.trim() || null,
-      });
+      if (form.id) {
+        // A quién aplica no se edita: el backend solo acepta lista y vigencia,
+        // porque mover las dimensiones es otra negociación, no la misma.
+        await patch(`/api/v1/asignaciones-precios/${form.id}`, {
+          lista_id: form.lista_id,
+          vigencia_desde: form.vigencia_desde || null,
+          vigencia_hasta: form.vigencia_hasta || null,
+          notas: form.notas.trim() || null,
+        });
+      } else {
+        await post("/api/v1/asignaciones-precios", {
+          lista_id: form.lista_id,
+          cliente_id: form.cliente_id || null,
+          sucursal_id: form.sucursal_id || null,
+          serie_id: form.serie_id || null,
+          proyecto_id: form.proyecto_id || null,
+          vigencia_desde: form.vigencia_desde || null,
+          vigencia_hasta: form.vigencia_hasta || null,
+          notas: form.notas.trim() || null,
+        });
+      }
       toast.success("Asignación guardada");
       setForm(null);
       asignacionesRes.reload();
@@ -216,16 +228,38 @@ export default function AsignacionesPreciosPage() {
             header: "",
             className: "text-right w-1",
             cell: (a: ListaAsignacion) => (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setABorrar(a);
-                }}
-                className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
-                aria-label="Eliminar asignación"
-              >
-                <Trash2 size={16} />
-              </button>
+              <div className="flex justify-end gap-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setForm({
+                      id: a.id,
+                      lista_id: a.lista_id,
+                      cliente_id: a.cliente_id ?? "",
+                      sucursal_id: a.sucursal_id ?? "",
+                      serie_id: a.serie_id ?? "",
+                      proyecto_id: a.proyecto_id ?? "",
+                      vigencia_desde: a.vigencia_desde ?? "",
+                      vigencia_hasta: a.vigencia_hasta ?? "",
+                      notas: a.notas ?? "",
+                    });
+                  }}
+                  className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
+                  aria-label="Editar asignación"
+                >
+                  <Pencil size={16} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setABorrar(a);
+                  }}
+                  className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
+                  aria-label="Eliminar asignación"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
             ),
           },
         ]
@@ -344,7 +378,7 @@ export default function AsignacionesPreciosPage() {
       <Modal
         open={form !== null}
         onClose={() => setForm(null)}
-        title="Nueva asignación de precios"
+        title={form?.id ? "Editar asignación de precios" : "Nueva asignación de precios"}
         footer={
           <>
             <Button variant="secondary" onClick={() => setForm(null)}>
@@ -375,8 +409,18 @@ export default function AsignacionesPreciosPage() {
             </Field>
 
             <p className="text-xs text-muted">
-              Deja en blanco lo que no aplique. Solo el cliente = <b>mismos precios en todo el
-              país</b>; agregar sucursal, serie o proyecto acota la negociación y le gana.
+              {form.id ? (
+                <>
+                  A quién aplica no se edita: mover las dimensiones es otra negociación y
+                  borraría el rastro de la anterior. Para cambiarlas, crea el renglón nuevo y
+                  elimina este.
+                </>
+              ) : (
+                <>
+                  Deja en blanco lo que no aplique. Solo el cliente = <b>mismos precios en todo
+                  el país</b>; agregar sucursal, serie o proyecto acota la negociación y le gana.
+                </>
+              )}
             </p>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -386,6 +430,7 @@ export default function AsignacionesPreciosPage() {
                   onChange={(e) =>
                     setForm({ ...form, cliente_id: e.target.value, sucursal_id: "", proyecto_id: "" })
                   }
+                  disabled={!!form.id}
                 >
                   <option value="">— Cualquiera —</option>
                   {clientes.map((c) => (
@@ -397,17 +442,18 @@ export default function AsignacionesPreciosPage() {
               </Field>
               <Field
                 label="Sucursal"
-                hint={form.cliente_id ? undefined : "Elige primero el cliente."}
+                hint={form.id || form.cliente_id ? undefined : "Elige primero el cliente."}
               >
                 <Select
                   value={form.sucursal_id}
                   onChange={(e) => setForm({ ...form, sucursal_id: e.target.value })}
-                  disabled={!form.cliente_id}
+                  disabled={!!form.id || !form.cliente_id}
                 >
                   <option value="">— Cualquiera —</option>
                   {sucursalesDelCliente
                     .filter(
                       (s) =>
+                        !!form.id ||
                         !proyectoForm?.sucursal_ids?.length ||
                         proyectoForm.sucursal_ids.includes(s.id)
                     )
@@ -422,6 +468,7 @@ export default function AsignacionesPreciosPage() {
                 <Select
                   value={form.serie_id}
                   onChange={(e) => setForm({ ...form, serie_id: e.target.value })}
+                  disabled={!!form.id}
                 >
                   <option value="">— Cualquiera —</option>
                   {series.map((s) => (
@@ -442,11 +489,13 @@ export default function AsignacionesPreciosPage() {
                 <Select
                   value={form.proyecto_id}
                   onChange={(e) => setForm({ ...form, proyecto_id: e.target.value })}
+                  disabled={!!form.id}
                 >
                   <option value="">— Cualquiera —</option>
                   {proyectosDelCliente
                     .filter(
                       (p) =>
+                        !!form.id ||
                         !form.sucursal_id ||
                         !p.sucursal_ids?.length ||
                         p.sucursal_ids.includes(form.sucursal_id)
