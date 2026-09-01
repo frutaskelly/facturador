@@ -243,19 +243,23 @@ def cotizar(
         from sqlalchemy import or_ as _or
         from ...models import Precio
         hoy = fecha or date.today()
+        base = db.query(Precio.cantidad_minima, Precio.precio_unitario).filter(
+            Precio.lista_id == lista_id,
+            Precio.producto_id == producto_id,
+            Precio.presentacion == presentacion,
+            _or(Precio.vigencia_desde.is_(None), Precio.vigencia_desde <= hoy),
+            _or(Precio.vigencia_hasta.is_(None), Precio.vigencia_hasta >= hoy),
+        )
         fila = (
-            db.query(Precio.cantidad_minima, Precio.precio_unitario)
-            .filter(
-                Precio.lista_id == lista_id,
-                Precio.producto_id == producto_id,
-                Precio.presentacion == presentacion,
-                Precio.cantidad_minima <= cantidad,
-                _or(Precio.vigencia_desde.is_(None), Precio.vigencia_desde <= hoy),
-                _or(Precio.vigencia_hasta.is_(None), Precio.vigencia_hasta >= hoy),
-            )
+            base.filter(Precio.cantidad_minima <= cantidad)
             .order_by(Precio.cantidad_minima.desc())
             .first()
         )
+        # Debajo del tramo más chico se cobra ese (ver _precio_lista): el tramo
+        # que se reporta tiene que ser el MISMO que puso el precio, o
+        # "actualizar la lista" escribiría en un tramo que no habló.
+        if fila is None:
+            fila = base.order_by(Precio.cantidad_minima.asc()).first()
         if fila is not None and fila[1] == (res or {}).get("precio"):
             cantidad_minima = fila[0]
     return CotizacionOut(

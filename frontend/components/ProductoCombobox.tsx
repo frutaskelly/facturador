@@ -34,6 +34,9 @@ export function ProductoCombobox({
   clienteId = null,
   unidadBase,
   presentacion,
+  sugerencias,
+  onCrear,
+  aliasTexto,
 }: {
   label?: string;
   onSelect: (p: ProductoPick | null, texto: string) => void;
@@ -46,9 +49,19 @@ export function ProductoCombobox({
   unidadBase?: string;
   /** Presentación a la que va el precio del alta. */
   presentacion?: string;
+  /** Coincidencias ya calculadas (columna Match IA): se muestran al abrir, sin
+   * teclear nada. En cuanto el usuario escribe, manda la búsqueda del catálogo. */
+  sugerencias?: Candidato[];
+  /** Si se pasa, "Crear Producto Nuevo" delega en la pantalla (que ya tiene su
+   * propio popup con el texto pegado) en vez de abrir el modal interno. */
+  onCrear?: (texto: string) => void;
+  /** Texto con el que se aprende el alias al confirmar un cruce. Por defecto es
+   * lo tecleado; en Match IA es el texto ORIGINAL del cliente. */
+  aliasTexto?: string;
 }) {
   const [q, setQ] = useState(label ?? "");
   const [open, setOpen] = useState(false);
+  const [tecleado, setTecleado] = useState(false);
   const [cands, setCands] = useState<Candidato[]>([]);
   const [loading, setLoading] = useState(false);
   const [iaTried, setIaTried] = useState(false);
@@ -61,8 +74,11 @@ export function ProductoCombobox({
   const [createOpen, setCreateOpen] = useState(false);
   const [createNombre, setCreateNombre] = useState("");
 
-  useEffect(() => setQ(label ?? ""), [label]);
-  useEffect(() => setHi(0), [cands]);
+  useEffect(() => { setQ(label ?? ""); setTecleado(false); }, [label]);
+  // Mientras no se teclee, la lista son las sugerencias que ya trae la línea.
+  const mostrandoSug = !tecleado && !!sugerencias?.length;
+  const lista = mostrandoSug ? sugerencias! : cands;
+  useEffect(() => setHi(0), [cands, sugerencias]);
   // Enfoca cuando el flujo encadenado apunta a esta caja (no solo al montar).
   useEffect(() => {
     if (autoFocus) {
@@ -72,7 +88,7 @@ export function ProductoCombobox({
   }, [autoFocus]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || mostrandoSug) return;
     const t = q.trim();
     if (t.length < 2) {
       setCands([]);
@@ -98,7 +114,7 @@ export function ProductoCombobox({
       active = false;
       clearTimeout(timer);
     };
-  }, [q, open]);
+  }, [q, open, mostrandoSug]);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -127,7 +143,7 @@ export function ProductoCombobox({
   }
 
   async function pick(c: Candidato) {
-    const texto = q.trim();
+    const texto = (aliasTexto ?? q).trim();
     onSelect({
       producto_id: c.producto_id, sku: c.sku, nombre: c.nombre,
       presentaciones: c.presentaciones, presentacion_default: c.presentacion_default,
@@ -135,7 +151,13 @@ export function ProductoCombobox({
     }, texto);
     setQ(c.nombre);   // solo el nombre, sin SKU
     setOpen(false);
-    if (c.origen !== "exacto" && texto && texto.toLowerCase() !== c.nombre.toLowerCase()) {
+    // Con `aliasTexto` (Match IA) el origen habla de LO BUSCADO, no del texto del
+    // cliente: buscar "manzana amarilla" da un match exacto y aun así hay que
+    // aprender que "MANZANA GOLDEN SIN PICADURAS…" es ese producto.
+    const aprender = aliasTexto
+      ? !!texto && texto.toLowerCase() !== c.nombre.toLowerCase()
+      : c.origen !== "exacto" && !!texto && texto.toLowerCase() !== c.nombre.toLowerCase();
+    if (aprender) {
       // El usuario confirmó el cruce → se aprende para no volver a preguntar.
       try {
         await apiFetch("/api/v1/productos/alias", {
@@ -149,8 +171,10 @@ export function ProductoCombobox({
   }
 
   function abrirCrear() {
-    setCreateNombre(q.trim());
+    const texto = (aliasTexto ?? q).trim();
     setOpen(false);
+    if (onCrear) { onCrear(texto); return; }
+    setCreateNombre(texto);
     setCreateOpen(true);
   }
 
@@ -165,22 +189,28 @@ export function ProductoCombobox({
         autoFocus={autoFocus}
         onChange={(e) => {
           setQ(e.target.value);
+          setTecleado(true);
           setOpen(true);
           onSelect(null, e.target.value); // limpia la selección mientras escribe
         }}
-        onFocus={() => setOpen(true)}
+        onFocus={(e) => { setOpen(true); if (sugerencias?.length) e.currentTarget.select(); }}
         onPaste={onPaste}
         onKeyDown={(e) => {
-          if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHi((h) => Math.min(h + 1, Math.max(cands.length - 1, 0))); }
+          if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHi((h) => Math.min(h + 1, Math.max(lista.length - 1, 0))); }
           else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
-          else if (e.key === "Enter") { if (cands[hi]) { e.preventDefault(); pick(cands[hi]); } }
+          else if (e.key === "Enter") { if (lista[hi]) { e.preventDefault(); pick(lista[hi]); } }
           else if (e.key === "Escape") setOpen(false);
         }}
       />
-      {open && q.trim().length >= 2 && (
+      {open && (mostrandoSug || q.trim().length >= 2) && (
         <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-border bg-surface shadow-lg">
           {loading && <div className="px-3 py-2 text-sm text-muted">Buscando…</div>}
-          {!loading && cands.length === 0 && (
+          {!loading && mostrandoSug && (
+            <div className="px-3 pt-2 text-[11px] uppercase tracking-wide text-muted">
+              Sugerencias · escribe para buscar en todo el catálogo
+            </div>
+          )}
+          {!loading && lista.length === 0 && (
             <div className="px-3 py-2 text-sm text-muted">
               <div>Sin coincidencias.</div>
               {!iaTried && (
@@ -195,7 +225,7 @@ export function ProductoCombobox({
             </div>
           )}
           {!loading &&
-            cands.map((c, i) => (
+            lista.map((c, i) => (
               <button
                 key={c.producto_id}
                 type="button"

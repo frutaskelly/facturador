@@ -17,7 +17,7 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
 import {
-  NUEVO_PRODUCTO, fetchFiscalPreview, lineaDesdePegado, matchPresentacion, norm,
+  fetchFiscalPreview, lineaDesdePegado, matchPresentacion,
   nuevaLinea, pegarLocalFallback, unidadBaseDesde,
   type FiscalPreview, type LineaForm,
 } from "@/lib/lineas";
@@ -293,27 +293,27 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
     }
   }
 
-  function resolverMatchIA(key: string, sel: string) {
+  // Cambia el producto de una línea desde el buscador de la columna Match IA.
+  // El propio buscador aprende el alias con el texto ORIGINAL del cliente.
+  function onPickMatchIA(key: string, pick: ProductoPick | null) {
     const l = lineas.find((x) => x.key === key);
     if (!l) return;
-    if (sel === NUEVO_PRODUCTO) {
-      setLinea(key, { producto_id: "", label: "", presentaciones: [], presentacion: l.presPegada || l.presentacion, importe: 0 });
-      setCrearParaKey(key);
+    if (!pick) {
+      setLinea(key, { producto_id: "", label: "", presentaciones: [], precio: "", precioManual: false,
+                      importe: 0, precioLista: null, precioListaId: null, precioTramo: null });
       return;
     }
-    const cand = (l.candidatos ?? []).find((c) => c.producto_id === sel);
-    if (!cand) return;
-    // Aprende el alias cuando el usuario confirma un cruce no exacto.
-    if (cand.origen !== "exacto" && norm(l.texto) !== norm(cand.nombre)) {
-      apiFetch("/api/v1/productos/alias", {
-        method: "POST",
-        body: JSON.stringify({ texto: l.texto, producto_id: cand.producto_id }),
-      }).catch(() => {});
-    }
-    const presKeys = Object.keys(cand.presentaciones ?? {});
-    const presentacion = matchPresentacion(l.presPegada ?? l.presentacion, cand);
-    setLinea(key, { producto_id: cand.producto_id, label: cand.nombre, presentaciones: presKeys, presentacion });
-    cotizar(key, cand.producto_id, presentacion, l.cantidad);
+    const presKeys = Object.keys(pick.presentaciones ?? {});
+    const presentacion = matchPresentacion(l.presPegada ?? l.presentacion, pick);
+    setLinea(key, { producto_id: pick.producto_id, label: pick.nombre, presentaciones: presKeys, presentacion });
+    cotizar(key, pick.producto_id, presentacion, l.cantidad);
+  }
+
+  function crearDesdeMatchIA(key: string) {
+    const l = lineas.find((x) => x.key === key);
+    setLinea(key, { producto_id: "", label: "", presentaciones: [],
+                    presentacion: l?.presPegada || l?.presentacion || "", importe: 0 });
+    setCrearParaKey(key);
   }
 
   function aplicarProductoCreado(prod: ProductoCreado) {
@@ -627,7 +627,7 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
         <div className="space-y-2">
           <div className="hidden grid-cols-12 gap-2 px-1 text-xs text-muted sm:grid">
             <div className={showMatchIA ? "col-span-1" : "col-span-2"}>Cantidad</div>
-            <div className="col-span-3">Producto</div>
+            <div className="col-span-3">{showMatchIA ? "Producto del cliente" : "Producto"}</div>
             {showMatchIA && <div className="col-span-3 inline-flex items-center gap-1"><Sparkles size={12} /> Match IA</div>}
             <div className="col-span-2">Presentación</div>
             <div className="col-span-2">Precio</div>
@@ -638,7 +638,7 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
           {lineas.map((l) => {
             // En el desplegable Match IA solo se ofrecen coincidencias ≥80%.
             const cands = (l.candidatos ?? []).filter((c) => c.score >= 80);
-            const enCands = cands.some((c) => c.producto_id === l.producto_id);
+            const top = cands[0];
             return (
               <div key={l.key} className="grid grid-cols-12 items-start gap-2">
                 <div className={`col-span-3 ${showMatchIA ? "sm:col-span-1" : "sm:col-span-2"}`}>
@@ -654,29 +654,45 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
                   />
                 </div>
                 <div className="col-span-12 sm:col-span-3">
-                  <ProductoCombobox
-                    label={l.label || l.texto}
-                    onSelect={(p, t) => onPickProducto(l.key, p, t)}
-                    autoFocus={lineFocus?.key === l.key && lineFocus?.field === "producto"}
-                    onPaste={(e) => {
-                      const text = e.clipboardData.getData("text");
-                      if (text.includes("\n")) { e.preventDefault(); void pegarColumnaProducto(l.key, text); }
-                    }}
-                  />
+                  {showMatchIA && l.fromPaste ? (
+                    // Lo que mandó el cliente se queda a la vista para poder
+                    // juzgar el cruce; el producto del catálogo se elige al lado.
+                    <div className="rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm" title={l.texto}>
+                      {l.texto}
+                    </div>
+                  ) : (
+                    <ProductoCombobox
+                      label={l.label || l.texto}
+                      onSelect={(p, t) => onPickProducto(l.key, p, t)}
+                      autoFocus={lineFocus?.key === l.key && lineFocus?.field === "producto"}
+                      onPaste={(e) => {
+                        const text = e.clipboardData.getData("text");
+                        if (text.includes("\n")) { e.preventDefault(); void pegarColumnaProducto(l.key, text); }
+                      }}
+                    />
+                  )}
                 </div>
                 {showMatchIA && (
                   <div className="col-span-12 sm:col-span-3">
                     {l.fromPaste ? (
-                      <Select
-                        value={l.producto_id || NUEVO_PRODUCTO}
-                        onChange={(e) => resolverMatchIA(l.key, e.target.value)}
-                      >
-                        {l.producto_id && !enCands && <option value={l.producto_id}>{l.label || "Producto elegido"}</option>}
-                        {cands.map((c) => (
-                          <option key={c.producto_id} value={c.producto_id}>{c.nombre} · {c.score}%{c.origen === "ia" ? " (IA)" : ""}</option>
-                        ))}
-                        <option value={NUEVO_PRODUCTO}>＋ Crear producto nuevo</option>
-                      </Select>
+                      <>
+                        <ProductoCombobox
+                          label={l.label}
+                          placeholder="Buscar producto…"
+                          sugerencias={cands}
+                          aliasTexto={l.texto}
+                          clienteId={clienteId || null}
+                          unidadBase={unidadBaseDesde(l.presPegada)}
+                          presentacion={l.presentacion}
+                          onSelect={(p) => onPickMatchIA(l.key, p)}
+                          onCrear={() => crearDesdeMatchIA(l.key)}
+                        />
+                        {l.producto_id && top && top.producto_id === l.producto_id && (
+                          <div className="mt-0.5 text-[11px] text-muted">
+                            {top.score}%{top.origen === "ia" ? " (IA)" : ""}
+                          </div>
+                        )}
+                      </>
                     ) : (
                       <span className="text-xs text-muted">—</span>
                     )}

@@ -142,6 +142,22 @@ def test_tiers_por_volumen(client, env, auth_as):
     assert float(_cot(client, h, pid, cliente_id=env["cli3"], cantidad="15")["precio"]) == 20.0
 
 
+def test_cantidad_fraccionaria_usa_el_tramo_mas_chico(client, env, auth_as):
+    """Medio kilo NO es «sin precio».
+
+    Los tramos son descuentos por volumen, no una cantidad mínima de venta. Una
+    lista que arranca en `cantidad_minima=1` tiene que cobrar ese mismo precio a
+    0.5 — es lo que cobra el SAE, y sin esto la primera línea de un pegado de
+    Excel con 0.5 kg entraba a la remisión sin precio y trababa confirmarla.
+    """
+    auth_as(env["admin"]); h = _hdr(env["admin"]); pid = env["aguacate"]
+    medio = _cot(client, h, pid, cliente_id=env["cli3"], cantidad="0.5")
+    assert float(medio["precio"]) == 25.0
+    # El tramo reportado es el que puso el precio: «actualizar la lista» no debe
+    # escribir en el de mayoreo.
+    assert medio["cantidad_minima"] == 1
+
+
 def test_sucursal_crud(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
     r = client.post("/api/v1/sucursales", headers=h, json={"cliente_id": env["cli1"], "nombre": "CDMX"})

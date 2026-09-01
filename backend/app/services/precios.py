@@ -19,7 +19,10 @@ Pachuca a secas). Los pesos NO viven aquí: son la columna generada
 `lista_asignaciones.especificidad`, para declararlos una sola vez.
 
 Dentro de una lista se toma el tier cuyo `cantidad_minima` ≤ cantidad más alto
-(así "compra más → mejor precio"). Todo filtrado por vigencia.
+(así "compra más → mejor precio"), y por debajo del tier más chico se cobra ese
+mismo (los tiers son descuentos por volumen, no una cantidad mínima de venta:
+medio kilo de una lista que arranca en 1 sí tiene precio). Todo filtrado por
+vigencia.
 """
 from __future__ import annotations
 
@@ -85,10 +88,19 @@ def _precio_lista(db, lista_id, producto_id, presentacion, cantidad, fecha):
         Precio.lista_id == lista_id,
         Precio.producto_id == producto_id,
         Precio.presentacion == presentacion,
-        Precio.cantidad_minima <= cantidad,
     )
-    q = _vigente(q, Precio, fecha).order_by(Precio.cantidad_minima.desc())
-    row = q.first()
+    q = _vigente(q, Precio, fecha)
+    row = (
+        q.filter(Precio.cantidad_minima <= cantidad)
+        .order_by(Precio.cantidad_minima.desc())
+        .first()
+    )
+    if row is None:
+        # Debajo del tramo más chico NO es "sin precio": los tramos son
+        # descuentos por volumen, no una cantidad mínima de venta. Medio kilo de
+        # una lista que arranca en 1 se cobra al precio de ese tramo — es lo que
+        # cobra el SAE. Misma regla que el cotizador de órdenes.
+        row = q.order_by(Precio.cantidad_minima.asc()).first()
     return row[0] if row else None
 
 
@@ -400,10 +412,14 @@ def resolver_precios_lote(
             lst.sort(key=lambda t: t[0], reverse=True)
 
     def _precio_en(lista_id, pid, pres, cantidad) -> Optional[Decimal]:
-        for cmin, precio in tramos.get((lista_id, pid, pres), ()):
+        # Ordenados cantidad_minima desc: el primero que quepa es el tramo. Si
+        # ninguno cabe, el último de la lista es el tramo más chico — ver
+        # _precio_lista: debajo del primer tramo se cobra ese, no "sin precio".
+        filas = tramos.get((lista_id, pid, pres), ())
+        for cmin, precio in filas:
             if cmin <= cantidad:
                 return precio
-        return None
+        return filas[-1][1] if filas else None
 
     resultados: list[Optional[dict]] = []
     for it, intentos in zip(items, intentos_por_item):

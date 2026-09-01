@@ -119,7 +119,10 @@ export async function pegarLocalFallback(raw: string): Promise<LineaPegada[]> {
 // Mapea la presentación pegada (texto libre) a una de las presentaciones REALES
 // del producto elegido: 'KILOGRAMOS' → 'KILO'. Si no calza, usa la default /
 // unidad base / la primera disponible.
-export function matchPresentacion(pegada: string, cand?: Candidato): string {
+export function matchPresentacion(
+  pegada: string,
+  cand?: Pick<Candidato, "presentaciones" | "presentacion_default" | "unidad_base">,
+): string {
   const keys = Object.keys(cand?.presentaciones ?? {});
   if (keys.length === 0) return (pegada || cand?.unidad_base || "PIEZA").toUpperCase();
   const p = norm(pegada);
