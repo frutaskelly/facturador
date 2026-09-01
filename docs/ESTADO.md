@@ -9,8 +9,8 @@ carpeta y leer este archivo.
 |---|---|
 | Rama base | `main` — el commit de este archivo, sobre `2a8b29f` (Match IA + tramos de precio) — igual que `origin/main` salvo este commit de docs |
 | Remoto | `frutaskelly/facturador` |
-| Working tree | limpio |
-| Worktrees | Ninguno. El `wrap-all` de esta noche cerró `amazing-gould` (vacía), `nervous-poincare` (squash #78) y `remision-file-upload` (ya en `main`), y removió `facturador-remision-productos` al subir su trabajo |
+| Working tree | limpio en el padre y en la worktree |
+| Worktrees | Solo la de esta sesión (`elastic-morse`, en `main`, limpia). El cierre de la noche removió las 4 restantes y podó **9 ramas locales** ya fusionadas — las de `catálogo-multicliente` (#34) y `vocabulario` (#74) verificadas por `headRefOid`, no por conteo de commits |
 | PRs abiertos | ninguno (#78 por squash; `2a8b29f` entró por fast-forward directo) |
 | Migración head | `0063_export_pedido_rastro`, sin cambios: ni #78 ni `2a8b29f` traen migración |
 
