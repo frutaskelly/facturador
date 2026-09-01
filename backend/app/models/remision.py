@@ -14,6 +14,7 @@ fiscal coupling (factura_id, invoicing states, CFDI) → Phase 6; and v1's
 AI/multichannel ingestion + government-contract links (cut from v2).
 """
 from sqlalchemy import (
+    Boolean,
     Column,
     Date,
     DateTime,
@@ -94,6 +95,17 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     su_pedido = Column(String(30))
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+
+    # Llegó de la bandeja SIN que nadie la revisara ("pasar sin revisar"): la
+    # remisión ya tiene folio, pero sus unidades y precios no los ha visto un
+    # humano. Mientras esté encendida no se confirma, no se factura y no sale al
+    # export de SAE — el freno ES la razón de que se pueda pasar sin revisar.
+    revision_pendiente = Column(Boolean, nullable=False, server_default=text("false"))
+    # Las partidas de la orden que NO cruzaron a ningún producto, tal como
+    # venían: [{numero, descripcion, cantidad, unidad, clave, precio, notas}].
+    # No pueden ser líneas (`producto_id` es NOT NULL y de él cuelgan precio,
+    # impuesto e inventario), pero tampoco se tiran: se cruzan a mano al revisar.
+    partidas_por_cruzar = Column(JSONB, nullable=False, server_default="[]")
 
     # POS (Fase 0): estación donde el pedido ESPERA (pedido/caja/almacen/salida/
     # completado); NULL = remisión normal fuera del POS. El pipeline activo lo

@@ -293,6 +293,9 @@ export type Remision = {
   fecha_remision: string;
   fecha_entrega?: string | null;
   estado: "BORRADOR" | "RESERVADO" | "CONFIRMADA" | "FACTURADA" | "CANCELADA";
+  // Llegó de la bandeja de órdenes SIN que nadie la revisara: no se confirma,
+  // no se factura y no sale a SAE hasta que alguien la dé por revisada.
+  revision_pendiente?: boolean;
   canal: string;
   factura_folio?: string | null;
   // Folio de la factura de SAE que ampara la remisión (relación con el legado).
@@ -333,7 +336,24 @@ export type Devolucion = {
   lineas: LineaDevolucion[];
 };
 
-export type RemisionDetail = Remision & { lineas: LineaRemision[]; devoluciones?: Devolucion[] };
+/** Una partida de la orden que no cruzó a ningún producto, tal como venía. No
+ *  puede ser línea de la remisión (esas exigen producto): es lo que falta por
+ *  cruzar a mano para dar la remisión por revisada. */
+export type PartidaPorCruzar = {
+  numero: number;
+  descripcion: string;
+  cantidad?: string | null;
+  unidad?: string | null;
+  clave?: string | null;
+  precio?: string | null;
+  notas?: string | null;
+};
+
+export type RemisionDetail = Remision & {
+  lineas: LineaRemision[];
+  devoluciones?: Devolucion[];
+  partidas_por_cruzar?: PartidaPorCruzar[];
+};
 
 export type LineaFactura = {
   numero_linea: number;

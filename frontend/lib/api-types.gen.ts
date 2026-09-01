@@ -1944,6 +1944,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oc-recibidas/{oc_id}/crear-remision-sin-revisar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Crear Remision Sin Revisar
+         * @description Pasa la orden a Remisiones tal como está, para revisarla allá.
+         *
+         *     El atajo de un clic (`crear-remision-auto`) solo acepta la orden perfecta;
+         *     cuando algo no cuadra, la orden se quedaba en la bandeja acumulándose. Esto
+         *     la pasa igual: cada partida entra con el producto que mejor cruzó, la
+         *     unidad que se pudo y el precio de su lista, y lo dudoso queda escrito en las
+         *     notas de su línea. Las partidas que no cruzaron a ningún producto viajan
+         *     aparte, en `partidas_por_cruzar`, para cruzarlas a mano en la remisión.
+         *
+         *     La remisión nace marcada `revision_pendiente`, y con eso no se confirma, no
+         *     se factura y no sale al export de SAE hasta que alguien la mire. Sin ese
+         *     freno esto sería una manera de mandar al SAT lo que dijo una foto.
+         */
+        post: operations["crear_remision_sin_revisar_api_v1_oc_recibidas__oc_id__crear_remision_sin_revisar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/oc-recibidas/{oc_id}/descartar": {
         parameters: {
             query?: never;
@@ -7246,6 +7277,29 @@ export interface components {
              */
             usar_ia: boolean;
         };
+        /**
+         * PartidaPorCruzarOut
+         * @description Una partida de la orden que no encontró producto en el catálogo, tal
+         *     como venía en el documento. No es una línea de la remisión (esas exigen
+         *     producto): es lo que falta por cruzar a mano para dar la remisión por
+         *     revisada.
+         */
+        PartidaPorCruzarOut: {
+            /** Cantidad */
+            cantidad?: string | null;
+            /** Clave */
+            clave?: string | null;
+            /** Descripcion */
+            descripcion: string;
+            /** Notas */
+            notas?: string | null;
+            /** Numero */
+            numero: number;
+            /** Precio */
+            precio?: string | null;
+            /** Unidad */
+            unidad?: string | null;
+        };
         /** PermissionOut */
         PermissionOut: {
             /** Accion */
@@ -8258,6 +8312,11 @@ export interface components {
             /** Oc Id */
             oc_id?: string | null;
             /**
+             * Partidas Por Cruzar
+             * @default []
+             */
+            partidas_por_cruzar: components["schemas"]["PartidaPorCruzarOut"][];
+            /**
              * Pos Asignaciones
              * @default {}
              */
@@ -8266,6 +8325,11 @@ export interface components {
             pos_etapa?: string | null;
             /** Proyecto Id */
             proyecto_id?: string | null;
+            /**
+             * Revision Pendiente
+             * @default false
+             */
+            revision_pendiente: boolean;
             /** Serie Id */
             serie_id?: string | null;
             /** Su Pedido */
@@ -8354,6 +8418,11 @@ export interface components {
             pos_etapa?: string | null;
             /** Proyecto Id */
             proyecto_id?: string | null;
+            /**
+             * Revision Pendiente
+             * @default false
+             */
+            revision_pendiente: boolean;
             /** Serie Id */
             serie_id?: string | null;
             /** Su Pedido */
@@ -8397,6 +8466,8 @@ export interface components {
             nota_entrega?: string | null;
             /** Notas */
             notas?: string | null;
+            /** Partidas Por Cruzar */
+            partidas_por_cruzar?: components["schemas"]["PartidaPorCruzarOut"][] | null;
             /**
              * Permitir Negativos
              * @default false
@@ -8404,6 +8475,8 @@ export interface components {
             permitir_negativos: boolean;
             /** Proyecto Id */
             proyecto_id?: string | null;
+            /** Revision Pendiente */
+            revision_pendiente?: boolean | null;
             /** Su Pedido */
             su_pedido?: string | null;
             /** Sucursal Id */
@@ -13522,6 +13595,41 @@ export interface operations {
             };
         };
     };
+    crear_remision_sin_revisar_api_v1_oc_recibidas__oc_id__crear_remision_sin_revisar_post: {
+        parameters: {
+            query?: {
+                almacen_id?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     descartar_api_v1_oc_recibidas__oc_id__descartar_post: {
         parameters: {
             query?: {
@@ -15541,6 +15649,7 @@ export interface operations {
                 cliente_id?: string | null;
                 fecha_desde?: string | null;
                 fecha_hasta?: string | null;
+                revision_pendiente?: boolean | null;
                 limit?: number;
                 offset?: number;
             };

@@ -6,7 +6,7 @@
 // es la pantalla de trabajo diaria, no un popup.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ExternalLink, PencilLine, RotateCcw, Trash2 } from "lucide-react";
+import { ExternalLink, FastForward, PencilLine, RotateCcw, Trash2 } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -114,6 +114,10 @@ export default function Page() {
   const [proyectos, setProyectos] = useState<Proyecto[]>([]);
   const [grupos, setGrupos] = useState<GrupoBandeja[]>([]);
   const [aDescartar, setADescartar] = useState<OCRecibida | null>(null);
+  // La orden que se va a pasar a Remisiones TAL COMO ESTÁ. Se pregunta antes:
+  // crear la remisión quema un folio de la serie y eso no se recupera.
+  const [aPasar, setAPasar] = useState<OCRecibida | null>(null);
+  const [pasando, setPasando] = useState(false);
 
   const LIMIT = 100;
 
@@ -278,6 +282,28 @@ export default function Page() {
     }
   }
 
+  /** Pasa la orden a Remisiones sin revisarla aquí: cada partida entra con el
+   *  producto que mejor cruzó y lo dudoso queda anotado en su línea. La
+   *  remisión nace marcada «por revisar» y no se confirma ni se factura hasta
+   *  que alguien la mire. */
+  async function pasarSinRevisar() {
+    if (!aPasar) return;
+    setPasando(true);
+    try {
+      const d = await apiFetch<OCRecibidaDetalle>(
+        `/api/v1/oc-recibidas/${aPasar.id}/crear-remision-sin-revisar`,
+        { method: "POST" }
+      );
+      toast.success(`Remisión ${d.remision_folio ?? ""} creada — te espera en Remisiones para revisar`);
+      setAPasar(null);
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo pasar la orden");
+    } finally {
+      setPasando(false);
+    }
+  }
+
   async function reabrir(oc: OCRecibida) {
     try {
       await apiFetch(`/api/v1/oc-recibidas/${oc.id}/reabrir`, { method: "POST" });
@@ -376,6 +402,19 @@ export default function Page() {
               >
                 <ExternalLink size={16} />
               </a>
+            ) : null}
+            {r.estado !== "DESCARTADA" && !r.remision_id && r.cliente_id ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAPasar(r);
+                }}
+                className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
+                aria-label="Pasar a Remisiones sin revisar"
+                title="Pasar a Remisiones sin revisar (se revisa allá)"
+              >
+                <FastForward size={16} />
+              </button>
             ) : null}
             {r.estado === "DESCARTADA" ? (
               <button
@@ -759,6 +798,20 @@ export default function Page() {
         </div>
       </Modal>
 
+      <ConfirmDialog
+        open={aPasar !== null}
+        title="Pasar a Remisiones sin revisar"
+        message={
+          `La OC ${aPasar?.folio_externo ?? ""} se vuelve remisión TAL COMO ESTÁ: cada partida entra con el ` +
+          "producto que mejor cruzó, la unidad que se pudo y el precio de su lista, y lo dudoso queda anotado " +
+          "en la línea. Las partidas que no cruzaron a ningún producto viajan aparte, para cruzarlas allá. " +
+          "La remisión queda marcada «por revisar»: no se confirma, no se factura y no sale a SAE hasta que la revises. " +
+          "Se consume un folio de la serie."
+        }
+        confirmLabel={pasando ? "Pasando…" : "Pasar sin revisar"}
+        onClose={() => setAPasar(null)}
+        onConfirm={pasarSinRevisar}
+      />
       <ConfirmDialog
         open={aDescartar !== null}
         title="Descartar la orden"

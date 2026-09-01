@@ -10570,6 +10570,80 @@
     "title": "ParsePegadoIn",
     "type": "object"
    },
+   "PartidaPorCruzarOut": {
+    "description": "Una partida de la orden que no encontró producto en el catálogo, tal\ncomo venía en el documento. No es una línea de la remisión (esas exigen\nproducto): es lo que falta por cruzar a mano para dar la remisión por\nrevisada.",
+    "properties": {
+     "cantidad": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cantidad"
+     },
+     "clave": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave"
+     },
+     "descripcion": {
+      "title": "Descripcion",
+      "type": "string"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "numero": {
+      "title": "Numero",
+      "type": "integer"
+     },
+     "precio": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Precio"
+     },
+     "unidad": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad"
+     }
+    },
+    "required": [
+     "numero",
+     "descripcion"
+    ],
+    "title": "PartidaPorCruzarOut",
+    "type": "object"
+   },
    "PermissionOut": {
     "properties": {
      "accion": {
@@ -13666,6 +13740,14 @@
       ],
       "title": "Oc Id"
      },
+     "partidas_por_cruzar": {
+      "default": [],
+      "items": {
+       "$ref": "#/components/schemas/PartidaPorCruzarOut"
+      },
+      "title": "Partidas Por Cruzar",
+      "type": "array"
+     },
      "pos_asignaciones": {
       "default": {},
       "title": "Pos Asignaciones",
@@ -13693,6 +13775,11 @@
        }
       ],
       "title": "Proyecto Id"
+     },
+     "revision_pendiente": {
+      "default": false,
+      "title": "Revision Pendiente",
+      "type": "boolean"
      },
      "serie_id": {
       "anyOf": [
@@ -13978,6 +14065,11 @@
       ],
       "title": "Proyecto Id"
      },
+     "revision_pendiente": {
+      "default": false,
+      "title": "Revision Pendiente",
+      "type": "boolean"
+     },
      "serie_id": {
       "anyOf": [
        {
@@ -14176,6 +14268,20 @@
       ],
       "title": "Notas"
      },
+     "partidas_por_cruzar": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/PartidaPorCruzarOut"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Partidas Por Cruzar"
+     },
      "permitir_negativos": {
       "default": false,
       "title": "Permitir Negativos",
@@ -14192,6 +14298,17 @@
        }
       ],
       "title": "Proyecto Id"
+     },
+     "revision_pendiente": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Revision Pendiente"
      },
      "su_pedido": {
       "anyOf": [
@@ -25421,6 +25538,88 @@
     ]
    }
   },
+  "/api/v1/oc-recibidas/{oc_id}/crear-remision-sin-revisar": {
+   "post": {
+    "description": "Pasa la orden a Remisiones tal como está, para revisarla allá.\n\nEl atajo de un clic (`crear-remision-auto`) solo acepta la orden perfecta;\ncuando algo no cuadra, la orden se quedaba en la bandeja acumulándose. Esto\nla pasa igual: cada partida entra con el producto que mejor cruzó, la\nunidad que se pudo y el precio de su lista, y lo dudoso queda escrito en las\nnotas de su línea. Las partidas que no cruzaron a ningún producto viajan\naparte, en `partidas_por_cruzar`, para cruzarlas a mano en la remisión.\n\nLa remisión nace marcada `revision_pendiente`, y con eso no se confirma, no\nse factura y no sale al export de SAE hasta que alguien la mire. Sin ese\nfreno esto sería una manera de mandar al SAT lo que dijo una foto.",
+    "operationId": "crear_remision_sin_revisar_api_v1_oc_recibidas__oc_id__crear_remision_sin_revisar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "oc_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Oc Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "almacen_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Almacen Id"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OCRecibidaDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Crear Remision Sin Revisar",
+    "tags": [
+     "bandeja de OC"
+    ]
+   }
+  },
   "/api/v1/oc-recibidas/{oc_id}/descartar": {
    "post": {
     "operationId": "descartar_api_v1_oc_recibidas__oc_id__descartar_post",
@@ -29688,6 +29887,22 @@
         }
        ],
        "title": "Fecha Hasta"
+      }
+     },
+     {
+      "in": "query",
+      "name": "revision_pendiente",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Revision Pendiente"
       }
      },
      {
