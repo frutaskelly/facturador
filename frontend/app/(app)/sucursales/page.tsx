@@ -67,7 +67,8 @@ export default function SucursalesPage() {
   const seriesFacRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
   const seriesRemRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=REMISION&activa=true&limit=200");
   const overridesRes = useResource<Page<PrecioOverride>>(
-    verOvr ? "/api/v1/precios/overrides?limit=500" : null,
+    // El endpoint topa `limit` en 200.
+    verOvr ? "/api/v1/precios/overrides?limit=200" : null,
   );
 
   const clientes = clientesRes.data?.items ?? [];
