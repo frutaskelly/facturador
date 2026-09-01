@@ -206,6 +206,7 @@ def test_importar_crea_vincula_alias_y_precios(client, env, auth_as):
     r = client.post("/api/v1/productos/importar", headers=h, json={
         "cliente_id": env["cli_id"],
         "guardar_precios": True,
+        "esquema_default_id": _esquema_lote(env["tenant_id"]),
         "filas": [
             {  # el cliente llama "JITOMATE ROMA" a nuestro saladett
                 "accion": "vincular", "producto_id": env["prod_id"],
@@ -270,6 +271,7 @@ def test_importar_precios_sin_lista_falla(client, env, auth_as):
 def test_importar_fila_mala_no_tira_el_lote(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
     r = client.post("/api/v1/productos/importar", headers=h, json={
+        "esquema_default_id": _esquema_lote(env["tenant_id"]),
         "filas": [
             {"accion": "crear", "nombre": "PRODUCTO BUENO A"},
             {"accion": "crear", "nombre": "PRODUCTO SKU DUP", "sku": "00000010"},  # choca
@@ -615,6 +617,7 @@ def test_importar_categoria_esquema_y_baja(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
     r = client.post("/api/v1/productos/importar", headers=h, json={
         "crear_categorias": True,
+        "esquema_default_id": esq_id,
         "filas": [
             {"accion": "crear", "nombre": "REFRESCO COLA 600", "unidad_base": "PIEZA",
              "categoria": "BEBIDAS", "esquema": "IVA16X"},
@@ -641,6 +644,65 @@ def test_importar_categoria_esquema_y_baja(client, env, auth_as):
         assert p2.activo is False and p2.categoria_id == cat.id
     finally:
         db.close()
+
+
+def test_importar_rechaza_alta_sin_esquema_de_impuesto(client, env, auth_as):
+    """Un producto sin esquema nace sin IVA y su CFDI sale mal, así que el alta
+    masiva lo rechaza — que es como se colaron 10 productos de una lista de 118.
+
+    Se revisa ANTES de escribir: el lote entero se rechaza nombrando las filas,
+    en vez de crear las buenas y dejar las malas a medias."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/importar", headers=h, json={
+        "filas": [
+            {"accion": "crear", "nombre": "AGUACATILLO", "unidad_base": "KILO"},
+            {"accion": "crear", "nombre": "PLATANO ROTAN", "unidad_base": "KILO"},
+        ],
+    })
+    assert r.status_code == 422, r.text
+    detalle = r.json()["detail"]
+    assert "esquema de impuesto" in detalle
+    assert "AGUACATILLO" in detalle          # dice CUÁLES, no solo cuántas
+
+    db = SessionLocal()
+    try:
+        assert db.query(Producto).filter(
+            Producto.tenant_id == env["tenant_id"],
+            Producto.nombre.in_(["AGUACATILLO", "PLATANO ROTAN"])).count() == 0
+    finally:
+        db.close()
+
+
+def test_importar_sin_esquema_pasa_con_el_default_del_lote(client, env, auth_as):
+    """La salida es elegir un esquema para todo el lote: entonces sí entra, y
+    los productos nacen con él."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    esq_lote = _esquema_lote(env["tenant_id"])
+    r = client.post("/api/v1/productos/importar", headers=h, json={
+        "esquema_default_id": esq_lote,
+        "filas": [{"accion": "crear", "nombre": "AGUACATILLO", "unidad_base": "KILO"}],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["creados"] == 1
+    db = SessionLocal()
+    try:
+        p = db.query(Producto).filter(
+            Producto.tenant_id == env["tenant_id"], Producto.nombre == "AGUACATILLO").one()
+        assert str(p.esquema_impuesto_id) == esq_lote
+    finally:
+        db.close()
+
+
+def test_importar_vincular_sin_esquema_si_pasa(client, env, auth_as):
+    """Vincular NO exige esquema: la fila se pega a un producto que ya existe y
+    conserva el suyo. La regla es solo para lo que nace."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/importar", headers=h, json={
+        "filas": [{"accion": "vincular", "producto_id": env["prod_id"],
+                   "nombre": "JITOMATE ROMA", "unidad_base": "KILO"}],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["vinculados"] == 1
 
 
 # ─── F3: un producto, varias presentaciones (Cilantro) ───────────────────────
@@ -700,8 +762,10 @@ def test_importar_variante_presentacion(client, env, auth_as):
 # ─── F4: crear lista al importar y asignarla (default / clientes) ────────────
 def test_importar_crea_lista_y_se_asigna(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
+    esq_lote = _esquema_lote(env["tenant_id"])
     r = client.post("/api/v1/productos/importar", headers=h, json={
         "guardar_precios": True, "lista_nombre": "Lista Mayoreo 2026",
+        "esquema_default_id": esq_lote,
         "filas": [{"accion": "crear", "nombre": "AZUCAR ESTANDAR 50 KG",
                    "unidad_base": "BULTO", "precio": "1150"}],
     })
@@ -732,6 +796,7 @@ def test_importar_crea_lista_y_se_asigna(client, env, auth_as):
     # Otra lista marcada default → la anterior se limpia (solo una default).
     r = client.post("/api/v1/productos/importar", headers=h, json={
         "guardar_precios": True, "lista_nombre": "Lista Menudeo",
+        "esquema_default_id": esq_lote,
         "filas": [{"accion": "crear", "nombre": "SAL DE MESA 1 KG", "precio": "18"}],
     })
     lista2 = r.json()["lista_id"]
@@ -1157,6 +1222,25 @@ def test_encabezados_con_rotulo_propio():
 
 
 # ─── Esquema de impuesto y match de categorías (preview con columnas propias) ─
+def _esquema_lote(tenant_id) -> str:
+    """Crea un esquema y devuelve su id, para los lotes que dan de alta.
+
+    Dar de alta sin esquema está prohibido (el producto nacería sin IVA), así
+    que todo import con filas "crear" tiene que elegir uno. Se crea aquí y no en
+    el fixture porque hay pruebas que dependen de un tenant SIN esquemas."""
+    db = SessionLocal()
+    try:
+        esq = db.query(EsquemaImpuesto).filter(
+            EsquemaImpuesto.tenant_id == tenant_id, EsquemaImpuesto.codigo == "LOTE").first()
+        if esq is None:
+            esq = EsquemaImpuesto(tenant_id=tenant_id, codigo="LOTE",
+                                  nombre="IVA 0% del lote", iva_tasa=Decimal("0"))
+            db.add(esq); db.commit()
+        return str(esq.id)
+    finally:
+        db.close()
+
+
 def _esquemas_base(tenant_id):
     """IVA 0% alimentos + IVA 16% + refresco (IEPS cuota) + botana (IEPS tasa)."""
     return [
@@ -1406,6 +1490,9 @@ def test_importar_no_escala_las_consultas_con_las_filas(client, env, auth_as):
     from app.core.db import engine
 
     auth_as(env["admin"]); h = _hdr(env["admin"])
+    # Fuera del contador a propósito: crear el esquema es preparación, no parte
+    # de lo que mide la prueba.
+    esq_lote = _esquema_lote(env["tenant_id"])
 
     def _importar(n: int) -> int:
         sentencias: list[str] = []
@@ -1417,6 +1504,7 @@ def test_importar_no_escala_las_consultas_con_las_filas(client, env, auth_as):
                 "cliente_ids": [env["cli_id"]],
                 "guardar_precios": True,
                 "crear_categorias": True,
+                "esquema_default_id": esq_lote,
                 "filas": [
                     {"accion": "crear", "nombre": f"PRODUCTO LOTE {n}-{i}",
                      "unidad_base": "KILO", "categoria": "CATEGORIA LOTE",
@@ -1444,6 +1532,7 @@ def test_import_reporta_producto_por_fila(client, env, auth_as):
     último paso para guardar el catálogo del cliente sin resubir el archivo."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
     r = client.post("/api/v1/productos/importar", headers=h, json={
+        "esquema_default_id": _esquema_lote(env["tenant_id"]),
         "filas": [
             {"accion": "crear", "nombre": "PRODUCTO FINAL A", "sku": "FIN-A",
              "unidad_base": "KILO", "codigo_cliente": "FIN-A", "nombre_cliente": "PRODUCTO FINAL A"},
@@ -1518,6 +1607,7 @@ def test_catalogo_cliente_batch_no_escala_consultas(client, env, auth_as):
 
     auth_as(env["admin"]); h = _hdr(env["admin"])
     imp = client.post("/api/v1/productos/importar", headers=h, json={
+        "esquema_default_id": _esquema_lote(env["tenant_id"]),
         "filas": [{"accion": "crear", "nombre": f"PRODUCTO CAT {i}", "unidad_base": "KILO"}
                   for i in range(40)],
     }).json()
