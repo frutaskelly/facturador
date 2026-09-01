@@ -1354,6 +1354,15 @@ def create_producto(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
+    # Nada nace sin esquema de impuesto: sin él el producto no lleva IVA/IEPS y
+    # su CFDI sale mal. Va aquí y no en el schema porque `ProductoBase` lo
+    # comparte la SALIDA, y los productos viejos que aún tienen el hueco deben
+    # poder leerse para justamente poder arreglarlos.
+    if payload.esquema_impuesto_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Elige el esquema de impuesto: sin él el producto no lleva IVA y su factura saldría mal",
+        )
     _validate_fks(
         db,
         categoria_id=payload.categoria_id,
@@ -1446,6 +1455,13 @@ def update_producto(
     if "categoria_id" in data:
         ensure_fk(db, CategoriaProducto, data["categoria_id"], "categoria_id")
     if "esquema_impuesto_id" in data:
+        # Quitárselo es la otra forma de dejar un producto sin IVA. Se puede
+        # CAMBIAR, nunca vaciar.
+        if data["esquema_impuesto_id"] is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Elige el esquema de impuesto: sin él el producto no lleva IVA y su factura saldría mal",
+            )
         ensure_fk(db, EsquemaImpuesto, data["esquema_impuesto_id"], "esquema_impuesto_id")
     for key, value in data.items():
         setattr(obj, key, value)
