@@ -12,10 +12,11 @@ el que SAE ya demostró aceptar:
   FOLIO+CLIENTE+FECHA (regla oficial del manual Aspel §2.4). El FOLIO va
   pre-resuelto: serie + número alineado a la derecha en 10 posiciones
   ("ZHGO       233" = 14 chars) — el ancho NO es por serie, es serie+10.
-- PEDIDO: 22 columnas, hoja "Pedidos", sin columnas CFDI; el FOLIO lleva la OC
-  del cliente (su_pedido) y SAE asigna su propio consecutivo al importar.
+- PEDIDO: 22 columnas, hoja "Pedidos", sin columnas CFDI; el FOLIO es el
+  CONSECUTIVO DE PEDIDOS DEL SAE relleno a 10 dígitos con ceros ("0000000134"),
+  no la OC del cliente — esa va en "SU PEDIDO" y en la Observación.
 
-Tres trampas que este módulo hereda resueltas del bot:
+Cuatro trampas que este módulo hereda resueltas del bot:
 
 1. **FECHA en MM/DD/YYYY.** La PC donde se importa interpreta la columna con el
    regional de Windows (mes/día/año); con DD/MM entraron facturas con la fecha
@@ -25,6 +26,14 @@ Tres trampas que este módulo hereda resueltas del bot:
 3. **La Observación es la llave de conciliación**: "OC <su_pedido> …" es como
    el resto del sistema (bot, Master, estado de cuenta) casa la factura de SAE
    con su orden. Se arma con el MISMO formato.
+
+4. **El FOLIO del PEDIDO es el consecutivo del SAE, no la OC.** Durante meses
+   el masivo de pedidos escribió la OC del cliente ahí ("CE-34CER-MAR"); el
+   layout pide el consecutivo de FACTP02 de esa empresa
+   (KnowHow_Massivos_SAE.md §2, REGLAS_PEDIDOS.md Regla 2), que es como se
+   importaron los pedidos que sí quedaron bien ("0000001336"). Los pedidos no
+   llevan serie: una sola ('STAND.', TIP_DOC='P') numerada POR EMPRESA, así
+   que el operador confirma el folio inicial contra SAE igual que en facturas.
 
 El archivo se escribe con xlwt (.xls Excel 97-2003): es el formato de los
 masivos que SAE ya importa hoy — no se innova en el formato del intercambio.
@@ -80,6 +89,24 @@ def folio_sae(serie: str, numero: int) -> str:
     return f"{serie}{str(numero).rjust(10)}"
 
 
+# Los PEDIDOS de SAE no tienen serie: una sola ('STAND.', TIP_DOC='P') con un
+# consecutivo POR EMPRESA. Se usa esta pseudo-serie como llave para que el
+# pedido recorra el mismo camino que la factura (preview → folio que el
+# operador confirma contra SAE → contador del lote).
+SERIE_PEDIDO = "PEDIDO"
+
+
+def folio_pedido_sae(numero: int) -> str:
+    """134 → '0000000134' (el consecutivo de pedidos con ceros a 10 dígitos).
+
+    `FACTP02.CVE_DOC` es varchar(20) = 10 espacios + 10 dígitos
+    ('          0000001255', REGLAS_PEDIDOS.md Regla 2); en el masivo va la
+    parte numérica, que es como entraron los pedidos que sí quedaron bien
+    (PEDIDO_massivo_SAE_3JUBRAN, _lote1_4ordenes, _ejemplo: '0000001336').
+    """
+    return str(int(numero)).zfill(10)
+
+
 def fecha_sae(d: date) -> str:
     """La FECHA como la lee Aspel: con el formato de la PC de importación.
 
@@ -125,7 +152,9 @@ class ResultadoPreview:
     errores: list[str] = field(default_factory=list)
     avisos: list[str] = field(default_factory=list)
     empresa: Optional[str] = None
-    # Por serie fiscal: cuántas remisiones foliarán con ella y el folio sugerido.
+    # Por serie: cuántas remisiones foliarán con ella y el folio sugerido. En
+    # FACTURA son las series fiscales; en PEDIDO es una sola entrada
+    # (SERIE_PEDIDO), porque los pedidos de SAE se numeran por empresa.
     series: list[dict] = field(default_factory=list)
     remisiones: int = 0
     # Cómo va a quedar escrita la FECHA en el archivo. Se muestra en el preview
@@ -323,6 +352,18 @@ def preparar(
                 f"{rem.export_sae_at:%d-%b %H:%M}{propuesto} y el espejo aún no confirma "
                 "su factura — si aquel archivo SÍ se importó en SAE, no la re-exportes"
             )
+        if tipo == "PEDIDO" and rem.export_pedido_at is not None:
+            # Igual que en factura: el archivo anterior pudo no subirse nunca.
+            # Si SÍ se importó, re-exportarla deja DOS pedidos por la misma
+            # venta (KnowHow_Massivos_SAE.md §5) — el operador decide.
+            propuesto = ""
+            if rem.export_pedido_folio and ":" in rem.export_pedido_folio:
+                propuesto = f" (folio propuesto {rem.export_pedido_folio.split(':', 1)[1]})"
+            res.avisos.append(
+                f"{rem.folio_interno}: ya salió en un archivo de pedidos el "
+                f"{rem.export_pedido_at:%d-%b %H:%M}{propuesto} — si aquel archivo se "
+                "importó en SAE, volver a exportarla crearía un pedido duplicado"
+            )
         pares = claves.get(rem.cliente_facturacion_id) or []
         if not pares:
             res.errores.append(
@@ -394,6 +435,14 @@ def preparar(
                 "remisiones": n,
                 "folio_sugerido": _folio_sugerido(db, tenant_id, codigo),
             })
+    elif docs:
+        # PEDIDO: una sola entrada — el consecutivo es de la EMPRESA SAE, y el
+        # lote ya es de una sola empresa (mezclar se detiene arriba).
+        res.series.append({
+            "serie": SERIE_PEDIDO,
+            "remisiones": len(docs),
+            "folio_sugerido": _folio_pedido_sugerido(db, tenant_id, res.empresa),
+        })
     res.ok = True
     return res, docs
 
@@ -407,6 +456,47 @@ def _folio_sugerido(db: Session, tenant_id: UUID, serie: str) -> Optional[int]:
 
     folios = _folios_ocupados(db, tenant_id, serie) | _folios_propuestos(db, tenant_id, serie)
     return max(folios) + 1 if folios else None
+
+
+def _folio_pedido_sugerido(db: Session, tenant_id: UUID, empresa: Optional[str]) -> Optional[int]:
+    """max(folio de pedido propuesto para esa empresa) + 1, o None.
+
+    Los pedidos no tienen espejo que los confirme, así que lo único que el
+    Facturador sabe es lo que él mismo propuso: se mira TODO el historial (no
+    una ventana de días) para que el prellenado no se pierda. Es un
+    PRELLENADO — la verdad está en SAE (FACTP02 / FOLIOSF02.ULT_DOC) y el
+    operador la confirma antes de generar.
+    """
+    folios = _folios_pedido_propuestos(db, tenant_id, empresa)
+    return max(folios) + 1 if folios else None
+
+
+def _folios_pedido_propuestos(db: Session, tenant_id: UUID, empresa: Optional[str]) -> set[int]:
+    """Folios de PEDIDO que este sistema ya propuso para esa empresa SAE.
+
+    El rastro se guarda como "<empresa>:<numero>" ("02:134") porque el
+    consecutivo de pedidos es por empresa: el mismo 134 es legítimo en la 02 y
+    en la 03.
+    """
+    if not empresa:
+        return set()
+    prefijo = f"{empresa}:"
+    out: set[int] = set()
+    filas = (
+        db.query(Remision.export_pedido_folio)
+        .filter(
+            Remision.tenant_id == tenant_id,
+            Remision.export_pedido_folio.startswith(prefijo),
+            Remision.deleted_at.is_(None),
+        )
+        .all()
+    )
+    for (fp,) in filas:
+        try:
+            out.add(int((fp or "").split(":", 1)[1]))
+        except (IndexError, ValueError):
+            continue
+    return out
 
 
 def _folios_propuestos(db: Session, tenant_id: UUID, serie: str) -> set[int]:
@@ -467,6 +557,46 @@ def _folios_ocupados(db: Session, tenant_id: UUID, serie: str) -> set[int]:
     return ocupados
 
 
+# El folio interno de la remisión ("RZMAFAN22") = prefijo + consecutivo.
+_RE_FOLIO_INTERNO = re.compile(r"^(.*?)(\d+)$")
+
+
+def _clave_orden(folio: str) -> tuple:
+    m = _RE_FOLIO_INTERNO.match(folio)
+    return (m.group(1), int(m.group(2))) if m else (folio, -1)
+
+
+def rango_folios(folios: list[str]) -> str:
+    """['RZMAFAN9'] → 'RZMAFAN9'; RZMAFAN9…RZMAFAN22 → 'RZMAFAN9 al 22'.
+
+    Es como el dueño nombra un lote. Si el lote mezcla prefijos (dos series de
+    remisión) no hay abreviatura posible: van los dos folios completos.
+    """
+    limpios = sorted({(f or "").strip() for f in folios if (f or "").strip()}, key=_clave_orden)
+    if not limpios:
+        return "SIN_FOLIO"
+    if len(limpios) == 1:
+        return limpios[0]
+    partidos = [_RE_FOLIO_INTERNO.match(f) for f in limpios]
+    prefijos = {m.group(1) for m in partidos if m}
+    if len(prefijos) == 1 and all(partidos):
+        numeros = sorted(int(m.group(2)) for m in partidos)
+        return f"{prefijos.pop()}{numeros[0]} al {numeros[-1]}"
+    return f"{limpios[0]} al {limpios[-1]}"
+
+
+def nombre_archivo(tipo: str, folios: list[str]) -> str:
+    """'PEDIDO RZMAFAN9 al 22.xls' — el archivo se llama como sus remisiones.
+
+    El nombre genérico ("PEDIDO_massivo_SAE.xls") dejaba al navegador numerando
+    copias ("(4)") y no se sabía qué lote traía cada archivo. El tipo va al
+    frente porque de la MISMA remisión salen el pedido y la factura, y con el
+    mismo nombre el segundo download se volvería "(1)".
+    """
+    seguro = re.sub(r'[\\/:*?"<>|\r\n]+', "-", rango_folios(folios)).strip()
+    return f"{'FACTURA' if (tipo or '').upper() == 'FACTURA' else 'PEDIDO'} {seguro or 'SIN_FOLIO'}.xls"
+
+
 def generar(
     db: Session,
     tenant_id: UUID,
@@ -483,7 +613,9 @@ def generar(
     cuando la factura de verdad existe (o una captura manual). Solo se marca
     `export_sae_at` como rastro para avisar de un doble export.
 
-    `folios` = {serie: folio_inicial} confirmados por el operador (FACTURA).
+    `folios` = {serie: folio_inicial} confirmados por el operador. En FACTURA
+    hay una entrada por serie fiscal; en PEDIDO hay una sola, `SERIE_PEDIDO`,
+    con el consecutivo de pedidos de la empresa SAE.
     El commit lo hace el caller (endpoint).
     """
     import xlwt
@@ -531,6 +663,31 @@ def generar(
                 )
         if not res.ok:
             return res, None, None
+    else:
+        # PEDIDO: un solo consecutivo, el de la EMPRESA SAE (los pedidos no
+        # llevan serie). El operador lo confirma contra SAE — FACTP02 y
+        # FOLIOSF02.ULT_DOC, el mayor de los dos, porque el contador propio de
+        # SAE puede ir adelantado y entonces un MAX()+1 propone un folio que
+        # SAE ya considera usado y la importación falla.
+        inicial = (folios or {}).get(SERIE_PEDIDO)
+        if not inicial:
+            res.ok = False
+            res.errores.append(
+                "falta el folio inicial de pedidos (confírmalo contra SAE: es el "
+                "consecutivo de la empresa, no la OC del cliente)"
+            )
+            return res, None, None
+        contador = {SERIE_PEDIDO: int(inicial)}
+        rango = set(range(int(inicial), int(inicial) + len(docs)))
+        chocan = sorted(rango & _folios_pedido_propuestos(db, tenant_id, res.empresa))
+        if chocan:
+            # Aviso, no error: el archivo anterior pudo no subirse nunca. La
+            # verdad la tiene SAE y el operador la está mirando.
+            res.avisos.append(
+                f"empresa {res.empresa}: los folios de pedido {', '.join(map(str, chocan))} "
+                "ya salieron propuestos en otro archivo — si aquel se importó en SAE, "
+                "repetir el rango deja pedidos duplicados"
+            )
 
     dia = fecha or date.today()
     f_txt = fecha_sae(dia)
@@ -557,23 +714,29 @@ def generar(
             doc.folio = contador[doc.serie]
             contador[doc.serie] += 1
             folio_txt = folio_sae(doc.serie, doc.folio)
+            su_pedido_txt = ""
         else:
-            # PEDIDO: va la OC del cliente; SAE asigna su consecutivo al importar.
-            folio_txt = (rem.su_pedido or rem.folio_interno or "").strip()
+            # PEDIDO: el consecutivo del SAE. La OC del cliente pasa a su
+            # columna ("SU PEDIDO") y sigue en la Observación, que es por donde
+            # el resto del sistema concilia.
+            doc.folio = contador[SERIE_PEDIDO]
+            contador[SERIE_PEDIDO] += 1
+            folio_txt = folio_pedido_sae(doc.folio)
+            su_pedido_txt = (rem.su_pedido or "").strip()
 
         # Solo partidas vivas: una devolución total deja la línea con cantidad
         # 0, y SAE importaría un concepto en cero que el PAC rechaza.
         for ln in (x for x in rem.lineas if Decimal(str(x.cantidad_solicitada or 0)) > 0):
             clave = codigos[(rem.cliente_facturacion_id, ln.producto_id)]
             if tipo == "FACTURA":
-                vals = [folio_txt, doc.cliente_sae, f_txt, "", clave,
+                vals = [folio_txt, doc.cliente_sae, f_txt, su_pedido_txt, clave,
                         _num(ln.cantidad_solicitada), _num(ln.precio_unitario), ""]
                 vals += [""] * 13
                 vals += [cli.metodo_pago_default or "PPD",
                          cli.forma_pago_default or "99",
                          cli.uso_cfdi_default or "G01", "", "", obs]
             else:
-                vals = [folio_txt, doc.cliente_sae, f_txt, "", clave,
+                vals = [folio_txt, doc.cliente_sae, f_txt, su_pedido_txt, clave,
                         _num(ln.cantidad_solicitada), _num(ln.precio_unitario)]
                 vals += [""] * 14
                 vals += [obs]
@@ -587,12 +750,12 @@ def generar(
             # lo pone el espejo cuando SAE confirma.
             rem.export_sae_at = datetime.now(timezone.utc)
             rem.export_sae_folio = f"{doc.serie} {doc.folio}"
+        else:
+            # Mismo rastro para el pedido, en sus propias columnas: alimenta el
+            # folio sugerido del siguiente lote y el aviso de doble export.
+            rem.export_pedido_at = datetime.now(timezone.utc)
+            rem.export_pedido_folio = f"{doc.empresa}:{doc.folio}"
 
     buf = io.BytesIO()
     libro.save(buf)
-    sufijo = dia.strftime("%Y-%m-%d")
-    nombre = (
-        f"{'FACTURA_massiva' if tipo == 'FACTURA' else 'PEDIDO_massivo'}"
-        f"_SAE_emp{res.empresa}_{len(docs)}remisiones_{sufijo}.xls"
-    )
-    return res, buf.getvalue(), nombre
+    return res, buf.getvalue(), nombre_archivo(tipo, [d.remision.folio_interno for d in docs])

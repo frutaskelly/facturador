@@ -90,6 +90,13 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     # de doble export y el folio sugerido del siguiente lote.
     export_sae_at = Column(DateTime(timezone=True))
     export_sae_folio = Column(String(30))
+    # Rastro del export de PEDIDOS, aparte del de facturas porque una remisión
+    # sale primero como pedido y después como factura: compartir columna
+    # borraría el aviso de doble export de la otra. Los pedidos de SAE no
+    # llevan serie (una sola, 'STAND.') sino un consecutivo POR EMPRESA, así
+    # que el folio propuesto se guarda como "<empresa>:<numero>" ("02:134").
+    export_pedido_at = Column(DateTime(timezone=True))
+    export_pedido_folio = Column(String(30))
     # "Su pedido": la ORDEN DE COMPRA del cliente ("24478"), con la que él
     # reconoce el documento. Texto libre: es un folio de su sistema, no del nuestro.
     su_pedido = Column(String(30))

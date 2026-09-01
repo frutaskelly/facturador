@@ -82,7 +82,11 @@ app.add_middleware(
     # X-Tenant-Id: selector de empresa activa (cuentas multi-empresa); el
     # backend lo valida contra las membresías del usuario (_select_membership).
     allow_headers=["Authorization", "Content-Type", "X-Tenant-Id"],
-    expose_headers=["X-Request-Id", "X-Total-Count"],
+    # Content-Disposition: sin exponerlo, el navegador NO deja que el front lea
+    # el nombre del archivo (no es un header CORS "safelisted") y todo download
+    # cae al nombre genérico de respaldo — así los masivos de SAE salían todos
+    # como "PEDIDO_massivo_SAE (4).xls".
+    expose_headers=["X-Request-Id", "X-Total-Count", "Content-Disposition"],
     max_age=3600,
 )
 

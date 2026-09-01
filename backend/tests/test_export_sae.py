@@ -23,7 +23,13 @@ from app.models import (
     Tenant,
     User,
 )
-from app.services.export_sae import FACTURA_HDR, PEDIDO_HDR, folio_sae
+from app.services.export_sae import (
+    FACTURA_HDR,
+    PEDIDO_HDR,
+    folio_pedido_sae,
+    folio_sae,
+    nombre_archivo,
+)
 
 _PURGE = (
     "lineas_factura", "facturas", "lineas_remision", "remisiones", "cliente_externos",
@@ -186,20 +192,77 @@ def test_export_factura_sin_folio_es_422(client, env, auth_as):
     assert det["factura_sae"] is None
 
 
-def test_export_pedido_lleva_la_oc_del_cliente(client, env, auth_as):
+def test_folio_pedido_es_el_consecutivo_del_sae_con_ceros():
+    # Los pedidos no llevan serie: consecutivo por empresa, 10 dígitos con
+    # ceros (REGLAS_PEDIDOS.md Regla 2).
+    assert folio_pedido_sae(134) == "0000000134"
+    assert folio_pedido_sae(1336) == "0000001336"
+
+
+def test_nombre_archivo_es_el_de_las_remisiones():
+    # El nombre genérico dejaba al navegador numerando copias ("(4)").
+    assert nombre_archivo("PEDIDO", ["RZMAFAN9"]) == "PEDIDO RZMAFAN9.xls"
+    assert (nombre_archivo("PEDIDO", ["RZMAFAN9", "RZMAFAN22", "RZMAFAN10"])
+            == "PEDIDO RZMAFAN9 al 22.xls")
+    assert nombre_archivo("FACTURA", ["RZMAFAN9"]) == "FACTURA RZMAFAN9.xls"
+    # prefijos mezclados: no hay abreviatura, van los dos folios completos
+    assert (nombre_archivo("PEDIDO", ["RZMAFAN9", "RZHGO14"])
+            == "PEDIDO RZHGO14 al RZMAFAN9.xls")
+
+
+def test_export_pedido_folia_con_el_consecutivo_del_sae(client, env, auth_as):
+    """El FOLIO del pedido es el consecutivo del SAE (no la OC): la OC pasa a
+    'SU PEDIDO' y sigue en la observación, que es la llave de conciliación."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
     rem = _rem(client, h, env)
+
+    # el preview pide el folio inicial, igual que en facturas
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem["id"]], "tipo": "PEDIDO"}).json()
+    assert pv["ok"] is True, pv
+    assert pv["series"] == [{"serie": "PEDIDO", "remisiones": 1, "folio_sugerido": None}]
+
+    # sin folio confirmado NO se genera nada
+    r0 = client.post("/api/v1/remisiones/export-sae", headers=h,
+                     json={"ids": [rem["id"]], "tipo": "PEDIDO"})
+    assert r0.status_code == 422
+    assert "folio inicial de pedidos" in r0.json()["detail"]
+
     r = client.post("/api/v1/remisiones/export-sae", headers=h,
-                    json={"ids": [rem["id"]], "tipo": "PEDIDO"})
+                    json={"ids": [rem["id"]], "tipo": "PEDIDO", "folios": {"PEDIDO": 134}})
     assert r.status_code == 200, r.text
+    assert 'filename="PEDIDO ' in r.headers["content-disposition"]
     hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_name("Pedidos")
     assert [c.value for c in hoja.row(0)] == PEDIDO_HDR
     fila = [c.value for c in hoja.row(1)]
-    assert fila[0] == "24736"          # la OC del cliente; SAE folia al importar
+    assert fila[0] == "0000000134"      # consecutivo del SAE, no "24736"
+    assert fila[3] == "24736"           # la OC del cliente, en SU PEDIDO
     assert fila[4] == "ACEI-ACEI-639"
+    assert fila[21].startswith("OC 24736")
     # PEDIDO no estampa espejo: la factura aún no existe
     det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
     assert det["factura_sae"] is None
+
+    # el rastro alimenta el sugerido del siguiente lote y avisa del re-export
+    rem2 = _rem(client, h, env, su_pedido="24990")
+    pv2 = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                      json={"ids": [rem["id"], rem2["id"]], "tipo": "PEDIDO"}).json()
+    assert pv2["series"][0]["folio_sugerido"] == 135
+    assert any("pedido duplicado" in a for a in pv2["avisos"])
+
+
+def test_export_pedido_numera_consecutivo_por_remision(client, env, auth_as):
+    """Varias remisiones en un archivo = varios pedidos, cada uno con SU folio."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem1 = _rem(client, h, env)
+    rem2 = _rem(client, h, env, su_pedido="24990")
+    r = client.post("/api/v1/remisiones/export-sae", headers=h,
+                    json={"ids": [rem1["id"], rem2["id"]], "tipo": "PEDIDO",
+                          "folios": {"PEDIDO": 200}})
+    assert r.status_code == 200, r.text
+    hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_name("Pedidos")
+    folios = [hoja.cell_value(f, 0) for f in range(1, hoja.nrows)]
+    assert sorted(set(folios)) == ["0000000200", "0000000201"]
 
 
 def test_export_rechaza_colision_de_folios(client, env, auth_as):

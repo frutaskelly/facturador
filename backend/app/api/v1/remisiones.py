@@ -1421,13 +1421,16 @@ def delete_remision(
 # ─── Export masivo para SAE (fase espejo de la migración) ────────────────────
 # El Facturador genera el archivo que Aspel importa; el layout y las trampas
 # (fechas MM/DD, relleno del folio, claves del cliente) viven en
-# services/export_sae.py. El folio inicial de cada serie lo CONFIRMA el
-# operador (regla D1 del plan): aquí solo se sugiere.
+# services/export_sae.py. El folio inicial lo CONFIRMA el operador contra SAE
+# (regla D1 del plan): aquí solo se sugiere — tanto la serie de la factura
+# como el consecutivo de pedidos de la empresa.
 
 class ExportSaeIn(BaseModel):
     ids: list[UUID] = PydField(min_length=1)
     tipo: str = "FACTURA"                        # FACTURA | PEDIDO
-    # {serie: folio_inicial} confirmados por el operador. Solo FACTURA.
+    # {serie: folio_inicial} confirmados por el operador. En FACTURA, una
+    # entrada por serie fiscal; en PEDIDO, una sola con la llave "PEDIDO"
+    # (export_sae.SERIE_PEDIDO): el consecutivo de pedidos de la empresa SAE.
     folios: Optional[dict[str, int]] = None
     fecha: Optional[date] = None                 # default: hoy (MM/DD/YYYY en el archivo)
 
