@@ -535,10 +535,10 @@ export default function FacturasPage() {
 
   const columns: Column<Factura>[] = [
     { header: "Folio", cell: (f) => <span className="font-medium">{f.serie}{f.folio}</span> },
-    { header: "Cliente", cell: (f) => cliName[f.cliente_id] ?? "—" },
-    { header: "Fecha", cell: (f) => fmtDate(f.fecha) },
+    { header: "Cliente", truncate: true, cell: (f) => <span title={cliName[f.cliente_id] ?? ""}>{cliName[f.cliente_id] ?? "—"}</span> },
+    { header: "Fecha", className: "whitespace-nowrap", cell: (f) => fmtDate(f.fecha) },
     { header: "Estado", cell: (f) => (
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 whitespace-nowrap">
         <Badge tone={ESTADO_TONE[f.estado] ?? "muted"}>{f.estado}</Badge>
         {f.origen === "ESPEJO_SAE" ? <Badge tone="muted">Espejo SAE</Badge> : null}
       </div>
@@ -546,7 +546,7 @@ export default function FacturasPage() {
     { header: "Subtotal", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.subtotal) },
     { header: "IVA", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.iva_trasladado) },
     { header: "Total", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.total) },
-    { header: "Nota", cell: (f) => f.notas ?? "—" },
+    { header: "Nota", truncate: true, exportValue: (f) => f.notas ?? "", cell: (f) => <span title={f.notas ?? ""}>{f.notas ?? "—"}</span> },
   ];
 
   const rowActions: RowAction<Factura>[] = [

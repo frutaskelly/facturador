@@ -266,7 +266,7 @@ export default function ListasPreciosPage() {
 
   const columns: Column<ListaPrecios>[] = [
     { header: "Código", cell: (l) => <span className="font-medium">{l.codigo}</span> },
-    { header: "Nombre", cell: (l) => l.nombre },
+    { header: "Nombre", truncate: true, cell: (l) => <span title={l.nombre}>{l.nombre}</span> },
     { header: "Estado", cell: (l) => <Badge tone={l.status === "ACTIVO" ? "success" : "muted"}>{l.status}</Badge> },
     { header: "Base", cell: (l) => (l.es_default ? <Badge tone="accent">★ Base</Badge> : <span className="text-muted">—</span>) },
     { header: "Moneda", cell: (l) => <span className="text-muted">{l.moneda}</span> },

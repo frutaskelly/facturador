@@ -1628,53 +1628,85 @@ export default function RemisionesPage() {
     reportarFacturar(timbradas, borrador, otras + grupos.length, omitidas);
   }
 
+  // Columnas agrupadas: los campos que se leen juntos van en la MISMA celda, en
+  // dos renglones (el de arriba manda, el de abajo es su contexto). Pasamos de
+  // 13 columnas a 6 y la tabla cabe entera en una laptop de 1280 px, sin la
+  // barra de scroll horizontal que obligaba a irse a la derecha para ver las
+  // opciones. El detalle fiscal (subtotal, IEPS, IVA) y la nota siguen ahí,
+  // ocultos de arranque y a un clic en el menú «Columnas».
   const columns: Column<Remision>[] = [
-    { header: "Folio", sortable: true, sortValue: (r) => r.folio_interno, cell: (r) => <span className="font-medium">{r.folio_interno}</span> },
     {
-      header: "Factura",
+      header: "Folio / Pedido",
+      sortable: true,
+      sortValue: (r) => r.folio_interno,
+      exportValue: (r) => r.folio_interno,
+      cell: (r) => (
+        <div className="whitespace-nowrap">
+          <div className="font-medium">{r.folio_interno}</div>
+          <div className="text-xs text-muted">
+            {r.su_pedido ? <span className="tabular-nums">{r.su_pedido}</span> : "sin pedido"}
+          </div>
+        </div>
+      ),
+    },
+    {
+      header: "Factura / SAE",
       sortable: true,
       sortValue: (r) => r.factura_folio ?? "",
-      cell: (r) =>
-        r.factura_folio ? (
-          <span className="inline-flex items-center gap-1.5">
-            {r.factura_id ? (
-              <button
-                type="button"
-                title="Ver la factura"
-                onClick={(e) => { e.stopPropagation(); router.push(`/facturas?ver=${r.factura_id}`); }}
-                className="font-medium text-accent hover:underline"
-              >
-                {r.factura_folio}
-              </button>
+      exportValue: (r) => r.factura_folio ?? "",
+      cell: (r) => (
+        <div className="whitespace-nowrap">
+          <div>
+            {r.factura_folio ? (
+              <span className="inline-flex items-center gap-1.5">
+                {r.factura_id ? (
+                  <button
+                    type="button"
+                    title="Ver la factura"
+                    onClick={(e) => { e.stopPropagation(); router.push(`/facturas?ver=${r.factura_id}`); }}
+                    className="font-medium text-accent hover:underline"
+                  >
+                    {r.factura_folio}
+                  </button>
+                ) : (
+                  <span className="font-medium">{r.factura_folio}</span>
+                )}
+                {r.factura_estado && (
+                  <Badge tone={FACTURA_TONE[r.factura_estado] ?? "muted"}>{r.factura_estado}</Badge>
+                )}
+              </span>
             ) : (
-              <span className="font-medium">{r.factura_folio}</span>
+              <span className="text-muted">—</span>
             )}
-            {r.factura_estado && (
-              <Badge tone={FACTURA_TONE[r.factura_estado] ?? "muted"}>{r.factura_estado}</Badge>
-            )}
-          </span>
-        ) : (
-          <span className="text-muted">—</span>
-        ),
+          </div>
+          <div className="text-xs text-muted">
+            {r.factura_sae ? <span className="tabular-nums">SAE {r.factura_sae}</span> : "sin SAE"}
+          </div>
+        </div>
+      ),
+    },
+    // La elástica: es la que cede ancho cuando la ventana es angosta, y corta
+    // con «…» en vez de partir el renglón (era la que hacía filas de 81 px).
+    {
+      header: "Cliente",
+      sortable: true,
+      truncate: true,
+      className: "min-w-[170px]",
+      sortValue: (r) => cliName[r.cliente_facturacion_id] ?? "",
+      exportValue: (r) => cliName[r.cliente_facturacion_id] ?? "",
+      cell: (r) => (
+        <span title={cliName[r.cliente_facturacion_id] ?? ""}>
+          {cliName[r.cliente_facturacion_id] ?? "—"}
+        </span>
+      ),
     },
     {
-      header: "Su pedido",
+      header: "Fecha",
       sortable: true,
-      sortValue: (r) => r.su_pedido ?? "",
-      cell: (r) => r.su_pedido
-        ? <span className="tabular-nums">{r.su_pedido}</span>
-        : <span className="text-muted">—</span>,
+      sortValue: (r) => r.fecha_remision,
+      className: "whitespace-nowrap",
+      cell: (r) => fmtDate(r.fecha_remision),
     },
-    {
-      header: "Factura SAE",
-      sortable: true,
-      sortValue: (r) => r.factura_sae ?? "",
-      cell: (r) => r.factura_sae
-        ? <span className="font-medium tabular-nums">{r.factura_sae}</span>
-        : <span className="text-muted">—</span>,
-    },
-    { header: "Cliente", sortable: true, sortValue: (r) => cliName[r.cliente_facturacion_id] ?? "", cell: (r) => cliName[r.cliente_facturacion_id] ?? "—" },
-    { header: "Fecha", sortable: true, sortValue: (r) => r.fecha_remision, cell: (r) => fmtDate(r.fecha_remision) },
     {
       header: "Estado",
       sortable: true,
@@ -1683,17 +1715,32 @@ export default function RemisionesPage() {
       // siendo un BORRADOR con todo lo que eso implica; lo que añade la marca
       // es que nadie ha mirado sus unidades ni sus precios todavía.
       cell: (r) => (
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="whitespace-nowrap">
           <Badge tone={ESTADO_TONE[r.estado] ?? "muted"}>{r.estado}</Badge>
-          {r.revision_pendiente ? <Badge tone="warning">POR REVISAR</Badge> : null}
+          {r.revision_pendiente ? (
+            <div className="mt-0.5 text-xs font-medium text-amber-700">POR REVISAR</div>
+          ) : null}
         </div>
       ),
     },
-    { header: "Subtotal", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.subtotal) },
-    { header: "IEPS", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.ieps) },
-    { header: "IVA", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.iva) },
-    { header: "Total", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.total) },
-    { header: "Nota", cell: (r) => r.notas ?? "—" },
+    {
+      header: "Total",
+      sortable: true,
+      sortValue: (r) => r.total,
+      exportValue: (r) => r.total,
+      className: "text-right",
+      cell: (r) => (
+        <div className="whitespace-nowrap">
+          <div className="font-medium tabular-nums">{fmtMoney(r.total)}</div>
+          <div className="text-xs text-muted tabular-nums">sub {fmtMoney(r.subtotal)}</div>
+        </div>
+      ),
+    },
+    // Detalle fiscal y nota: ocultas de arranque, disponibles en «Columnas».
+    { header: "Subtotal", hiddenByDefault: true, className: "text-right tabular-nums", sortable: true, sortValue: (r) => r.subtotal, cell: (r) => fmtMoney(r.subtotal) },
+    { header: "IEPS", hiddenByDefault: true, className: "text-right tabular-nums", sortable: true, sortValue: (r) => r.ieps, cell: (r) => fmtMoney(r.ieps) },
+    { header: "IVA", hiddenByDefault: true, className: "text-right tabular-nums", sortable: true, sortValue: (r) => r.iva, cell: (r) => fmtMoney(r.iva) },
+    { header: "Nota", hiddenByDefault: true, truncate: true, exportValue: (r) => r.notas ?? "", cell: (r) => <span title={r.notas ?? ""}>{r.notas ?? "—"}</span> },
   ];
 
   const rowActions: RowAction<Remision>[] = [
@@ -2193,7 +2240,7 @@ export default function RemisionesPage() {
         actions={rowActions}
         onRowExpand={verDetalle}
         renderExpanded={renderDetalle}
-        storageKey="remisiones"
+        storageKey="remisiones-v2"
         selectable
         onSelectionChange={setSelected}
         selectionResetKey={selectionResetKey}

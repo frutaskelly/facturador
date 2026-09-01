@@ -23,6 +23,17 @@ export type Column<T> = {
   /** Excluye la columna del menú de columnas y la deja fija (al final). Las
    *  columnas con encabezado vacío (acciones) se fijan automáticamente. */
   fixed?: boolean;
+  /** Arranca oculta: no ocupa ancho, pero sigue estando en el menú «Columnas»
+   *  para quien la necesite (y en la exportación a CSV). Úsalo con el detalle
+   *  fiscal o los campos de consulta ocasional, no con datos que se leen a
+   *  diario. Sólo aplica la primera vez: si la persona ya cambió las columnas
+   *  de esta tabla, manda lo que ella eligió. */
+  hiddenByDefault?: boolean;
+  /** Columna «elástica»: se queda en UN renglón y corta con puntos suspensivos
+   *  (…) en vez de partirse en varios. Es la que cede ancho cuando la tabla no
+   *  cabe, así que márcala en el texto largo (cliente, descripción, nota) para
+   *  que las filas no crezcan a lo alto. */
+  truncate?: boolean;
   /** Valor a escribir al exportar a Excel/CSV. Si no se indica, usa `sortValue`
    *  o el `cell` cuando sea texto/número. Las columnas de acciones se omiten. */
   exportValue?: (row: T) => string | number | null | undefined;
@@ -45,6 +56,89 @@ export type RowAction<T> = {
   /** Oculta la acción en filas concretas (cuando no aplica a esa fila). */
   hidden?: (row: T) => boolean;
 };
+
+/** Menú ⋮ con las acciones que no caben como ícono suelto en la fila.
+ *  Se dibuja en `position: fixed` porque el contenedor de la tabla tiene
+ *  `overflow-x-auto` y recortaría un desplegable normal. */
+function RowOverflowMenu<T>({ actions, row }: { actions: RowAction<T>[]; row: T }) {
+  const [open, setOpen] = useState(false);
+  // `abajo` = el menú cuelga hacia abajo del botón; si la fila está al final de
+  // la pantalla se ancla al revés para no quedar cortado.
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number }>({ top: 0, right: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    document.addEventListener("mousedown", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      document.removeEventListener("mousedown", close);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        title="Más acciones"
+        aria-label="Más acciones"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation();
+          const r = btnRef.current?.getBoundingClientRect();
+          if (r) {
+            const alto = actions.length * 36 + 8; // alto aproximado del menú
+            const derecha = Math.max(8, window.innerWidth - r.right);
+            setPos(
+              r.bottom + 4 + alto > window.innerHeight - 8
+                ? { bottom: Math.max(8, window.innerHeight - r.top + 4), right: derecha }
+                : { top: r.bottom + 4, right: derecha },
+            );
+          }
+          setOpen((v) => !v);
+        }}
+        className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
+      >
+        <MoreVertical size={16} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          style={{ top: pos.top, bottom: pos.bottom, right: pos.right }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className="fixed z-50 w-56 overflow-hidden rounded-xl border border-border bg-background py-1 text-left shadow-xl"
+        >
+          {actions.map((a) => {
+            const icon = typeof a.icon === "function" ? a.icon(row) : a.icon;
+            const toneCls =
+              a.tone === "danger" ? "text-danger"
+              : a.tone === "success" ? "text-success"
+              : "text-foreground";
+            return (
+              <button
+                key={a.id}
+                type="button"
+                role="menuitem"
+                onClick={() => { setOpen(false); a.onClick(row); }}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-surface-2 ${toneCls}`}
+              >
+                <span className="shrink-0 text-muted">{icon}</span>
+                <span className="truncate">{a.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
 
 const MIN_W = 64; // ancho mínimo de columna al redimensionar (px)
 const EXPAND_W = 40; // ancho de la columna del chevron (modo Excel)
@@ -117,6 +211,14 @@ export type DataTableProps<T> = {
   /** Muestra el menú ⋮ (puntos) en la cabecera de acciones para reordenar y
    *  mostrar/ocultar los íconos. Se recuerda con `storageKey`. */
   actionsMenu?: boolean;
+  /** Cuántas acciones se muestran como ícono suelto en cada fila. El resto se
+   *  agrupa en un menú ⋮ al final de la fila. Con 8 acciones sueltas la columna
+   *  medía 217 px y empujaba la mitad de la tabla fuera de la pantalla; con 2
+   *  mide ~90 px. Ponlo en `Infinity` para volver a verlas todas. */
+  maxInlineActions?: number;
+  /** Deja la columna de acciones pegada al borde derecho: aunque la tabla
+   *  necesite scroll horizontal, los íconos nunca se salen de la vista. */
+  stickyActions?: boolean;
   /** Muestra el botón "Columnas" para mostrar/ocultar y reordenar columnas. */
   columnsMenu?: boolean;
   /** Permite cambiar el ancho de las columnas arrastrando el borde derecho. */
@@ -173,6 +275,8 @@ export function DataTable<T>({
   initialExpandedKey,
   actions,
   actionsMenu,
+  maxInlineActions = 2,
+  stickyActions = true,
   columnsMenu,
   resizable,
   exportable,
@@ -304,7 +408,9 @@ export function DataTable<T>({
 
   // ── estado del menú de columnas ──
   const [order, setOrder] = useState<string[]>([]); // orden explícito de columnas manejables
-  const [hidden, setHidden] = useState<string[]>([]);
+  const [hidden, setHidden] = useState<string[]>(() =>
+    columns.filter((c) => c.hiddenByDefault).map((c) => c.key ?? c.header),
+  );
   const [widths, setWidths] = useState<Record<string, number>>({}); // ancho px por id
   const [menuOpen, setMenuOpen] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -646,9 +752,23 @@ export function DataTable<T>({
   const hasWidths = resizable && Object.keys(widths).length > 0;
   // Total de columnas reales + extras (casilla, chevron y acciones), para los colSpan.
   const totalCols = renderCols.length + (selectable ? 1 : 0) + (expandable ? 1 : 0) + (hasActions ? 1 : 0);
-  // Ancho de la columna de acciones: depende de cuántos íconos hay visibles
-  // (+ el botón ⋮). Es fija (no se redimensiona).
-  const actionsWidth = (actionsMenu ? 34 : 0) + Math.max(visibleActions.length, 1) * 32 + 16;
+  // Ancho de la columna de acciones: los íconos sueltos (tope `maxInlineActions`)
+  // + el ⋮ de desborde si sobra alguna + el ⋮ de configuración del encabezado.
+  // Es fija (no se redimensiona).
+  const inlineCount = Math.min(maxInlineActions, visibleActions.length);
+  const anyOverflow = visibleActions.length > inlineCount;
+  const actionsWidth =
+    (actionsMenu ? 34 : 0) + Math.max(inlineCount, 1) * 32 + (anyOverflow ? 32 : 0) + 16;
+  // Clases de la columna pegada al borde derecho. El fondo tiene que ser opaco
+  // (si no, las columnas de abajo se transparentan al hacer scroll) y seguir el
+  // hover de la fila, por eso el `<tr>` lleva `group`.
+  const stickyOn = stickyActions && hasActions;
+  const stickyHeadCls = stickyOn
+    ? "sticky right-0 z-20 bg-surface-2 shadow-[-8px_0_8px_-6px_rgb(0_0_0/0.12)]"
+    : "";
+  const stickyCellCls = stickyOn
+    ? "sticky right-0 z-10 shadow-[-8px_0_8px_-6px_rgb(0_0_0/0.12)]"
+    : "";
   // Ancho total de la tabla en modo Excel = suma de las columnas (las que aún no
   // tienen ancho explícito cuentan con el mínimo) + las columnas fijas (chevron y
   // acciones). La tabla se ensancha y el contenedor hace scroll; agrandar una
@@ -711,7 +831,7 @@ export function DataTable<T>({
                 return (
                   <th
                     key={id}
-                    className={`relative px-4 py-2.5 font-medium ${col.className ?? ""}`}
+                    className={`relative px-3 py-2.5 font-medium ${col.className ?? ""}`}
                     aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined}
                   >
                     {col.sortable ? (
@@ -743,7 +863,7 @@ export function DataTable<T>({
                 );
               })}
               {hasActions && (
-                <th className="px-2 py-2.5 text-right font-medium">
+                <th className={`px-2 py-2.5 text-right font-medium ${stickyHeadCls}`}>
                   <span className="inline-flex items-center justify-end gap-1.5">
                     <span>Opciones</span>
                   {actionsMenu ? (
@@ -820,7 +940,7 @@ export function DataTable<T>({
                   <Fragment key={key}>
                     <tr
                       onClick={() => (expandable ? toggleExpand(key, row) : onRowClick?.(row))}
-                      className={`border-t border-border ${clickable ? "cursor-pointer hover:bg-surface-2" : ""} ${isOpen ? "bg-surface-2" : ""} ${rowClassName?.(row) ?? ""}`}
+                      className={`group border-t border-border ${clickable ? "cursor-pointer hover:bg-surface-2" : ""} ${isOpen ? "bg-surface-2" : ""} ${rowClassName?.(row) ?? ""}`}
                     >
                       {selectable && (
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
@@ -837,36 +957,49 @@ export function DataTable<T>({
                         </td>
                       )}
                       {renderCols.map(({ col, id }) => (
-                        <td key={id} className={`px-4 py-2.5 ${hasWidths ? "truncate" : ""} ${col.className ?? ""}`}>
+                        <td
+                          key={id}
+                          className={`px-3 py-2.5 ${hasWidths || col.truncate ? "truncate" : ""} ${col.truncate && !hasWidths ? "max-w-0" : ""} ${col.className ?? ""}`}
+                        >
                           {col.cell(row)}
                         </td>
                       ))}
-                      {hasActions && (
-                        <td className="px-2 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex justify-end gap-0.5">
-                            {visibleActions.map((a) => {
-                              if (a.hidden?.(row)) return null;
-                              const icon = typeof a.icon === "function" ? a.icon(row) : a.icon;
-                              const toneCls =
-                                a.tone === "danger" ? "text-danger hover:bg-surface-2"
-                                : a.tone === "success" ? "text-success hover:bg-surface-2"
-                                : "text-muted hover:bg-surface-2 hover:text-foreground";
-                              return (
-                                <button
-                                  key={a.id}
-                                  type="button"
-                                  title={a.label}
-                                  aria-label={a.label}
-                                  onClick={(e) => { e.stopPropagation(); a.onClick(row); }}
-                                  className={`rounded-md p-1.5 ${toneCls}`}
-                                >
-                                  {icon}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </td>
-                      )}
+                      {hasActions && (() => {
+                        // Las que aplican a ESTA fila: las primeras van sueltas
+                        // como ícono, las demás al menú ⋮.
+                        const aplican = visibleActions.filter((a) => !a.hidden?.(row));
+                        const sueltas = aplican.slice(0, maxInlineActions);
+                        const enMenu = aplican.slice(maxInlineActions);
+                        return (
+                          <td
+                            className={`px-2 py-2.5 text-right ${stickyCellCls} ${isOpen ? "bg-surface-2" : "bg-surface group-hover:bg-surface-2"}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="flex items-center justify-end gap-0.5">
+                              {sueltas.map((a) => {
+                                const icon = typeof a.icon === "function" ? a.icon(row) : a.icon;
+                                const toneCls =
+                                  a.tone === "danger" ? "text-danger hover:bg-surface-2"
+                                  : a.tone === "success" ? "text-success hover:bg-surface-2"
+                                  : "text-muted hover:bg-surface-2 hover:text-foreground";
+                                return (
+                                  <button
+                                    key={a.id}
+                                    type="button"
+                                    title={a.label}
+                                    aria-label={a.label}
+                                    onClick={(e) => { e.stopPropagation(); a.onClick(row); }}
+                                    className={`rounded-md p-1.5 ${toneCls}`}
+                                  >
+                                    {icon}
+                                  </button>
+                                );
+                              })}
+                              {enMenu.length > 0 && <RowOverflowMenu actions={enMenu} row={row} />}
+                            </div>
+                          </td>
+                        );
+                      })()}
                     </tr>
                     {isOpen && (
                       <tr className="border-t border-border bg-surface-2/40">
