@@ -17,6 +17,12 @@ export type LineaForm = {
   precio: string;           // vacío = se resuelve en backend
   precioManual: boolean;
   importe: number;
+  // De dónde salió el precio SUGERIDO, para poder llevar de vuelta al catálogo
+  // el que se teclee encima sin adivinar destino ni tramo. `precioLista` en
+  // null = el producto no tenía precio ahí (es el caso "agrégalo").
+  precioLista?: string | null;
+  precioListaId?: string | null;   // null cuando no se puede/debe reescribir
+  precioTramo?: number | null;     // tramo del que habló la referencia
   // Solo para líneas venidas de "Pegar de Excel": alimentan la columna Match IA
   // (visible únicamente mientras haya líneas pegadas por revisar).
   fromPaste?: boolean;

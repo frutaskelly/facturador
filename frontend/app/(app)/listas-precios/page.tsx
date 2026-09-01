@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, FileText, ListPlus, Pencil, Plus, Tag, Trash2, Upload } from "lucide-react";
 
+import { NuevaPresentacionDialog } from "@/components/NuevaPresentacionDialog";
+
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -24,6 +26,9 @@ const WRITE = "lista_precios:gestionar";
 // quitar un precio suelto sigue siendo gestionar.
 const DELETE = "lista_precios:eliminar";
 
+// Valor especial de los selectores de presentación: "darla de alta ahora".
+const NUEVA_PRESENTACION = "__nueva_pres__";
+
 /** Presentación options for a producto: its declared presentaciones keys. */
 function presentacionOptions(p: Producto | undefined): string[] {
   if (!p) return [];
@@ -42,6 +47,9 @@ export default function ListasPreciosPage() {
   const toast = useToast();
   const canWrite = can(me, WRITE);
   const canDelete = can(me, DELETE);
+  // Dar de alta una presentación escribe en el PRODUCTO, no en la lista:
+  // se ofrece solo a quien puede editar productos.
+  const canWriteProductos = can(me, "producto:gestionar");
   const { post, patch, del, loading: saving } = useMutation();
 
   const listasRes = useResource<Page<ListaPrecios>>("/api/v1/listas-precios?limit=200");
@@ -130,6 +138,8 @@ export default function ListasPreciosPage() {
   }
   const [loadingPrecios, setLoadingPrecios] = useState(false);
   const [nuevo, setNuevo] = useState({ producto_id: "", presentacion: "", cantidad_minima: "1", precio_unitario: "" });
+  // Producto al que se le está agregando una presentación desde esta pantalla.
+  const [nuevaPres, setNuevaPres] = useState<string | null>(null);
 
   async function openPrecios(lista: ListaPrecios) {
     setActiveLista(lista);
@@ -426,12 +436,20 @@ export default function ListasPreciosPage() {
               <Field label="Present.">
                 <Select
                   value={nuevo.presentacion}
-                  onChange={(e) => setNuevo({ ...nuevo, presentacion: e.target.value })}
+                  onChange={(e) => {
+                    if (e.target.value === NUEVA_PRESENTACION) { setNuevaPres(nuevo.producto_id); return; }
+                    setNuevo({ ...nuevo, presentacion: e.target.value });
+                  }}
                   disabled={!nuevo.producto_id}
                 >
                   {presentacionOptions(prodById[nuevo.producto_id]).map((k) => (
                     <option key={k} value={k}>{k}</option>
                   ))}
+                  {/* Cobrar por CAJA empieza por que el producto sepa qué es
+                      una caja: se da de alta aquí y no en otra pantalla. */}
+                  {nuevo.producto_id && canWriteProductos && (
+                    <option value={NUEVA_PRESENTACION}>＋ Nueva presentación…</option>
+                  )}
                 </Select>
               </Field>
               <Field label="Desde cant.">
@@ -509,11 +527,17 @@ export default function ListasPreciosPage() {
                   cell: (r: CatalogRow) => (
                     <Select
                       value={r.presentacion}
-                      onChange={(e) => setCargarRow(r.producto_id, { presentacion: e.target.value })}
+                      onChange={(e) => {
+                        if (e.target.value === NUEVA_PRESENTACION) { setNuevaPres(r.producto_id); return; }
+                        setCargarRow(r.producto_id, { presentacion: e.target.value });
+                      }}
                     >
                       {presentacionOptions(prodById[r.producto_id]).map((k) => (
                         <option key={k} value={k}>{k}</option>
                       ))}
+                      {canWriteProductos && (
+                        <option value={NUEVA_PRESENTACION}>＋ Nueva presentación…</option>
+                      )}
                     </Select>
                   ),
                 },
@@ -545,6 +569,22 @@ export default function ListasPreciosPage() {
         onConfirm={confirmDeleteLista}
         onClose={() => setToDelete(null)}
         loading={saving}
+      />
+
+      <NuevaPresentacionDialog
+        open={nuevaPres !== null}
+        producto={nuevaPres ? prodById[nuevaPres] ?? null : null}
+        onClose={() => setNuevaPres(null)}
+        onCreated={(prod) => {
+          const keys = Object.keys(prod.presentaciones ?? {});
+          const nueva = keys[keys.length - 1] ?? "";
+          // Queda elegida donde se pidió: el renglón que se estaba capturando
+          // o el del producto en la rejilla del catálogo.
+          if (nuevaPres === nuevo.producto_id) setNuevo({ ...nuevo, presentacion: nueva });
+          setCargarRow(prod.id, { presentacion: nueva });
+          setNuevaPres(null);
+          productosRes.reload();
+        }}
       />
     </div>
   );

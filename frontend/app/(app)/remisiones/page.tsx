@@ -7,6 +7,8 @@ import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, Sparkles,
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
 import { CrearProductoModal, type ProductoCreado } from "@/components/CrearProductoModal";
+import { AprenderPreciosDialog, divergentes, type PrecioDivergente } from "@/components/AprenderPreciosDialog";
+import { NuevaPresentacionDialog } from "@/components/NuevaPresentacionDialog";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -31,6 +33,9 @@ import {
 import type { Almacen, Cliente, LineaPegada, MatchResult, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "remision:gestionar";
+
+// Valor especial del selector de presentación: "no está en el producto, darla de alta".
+const NUEVA_PRESENTACION = "__nueva_pres__";
 
 // Referencia estable para cuando `data` aún no llega: `?? []` crearía un
 // arreglo nuevo en cada render, lo que invalida el memo de `filteredRows` y
@@ -351,14 +356,28 @@ export default function RemisionesPage() {
       const p = new URLSearchParams({ producto_id, presentacion, cantidad });
       if (clienteId) p.set("cliente_id", clienteId);
       if (sucursalId) p.set("sucursal_id", sucursalId);
-      const r = await apiFetch<{ precio: string | null }>(`/api/v1/precios/cotizar?${p.toString()}`);
+      const r = await apiFetch<{
+        precio: string | null; origen?: string | null;
+        lista_id?: string | null; cantidad_minima?: number | null;
+      }>(`/api/v1/precios/cotizar?${p.toString()}`);
       if (cotizaSeq.current[key] !== seq) return;   // hay una cotización más nueva en curso
+      // La lista BASE queda fuera de "llevarlo al catálogo": es la default de
+      // todo el negocio y reescribirla desde una partida es demasiado.
+      const origen = r.origen ?? "";
+      const reescribible = origen.startsWith("lista") && origen !== "lista_base";
+      const ref = {
+        precioLista: r.precio == null ? null : String(r.precio),
+        precioListaId: reescribible ? r.lista_id ?? null : null,
+        precioTramo: reescribible ? r.cantidad_minima ?? null : null,
+      };
       setLineas((ls) =>
         ls.map((l) => {
           if (l.key !== key) return l;
-          if (l.precioManual) return { ...l, importe: Number(l.precio || 0) * Number(cantidad) };
+          // La referencia se guarda aunque el precio sea manual: es justo lo
+          // que se compara al final para ofrecer guardarlo.
+          if (l.precioManual) return { ...l, ...ref, importe: Number(l.precio || 0) * Number(cantidad) };
           const precio = r.precio ?? "";
-          return { ...l, precio: precio === "" ? "" : String(precio), importe: Number(precio || 0) * Number(cantidad) };
+          return { ...l, ...ref, precio: precio === "" ? "" : String(precio), importe: Number(precio || 0) * Number(cantidad) };
         }),
       );
     } catch {
@@ -370,7 +389,8 @@ export default function RemisionesPage() {
     if (!pick) {
       // Sin producto no hay precio: se limpian también precio/importe para que
       // la línea no siga sumando en los totales.
-      setLinea(key, { producto_id: "", label: "", texto, precio: "", precioManual: false, importe: 0 });
+      setLinea(key, { producto_id: "", label: "", texto, precio: "", precioManual: false, importe: 0,
+                      precioLista: null, precioListaId: null, precioTramo: null });
       return;
     }
     // La presentación viene del propio producto (no de un fetch separado), así el
@@ -576,6 +596,14 @@ export default function RemisionesPage() {
   function abrirGuardar() {
     if (saving) return;
     if (!construirPayload()) return; // valida (togglea el toast si falta algo)
+    // Cobrar otro precio siempre se puede; que se QUEDE es la pregunta, y va
+    // antes de tocar el documento para que "cancelar" regrese a la captura.
+    const div = puedePrecios ? divergentes(lineas) : [];
+    if (div.length > 0) { setAprender(div); return; }
+    continuarGuardar();
+  }
+
+  function continuarGuardar() {
     if (editId && editEstado === "CONFIRMADA") { void guardarEdicionConfirmada(); return; }
     setGuardarChoiceOpen(true);
   }
@@ -583,6 +611,15 @@ export default function RemisionesPage() {
   // Guard síncrono contra doble clic en Guardar: el estado `saving` llega tarde
   // si el segundo clic entra antes del re-render (serían dos POST y dos folios).
   const inFlight = useRef(false);
+
+  // Precios tecleados que no son los del catálogo: se preguntan ANTES de
+  // guardar, una sola vez y en bloque (con 40 partidas, un aviso por renglón
+  // no se lee). Solo a quien puede tocar precios.
+  const puedePrecios = can(me, "lista_precios:gestionar");
+  const puedeProductos = can(me, "producto:gestionar");
+  const [aprender, setAprender] = useState<PrecioDivergente[] | null>(null);
+  // Alta de presentación desde la línea: guarda a qué línea volver.
+  const [nuevaPres, setNuevaPres] = useState<{ key: string; producto_id: string } | null>(null);
 
   // Sobregiro al EDITAR una confirmada (misma política que confirmar/facturar):
   // si el re-descuento no alcanza, se ofrece guardar dejando negativo.
@@ -1648,9 +1685,20 @@ export default function RemisionesPage() {
                 )}
                 <div className="col-span-4 sm:col-span-2">
                   <KeyboardCombobox
-                    options={(l.presentaciones.length ? l.presentaciones : [l.presentacion]).map((p) => ({ value: p, label: p }))}
+                    options={[
+                      ...(l.presentaciones.length ? l.presentaciones : [l.presentacion]).map((p) => ({ value: p, label: p })),
+                      // Vender por CAJA cuando el producto solo sabe de KILO:
+                      // se da de alta aquí en vez de mandar al usuario a otra
+                      // pantalla y perder la captura.
+                      ...(l.producto_id && puedeProductos
+                        ? [{ value: NUEVA_PRESENTACION, label: "＋ Nueva presentación…" }]
+                        : []),
+                    ]}
                     value={l.presentacion}
-                    onSelect={(v) => { setLinea(l.key, { presentacion: v }); cotizar(l.key, l.producto_id, v, l.cantidad); }}
+                    onSelect={(v) => {
+                      if (v === NUEVA_PRESENTACION) { setNuevaPres({ key: l.key, producto_id: l.producto_id }); return; }
+                      setLinea(l.key, { presentacion: v }); cotizar(l.key, l.producto_id, v, l.cantidad);
+                    }}
                     onAdvance={() => advanceLine(l.key, "presentacion")}
                     autoOpen={lineFocus?.key === l.key && lineFocus?.field === "presentacion"}
                     placeholder="Presentación"
@@ -1663,6 +1711,22 @@ export default function RemisionesPage() {
                     onChange={(e) => { const v = e.target.value.replace(",", "."); setLinea(l.key, { precio: v, precioManual: true, importe: Number(v || 0) * Number(l.cantidad || 0) }); }}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); advanceLine(l.key, "precio"); } }}
                   />
+                  {/* Lo que dice el catálogo, cuando se está cobrando otra cosa.
+                      Solo informa: llevarlo al catálogo se decide al guardar. */}
+                  {(() => {
+                    if (!l.producto_id || !l.precioManual || !l.precio.trim()) return null;
+                    const v = Number(l.precio);
+                    if (!Number.isFinite(v) || v <= 0) return null;
+                    if (l.precioLista == null) {
+                      return <div className="mt-0.5 text-[11px] text-muted">sin precio en el catálogo</div>;
+                    }
+                    if (Math.abs(v - Number(l.precioLista)) <= 0.01) return null;
+                    return (
+                      <div className="mt-0.5 text-[11px] text-muted">
+                        catálogo {fmtMoney(Number(l.precioLista))}
+                      </div>
+                    );
+                  })()}
                 </div>
                 {!showMatchIA && (
                   <div className="col-span-2 flex items-center justify-end sm:col-span-1">
@@ -1729,6 +1793,36 @@ export default function RemisionesPage() {
           nombreInicial={lineaCrear?.texto ?? ""}
           unidadBaseInicial={unidadBaseDesde(lineaCrear?.presPegada)}
           onCreated={aplicarProductoCreado}
+        />
+
+        <NuevaPresentacionDialog
+          open={nuevaPres !== null}
+          producto={nuevaPres ? prodById[nuevaPres.producto_id] ?? null : null}
+          onClose={() => setNuevaPres(null)}
+          onCreated={(prod) => {
+            const key = nuevaPres?.key;
+            setNuevaPres(null);
+            if (!key) return;
+            // La presentación recién creada queda elegida y se recotiza sola:
+            // el capturista sigue donde estaba, no vuelve a armar la línea.
+            const presKeys = Object.keys(prod.presentaciones ?? {});
+            const nueva = presKeys[presKeys.length - 1] ?? "";
+            setLinea(key, { presentaciones: presKeys, presentacion: nueva });
+            const ln = lineas.find((x) => x.key === key);
+            cotizar(key, prod.id, nueva, ln?.cantidad ?? "1");
+            productosRes.reload();   // para que las demás líneas también la vean
+          }}
+        />
+
+        <AprenderPreciosDialog
+          open={aprender !== null}
+          lineas={aprender ?? []}
+          clienteId={clienteId}
+          clienteNombre={cliName[clienteId] ?? ""}
+          sucursalId={sucursalId || undefined}
+          sucursalNombre={sucursales.find((x) => x.id === sucursalId)?.nombre}
+          onCancel={() => setAprender(null)}
+          onDone={() => { setAprender(null); continuarGuardar(); }}
         />
 
         <Modal open={guardarChoiceOpen} onClose={() => setGuardarChoiceOpen(false)} title="Guardar remisión"
