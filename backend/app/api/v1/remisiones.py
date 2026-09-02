@@ -50,6 +50,7 @@ from ...models import (
     Tenant,
 )
 from ...services import email as email_service
+from ...services.espejo_cruce import ligar_remision_con_espejo
 from ...services.fiscal import calcular_linea_producto
 from ...services.importar_remisiones import (
     ImportError_,
@@ -304,6 +305,12 @@ def create_remision(
     rem.ieps = ieps_total
     rem.total = subtotal - payload.descuento + iva_total + ieps_total
     flush_or_conflict(db, detail=_DUP)
+    # Reintento del cruce con el espejo: si la factura de SAE pasó por el
+    # espejo ANTES de que esta remisión existiera (la sync solo re-manda ~3
+    # días), el cruce factura→remisión ya no se vuelve a intentar — se intenta
+    # aquí, al revés, con los mismos candados (caso HO-33APA-MAR / ZEHMOHOS 810).
+    ligar_remision_con_espejo(db, rem)
+    db.flush()
     db.refresh(rem)
     return rem
 
@@ -615,6 +622,10 @@ def update_remision(
             reservar_stock_remision(db, ctx, rem, permitir_negativos=permitir_negativos)
 
     rem.total = (rem.subtotal or _ZERO) - (rem.descuento or _ZERO) + (rem.iva or _ZERO) + (rem.ieps or _ZERO)
+    # La edición puede completar la llave del cruce con el espejo (su_pedido o
+    # cliente nuevos, un precio corregido que ya cuadra): se reintenta aquí.
+    # Solo actúa sobre una remisión libre — RESERVADO/FACTURADA no entran.
+    ligar_remision_con_espejo(db, rem)
     rem.updated_by = ctx.user_id
     db.flush()
     db.refresh(rem)

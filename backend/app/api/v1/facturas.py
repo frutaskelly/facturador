@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import html as html_mod
 import logging
-import re
 
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -65,6 +64,7 @@ from ...schemas.factura import (
 )
 from ...services import email as email_service
 from ...services.cfdi import _RFC_PUBLICO, build_payload, emisor_rfc_esperado
+from ...services.espejo_cruce import extraer_oc as _extraer_oc, norm_oc as _norm_oc
 from ...services.factura_pdf import build_factura_pdf, build_facturas_pdf
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea_producto, totales
@@ -649,45 +649,6 @@ def _rechazar_cliente_en_espejo(db: Session, cliente_id: UUID, cliente: Cliente 
             detail=f"{cli.legal_name} está en espejo SAE: su facturación se emite en SAE "
                    "y aquí solo se refleja. El candado se quita al cortar ese cliente.",
         )
-
-
-_RE_OC_OBS = re.compile(r"\bOC[\s:]+([A-Z0-9][A-Z0-9\-\/\.]*)")
-# El folio interno de una entrega EHMO/MAFAN: dos letras del proyecto, la
-# semana, el punto y el día — HO-33PAC-LUN, SN-33NER-JUE, VH-35SAL-VIE.
-_RE_FOLIO_INTERNO = re.compile(r"\b([A-Z]{2}-\d{1,2}[A-Z]{2,4}(?:-[A-Z]{3})?)\b")
-
-
-def _norm_oc(v: Optional[str]) -> Optional[str]:
-    """SAE escribe la OC con ceros a la izquierda ('0000024646') y el
-    Facturador la guarda limpia ('24646'): se comparan sin ceros. Un folio
-    alfanumérico (DI-32MAF) se compara tal cual, en mayúsculas."""
-    v = (v or "").strip().upper()
-    if not v:
-        return None
-    return (v.lstrip("0") or "0") if v.isdigit() else v
-
-
-def _extraer_oc(observaciones: Optional[str]) -> Optional[str]:
-    """'OC 0000024736 ENTREGA CEDIS' → '24736'; 'OC DI-32MAF …' → 'DI-32MAF'.
-
-    Es la MISMA llave que escribe el export masivo en la Observación de SAE
-    (services/export_sae._observacion) y la que el resto del ecosistema
-    (bot, Master) usa para conciliar. Solo la primera: una obs con dos OC es
-    ambigua y no decide.
-
-    Segundo formato, el de EHMO/MAFAN: sus observaciones NO llevan el prefijo
-    "OC" y el folio interno va al FINAL — «SEMANA 33 SECRETARIO NERI REQ
-    20/08/2026 SN-33NER-JUE». Ese folio es igualmente el `su_pedido` de la
-    remisión, así que también sirve de llave; sin reconocerlo, 46 facturas
-    reales quedaron sin ligar a su entrega (detectado el 30-ago buscando
-    SN-33NER-JUE).
-    """
-    texto = (observaciones or "").upper()
-    m = _RE_OC_OBS.search(texto)
-    if m:
-        return _norm_oc(m.group(1))
-    m = _RE_FOLIO_INTERNO.search(texto)
-    return _norm_oc(m.group(1)) if m else None
 
 
 def _norm_clave_sae(v: str) -> str:
