@@ -174,6 +174,11 @@ export default function RemisionesPage() {
   const [editFolio, setEditFolio] = useState<string | null>(null);     // folio real de la remisión editada
   const [clienteId, setClienteId] = useState("");
   const [sucursalId, setSucursalId] = useState("");
+  // Dimensiones de negociación que el documento ya fijó (vienen de la orden o
+  // del alta): sin ellas /precios/cotizar no ve las listas pactadas por
+  // proyecto/serie y marca "sin precio" productos que sí están en la lista.
+  const [proyectoId, setProyectoId] = useState("");
+  const [serieDocId, setSerieDocId] = useState("");   // serie ya foliada (solo edición)
   const [almacenId, setAlmacenId] = useState("");
   const [fecha, setFecha] = useState("");
   const [serieOverride, setSerieOverride] = useState("");
@@ -285,6 +290,7 @@ export default function RemisionesPage() {
   // Lo usa "Borrar" y también openCreate al entrar.
   function resetForm() {
     setClienteId(""); setSucursalId(""); setAlmacenId(""); setSerieOverride("");
+    setProyectoId(""); setSerieDocId("");
     setSucursales([]); setNotas(""); setFacturaSae(""); setSuPedido(""); setLineas([nuevaLinea()]);
     setFecha(today());            // fecha de hoy por defecto (el flujo la salta)
     setStep("cliente");           // arranca con el cliente abierto
@@ -315,6 +321,8 @@ export default function RemisionesPage() {
       setSucursalId(det.sucursal_id ?? "");
       setAlmacenId(det.almacen_id ?? "");
       setSerieOverride("");                       // el folio ya está fijo; no se re-serie al editar
+      setProyectoId(det.proyecto_id ?? "");
+      setSerieDocId(det.serie_id ?? "");
       setFecha(det.fecha_remision ?? today());
       setNotas(det.notas ?? "");
       setFacturaSae(det.factura_sae ?? "");
@@ -382,6 +390,11 @@ export default function RemisionesPage() {
     return setLineFocus({ key: lineas[idx + 1].key, field: "cantidad" });
   }
 
+  // La serie con la que se cotiza: al editar es la que ya folió el documento;
+  // al crear, la elegida a mano o la que el resolutor previó — la misma que el
+  // backend fijará al guardar, para que el preview cobre lo que se va a cobrar.
+  const serieCotiza = editId ? serieDocId : (serieOverride || serieResuelta?.id || "");
+
   // Secuencia por línea: cada llamada a cotizar (aunque no llegue a pedir precio)
   // invalida las anteriores en vuelo, para que una respuesta vieja no pise el
   // precio/importe calculados con la cantidad más reciente.
@@ -395,6 +408,8 @@ export default function RemisionesPage() {
       const p = new URLSearchParams({ producto_id, presentacion, cantidad });
       if (clienteId) p.set("cliente_id", clienteId);
       if (sucursalId) p.set("sucursal_id", sucursalId);
+      if (proyectoId) p.set("proyecto_id", proyectoId);
+      if (serieCotiza) p.set("serie_id", serieCotiza);
       const r = await apiFetch<{
         precio: string | null; origen?: string | null;
         lista_id?: string | null; cantidad_minima?: number | null;
@@ -443,7 +458,7 @@ export default function RemisionesPage() {
 
   // Sin esto, el precio se quedaba con el de la primera selección: cambiar de
   // cliente, sucursal o almacén después de capturar líneas no re-cotizaba.
-  const contextoPrecios = `${clienteId}|${sucursalId}|${almacenId}`;
+  const contextoPrecios = `${clienteId}|${sucursalId}|${almacenId}|${proyectoId}|${serieCotiza}`;
   const contextoPreciosPrev = useRef(contextoPrecios);
   useEffect(() => {
     if (contextoPreciosPrev.current === contextoPrecios) return;
