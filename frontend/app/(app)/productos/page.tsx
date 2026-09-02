@@ -282,12 +282,20 @@ export default function ProductosPage() {
     }
   }
 
+  // Cada columna lleva `sortValue`: es el texto que el buscador de la tabla
+  // indexa (y el que sale al exportar a Excel). Sin él, las celdas JSX no
+  // aportan texto y buscar no encontraba nada.
   const columns: Column<Producto>[] = [
-    { header: "SKU", cell: (p) => <span className="font-medium">{p.sku}</span> },
-    { header: "Nombre", truncate: true, cell: (p) => <span title={p.nombre}>{p.nombre}</span> },
-    { header: "Categoría", cell: (p) => (p.categoria_id ? catName[p.categoria_id] ?? "—" : "—") },
+    { header: "SKU", sortValue: (p) => p.sku, cell: (p) => <span className="font-medium">{p.sku}</span> },
+    { header: "Nombre", truncate: true, sortValue: (p) => p.nombre, cell: (p) => <span title={p.nombre}>{p.nombre}</span> },
+    {
+      header: "Categoría",
+      sortValue: (p) => (p.categoria_id ? catName[p.categoria_id] ?? "" : ""),
+      cell: (p) => (p.categoria_id ? catName[p.categoria_id] ?? "—" : "—"),
+    },
     {
       header: "Esquema de impuesto",
+      sortValue: (p) => (p.esquema_impuesto_id ? esqName[p.esquema_impuesto_id] ?? "" : "Sin esquema"),
       cell: (p) =>
         p.esquema_impuesto_id ? (
           esqName[p.esquema_impuesto_id] ?? "—"
@@ -295,17 +303,19 @@ export default function ProductosPage() {
           <span className="text-danger">Sin esquema</span>
         ),
     },
-    { header: "Clave SAT", cell: (p) => <span className="text-muted">{p.clave_sat}</span> },
+    { header: "Clave SAT", sortValue: (p) => p.clave_sat, cell: (p) => <span className="text-muted">{p.clave_sat}</span> },
     {
       // La descripción oficial del SAT para esa clave: la resuelve el backend
       // (el producto solo guarda la clave). Sin ella, los 8 dígitos no dicen
       // nada al revisar si la clave que quedó es la correcta.
       header: "Descripción SAT",
       truncate: true,
+      sortValue: (p) => p.clave_sat_descripcion ?? "",
       cell: (p) => <span className="text-muted" title={p.clave_sat_descripcion ?? ""}>{p.clave_sat_descripcion || "—"}</span>,
     },
     {
       header: "Estado",
+      sortValue: (p) => (p.activo ? "Activo" : "Inactivo"),
       cell: (p) => <Badge tone={p.activo ? "success" : "muted"}>{p.activo ? "Activo" : "Inactivo"}</Badge>,
     },
     {
