@@ -253,6 +253,68 @@ def test_espejo_no_resucita_canceladas_ni_pisa_saldo(client, env, auth_as, sin_s
     assert "CANCELADA" in tardio.json()["detail"]
 
 
+def test_timbrado_fallido_se_refleja_borrador_sin_efectos(client, env, auth_as, sin_sesion):
+    """La regla ZEHMOHOS 829/830 (2-sep): SAE emitió el documento pero el
+    timbrado FALLÓ (CFDI02.UUID vacío). El espejo la refleja BORRADOR —el folio
+    no desaparece— pero sin efectos: ni estampa la remisión ni entra al estado
+    de cuenta. Cuando SAE por fin timbra, la misma pasada la sube a TIMBRADA."""
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"],
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+    client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                 json={"factura_sae": "ZHGO 829"})
+
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    # TIMBRADA sin UUID no existe: 422, no un reflejo que miente
+    r = client.post("/api/v1/facturas/espejo", headers=hk,
+                    json=_espejo(folio=829, uuid_fiscal=None))
+    assert r.status_code == 422
+    assert "UUID" in r.json()["detail"]
+
+    # BORRADOR sin UUID sí entra, y sin efectos
+    r = client.post("/api/v1/facturas/espejo", headers=hk,
+                    json=_espejo(folio=829, uuid_fiscal=None, estado="BORRADOR"))
+    assert r.status_code == 201, r.text
+    f = r.json()
+    assert f["estado"] == "BORRADOR" and f["uuid"] is None
+    assert f["fecha_timbrado"] is None
+
+    auth_as(env["dueno"])
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["estado"] != "FACTURADA"                 # ni FACTURADA…
+    assert det["factura_id"] is None
+    assert det["factura_sae"] == "ZHGO 829"             # …ni liberada
+    ec = client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli']}", headers=h).json()
+    assert not any(x.get("folio") == 829 for x in ec.get("facturas", []))
+
+    # SAE reintenta y timbra: el mismo folio sube a TIMBRADA y ahora sí liga
+    sin_sesion()
+    r = client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=829))
+    assert r.status_code == 201
+    assert r.json()["estado"] == "TIMBRADA" and r.json()["uuid"]
+    auth_as(env["dueno"])
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["estado"] == "FACTURADA"
+    assert det["factura_id"] == r.json()["id"]
+
+
+def test_un_uuid_no_se_destimbra(client, env, auth_as, sin_sesion):
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=850))
+    # SAE reporta sin UUID una que el espejo ya tiene timbrada: revisión manual
+    r = client.post("/api/v1/facturas/espejo", headers=hk,
+                    json=_espejo(folio=850, uuid_fiscal=None, estado="BORRADOR"))
+    assert r.status_code == 409
+    # y una CANCELADA tampoco regresa a BORRADOR
+    client.post("/api/v1/facturas/espejo", headers=hk,
+                json=_espejo(folio=850, estado="CANCELADA"))
+    r = client.post("/api/v1/facturas/espejo", headers=hk,
+                    json=_espejo(folio=850, uuid_fiscal=None, estado="BORRADOR"))
+    assert r.status_code == 409
+
+
 def test_espejo_liga_estampas_de_captura_manual(client, env, auth_as, sin_sesion):
     """Las estampas a mano ('ZHGO0820', con ceros o sin espacio) también ligan:
     el cruce usa la misma tolerancia que el folio sugerido del export."""

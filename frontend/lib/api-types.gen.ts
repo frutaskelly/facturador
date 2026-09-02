@@ -1229,6 +1229,10 @@ export interface paths {
          *     folio (`factura_sae` = "SERIE FOLIO", puesto por el export masivo) quedan
          *     ligadas a la factura y en FACTURADA; si SAE la cancela, se liberan para
          *     re-exportarse.
+         *
+         *     Un timbrado FALLIDO en SAE (documento emitido, CFDI02.UUID vacío) llega
+         *     como BORRADOR: se refleja para que el folio no desaparezca, pero sin
+         *     efectos — ni estado de cuenta ni remisiones. TIMBRADA exige uuid_fiscal.
          */
         post: operations["factura_espejo_api_v1_facturas_espejo_post"];
         delete?: never;

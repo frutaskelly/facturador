@@ -106,7 +106,9 @@ class FacturaEspejoIn(BaseModel):
     # 'empresa:numero' de cliente_externos (la misma que usa el export).
     cliente_sae: str = Field(max_length=10)
     fecha: Optional[datetime] = None
-    estado: str = Field(default="TIMBRADA", pattern="^(TIMBRADA|CANCELADA)$")
+    # BORRADOR = SAE emitió el documento pero el timbrado FALLÓ (CFDI02.UUID
+    # vacío): se refleja sin efectos — ni estado de cuenta ni remisiones.
+    estado: str = Field(default="TIMBRADA", pattern="^(BORRADOR|TIMBRADA|CANCELADA)$")
     uuid_fiscal: Optional[str] = Field(default=None, max_length=36)   # CFDI02.UUID
     metodo_pago: Optional[str] = Field(default=None, max_length=5)
     forma_pago: Optional[str] = Field(default=None, max_length=5)
