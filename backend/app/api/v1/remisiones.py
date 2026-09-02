@@ -27,7 +27,7 @@ from email_validator import EmailNotValidError, validate_email
 from rapidfuzz import fuzz
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, Field as PydField
-from sqlalchemy import func
+from sqlalchemy import BigInteger, func
 from sqlalchemy.orm import Session, joinedload
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
@@ -140,6 +140,14 @@ def _next_folio(db: Session, tenant_id, *, sucursal_id=None, cliente_id=None, se
     return f"R{mx + 1}"
 
 
+# Orden natural del folio: como texto, "RZEHMOHOS9" > "RZEHMOHOS72" y el listado
+# sale barajado (9, 8, 72, 7, 6, 37…). Se separa el prefijo de serie del número
+# final para comparar el número como número (los folios los pone el sistema sin
+# ceros a la izquierda, así que el texto solo no ordena).
+_FOLIO_PREFIJO = func.regexp_replace(Remision.folio_interno, r"\d+$", "")
+_FOLIO_NUMERO = func.cast(func.substring(Remision.folio_interno, r"(\d+)$"), BigInteger)
+
+
 def _adjuntar_oc(db: Session, rems: list) -> None:
     """Cuelga de cada remisión su OC original, en DOS consultas para toda la
     página: la que la generó (`remision_id`) y, si no la hay, la que traiga el
@@ -198,7 +206,12 @@ def list_remisiones(
         query = query.filter(Remision.fecha_remision >= fecha_desde)
     if fecha_hasta:
         query = query.filter(Remision.fecha_remision <= fecha_hasta)
-    query = query.order_by(Remision.fecha_remision.desc(), Remision.folio_interno.desc())
+    query = query.order_by(
+        Remision.fecha_remision.desc(),
+        _FOLIO_PREFIJO.desc(),
+        _FOLIO_NUMERO.desc().nullslast(),
+        Remision.folio_interno.desc(),
+    )
     return paginate(query, RemisionOut, limit, offset,
                     preparar=lambda rows: _adjuntar_oc(db, rows))
 
@@ -341,7 +354,7 @@ def remisiones_pdf_lote(
     )
     if ctx.cliente_scope:
         q = q.filter(Remision.cliente_facturacion_id.in_(ctx.cliente_scope))
-    rems = q.order_by(Remision.folio_interno).all()
+    rems = q.order_by(_FOLIO_PREFIJO, _FOLIO_NUMERO, Remision.folio_interno).all()
     if not rems:
         raise HTTPException(status_code=404, detail="No se encontraron remisiones")
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()

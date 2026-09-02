@@ -117,6 +117,25 @@ def test_create_draft_and_folio(client, env, auth_as):
     assert _create_rem(client, h, env, "1", "1").json()["folio_interno"] == "R2"
 
 
+def test_list_ordena_folio_como_numero(client, env, auth_as):
+    """Como texto "R9" > "R72" y el listado salía barajado (9, 72, 37): a fecha
+    igual, el número del folio se ordena como número (72, 37, 9)."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    ids = [_create_rem(client, h, env, "1", "1").json()["id"] for _ in range(3)]
+    db = SessionLocal()
+    try:
+        for rid, folio in zip(ids, ["QZX9", "QZX72", "QZX37"]):
+            db.execute(text("UPDATE remisiones SET folio_interno = :f WHERE id = :id"),
+                       {"f": folio, "id": rid})
+        db.commit()
+    finally:
+        db.close()
+    data = client.get("/api/v1/remisiones", headers=h,
+                      params={"cliente_id": env["cli_a"], "limit": 200}).json()
+    folios = [r["folio_interno"] for r in data["items"] if r["folio_interno"].startswith("QZX")]
+    assert folios == ["QZX72", "QZX37", "QZX9"]
+
+
 def test_confirm_descuenta_then_cancel_restituye(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     _load_stock(client, h, env, "100", "4")
