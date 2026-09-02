@@ -603,3 +603,137 @@ def test_pasada_automatica_del_espejo_reporta_fecha(client, env, auth_as, sin_se
     est = client.get("/api/v1/facturas/espejo/sync", headers=h).json()
     assert est["ultima"]["origen"] == "AUTOMATICA"
     assert est["ultima"]["estado"] == "ERROR" and est["pendiente"] is None
+
+
+# ─── Reintento del cruce: la remisión llega DESPUÉS que la factura ───────────
+# La sync del conector solo re-manda ~3 días de FECHA_DOC: si la remisión se
+# crea después de la última pasada de su factura por el espejo, el cruce
+# factura→remisión no se reintenta jamás (caso real HO-33APA-MAR / ZEHMOHOS
+# 810, 2-sep-2026). El lado remisión→factura cierra ese hueco con los MISMOS
+# candados: una sola candidata, tolerancia 15%/$100, nada de facturas nativas.
+
+
+def test_remision_creada_despues_liga_con_espejo_huerfana(client, env, auth_as, sin_sesion):
+    """El caso HO-33APA-MAR: la factura ya pasó por el espejo sin remisión que
+    la esperara; al CREAR la remisión con ese su_pedido, se liga sola."""
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    f = client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=920, observaciones="OC 0000066001 ENTREGA CEDIS")).json()
+
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "su_pedido": "66001",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+    assert rem["estado"] == "FACTURADA"
+    assert rem["factura_sae"] == "ZHGO 920"
+    assert rem["factura_id"] == f["id"]
+
+
+def test_editar_su_pedido_liga_con_espejo_huerfana(client, env, auth_as, sin_sesion):
+    """La remisión existía pero SIN su_pedido (el espejo no tuvo con qué casar);
+    capturarlo después completa la llave y liga al vuelo."""
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"],
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    f = client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=921, observaciones="OC 66002 ENTREGA CEDIS")).json()
+    auth_as(env["dueno"])
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["factura_sae"] is None            # sin su_pedido no hubo cruce
+
+    det = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                       json={"su_pedido": "66002"}).json()
+    assert det["estado"] == "FACTURADA"
+    assert det["factura_sae"] == "ZHGO 921"
+    assert det["factura_id"] == f["id"]
+
+
+def test_reintento_no_adivina_con_dos_facturas_misma_oc(client, env, auth_as, sin_sesion):
+    """Dos facturas huérfanas con la misma OC (una OC ampara varias entregas):
+    la remisión nueva no adivina cuál es la suya — estampa manual."""
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    for folio in (922, 923):
+        client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+            folio=folio, observaciones="OC 66003"))
+
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "su_pedido": "66003",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+    assert rem["estado"] == "BORRADOR"
+    assert rem["factura_sae"] is None
+
+
+def test_reintento_no_roba_factura_ya_ligada(client, env, auth_as, sin_sesion):
+    """Una factura que YA tiene su remisión no es huérfana: una segunda
+    remisión con el mismo su_pedido no se la lleva."""
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    rem1 = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "su_pedido": "66004",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    f = client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=924, observaciones="OC 66004")).json()
+
+    auth_as(env["dueno"])
+    rem2 = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "su_pedido": "66004",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+    assert rem2["estado"] == "BORRADOR" and rem2["factura_sae"] is None
+    det1 = client.get(f"/api/v1/remisiones/{rem1['id']}", headers=h).json()
+    assert det1["factura_id"] == f["id"]         # la dueña original sigue ligada
+
+
+def test_reintento_respeta_marca_manual_pendiente(client, env, auth_as, sin_sesion):
+    """Una estampa manual ('ZHGO0925') reclama la factura aunque el espejo aún
+    no la ligue por factura_id: otra remisión con la OC no se mete."""
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=925, observaciones="OC 66005"))
+
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    rem1 = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"],
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+    client.patch(f"/api/v1/remisiones/{rem1['id']}", headers=h,
+                 json={"factura_sae": "ZHGO0925"})
+
+    rem2 = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "su_pedido": "66005",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+    assert rem2["estado"] == "BORRADOR" and rem2["factura_sae"] is None
+
+
+def test_reintento_respeta_tolerancia_y_borradores(client, env, auth_as, sin_sesion):
+    """Los mismos candados del espejo: un importe descuadrado (>15%/$100) no
+    estampa, y un timbrado fallido (reflejo BORRADOR) no liga nada."""
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=926, observaciones="OC 66006"))              # total 969.76
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=927, estado="BORRADOR", uuid_fiscal=None,
+        observaciones="OC 66007"))                          # timbrado fallido
+
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    lejos = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "su_pedido": "66006",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 100}]}).json()      # dif 869.76 > 145.46
+    assert lejos["estado"] == "BORRADOR" and lejos["factura_sae"] is None
+
+    sin_cfdi = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "su_pedido": "66007",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+    assert sin_cfdi["estado"] == "BORRADOR" and sin_cfdi["factura_sae"] is None
