@@ -1,4 +1,4 @@
-# Estado del proyecto — 01/09/2026 (cierre: `7b6e6ca` en vivo — la tabla y el menú caben en la pantalla)
+# Estado del proyecto — 01/09/2026 (cierre: `9021dfa` — tabla y menú en vivo, plan del retiro del Master dentro)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -7,11 +7,11 @@ carpeta y leer este archivo.
 
 | | |
 |---|---|
-| Rama base | `main` en `7b6e6ca`, igual que `origin/main` |
+| Rama base | `main` en `9021dfa`, igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio en el padre |
-| Worktrees | Dos vivas: la de esta sesión (`remisiones-table-layout`, ya fusionada) y **`facturador-migration-proposal`, que tiene trabajo sin commitear** (ver Pendientes 7). El cierre removió `admiring-aryabhata` y `elastic-morse`, ambas fusionadas y limpias, y podó sus dos ramas |
-| PRs abiertos | ninguno — #79 (docs) y #80 (tabla + menú) fusionados en este cierre |
+| Worktrees | Solo la de esta sesión (`remisiones-table-layout`), ya fusionada y borrable. El cierre removió `admiring-aryabhata`, `elastic-morse` y `facturador-migration-proposal` — las tres fusionadas y limpias — y podó sus ramas |
+| PRs abiertos | ninguno — #79 (docs), #80 (tabla + menú), #81 (traspaso) y #82 (plan del Master) fusionados en este cierre |
 | Migración head | `0063_export_pedido_rastro`, sin cambios: el trabajo de hoy es sólo frontend |
 
 `Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
@@ -21,7 +21,7 @@ es `gh pr create --base main` y luego `gh pr merge N --merge`.
 
 ## Deploy
 
-**En vivo en https://facturador.mx y al día con `7b6e6ca`.** `./deploy.sh` reconstruyó frontend
+**En vivo en https://facturador.mx y al día con `7b6e6ca`** (lo posterior es sólo documentación). `./deploy.sh` reconstruyó frontend
 y backend (la imagen de landing se reusó de caché: su contexto no cambió) y los cinco
 contenedores quedaron sanos. Verificado contra los dominios reales: `facturador.mx` 200,
 `api.facturador.mx/health` 200, `admin.facturador.mx` 200 y `app.facturador.mx` 307 (redirige a
@@ -365,9 +365,9 @@ podarla.
 
 ## Pendientes
 
-0. **Mirar la tabla y el menú con datos reales.** Todo el trabajo de `7b6e6ca` se verificó con
-   mediciones sobre un banco de pruebas, nunca con sesión iniciada. Recargar con Ctrl+Shift+R y
-   revisar sobre todo la columna Cliente de remisiones con los nombres largos de verdad.
+0. ~~Mirar la tabla y el menú con datos reales~~ — **REVISADO por el dueño** el 1-sep al cierre:
+   la tabla y el menú se vieron con sesión iniciada y quedaron aprobados. Con eso se cierra
+   también la deuda de «sin verificación visual» que traía `7b6e6ca`.
 1. **15 textos de producto sin cruzar** (eran 51; el 31-ago se resolvieron 34 con las facturas
    del SAE, el historial de cada cliente y el catálogo INVE — 35 acciones: alias aprendidos,
    9 productos nuevos con su código SAE, 3 duplicados detectados y fusionados). Los 15 restantes
@@ -390,13 +390,15 @@ podarla.
    dueño, 31-ago): se retoma en otra sesión, en otra cuenta. El plan completo vive en
    `PLAN-onboarding-clientes-sae.md` (Etapas A–E); los grupos de WhatsApp ya están configurados
    en `activo: false`, listos para encender.
-7. **`facturador-migration-proposal` tiene trabajo sin commitear**: `PLAN-retiro-master-ordenes.md`
-   (248 líneas, propuesta del 1-sep para retirar el Master de órdenes). El cierre **no lo tocó**
-   a propósito — es de otra sesión y no estaba revisado. Su worktree sigue viva en
-   `.claude/worktrees/facturador-migration-proposal-c1faa9`. Decidir si se commitea o se descarta.
-8. **Decisiones abiertas del menú nuevo**: si los favoritos deben seguir «mudándose» de su
-   sección al marcarlos (regla del 28-ago) ahora que viven dentro de un panel, y si conviene
-   distinguir los iconos de Remisiones y Facturas, que son casi la misma hoja de papel.
+7. ~~Plan del retiro del Master sin commitear~~ — **REVISADO Y FUSIONADO** (PR #82):
+   `PLAN-retiro-master-ordenes.md` vive en la raíz. Recorre los 46 comandos del bot uno por uno
+   con el uso real de 30 días, y propone 11 piezas, 5 etapas y 9 decisiones del dueño. **Es la
+   siguiente pieza grande de trabajo**: empieza por su Etapa 0 (congelar el Master, fijar el
+   contrato de vista previa/aplicar y cerrar el pendiente 11 del propio plan).
+   Un matiz detectado al revisarlo: dice que `_sae_sig_folio_pedido` «no se llama», pero sí lo
+   hace `ehmo_pedidos.py:3708`; lo que no lo usa es la ruta del masivo de Balles/Jubran.
+8. ~~Decisiones abiertas del menú nuevo~~ — **CERRADAS por el dueño** el 1-sep: los favoritos
+   siguen «mudándose» de su sección y los iconos de Remisiones y Facturas se quedan como están.
 5. **Extender `SERIES_POR_EMPRESA` del conector a las empresas 04 y 05** — diferido junto con
    el onboarding (misma decisión); hoy solo cubre 02 y 03.
 6. ~~Resolver precios por lote al abrir una orden~~ — **RESUELTO** el 31-ago (PR #57):
