@@ -19,6 +19,7 @@ import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { LoadingDots } from "@/components/ui/LoadingDots";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { SearchBox } from "@/components/ui/SearchBox";
 import { SincronizarSae } from "@/components/SincronizarSae";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
@@ -138,14 +139,23 @@ export default function RemisionesPage() {
   // Las que llegaron de la bandeja sin revisar: es la cola de trabajo del
   // revisor, y sin filtro se pierden entre el histórico.
   const [fPorRevisar, setFPorRevisar] = useState(false);
+  // Búsqueda de folio/pedido/factura SAE en el servidor: el buscador de la
+  // tabla solo ve las 200 filas cargadas y las remisiones viejas se le escapan.
+  const [busca, setBusca] = useState("");
+  const [buscaAplicada, setBuscaAplicada] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setBuscaAplicada(busca.trim()), 300);
+    return () => clearTimeout(t);
+  }, [busca]);
   const listPath = useMemo(() => {
     const p = new URLSearchParams({ limit: "200" });
     if (fDesde) p.set("fecha_desde", fDesde);
     if (fHasta) p.set("fecha_hasta", fHasta);
     if (fCliente) p.set("cliente_id", fCliente);
     if (fPorRevisar) p.set("revision_pendiente", "true");
+    if (buscaAplicada) p.set("q", buscaAplicada);
     return `/api/v1/remisiones?${p.toString()}`;
-  }, [fDesde, fHasta, fCliente, fPorRevisar]);
+  }, [fDesde, fHasta, fCliente, fPorRevisar, buscaAplicada]);
 
   // lista
   const { data, loading, error, reload } = useResource<Page<Remision>>(listPath);
@@ -2192,6 +2202,14 @@ export default function RemisionesPage() {
 
       {/* Filtros */}
       <div className="mb-3 flex flex-wrap items-end gap-3">
+        <Field label="Buscar">
+          <SearchBox
+            value={busca}
+            onChange={setBusca}
+            placeholder="Folio, su pedido o factura SAE"
+            className="w-72"
+          />
+        </Field>
         <Field label="Desde">
           <Input type="date" value={fDesde} onChange={(e) => setFDesde(e.target.value)} />
         </Field>
@@ -2215,13 +2233,18 @@ export default function RemisionesPage() {
           />
           Solo por revisar
         </label>
-        {(fDesde || fHasta || fCliente || fPorRevisar) && (
+        {(busca || fDesde || fHasta || fCliente || fPorRevisar) && (
           <Button
             variant="secondary"
-            onClick={() => { setFDesde(""); setFHasta(""); setFCliente(""); setFPorRevisar(false); }}
+            onClick={() => { setBusca(""); setFDesde(""); setFHasta(""); setFCliente(""); setFPorRevisar(false); }}
           >
             Limpiar filtros
           </Button>
+        )}
+        {buscaAplicada && !loading && (
+          <span className="pb-2 text-sm text-muted">
+            {data?.total ?? 0} resultado{(data?.total ?? 0) === 1 ? "" : "s"}
+          </span>
         )}
       </div>
 

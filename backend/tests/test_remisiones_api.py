@@ -466,3 +466,40 @@ def test_factura_sae_reserva_y_al_quitarla_vuelve_a_borrador(client, env, auth_a
     # Ya confirmada, el folio de SAE es un dato más: no la regresa a borrador.
     up = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"factura_sae": ""})
     assert up.json()["estado"] == "CONFIRMADA"
+
+
+def test_busqueda_q_folio_pedido_factura_sae(client, env, auth_as):
+    """`q` busca en el servidor (folio interno, su pedido, factura SAE): el
+    buscador de la tabla solo ve la página cargada y lo viejo se le escapaba.
+    SAE muestra los folios rellenos de ceros, así que esa variante también pega.
+    """
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    # Términos únicos (la BD de pruebas no aísla por RLS) y SOLO letras: un
+    # dígito en la "serie" chocaría con la normalización de ceros que se prueba.
+    tag = uuid.uuid4().hex[:6].translate(str.maketrans("0123456789", "ghjkmnpqrt")).upper()
+
+    def _crear(**extra):
+        body = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+                "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "1",
+                            "precio_unitario": "5"}], **extra}
+        r = client.post("/api/v1/remisiones", headers=h, json=body)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    con_pedido = _crear(su_pedido=f"HO-34-{tag}")
+    con_sae = _crear(factura_sae=f"Z{tag} 588")
+    _crear()  # ruido: no debe aparecer en las búsquedas
+
+    def _ids(q):
+        res = client.get("/api/v1/remisiones", headers=h, params={"q": q})
+        assert res.status_code == 200, res.text
+        return {r["id"] for r in res.json()["items"]}
+
+    assert _ids(f"HO-34-{tag}") == {con_pedido["id"]}
+    assert con_pedido["id"] in _ids(con_pedido["folio_interno"])
+    # La factura SAE pega como se guardó, sin espacio, y como la muestra SAE
+    # (folio con ceros a la izquierda).
+    assert _ids(f"Z{tag} 588") == {con_sae["id"]}
+    assert _ids(f"Z{tag}588") == {con_sae["id"]}
+    assert _ids(f"Z{tag} 0000588") == {con_sae["id"]}
+    assert _ids(f"sin-coincidencias-{tag}") == set()
