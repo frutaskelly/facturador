@@ -1270,6 +1270,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/facturas/espejo/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Espejo Sync Estado
+         * @description La fecha de «SAE actualizado» (última corrida terminada del espejo) y la
+         *     solicitud viva si hay una en cola o corriendo. Es lo que la UI pinta junto
+         *     al botón, y lo que sondea después de presionarlo.
+         */
+        get: operations["espejo_sync_estado_api_v1_facturas_espejo_sync_get"];
+        put?: never;
+        /**
+         * Solicitar Espejo Sync
+         * @description El botón «Sincronizar SAE». El backend no ve SAE: aquí solo queda la
+         *     solicitud; el conector (que sí consulta SAE por sqlcmd) la reclama en su
+         *     siguiente vuelta, corre el espejo y reporta. Idempotente: si ya hay una
+         *     viva, se devuelve esa en vez de encolar otra.
+         */
+        post: operations["solicitar_espejo_sync_api_v1_facturas_espejo_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/facturas/espejo/sync/pendiente": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reclamar Espejo Sync
+         * @description El conector pregunta si alguien pidió sincronizar. Reclamar marca la
+         *     solicitud EN_CURSO (skip_locked: dos conectores no se pisan) — si el
+         *     conector muere a medias, la fila queda EN_CURSO y la siguiente pasada
+         *     automática la cierra vía reporte con su solicitud_id o queda a la vista.
+         */
+        get: operations["reclamar_espejo_sync_api_v1_facturas_espejo_sync_pendiente_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/facturas/espejo/sync/reporte": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reportar Espejo Sync
+         * @description El conector terminó una corrida del espejo. Con solicitud_id cierra la
+         *     del botón; sin él registra la pasada automática — así la fecha de «SAE
+         *     actualizado» vive aunque nadie presione nada.
+         */
+        post: operations["reportar_espejo_sync_api_v1_facturas_espejo_sync_reporte_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/facturas/pdf": {
         parameters: {
             query?: never;
@@ -5240,6 +5314,59 @@ export interface components {
             mensaje?: string | null;
             /** To */
             to?: string | null;
+        };
+        /**
+         * EspejoSyncEstadoOut
+         * @description Lo que la UI necesita: la última corrida terminada (la fecha de «SAE
+         *     actualizado») y la solicitud viva, si hay una en cola o corriendo.
+         */
+        EspejoSyncEstadoOut: {
+            pendiente?: components["schemas"]["EspejoSyncOut"] | null;
+            ultima?: components["schemas"]["EspejoSyncOut"] | null;
+        };
+        /**
+         * EspejoSyncOut
+         * @description Una corrida del espejo SAE: la solicitud del botón o la pasada del timer.
+         */
+        EspejoSyncOut: {
+            /** Dias */
+            dias: number;
+            /** Estado */
+            estado: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Iniciada At */
+            iniciada_at?: string | null;
+            /** Origen */
+            origen: string;
+            /** Resultado */
+            resultado?: Record<string, never> | null;
+            /**
+             * Solicitada At
+             * Format: date-time
+             */
+            solicitada_at: string;
+            /** Terminada At */
+            terminada_at?: string | null;
+        };
+        /**
+         * EspejoSyncReporteIn
+         * @description El conector reporta cómo le fue: con solicitud_id cierra la del botón;
+         *     sin él registra una pasada automática ya terminada.
+         */
+        EspejoSyncReporteIn: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Resultado */
+            resultado?: Record<string, never>;
+            /** Solicitud Id */
+            solicitud_id?: string | null;
         };
         /** EsquemaImpuestoCreate */
         EsquemaImpuestoCreate: {
@@ -12263,6 +12390,134 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    espejo_sync_estado_api_v1_facturas_espejo_sync_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EspejoSyncEstadoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    solicitar_espejo_sync_api_v1_facturas_espejo_sync_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EspejoSyncOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reclamar_espejo_sync_api_v1_facturas_espejo_sync_pendiente_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EspejoSyncOut"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reportar_espejo_sync_api_v1_facturas_espejo_sync_reporte_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EspejoSyncReporteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EspejoSyncOut"];
                 };
             };
             /** @description Validation Error */

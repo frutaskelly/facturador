@@ -9,6 +9,7 @@ from .conexion import Conexion
 from .grupo_whatsapp import GrupoWhatsapp
 from .conversion import ConversionProducto
 from .esquema_impuesto import EsquemaImpuesto
+from .espejo_sync import EspejoSync
 from .devolucion import Devolucion, LineaDevolucion
 from .factura import Factura, LineaFactura, TimbradoIntento
 from .pago import Pago
@@ -42,6 +43,7 @@ __all__ = [
     # ── Phase 3: catálogo ──
     "CategoriaProducto",
     "EsquemaImpuesto",
+    "EspejoSync",
     "Producto",
     "ProductoAlias",
     "ProductoCliente",

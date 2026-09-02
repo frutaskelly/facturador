@@ -29,11 +29,12 @@ from sqlalchemy.orm import Session
 from ...core.config import settings
 from ...core.db import set_role_tenant
 from ...core.ratelimit import enforce
-from ...core.rbac import AuthContext, get_tenant_db, require_permission
+from ...core.rbac import AuthContext, get_auth_context, get_tenant_db, require_permission
 from ...models import (
     Almacen,
     Cliente,
     ClienteExterno,
+    EspejoSync,
     EsquemaImpuesto,
     Factura,
     LineaFactura,
@@ -51,6 +52,9 @@ from ...schemas.common import Page
 from ...schemas.factura import (
     CancelarFacturaIn,
     EnviarFacturaIn,
+    EspejoSyncEstadoOut,
+    EspejoSyncOut,
+    EspejoSyncReporteIn,
     FacturaDesdeRemisionesIn,
     FacturaDetailOut,
     FacturaDirectaIn,
@@ -729,6 +733,114 @@ def espejo_resumen(
             for f, t, e, sal in filas
         ],
     }
+
+
+def _puede_pedir_sync(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    """El botón vive en /facturas Y en /remisiones: basta cualquiera de los dos
+    menús (require_permission exige TODOS, y hay roles con uno solo)."""
+    if ctx.is_owner or {"menu:facturas", "menu:remisiones"} & set(ctx.permissions):
+        return ctx
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Falta permiso: menu:facturas o menu:remisiones",
+    )
+
+
+@router.get("/espejo/sync", response_model=EspejoSyncEstadoOut)
+def espejo_sync_estado(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(_puede_pedir_sync),
+):
+    """La fecha de «SAE actualizado» (última corrida terminada del espejo) y la
+    solicitud viva si hay una en cola o corriendo. Es lo que la UI pinta junto
+    al botón, y lo que sondea después de presionarlo."""
+    base = db.query(EspejoSync).filter(EspejoSync.tenant_id == ctx.tenant_id)
+    ultima = (base.filter(EspejoSync.terminada_at.isnot(None))
+              .order_by(EspejoSync.terminada_at.desc()).first())
+    pendiente = (base.filter(EspejoSync.estado.in_(("PENDIENTE", "EN_CURSO")))
+                 .order_by(EspejoSync.solicitada_at.asc()).first())
+    return EspejoSyncEstadoOut(ultima=ultima, pendiente=pendiente)
+
+
+@router.post("/espejo/sync", response_model=EspejoSyncOut)
+def solicitar_espejo_sync(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(_puede_pedir_sync),
+):
+    """El botón «Sincronizar SAE». El backend no ve SAE: aquí solo queda la
+    solicitud; el conector (que sí consulta SAE por sqlcmd) la reclama en su
+    siguiente vuelta, corre el espejo y reporta. Idempotente: si ya hay una
+    viva, se devuelve esa en vez de encolar otra."""
+    viva = (db.query(EspejoSync)
+            .filter(EspejoSync.tenant_id == ctx.tenant_id,
+                    EspejoSync.estado.in_(("PENDIENTE", "EN_CURSO")))
+            .order_by(EspejoSync.solicitada_at.asc()).first())
+    if viva is not None:
+        return viva
+    sol = EspejoSync(tenant_id=ctx.tenant_id, origen="MANUAL",
+                     solicitada_por=ctx.user_id)
+    db.add(sol)
+    db.flush()
+    db.refresh(sol)
+    return sol
+
+
+@router.get("/espejo/sync/pendiente", response_model=Optional[EspejoSyncOut])
+def reclamar_espejo_sync(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("factura:espejo")),
+):
+    """El conector pregunta si alguien pidió sincronizar. Reclamar marca la
+    solicitud EN_CURSO (skip_locked: dos conectores no se pisan) — si el
+    conector muere a medias, la fila queda EN_CURSO y la siguiente pasada
+    automática la cierra vía reporte con su solicitud_id o queda a la vista."""
+    sol = (db.query(EspejoSync)
+           .filter(EspejoSync.tenant_id == ctx.tenant_id,
+                   EspejoSync.estado == "PENDIENTE")
+           .order_by(EspejoSync.solicitada_at.asc())
+           .with_for_update(skip_locked=True).first())
+    if sol is None:
+        return None
+    sol.estado = "EN_CURSO"
+    sol.iniciada_at = datetime.now(timezone.utc)
+    db.flush()
+    db.refresh(sol)
+    return sol
+
+
+@router.post("/espejo/sync/reporte", response_model=EspejoSyncOut)
+def reportar_espejo_sync(
+    payload: EspejoSyncReporteIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("factura:espejo")),
+):
+    """El conector terminó una corrida del espejo. Con solicitud_id cierra la
+    del botón; sin él registra la pasada automática — así la fecha de «SAE
+    actualizado» vive aunque nadie presione nada."""
+    ahora = datetime.now(timezone.utc)
+    if payload.solicitud_id is not None:
+        sol = (db.query(EspejoSync)
+               .filter(EspejoSync.tenant_id == ctx.tenant_id,
+                       EspejoSync.id == payload.solicitud_id)
+               .with_for_update().one_or_none())
+        if sol is None:
+            raise HTTPException(status_code=404, detail="Esa solicitud de sync no existe")
+    else:
+        sol = EspejoSync(tenant_id=ctx.tenant_id, origen="AUTOMATICA",
+                         solicitada_at=ahora, iniciada_at=ahora)
+        db.add(sol)
+    sol.estado = "OK" if payload.ok else "ERROR"
+    sol.terminada_at = ahora
+    sol.resultado = payload.resultado or None
+    # Poda: el historial de corridas no es bitácora eterna (48 automáticas al
+    # día). Se conservan 30 días — suficiente para depurar cualquier semana.
+    db.query(EspejoSync).filter(
+        EspejoSync.tenant_id == ctx.tenant_id,
+        EspejoSync.terminada_at < ahora - timedelta(days=30),
+    ).delete(synchronize_session=False)
+    db.flush()
+    db.refresh(sol)
+    return sol
 
 
 @router.post("/espejo", response_model=FacturaDetailOut, status_code=status.HTTP_201_CREATED)

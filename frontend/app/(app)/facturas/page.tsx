@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Download, Eye, FileCode2, FileText, Mail, Plus, Replace, Stamp, Trash2, X } from "lucide-react";
 
 import { FacturaDirectaForm } from "@/components/FacturaDirectaForm";
+import { SincronizarSae } from "@/components/SincronizarSae";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -592,12 +593,17 @@ export default function FacturasPage() {
       <PageHeader
         title="Facturas"
         subtitle={ambiente === "producción" ? "CFDI 4.0 — timbrado en producción" : "CFDI 4.0 — timbrado en modo sandbox (pruebas)"}
-        actions={canWrite ? (
+        actions={(
           <>
-            <Button variant="secondary" onClick={openGen}><FileText size={16} /> Generar desde remisiones</Button>
-            <Button onClick={() => setMode("create")}><Plus size={16} /> Nueva factura</Button>
+            <SincronizarSae onSynced={reload} />
+            {canWrite && (
+              <>
+                <Button variant="secondary" onClick={openGen}><FileText size={16} /> Generar desde remisiones</Button>
+                <Button onClick={() => setMode("create")}><Plus size={16} /> Nueva factura</Button>
+              </>
+            )}
           </>
-        ) : undefined}
+        )}
       />
 
       <div className="mb-3 flex items-center gap-3">

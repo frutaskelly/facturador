@@ -19,6 +19,7 @@ import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { LoadingDots } from "@/components/ui/LoadingDots";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { SincronizarSae } from "@/components/SincronizarSae";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiDownloadPost, apiFetch, apiOpenInTab } from "@/lib/api";
@@ -2136,14 +2137,19 @@ export default function RemisionesPage() {
       <PageHeader
         title="Remisiones"
         subtitle="Notas de entrega (no fiscales)"
-        actions={canWrite ? (
+        actions={(
           <>
-            <Button variant="secondary" onClick={() => importInputRef.current?.click()}>
-              <ClipboardPaste size={16} /> Importar Excel
-            </Button>
-            <Button onClick={openCreate}><Plus size={16} /> Nueva remisión</Button>
+            <SincronizarSae onSynced={reload} />
+            {canWrite && (
+              <>
+                <Button variant="secondary" onClick={() => importInputRef.current?.click()}>
+                  <ClipboardPaste size={16} /> Importar Excel
+                </Button>
+                <Button onClick={openCreate}><Plus size={16} /> Nueva remisión</Button>
+              </>
+            )}
           </>
-        ) : undefined}
+        )}
       />
 
       {/* Filtros */}

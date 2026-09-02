@@ -4347,6 +4347,132 @@
     "title": "EnviarRemisionesLoteIn",
     "type": "object"
    },
+   "EspejoSyncEstadoOut": {
+    "description": "Lo que la UI necesita: la última corrida terminada (la fecha de «SAE\nactualizado») y la solicitud viva, si hay una en cola o corriendo.",
+    "properties": {
+     "pendiente": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/EspejoSyncOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "ultima": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/EspejoSyncOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "title": "EspejoSyncEstadoOut",
+    "type": "object"
+   },
+   "EspejoSyncOut": {
+    "description": "Una corrida del espejo SAE: la solicitud del botón o la pasada del timer.",
+    "properties": {
+     "dias": {
+      "title": "Dias",
+      "type": "integer"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "iniciada_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Iniciada At"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "resultado": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resultado"
+     },
+     "solicitada_at": {
+      "format": "date-time",
+      "title": "Solicitada At",
+      "type": "string"
+     },
+     "terminada_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Terminada At"
+     }
+    },
+    "required": [
+     "id",
+     "estado",
+     "origen",
+     "dias",
+     "solicitada_at"
+    ],
+    "title": "EspejoSyncOut",
+    "type": "object"
+   },
+   "EspejoSyncReporteIn": {
+    "description": "El conector reporta cómo le fue: con solicitud_id cierra la del botón;\nsin él registra una pasada automática ya terminada.",
+    "properties": {
+     "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+     },
+     "resultado": {
+      "title": "Resultado",
+      "type": "object"
+     },
+     "solicitud_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Solicitud Id"
+     }
+    },
+    "title": "EspejoSyncReporteIn",
+    "type": "object"
+   },
    "EsquemaImpuestoCreate": {
     "properties": {
      "activo": {
@@ -22370,6 +22496,242 @@
      }
     ],
     "summary": "Espejo Resumen",
+    "tags": [
+     "facturas"
+    ]
+   }
+  },
+  "/api/v1/facturas/espejo/sync": {
+   "get": {
+    "description": "La fecha de «SAE actualizado» (última corrida terminada del espejo) y la\nsolicitud viva si hay una en cola o corriendo. Es lo que la UI pinta junto\nal botón, y lo que sondea después de presionarlo.",
+    "operationId": "espejo_sync_estado_api_v1_facturas_espejo_sync_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EspejoSyncEstadoOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Espejo Sync Estado",
+    "tags": [
+     "facturas"
+    ]
+   },
+   "post": {
+    "description": "El botón «Sincronizar SAE». El backend no ve SAE: aquí solo queda la\nsolicitud; el conector (que sí consulta SAE por sqlcmd) la reclama en su\nsiguiente vuelta, corre el espejo y reporta. Idempotente: si ya hay una\nviva, se devuelve esa en vez de encolar otra.",
+    "operationId": "solicitar_espejo_sync_api_v1_facturas_espejo_sync_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EspejoSyncOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Solicitar Espejo Sync",
+    "tags": [
+     "facturas"
+    ]
+   }
+  },
+  "/api/v1/facturas/espejo/sync/pendiente": {
+   "get": {
+    "description": "El conector pregunta si alguien pidió sincronizar. Reclamar marca la\nsolicitud EN_CURSO (skip_locked: dos conectores no se pisan) — si el\nconector muere a medias, la fila queda EN_CURSO y la siguiente pasada\nautomática la cierra vía reporte con su solicitud_id o queda a la vista.",
+    "operationId": "reclamar_espejo_sync_api_v1_facturas_espejo_sync_pendiente_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "anyOf": [
+          {
+           "$ref": "#/components/schemas/EspejoSyncOut"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "title": "Response Reclamar Espejo Sync Api V1 Facturas Espejo Sync Pendiente Get"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Reclamar Espejo Sync",
+    "tags": [
+     "facturas"
+    ]
+   }
+  },
+  "/api/v1/facturas/espejo/sync/reporte": {
+   "post": {
+    "description": "El conector terminó una corrida del espejo. Con solicitud_id cierra la\ndel botón; sin él registra la pasada automática — así la fecha de «SAE\nactualizado» vive aunque nadie presione nada.",
+    "operationId": "reportar_espejo_sync_api_v1_facturas_espejo_sync_reporte_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EspejoSyncReporteIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EspejoSyncOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Reportar Espejo Sync",
     "tags": [
      "facturas"
     ]
