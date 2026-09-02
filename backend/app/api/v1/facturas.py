@@ -749,8 +749,21 @@ def factura_espejo(
     folio (`factura_sae` = "SERIE FOLIO", puesto por el export masivo) quedan
     ligadas a la factura y en FACTURADA; si SAE la cancela, se liberan para
     re-exportarse.
+
+    Un timbrado FALLIDO en SAE (documento emitido, CFDI02.UUID vacío) llega
+    como BORRADOR: se refleja para que el folio no desaparezca, pero sin
+    efectos — ni estado de cuenta ni remisiones. TIMBRADA exige uuid_fiscal.
     """
     from ...services.cliente_match import buscar_equivalencia
+
+    if payload.estado == "TIMBRADA" and not (payload.uuid_fiscal or "").strip():
+        # Regla del dueño (ZEHMOHOS 829/830, 2-sep): sin UUID del SAT no hay
+        # factura timbrada — un timbrado fallido de SAE se refleja BORRADOR.
+        raise HTTPException(
+            status_code=422,
+            detail=f"{payload.serie}{payload.folio} llega TIMBRADA sin uuid_fiscal: "
+                   "un timbrado sin UUID no existe — mándala como BORRADOR",
+        )
 
     clave = f"{payload.empresa}:{payload.cliente_sae}"
     equiv = buscar_equivalencia(db, ctx.tenant_id, "SAE", clave, solo_confirmadas=True)
@@ -805,14 +818,23 @@ def factura_espejo(
             detail=f"{serie}{payload.folio} ya es reflejo de la empresa "
                    f"{factura.espejo_empresa} — no se pisa con la {payload.empresa}",
         )
-    if factura is not None and factura.estado == "CANCELADA" and payload.estado == "TIMBRADA":
-        # Monotonicidad: un reintento tardío del mensaje TIMBRADA no resucita
-        # un reflejo ya cancelado (las remisiones ya se liberaron). Si SAE de
-        # verdad la revivió (el SAT negó la cancelación), es revisión manual.
+    if factura is not None and factura.estado == "CANCELADA" and payload.estado != "CANCELADA":
+        # Monotonicidad: un reintento tardío del mensaje TIMBRADA (o BORRADOR)
+        # no resucita un reflejo ya cancelado (las remisiones ya se liberaron).
+        # Si SAE de verdad la revivió (el SAT negó la cancelación), es revisión manual.
         raise HTTPException(
             status_code=409,
             detail=f"{serie}{payload.folio} ya está CANCELADA en el espejo; "
-                   "un reflejo no regresa a TIMBRADA solo — revísalo a mano",
+                   f"un reflejo no regresa a {payload.estado} solo — revísalo a mano",
+        )
+    if factura is not None and factura.estado == "TIMBRADA" and factura.uuid \
+            and payload.estado == "BORRADOR":
+        # Un UUID no se des-timbra: si SAE reporta sin UUID una factura que el
+        # espejo ya tiene timbrada, algo raro pasó en SAE — revisión manual.
+        raise HTTPException(
+            status_code=409,
+            detail=f"{serie}{payload.folio} ya está TIMBRADA con UUID en el espejo "
+                   "y SAE la reporta sin timbrar — revísalo a mano",
         )
 
     # Cruce de líneas: la CVE_ART de SAE contra los códigos de ESTE cliente.
@@ -873,7 +895,8 @@ def factura_espejo(
     factura.estado = payload.estado
     factura.uuid = payload.uuid_fiscal or factura.uuid
     factura.fecha = payload.fecha or factura.fecha or datetime.now(timezone.utc)
-    factura.fecha_timbrado = payload.fecha or factura.fecha_timbrado
+    if payload.estado != "BORRADOR":   # un timbrado fallido no tiene fecha de timbre
+        factura.fecha_timbrado = payload.fecha or factura.fecha_timbrado
     factura.metodo_pago = metodo
     factura.forma_pago = payload.forma_pago or cliente.forma_pago_default or "99"
     factura.uso_cfdi = payload.uso_cfdi or cliente.uso_cfdi_default or "G01"
@@ -973,6 +996,11 @@ def factura_espejo(
                 rems = match
 
     for rem in rems:
+        if payload.estado == "BORRADOR":
+            # Timbrado fallido en SAE: la remisión NI se estampa FACTURADA (no
+            # hay CFDI que la ampare) NI se libera (el documento sigue vivo en
+            # SAE y el reintento de timbre suele llegar en la siguiente pasada).
+            continue
         if payload.estado == "TIMBRADA":
             # Nunca pisar el vínculo con una factura NATIVA viva: si la
             # remisión ya tiene CFDI propio, la estampa fue un error de

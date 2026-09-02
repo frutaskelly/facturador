@@ -5316,7 +5316,7 @@
      },
      "estado": {
       "default": "TIMBRADA",
-      "pattern": "^(TIMBRADA|CANCELADA)$",
+      "pattern": "^(BORRADOR|TIMBRADA|CANCELADA)$",
       "title": "Estado",
       "type": "string"
      },
@@ -22222,7 +22222,7 @@
   },
   "/api/v1/facturas/espejo": {
    "post": {
-    "description": "Refleja una factura EMITIDA POR SAE como factura del Facturador.\n\nLa deposita el conector (la clave de conexión trae `factura:espejo`, que\nSOLO abre esta puerta — nada de facturas nativas ni PAC). Es idempotente\npor (serie, folio): re-mandarla ACTUALIZA el reflejo — así llegan las\ncancelaciones de SAE y los backfills. Nunca consume folios propios (serie\ny folio son los reales de SAE) y jamás toca inventario.\n\nAdemás cierra el ciclo del espejo: las remisiones estampadas con este\nfolio (`factura_sae` = \"SERIE FOLIO\", puesto por el export masivo) quedan\nligadas a la factura y en FACTURADA; si SAE la cancela, se liberan para\nre-exportarse.",
+    "description": "Refleja una factura EMITIDA POR SAE como factura del Facturador.\n\nLa deposita el conector (la clave de conexión trae `factura:espejo`, que\nSOLO abre esta puerta — nada de facturas nativas ni PAC). Es idempotente\npor (serie, folio): re-mandarla ACTUALIZA el reflejo — así llegan las\ncancelaciones de SAE y los backfills. Nunca consume folios propios (serie\ny folio son los reales de SAE) y jamás toca inventario.\n\nAdemás cierra el ciclo del espejo: las remisiones estampadas con este\nfolio (`factura_sae` = \"SERIE FOLIO\", puesto por el export masivo) quedan\nligadas a la factura y en FACTURADA; si SAE la cancela, se liberan para\nre-exportarse.\n\nUn timbrado FALLIDO en SAE (documento emitido, CFDI02.UUID vacío) llega\ncomo BORRADOR: se refleja para que el folio no desaparezca, pero sin\nefectos — ni estado de cuenta ni remisiones. TIMBRADA exige uuid_fiscal.",
     "operationId": "factura_espejo_api_v1_facturas_espejo_post",
     "parameters": [
      {
