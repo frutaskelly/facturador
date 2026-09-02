@@ -23,7 +23,13 @@ type SyncRun = {
   estado: "PENDIENTE" | "EN_CURSO" | "OK" | "ERROR";
   origen: "MANUAL" | "AUTOMATICA";
   terminada_at?: string | null;
-  resultado?: { enviadas?: number; canceladas?: number; errores?: string[] } | null;
+  resultado?: {
+    enviadas?: number;
+    canceladas?: number;
+    errores?: string[];
+    // La corrida también refresca las listas de precios vinculadas a SAE.
+    precios?: { creados?: number; actualizados?: number; sin_cruce?: number } | null;
+  } | null;
 };
 type SyncEstado = { ultima: SyncRun | null; pendiente: SyncRun | null };
 
@@ -61,7 +67,11 @@ export function SincronizarSae({ onSynced }: { onSynced?: () => void }) {
         // Terminó una solicitud que este componente estaba esperando.
         const r = est.ultima?.resultado;
         if (est.ultima?.estado === "OK") {
-          toast.success(`SAE sincronizado — ${r?.enviadas ?? 0} factura(s) actualizadas`);
+          const p = r?.precios;
+          const precios = p && ((p.creados ?? 0) + (p.actualizados ?? 0)) > 0
+            ? ` · precios: ${p.creados ?? 0} nuevo(s), ${p.actualizados ?? 0} actualizado(s)`
+            : "";
+          toast.success(`SAE sincronizado — ${r?.enviadas ?? 0} factura(s) actualizadas${precios}`);
         } else if (est.ultima?.estado === "ERROR") {
           toast.error(`La sincronización con SAE terminó con errores${r?.errores?.length ? `: ${r.errores[0]}` : ""}`);
         }

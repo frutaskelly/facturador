@@ -16,6 +16,7 @@ vuelve a capturar.
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -30,11 +31,14 @@ from ...models import (
     ListaPrecios,
     Precio,
     Producto,
+    ProductoCliente,
     Proyecto,
     Serie,
     Sucursal,
 )
 from ...schemas.lista_precios import (
+    EspejoPreciosIn,
+    EspejoPreciosResult,
     ListaAsignacionCreate,
     ListaAsignacionOut,
     ListaAsignacionUpdate,
@@ -43,6 +47,7 @@ from ...schemas.lista_precios import (
     ListaPreciosCreate,
     ListaPreciosOut,
     ListaPreciosUpdate,
+    ListaVinculadaOut,
     PrecioBulkRequest,
     PrecioBulkResult,
     PrecioCopiarRequest,
@@ -119,6 +124,16 @@ def update_lista(
     obj = get_or_404(db, ListaPrecios, lista_id)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(obj, key, value)
+    # El PATCH es parcial: la pareja completa solo se puede validar sobre el
+    # estado final (mandar solo sae_lista dejaría un vínculo a medias).
+    if (obj.sae_empresa is None) != (obj.sae_lista is None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "El vínculo con SAE lleva empresa Y número de lista; "
+                "deja ambos vacíos para una lista manual."
+            ),
+        )
     flush_or_conflict(db, detail=_DUP_LISTA)
     db.refresh(obj)
     return obj
@@ -134,6 +149,151 @@ def delete_lista(
     obj.deleted_at = func.now()
     db.flush()
     return None
+
+
+# ─── espejo de precios SAE ───────────────────────────────────────────────────
+# El botón «Sincronizar SAE» de /listas-precios no habla con Aspel: el conector
+# (sqlcmd desde la Mac) pregunta aquí QUÉ listas declaran origen SAE, consulta
+# PRECIO_X_PROD y deposita. Gated por `factura:espejo` — la clave del conector,
+# que no abre el CRUD normal de listas.
+@router.get("/espejo/vinculadas", response_model=list[ListaVinculadaOut])
+def listas_vinculadas_espejo(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("factura:espejo")),
+):
+    filas = (
+        db.query(ListaPrecios)
+        .filter(
+            ListaPrecios.tenant_id == ctx.tenant_id,
+            ListaPrecios.deleted_at.is_(None),
+            ListaPrecios.status == "ACTIVO",
+            ListaPrecios.sae_empresa.isnot(None),
+            ListaPrecios.sae_lista.isnot(None),
+        )
+        .order_by(ListaPrecios.codigo)
+        .all()
+    )
+    return filas
+
+
+@router.post("/espejo/precios", response_model=EspejoPreciosResult)
+def depositar_precios_espejo(
+    payload: EspejoPreciosIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("factura:espejo")),
+):
+    """Deposita los precios que SAE tiene HOY para una lista vinculada.
+
+    Reglas del dueño que este endpoint respeta a propósito:
+      · SAE manda: el precio de la lista es el de PRECIO_X_PROD, tal cual.
+      · Nunca se da de baja nada por iniciativa propia: los renglones que ya
+        no están en SAE se quedan; solo se crea y se actualiza.
+      · $0 en SAE significa "sin precio autorizado": no se escribe un precio
+        en cero — ni se borra el que hubiera.
+      · El factor de una presentación lo decide una persona: si SAE cotiza en
+        una unidad que el producto no declara, el renglón se reporta en
+        `sin_presentacion` en vez de adivinar dónde caerlo.
+
+    El cruce de claves es el mismo del cotizador: CVE_ART contra el SKU del
+    catálogo (las claves SAE SON el sku), y de rescate la clave que algún
+    cliente le puso al producto — solo si no es ambigua.
+    """
+    from ...services.cotizador import _UNIDAD_ALIAS, _norm_codigo
+
+    lista = get_or_404(db, ListaPrecios, payload.lista_id)
+    if lista.sae_empresa is None or lista.sae_lista is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Esa lista no está vinculada a una lista de SAE",
+        )
+
+    prods = (
+        db.query(Producto)
+        .filter(Producto.tenant_id == ctx.tenant_id, Producto.deleted_at.is_(None))
+        .all()
+    )
+    por_id = {p.id: p for p in prods}
+    por_sku: dict[str, UUID] = {}
+    for p in prods:
+        if p.sku:
+            por_sku.setdefault(_norm_codigo(p.sku), p.id)
+    # Rescate: códigos de cliente. None marca un código que apunta a DOS
+    # productos distintos (los duplicados de claves existen) — ambiguo, no se usa.
+    por_codigo_cliente: dict[str, Optional[UUID]] = {}
+    for pc in db.query(ProductoCliente).filter(
+        ProductoCliente.tenant_id == ctx.tenant_id,
+        ProductoCliente.codigo_cliente.isnot(None),
+    ):
+        cod = _norm_codigo(pc.codigo_cliente)
+        if cod in por_codigo_cliente and por_codigo_cliente[cod] != pc.producto_id:
+            por_codigo_cliente[cod] = None
+        else:
+            por_codigo_cliente.setdefault(cod, pc.producto_id)
+
+    existentes = {
+        (p.producto_id, p.presentacion, p.cantidad_minima): p
+        for p in db.query(Precio).filter(Precio.lista_id == lista.id).all()
+    }
+
+    creados = actualizados = sin_cambio = en_cero = 0
+    sin_cruce: list[str] = []
+    sin_presentacion: list[str] = []
+    for item in payload.precios:
+        if item.precio <= 0:
+            en_cero += 1
+            continue
+        # A 4 decimales ANTES de comparar: la columna es Numeric(18,4) y un
+        # 45.529999 de sqlcmd quedaría "actualizado" en cada corrida.
+        precio = item.precio.quantize(Decimal("0.0001"))
+        cod = _norm_codigo(item.clave)
+        pid = por_sku.get(cod) or por_codigo_cliente.get(cod)
+        prod = por_id.get(pid) if pid else None
+        if prod is None:
+            sin_cruce.append(item.clave)
+            continue
+        pres_declaradas = list((prod.presentaciones or {}).keys())
+        u = (item.unidad or "").strip().upper()
+        if u:
+            norm = _UNIDAD_ALIAS.get(u, u)
+            pres = next((k for k in pres_declaradas if k.upper() == norm), None)
+        else:
+            pres = prod.presentacion_default or prod.unidad_base or (
+                pres_declaradas[0] if pres_declaradas else None
+            )
+        if not pres or not presentacion_declarada(prod, pres):
+            sin_presentacion.append(item.clave)
+            continue
+        key = (prod.id, pres, 1)
+        actual = existentes.get(key)
+        if actual is not None:
+            if actual.precio_unitario == precio:
+                sin_cambio += 1
+            else:
+                actual.precio_unitario = precio
+                actualizados += 1
+        else:
+            nuevo = Precio(
+                tenant_id=ctx.tenant_id,
+                lista_id=lista.id,
+                producto_id=prod.id,
+                presentacion=pres,
+                precio_unitario=precio,
+                cantidad_minima=1,
+            )
+            db.add(nuevo)
+            existentes[key] = nuevo
+            creados += 1
+
+    flush_or_conflict(db, detail=_DUP_PRECIO)
+    return EspejoPreciosResult(
+        recibidos=len(payload.precios),
+        creados=creados,
+        actualizados=actualizados,
+        sin_cambio=sin_cambio,
+        en_cero=en_cero,
+        sin_cruce=sin_cruce[:50],
+        sin_presentacion=sin_presentacion[:50],
+    )
 
 
 # ─── copy prices from another list ───────────────────────────────────────────

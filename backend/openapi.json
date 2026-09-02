@@ -4347,6 +4347,118 @@
     "title": "EnviarRemisionesLoteIn",
     "type": "object"
    },
+   "EspejoPrecioItem": {
+    "properties": {
+     "clave": {
+      "maxLength": 60,
+      "minLength": 1,
+      "title": "Clave",
+      "type": "string"
+     },
+     "precio": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Precio"
+     },
+     "unidad": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad"
+     }
+    },
+    "required": [
+     "clave",
+     "precio"
+    ],
+    "title": "EspejoPrecioItem",
+    "type": "object"
+   },
+   "EspejoPreciosIn": {
+    "properties": {
+     "lista_id": {
+      "format": "uuid",
+      "title": "Lista Id",
+      "type": "string"
+     },
+     "precios": {
+      "items": {
+       "$ref": "#/components/schemas/EspejoPrecioItem"
+      },
+      "maxItems": 10000,
+      "title": "Precios",
+      "type": "array"
+     }
+    },
+    "required": [
+     "lista_id",
+     "precios"
+    ],
+    "title": "EspejoPreciosIn",
+    "type": "object"
+   },
+   "EspejoPreciosResult": {
+    "properties": {
+     "actualizados": {
+      "title": "Actualizados",
+      "type": "integer"
+     },
+     "creados": {
+      "title": "Creados",
+      "type": "integer"
+     },
+     "en_cero": {
+      "title": "En Cero",
+      "type": "integer"
+     },
+     "recibidos": {
+      "title": "Recibidos",
+      "type": "integer"
+     },
+     "sin_cambio": {
+      "title": "Sin Cambio",
+      "type": "integer"
+     },
+     "sin_cruce": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Sin Cruce",
+      "type": "array"
+     },
+     "sin_presentacion": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Sin Presentacion",
+      "type": "array"
+     }
+    },
+    "required": [
+     "recibidos",
+     "creados",
+     "actualizados",
+     "sin_cambio",
+     "en_cero",
+     "sin_cruce",
+     "sin_presentacion"
+    ],
+    "title": "EspejoPreciosResult",
+    "type": "object"
+   },
    "EspejoSyncEstadoOut": {
     "description": "Lo que la UI necesita: la última corrida terminada (la fecha de «SAE\nactualizado») y la solicitud viva, si hay una en cola o corriendo.",
     "properties": {
@@ -8126,6 +8238,31 @@
       ],
       "title": "Notas"
      },
+     "sae_empresa": {
+      "anyOf": [
+       {
+        "maxLength": 4,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sae Empresa"
+     },
+     "sae_lista": {
+      "anyOf": [
+       {
+        "maximum": 10.0,
+        "minimum": 1.0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sae Lista"
+     },
      "status": {
       "default": "ACTIVO",
       "maxLength": 20,
@@ -8207,6 +8344,31 @@
        }
       ],
       "title": "Notas"
+     },
+     "sae_empresa": {
+      "anyOf": [
+       {
+        "maxLength": 4,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sae Empresa"
+     },
+     "sae_lista": {
+      "anyOf": [
+       {
+        "maximum": 10.0,
+        "minimum": 1.0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sae Lista"
      },
      "status": {
       "default": "ACTIVO",
@@ -8320,6 +8482,31 @@
       ],
       "title": "Notas"
      },
+     "sae_empresa": {
+      "anyOf": [
+       {
+        "maxLength": 4,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sae Empresa"
+     },
+     "sae_lista": {
+      "anyOf": [
+       {
+        "maximum": 10.0,
+        "minimum": 1.0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sae Lista"
+     },
      "status": {
       "anyOf": [
        {
@@ -8358,6 +8545,41 @@
      }
     },
     "title": "ListaPreciosUpdate",
+    "type": "object"
+   },
+   "ListaVinculadaOut": {
+    "description": "Una lista que declara su origen en SAE — lo único que el conector\nnecesita para saber qué consultar en PRECIO_X_PROD.",
+    "properties": {
+     "codigo": {
+      "title": "Codigo",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "sae_empresa": {
+      "title": "Sae Empresa",
+      "type": "string"
+     },
+     "sae_lista": {
+      "title": "Sae Lista",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "id",
+     "codigo",
+     "nombre",
+     "sae_empresa",
+     "sae_lista"
+    ],
+    "title": "ListaVinculadaOut",
     "type": "object"
    },
    "LoteOut": {
@@ -24031,6 +24253,129 @@
      }
     ],
     "summary": "Create Lista",
+    "tags": [
+     "listas de precios"
+    ]
+   }
+  },
+  "/api/v1/listas-precios/espejo/precios": {
+   "post": {
+    "description": "Deposita los precios que SAE tiene HOY para una lista vinculada.\n\nReglas del dueño que este endpoint respeta a propósito:\n  · SAE manda: el precio de la lista es el de PRECIO_X_PROD, tal cual.\n  · Nunca se da de baja nada por iniciativa propia: los renglones que ya\n    no están en SAE se quedan; solo se crea y se actualiza.\n  · $0 en SAE significa \"sin precio autorizado\": no se escribe un precio\n    en cero — ni se borra el que hubiera.\n  · El factor de una presentación lo decide una persona: si SAE cotiza en\n    una unidad que el producto no declara, el renglón se reporta en\n    `sin_presentacion` en vez de adivinar dónde caerlo.\n\nEl cruce de claves es el mismo del cotizador: CVE_ART contra el SKU del\ncatálogo (las claves SAE SON el sku), y de rescate la clave que algún\ncliente le puso al producto — solo si no es ambigua.",
+    "operationId": "depositar_precios_espejo_api_v1_listas_precios_espejo_precios_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EspejoPreciosIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EspejoPreciosResult"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Depositar Precios Espejo",
+    "tags": [
+     "listas de precios"
+    ]
+   }
+  },
+  "/api/v1/listas-precios/espejo/vinculadas": {
+   "get": {
+    "operationId": "listas_vinculadas_espejo_api_v1_listas_precios_espejo_vinculadas_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ListaVinculadaOut"
+         },
+         "title": "Response Listas Vinculadas Espejo Api V1 Listas Precios Espejo Vinculadas Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listas Vinculadas Espejo",
     "tags": [
      "listas de precios"
     ]

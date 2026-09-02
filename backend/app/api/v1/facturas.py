@@ -697,13 +697,15 @@ def espejo_resumen(
 
 
 def _puede_pedir_sync(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
-    """El botón vive en /facturas Y en /remisiones: basta cualquiera de los dos
-    menús (require_permission exige TODOS, y hay roles con uno solo)."""
-    if ctx.is_owner or {"menu:facturas", "menu:remisiones"} & set(ctx.permissions):
+    """El botón vive en /facturas, /remisiones y /listas-precios: basta
+    cualquiera de esos menús (require_permission exige TODOS, y hay roles con
+    uno solo)."""
+    menus = {"menu:facturas", "menu:remisiones", "menu:listas_precios"}
+    if ctx.is_owner or menus & set(ctx.permissions):
         return ctx
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Falta permiso: menu:facturas o menu:remisiones",
+        detail="Falta permiso: menu:facturas, menu:remisiones o menu:listas_precios",
     )
 
 
