@@ -1613,6 +1613,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/listas-precios/espejo/precios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Depositar Precios Espejo
+         * @description Deposita los precios que SAE tiene HOY para una lista vinculada.
+         *
+         *     Reglas del dueño que este endpoint respeta a propósito:
+         *       · SAE manda: el precio de la lista es el de PRECIO_X_PROD, tal cual.
+         *       · Nunca se da de baja nada por iniciativa propia: los renglones que ya
+         *         no están en SAE se quedan; solo se crea y se actualiza.
+         *       · $0 en SAE significa "sin precio autorizado": no se escribe un precio
+         *         en cero — ni se borra el que hubiera.
+         *       · El factor de una presentación lo decide una persona: si SAE cotiza en
+         *         una unidad que el producto no declara, el renglón se reporta en
+         *         `sin_presentacion` en vez de adivinar dónde caerlo.
+         *
+         *     El cruce de claves es el mismo del cotizador: CVE_ART contra el SKU del
+         *     catálogo (las claves SAE SON el sku), y de rescate la clave que algún
+         *     cliente le puso al producto — solo si no es ambigua.
+         */
+        post: operations["depositar_precios_espejo_api_v1_listas_precios_espejo_precios_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/listas-precios/espejo/vinculadas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listas Vinculadas Espejo */
+        get: operations["listas_vinculadas_espejo_api_v1_listas_precios_espejo_vinculadas_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/listas-precios/{lista_id}": {
         parameters: {
             query?: never;
@@ -5315,6 +5366,42 @@ export interface components {
             /** To */
             to?: string | null;
         };
+        /** EspejoPrecioItem */
+        EspejoPrecioItem: {
+            /** Clave */
+            clave: string;
+            /** Precio */
+            precio: number | string;
+            /** Unidad */
+            unidad?: string | null;
+        };
+        /** EspejoPreciosIn */
+        EspejoPreciosIn: {
+            /**
+             * Lista Id
+             * Format: uuid
+             */
+            lista_id: string;
+            /** Precios */
+            precios: components["schemas"]["EspejoPrecioItem"][];
+        };
+        /** EspejoPreciosResult */
+        EspejoPreciosResult: {
+            /** Actualizados */
+            actualizados: number;
+            /** Creados */
+            creados: number;
+            /** En Cero */
+            en_cero: number;
+            /** Recibidos */
+            recibidos: number;
+            /** Sin Cambio */
+            sin_cambio: number;
+            /** Sin Cruce */
+            sin_cruce: string[];
+            /** Sin Presentacion */
+            sin_presentacion: string[];
+        };
         /**
          * EspejoSyncEstadoOut
          * @description Lo que la UI necesita: la última corrida terminada (la fecha de «SAE
@@ -6690,6 +6777,10 @@ export interface components {
             nombre: string;
             /** Notas */
             notas?: string | null;
+            /** Sae Empresa */
+            sae_empresa?: string | null;
+            /** Sae Lista */
+            sae_lista?: number | null;
             /**
              * Status
              * @default ACTIVO
@@ -6728,6 +6819,10 @@ export interface components {
             nombre: string;
             /** Notas */
             notas?: string | null;
+            /** Sae Empresa */
+            sae_empresa?: string | null;
+            /** Sae Lista */
+            sae_lista?: number | null;
             /**
              * Status
              * @default ACTIVO
@@ -6760,12 +6855,36 @@ export interface components {
             nombre?: string | null;
             /** Notas */
             notas?: string | null;
+            /** Sae Empresa */
+            sae_empresa?: string | null;
+            /** Sae Lista */
+            sae_lista?: number | null;
             /** Status */
             status?: string | null;
             /** Vigencia Desde */
             vigencia_desde?: string | null;
             /** Vigencia Hasta */
             vigencia_hasta?: string | null;
+        };
+        /**
+         * ListaVinculadaOut
+         * @description Una lista que declara su origen en SAE — lo único que el conector
+         *     necesita para saber qué consultar en PRECIO_X_PROD.
+         */
+        ListaVinculadaOut: {
+            /** Codigo */
+            codigo: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+            /** Sae Empresa */
+            sae_empresa: string;
+            /** Sae Lista */
+            sae_lista: number;
         };
         /** LoteOut */
         LoteOut: {
@@ -13078,6 +13197,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListaPreciosOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    depositar_precios_espejo_api_v1_listas_precios_espejo_precios_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EspejoPreciosIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EspejoPreciosResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listas_vinculadas_espejo_api_v1_listas_precios_espejo_vinculadas_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListaVinculadaOut"][];
                 };
             };
             /** @description Validation Error */

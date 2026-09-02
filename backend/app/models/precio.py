@@ -52,6 +52,11 @@ class ListaPrecios(Base, TimestampMixin, SoftDeleteMixin):
     # La lista base del negocio (la usan los clientes sin lista propia). La
     # resolución de precios la prefiere sobre la convención codigo='UNICO'.
     es_default = Column(Boolean, nullable=False, server_default="false")
+    # Espejo de SAE: de qué lista de Aspel se alimenta esta lista — empresa
+    # ("02" Pachuca, "03" Tabasco) y CVE_PRECIO de PRECIO_X_PROD. Ambas en
+    # NULL = lista manual: el conector no la toca.
+    sae_empresa = Column(String(4))
+    sae_lista = Column(SmallInteger)
 
 
 class Precio(Base):

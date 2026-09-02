@@ -19,10 +19,22 @@ class ListaPreciosBase(BaseModel):
     moneda: str = Field(default="MXN", max_length=3)
     notas: Optional[str] = None
     es_default: bool = False
+    # Espejo de SAE: empresa de Aspel ("02", "03") + número de lista
+    # (CVE_PRECIO). Ambos o ninguno — el conector solo escribe en listas que
+    # declaran su origen completo.
+    sae_empresa: Optional[str] = Field(default=None, max_length=4)
+    sae_lista: Optional[int] = Field(default=None, ge=1, le=10)
 
 
 class ListaPreciosCreate(ListaPreciosBase):
-    pass
+    @model_validator(mode="after")
+    def _vinculo_sae_completo(self):
+        if (self.sae_empresa is None) != (self.sae_lista is None):
+            raise ValueError(
+                "El vínculo con SAE lleva empresa Y número de lista; "
+                "deja ambos vacíos para una lista manual."
+            )
+        return self
 
 
 class ListaPreciosUpdate(BaseModel):
@@ -34,6 +46,8 @@ class ListaPreciosUpdate(BaseModel):
     moneda: Optional[str] = Field(default=None, max_length=3)
     notas: Optional[str] = None
     es_default: Optional[bool] = None
+    sae_empresa: Optional[str] = Field(default=None, max_length=4)
+    sae_lista: Optional[int] = Field(default=None, ge=1, le=10)
 
 
 class ListaPreciosOut(ORMModel, ListaPreciosBase):
@@ -91,6 +105,40 @@ class PrecioBulkResult(BaseModel):
     created: int
     updated: int
     skipped: int
+
+
+# ─── espejo de precios SAE (lo usa el conector, no la UI) ────────────────────
+class ListaVinculadaOut(BaseModel):
+    """Una lista que declara su origen en SAE — lo único que el conector
+    necesita para saber qué consultar en PRECIO_X_PROD."""
+    id: uuid.UUID
+    codigo: str
+    nombre: str
+    sae_empresa: str
+    sae_lista: int
+
+
+class EspejoPrecioItem(BaseModel):
+    clave: str = Field(min_length=1, max_length=60)  # CVE_ART tal cual (RTRIM)
+    precio: Decimal = Field(ge=0)
+    unidad: Optional[str] = Field(default=None, max_length=20)  # UNI_MED de INVE
+
+
+class EspejoPreciosIn(BaseModel):
+    lista_id: uuid.UUID
+    precios: List[EspejoPrecioItem] = Field(max_length=10000)
+
+
+class EspejoPreciosResult(BaseModel):
+    recibidos: int
+    creados: int
+    actualizados: int
+    sin_cambio: int
+    # Renglones que NO se escribieron y por qué — el conector los reporta para
+    # que la corrida deje rastro de lo que falta cruzar, no para fallar.
+    en_cero: int
+    sin_cruce: List[str]
+    sin_presentacion: List[str]
 
 
 # ─── Asignación de la lista (wizard de importación / administración) ─────────
