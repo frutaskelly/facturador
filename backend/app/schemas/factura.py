@@ -123,6 +123,33 @@ class FacturaEspejoIn(BaseModel):
     lineas: List[LineaFacturaEspejoIn] = Field(default_factory=list)
 
 
+class EspejoSyncOut(ORMModel):
+    """Una corrida del espejo SAE: la solicitud del botón o la pasada del timer."""
+    id: uuid.UUID
+    estado: str            # PENDIENTE | EN_CURSO | OK | ERROR
+    origen: str            # MANUAL | AUTOMATICA
+    dias: int
+    solicitada_at: datetime
+    iniciada_at: Optional[datetime] = None
+    terminada_at: Optional[datetime] = None
+    resultado: Optional[dict] = None
+
+
+class EspejoSyncEstadoOut(BaseModel):
+    """Lo que la UI necesita: la última corrida terminada (la fecha de «SAE
+    actualizado») y la solicitud viva, si hay una en cola o corriendo."""
+    ultima: Optional[EspejoSyncOut] = None
+    pendiente: Optional[EspejoSyncOut] = None
+
+
+class EspejoSyncReporteIn(BaseModel):
+    """El conector reporta cómo le fue: con solicitud_id cierra la del botón;
+    sin él registra una pasada automática ya terminada."""
+    solicitud_id: Optional[uuid.UUID] = None
+    ok: bool = True
+    resultado: dict = Field(default_factory=dict)
+
+
 class LineaFacturaOut(ORMModel):
     numero_linea: int
     # Nulo SOLO en líneas de facturas espejo cuya clave SAE no cruzó con el

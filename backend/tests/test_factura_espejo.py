@@ -30,7 +30,7 @@ _PURGE = (
     "timbrado_intentos", "recibo_pago_facturas", "recibos_pago",
     "lineas_factura", "facturas", "lineas_remision", "remisiones",
     "conexiones", "cliente_externos", "producto_clientes", "productos",
-    "series", "clientes",
+    "series", "clientes", "espejo_syncs",
 )
 
 
@@ -554,3 +554,52 @@ def test_buscar_factura_por_folio_interno_y_por_folio_fiscal(client, env, auth_a
     # y un término que no es de nadie no devuelve de más
     r = client.get("/api/v1/facturas", headers=h, params={"q": "XX-99ZZZ-DOM"})
     assert r.json()["total"] == 0
+
+
+def test_sincronizar_sae_boton_y_reporte(client, env, auth_as, sin_sesion):
+    """El botón «Sincronizar SAE»: encola sin duplicar, el conector reclama y
+    reporta, y la UI ve la fecha de la última actualización."""
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    r = client.get("/api/v1/facturas/espejo/sync", headers=h)
+    assert r.status_code == 200
+    assert r.json()["ultima"] is None and r.json()["pendiente"] is None
+
+    a = client.post("/api/v1/facturas/espejo/sync", headers=h)
+    b = client.post("/api/v1/facturas/espejo/sync", headers=h)
+    assert a.status_code == 200 and b.status_code == 200
+    assert a.json()["id"] == b.json()["id"]            # dos clics, una solicitud
+    assert a.json()["estado"] == "PENDIENTE" and a.json()["origen"] == "MANUAL"
+
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    sol = client.get("/api/v1/facturas/espejo/sync/pendiente", headers=hk)
+    assert sol.status_code == 200 and sol.json()["id"] == a.json()["id"]
+    assert sol.json()["estado"] == "EN_CURSO" and sol.json()["iniciada_at"]
+    # reclamada: la segunda pregunta ya no trae nada
+    assert client.get("/api/v1/facturas/espejo/sync/pendiente", headers=hk).json() is None
+
+    rep = client.post("/api/v1/facturas/espejo/sync/reporte", headers=hk,
+                      json={"solicitud_id": sol.json()["id"], "ok": True,
+                            "resultado": {"enviadas": 5}})
+    assert rep.status_code == 200 and rep.json()["estado"] == "OK"
+
+    auth_as(env["dueno"])
+    est = client.get("/api/v1/facturas/espejo/sync", headers=h).json()
+    assert est["pendiente"] is None
+    assert est["ultima"]["id"] == sol.json()["id"]
+    assert est["ultima"]["terminada_at"]
+    assert est["ultima"]["resultado"]["enviadas"] == 5
+
+
+def test_pasada_automatica_del_espejo_reporta_fecha(client, env, auth_as, sin_sesion):
+    """Sin botón de por medio: la corrida del timer reporta al terminar y de
+    ahí sale «SAE actualizado» aunque nadie haya pedido nada."""
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    rep = client.post("/api/v1/facturas/espejo/sync/reporte", headers=hk,
+                      json={"ok": False, "resultado": {"errores": ["ZHGO99: x"]}})
+    assert rep.status_code == 200
+    assert rep.json()["origen"] == "AUTOMATICA" and rep.json()["estado"] == "ERROR"
+
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    est = client.get("/api/v1/facturas/espejo/sync", headers=h).json()
+    assert est["ultima"]["origen"] == "AUTOMATICA"
+    assert est["ultima"]["estado"] == "ERROR" and est["pendiente"] is None
