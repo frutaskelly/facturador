@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, Sparkles, Trash2, Undo2, Upload, X, FileSearch } from "lucide-react";
+import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, RefreshCw, Sparkles, Trash2, Undo2, Upload, X, FileSearch } from "lucide-react";
 
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
@@ -412,6 +412,34 @@ export default function RemisionesPage() {
       /* sin precio: se resolverá al guardar */
     }
   }
+
+  // Re-cotiza todas las líneas con producto y cantidad. `forzar` (el botón
+  // "Actualizar precios") descarta también los precios tecleados a mano; el
+  // refresco automático al cambiar cliente/sucursal los respeta.
+  function recotizarLineas(forzar: boolean) {
+    let n = 0;
+    for (const l of lineas) {
+      if (!l.producto_id || !Number(l.cantidad)) continue;
+      if (l.precioManual) {
+        if (!forzar) continue;
+        setLinea(l.key, { precioManual: false });
+      }
+      n++;
+      cotizar(l.key, l.producto_id, l.presentacion, l.cantidad);
+    }
+    return n;
+  }
+
+  // Sin esto, el precio se quedaba con el de la primera selección: cambiar de
+  // cliente, sucursal o almacén después de capturar líneas no re-cotizaba.
+  const contextoPrecios = `${clienteId}|${sucursalId}|${almacenId}`;
+  const contextoPreciosPrev = useRef(contextoPrecios);
+  useEffect(() => {
+    if (contextoPreciosPrev.current === contextoPrecios) return;
+    contextoPreciosPrev.current = contextoPrecios;
+    recotizarLineas(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextoPrecios]);
 
   function onPickProducto(key: string, pick: ProductoPick | null, texto: string) {
     if (!pick) {
@@ -1842,6 +1870,16 @@ export default function RemisionesPage() {
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold">Líneas</h2>
             <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const n = recotizarLineas(true);
+                  if (n === 0) toast.info("No hay líneas con producto y cantidad que cotizar");
+                  else toast.success(`Actualizando el precio de ${n} línea${n === 1 ? "" : "s"}…`);
+                }}
+              >
+                <RefreshCw size={16} /> Actualizar precios
+              </Button>
               <Button variant="secondary" onClick={() => setPasteOpen(true)}><ClipboardPaste size={16} /> Pegar de Excel</Button>
               {/* Un input oculto: el botón de la casa dispara el selector de archivos. */}
               <input
