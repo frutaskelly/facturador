@@ -2482,6 +2482,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/precios/contexto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Contexto Precios
+         * @description El contexto de precios de un documento, en UNA llamada por cambio de
+         *     encabezado: qué lista cobraría el resolutor (para decirlo ANTES de capturar,
+         *     no descubrirlo línea a línea), si hay negociaciones por plaza que se están
+         *     quedando fuera por venir sin sucursal, y qué productos tienen precio aquí
+         *     (para que el buscador marque $ sin cotizar candidato por candidato).
+         */
+        get: operations["contexto_precios_api_v1_precios_contexto_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/precios/cotizacion-pdf": {
         parameters: {
             query?: never;
@@ -4601,6 +4625,11 @@ export interface components {
             /** Cliente Nombre */
             cliente_nombre?: string | null;
             /**
+             * Es Default
+             * @default false
+             */
+            es_default: boolean;
+            /**
              * Id
              * Format: uuid
              */
@@ -4621,6 +4650,8 @@ export interface components {
         };
         /** ClienteSucursalUpsert */
         ClienteSucursalUpsert: {
+            /** Es Default */
+            es_default?: boolean | null;
             /** Serie Factura Id */
             serie_factura_id?: string | null;
             /** Serie Remision Id */
@@ -4785,6 +4816,35 @@ export interface components {
              * @default true
              */
             ok: boolean;
+        };
+        /** ContextoListaOut */
+        ContextoListaOut: {
+            /**
+             * Lista Id
+             * Format: uuid
+             */
+            lista_id: string;
+            /** Lista Nombre */
+            lista_nombre: string;
+            /** Origen */
+            origen: string;
+            /** Proyecto Nombre */
+            proyecto_nombre?: string | null;
+            /** Serie Codigo */
+            serie_codigo?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
+        };
+        /** ContextoPreciosOut */
+        ContextoPreciosOut: {
+            lista?: components["schemas"]["ContextoListaOut"] | null;
+            /**
+             * Listas Por Sucursal Omitidas
+             * @default 0
+             */
+            listas_por_sucursal_omitidas: number;
+            /** Productos Con Precio */
+            productos_con_precio?: string[];
         };
         /** ConversionCreate */
         ConversionCreate: {
@@ -9305,6 +9365,11 @@ export interface components {
             created_at: string;
             /** Domicilio */
             domicilio?: Record<string, never>;
+            /**
+             * Es Default
+             * @default false
+             */
+            es_default: boolean;
             /**
              * Id
              * Format: uuid
@@ -15014,6 +15079,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RemisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    contexto_precios_api_v1_precios_contexto_get: {
+        parameters: {
+            query?: {
+                cliente_id?: string | null;
+                sucursal_id?: string | null;
+                serie_id?: string | null;
+                proyecto_id?: string | null;
+                fecha?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextoPreciosOut"];
                 };
             };
             /** @description Validation Error */

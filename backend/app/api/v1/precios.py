@@ -19,7 +19,13 @@ from sqlalchemy.orm import Session
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import Cliente, Producto, PrecioOverride, Sucursal
 from ...schemas.common import Page
-from ...schemas.sucursal import CotizacionOut, PrecioOverrideCreate, PrecioOverrideOut
+from ...schemas.sucursal import (
+    ContextoListaOut,
+    ContextoPreciosOut,
+    CotizacionOut,
+    PrecioOverrideCreate,
+    PrecioOverrideOut,
+)
 from ...models import Tenant
 from ...services.inventario import presentacion_declarada
 from ...services.precios import resolver_asignaciones, resolver_precio
@@ -208,6 +214,115 @@ def listas_del_cliente(
             "Sucursal" if a.sucursal_id else "General")
         out.append({"lista_id": str(lp.id), "nombre": lp.nombre, "alcance": alcance})
     return {"listas": out}
+
+
+@router.get("/contexto", response_model=ContextoPreciosOut)
+def contexto_precios(
+    cliente_id: Optional[UUID] = Query(default=None),
+    sucursal_id: Optional[UUID] = Query(default=None),
+    serie_id: Optional[UUID] = Query(default=None),
+    proyecto_id: Optional[UUID] = Query(default=None),
+    fecha: Optional[date] = Query(default=None),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ_COTIZAR)),
+):
+    """El contexto de precios de un documento, en UNA llamada por cambio de
+    encabezado: qué lista cobraría el resolutor (para decirlo ANTES de capturar,
+    no descubrirlo línea a línea), si hay negociaciones por plaza que se están
+    quedando fuera por venir sin sucursal, y qué productos tienen precio aquí
+    (para que el buscador marque $ sin cotizar candidato por candidato).
+    """
+    from sqlalchemy import and_
+
+    from ...models import ListaAsignacion, ListaPrecios, Precio, Proyecto, Serie
+    from ...services.precios import _lista_default, _vigente
+
+    if ctx.cliente_scope and not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
+    fecha = fecha or date.today()
+
+    asigs = resolver_asignaciones(
+        db, cliente_id=cliente_id, sucursal_id=sucursal_id,
+        serie_id=serie_id, proyecto_id=proyecto_id, fecha=fecha,
+    )
+    base_lp = _lista_default(db)
+
+    def _nombre(model, campo, _id):
+        if _id is None:
+            return None
+        row = db.query(campo).filter(model.id == _id).one_or_none()
+        return row[0] if row else None
+
+    lista_out = None
+    if asigs:
+        from ...services.precios import origen_de
+
+        a = asigs[0]
+        lp = (
+            db.query(ListaPrecios)
+            .filter(ListaPrecios.id == a.lista_id, ListaPrecios.deleted_at.is_(None))
+            .one_or_none()
+        )
+        if lp is not None:
+            lista_out = ContextoListaOut(
+                lista_id=lp.id,
+                lista_nombre=lp.nombre,
+                origen=origen_de(a),
+                proyecto_nombre=_nombre(Proyecto, Proyecto.nombre, a.proyecto_id),
+                sucursal_nombre=_nombre(Sucursal, Sucursal.nombre, a.sucursal_id),
+                serie_codigo=_nombre(Serie, Serie.codigo, a.serie_id),
+            )
+    if lista_out is None and base_lp is not None:
+        lista_out = ContextoListaOut(
+            lista_id=base_lp.id, lista_nombre=base_lp.nombre, origen="lista_base",
+        )
+
+    # Negociaciones del cliente ancladas a plaza que este documento NO puede
+    # ganar por venir sin sucursal: es el dato del aviso "elige la sucursal".
+    omitidas = 0
+    if cliente_id is not None and sucursal_id is None:
+        q = db.query(ListaAsignacion.id).filter(
+            ListaAsignacion.cliente_id == cliente_id,
+            ListaAsignacion.sucursal_id.isnot(None),
+        )
+        omitidas = _vigente(q, ListaAsignacion, fecha).count()
+        q = db.query(PrecioOverride.id).filter(
+            PrecioOverride.cliente_id == cliente_id,
+            PrecioOverride.sucursal_id.isnot(None),
+        )
+        omitidas += _vigente(q, PrecioOverride, fecha).count()
+
+    # Qué productos tienen precio en este contexto: los de las listas que
+    # aplican (asignaciones + base) más los overrides de la misma cascada.
+    con_precio: set[UUID] = set()
+    lista_ids = [a.lista_id for a in asigs]
+    if base_lp is not None and base_lp.id not in lista_ids:
+        lista_ids.append(base_lp.id)
+    if lista_ids:
+        q = db.query(Precio.producto_id).filter(Precio.lista_id.in_(lista_ids)).distinct()
+        con_precio.update(pid for (pid,) in _vigente(q, Precio, fecha).all())
+    condiciones = []
+    if sucursal_id is not None:
+        condiciones.append(and_(
+            PrecioOverride.sucursal_id == sucursal_id,
+            (PrecioOverride.cliente_id.is_(None)) | (PrecioOverride.cliente_id == cliente_id),
+        ))
+    if cliente_id is not None:
+        condiciones.append(and_(
+            PrecioOverride.cliente_id == cliente_id,
+            PrecioOverride.sucursal_id.is_(None),
+        ))
+    if condiciones:
+        from sqlalchemy import or_ as _or
+
+        q = db.query(PrecioOverride.producto_id).filter(_or(*condiciones)).distinct()
+        con_precio.update(pid for (pid,) in _vigente(q, PrecioOverride, fecha).all())
+
+    return ContextoPreciosOut(
+        lista=lista_out,
+        listas_por_sucursal_omitidas=omitidas,
+        productos_con_precio=sorted(con_precio, key=str),
+    )
 
 
 @router.get("/cotizar", response_model=CotizacionOut)

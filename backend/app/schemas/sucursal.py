@@ -65,6 +65,8 @@ class SucursalOut(ORMModel, SucursalBase):
     serie_remision_id: Optional[uuid.UUID] = None
     series_factura_ids: list[uuid.UUID] = Field(default_factory=list)
     series_remision_ids: list[uuid.UUID] = Field(default_factory=list)
+    # Con ?cliente_id=X: si esta plaza es la default de ese cliente (del vínculo).
+    es_default: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -76,6 +78,9 @@ class ClienteSucursalUpsert(BaseModel):
     # None = no tocar el abanico; lista (aun vacía) = reemplazarlo.
     series_factura_ids: Optional[list[uuid.UUID]] = Field(default=None, max_length=20)
     series_remision_ids: Optional[list[uuid.UUID]] = Field(default=None, max_length=20)
+    # True = esta plaza se preselecciona al capturar para el cliente (y se
+    # desmarca la que fuera default antes). None = no tocar.
+    es_default: Optional[bool] = None
 
 
 class ClienteSucursalOut(BaseModel):
@@ -87,6 +92,7 @@ class ClienteSucursalOut(BaseModel):
     serie_remision_id: Optional[uuid.UUID] = None
     series_factura_ids: list[uuid.UUID] = Field(default_factory=list)
     series_remision_ids: list[uuid.UUID] = Field(default_factory=list)
+    es_default: bool = False
 
 
 # ── Override de precio ──
@@ -120,6 +126,29 @@ class PrecioOverrideOut(ORMModel):
     vigencia_hasta: Optional[date] = None
     created_at: datetime
     updated_at: datetime
+
+
+# ── Contexto de precios de un documento (qué lista aplica y qué tiene precio) ──
+class ContextoListaOut(BaseModel):
+    lista_id: uuid.UUID
+    lista_nombre: str
+    # lista_proyecto | lista_serie | lista_sucursal | lista_cliente | lista_base
+    origen: str
+    proyecto_nombre: Optional[str] = None
+    sucursal_nombre: Optional[str] = None
+    serie_codigo: Optional[str] = None
+
+
+class ContextoPreciosOut(BaseModel):
+    # La lista que cobraría el resolutor para (cliente, sucursal, serie,
+    # proyecto): la asignación ganadora, o la lista base, o None (sin precio).
+    lista: Optional[ContextoListaOut] = None
+    # Negociaciones del cliente ancladas a plaza que NO aplican porque el
+    # documento viene sin sucursal — el aviso "elige la sucursal".
+    listas_por_sucursal_omitidas: int = 0
+    # Productos que SÍ tienen precio en este contexto (listas aplicables +
+    # overrides): alimenta el badge $ del buscador sin cotizar uno por uno.
+    productos_con_precio: list[uuid.UUID] = Field(default_factory=list)
 
 
 # ── Cotización (precio resuelto) ──

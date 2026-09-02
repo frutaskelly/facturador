@@ -32,7 +32,7 @@ import {
   nuevaLinea, pegarLocalFallback, unidadBaseDesde,
   type FiscalPreview, type LineaForm,
 } from "@/lib/lineas";
-import type { Almacen, Cliente, LineaPegada, LineaRemision, MatchResult, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
+import type { Almacen, Cliente, ContextoPrecios, LineaPegada, LineaRemision, MatchResult, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "remision:gestionar";
 
@@ -69,6 +69,19 @@ function puedeFacturar(r: Remision): boolean {
     (!r.factura_id || r.factura_estado === "CANCELADA")
   );
 }
+
+// Cómo se le llama en pantalla al origen que reporta el resolutor de precios
+// (mismas etiquetas que /cotizador).
+const ORIGEN_LABEL: Record<string, string> = {
+  override_sucursal: "precio especial de la sucursal",
+  override_cliente: "precio especial del cliente",
+  lista_forzada: "lista forzada en el documento",
+  lista_proyecto: "lista del proyecto",
+  lista_serie: "lista de la serie",
+  lista_sucursal: "lista de la sucursal",
+  lista_cliente: "lista del cliente",
+  lista_base: "lista base",
+};
 
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
                "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
@@ -177,6 +190,11 @@ export default function RemisionesPage() {
   const [almacenId, setAlmacenId] = useState("");
   const [fecha, setFecha] = useState("");
   const [serieOverride, setSerieOverride] = useState("");
+  // La serie con la que YA se folió (edición) y el proyecto de la remisión:
+  // no se capturan aquí, pero la cotización sin ellos no ve las listas
+  // negociadas por serie o por proyecto (mismo criterio que /oc y /cotizador).
+  const [editSerieId, setEditSerieId] = useState("");
+  const [proyectoId, setProyectoId] = useState("");
   const [notas, setNotas] = useState("");
   const [facturaSae, setFacturaSae] = useState("");
   const [suPedido, setSuPedido] = useState("");
@@ -207,6 +225,31 @@ export default function RemisionesPage() {
   }, [mode, editId, clienteId, sucursalId, serieOverride]);
 
   const folioPreview = serieResuelta ? `${serieResuelta.codigo}${serieResuelta.folio_actual + 1}` : "—";
+
+  // La serie con la que se COTIZA: en edición la real de la remisión; en alta,
+  // la elegida a mano o la que resolvió el backend.
+  const serieCotizaId = editId ? editSerieId : (serieOverride || serieResuelta?.id || "");
+
+  // Contexto de precios del documento: qué lista aplicaría y qué productos
+  // tienen precio. UNA llamada por cambio de encabezado — alimenta el chip
+  // junto a las líneas y el badge $ del buscador, sin costo por tecleo.
+  const [ctxPrecios, setCtxPrecios] = useState<ContextoPrecios | null>(null);
+  const ctxPreciosSeq = useRef(0);
+  useEffect(() => {
+    if (mode !== "create" || !clienteId) { setCtxPrecios(null); return; }
+    const seq = ++ctxPreciosSeq.current;
+    const p = new URLSearchParams({ cliente_id: clienteId });
+    if (sucursalId) p.set("sucursal_id", sucursalId);
+    if (serieCotizaId) p.set("serie_id", serieCotizaId);
+    if (proyectoId) p.set("proyecto_id", proyectoId);
+    apiFetch<ContextoPrecios>(`/api/v1/precios/contexto?${p.toString()}`)
+      .then((c) => { if (seq === ctxPreciosSeq.current) setCtxPrecios(c); })
+      .catch(() => { if (seq === ctxPreciosSeq.current) setCtxPrecios(null); });
+  }, [mode, clienteId, sucursalId, serieCotizaId, proyectoId]);
+  const productosConPrecio = useMemo(
+    () => (ctxPrecios ? new Set(ctxPrecios.productos_con_precio) : null),
+    [ctxPrecios],
+  );
 
   // Totales del alta calculados por el SERVIDOR (regla "el backend calcula
   // todo"): debounce por tecleo + secuencia contra respuestas fuera de orden.
@@ -246,6 +289,10 @@ export default function RemisionesPage() {
     if (target === "sucursal") {
       if (sucs.length === 0) { setSucursalId(""); return resolveFrom("almacen", sucs, alms); }
       if (sucs.length === 1) { setSucursalId(sucs[0].id); return resolveFrom("almacen", sucs, alms); }
+      // Con varias plazas, la marcada como default del cliente se preselecciona
+      // (sigue editable): capturar "sin sucursal" deja fuera sus listas por plaza.
+      const def = sucs.find((s) => s.es_default);
+      if (def) { setSucursalId(def.id); return resolveFrom("almacen", sucs, alms); }
       return setStep("sucursal");
     }
     if (target === "almacen") {
@@ -285,6 +332,7 @@ export default function RemisionesPage() {
   // Lo usa "Borrar" y también openCreate al entrar.
   function resetForm() {
     setClienteId(""); setSucursalId(""); setAlmacenId(""); setSerieOverride("");
+    setEditSerieId(""); setProyectoId("");
     setSucursales([]); setNotas(""); setFacturaSae(""); setSuPedido(""); setLineas([nuevaLinea()]);
     setFecha(today());            // fecha de hoy por defecto (el flujo la salta)
     setStep("cliente");           // arranca con el cliente abierto
@@ -311,10 +359,32 @@ export default function RemisionesPage() {
     }
     try {
       const det = await apiFetch<RemisionDetail>(`/api/v1/remisiones/${r.id}`);
+      // Las plazas del cliente TAMBIÉN se cargan al editar: sin esto el combo
+      // de Sucursal quedaba vacío y una remisión sin plaza no se podía corregir
+      // (y sin plaza no aplican sus listas de precios por sucursal).
+      let sucs: Sucursal[] = [];
+      try {
+        sucs = (await apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${det.cliente_facturacion_id}&limit=200`)).items;
+      } catch {
+        sucs = [];
+      }
+      setSucursales(sucs);
       setClienteId(det.cliente_facturacion_id);
-      setSucursalId(det.sucursal_id ?? "");
+      // Si la remisión venía SIN plaza, se propone la default del cliente (o la
+      // única): queda a la vista y editable; se persiste hasta guardar.
+      let sucursal = det.sucursal_id ?? "";
+      if (!sucursal) {
+        const auto = sucs.find((s) => s.es_default) ?? (sucs.length === 1 ? sucs[0] : null);
+        if (auto) {
+          sucursal = auto.id;
+          toast.info(`Sucursal propuesta en automático: ${auto.nombre} (revísala antes de guardar)`);
+        }
+      }
+      setSucursalId(sucursal);
       setAlmacenId(det.almacen_id ?? "");
       setSerieOverride("");                       // el folio ya está fijo; no se re-serie al editar
+      setEditSerieId(det.serie_id ?? "");         // pero la cotización SÍ debe saber la serie
+      setProyectoId(det.proyecto_id ?? "");
       setFecha(det.fecha_remision ?? today());
       setNotas(det.notas ?? "");
       setFacturaSae(det.factura_sae ?? "");
@@ -338,6 +408,7 @@ export default function RemisionesPage() {
       setEditEstado(r.estado);
       setEditFolio(det.folio_interno);
       setMode("create");
+      setRefrescarReferencias(true);              // trae el precio de catálogo de cada línea
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo cargar la remisión");
     }
@@ -382,6 +453,20 @@ export default function RemisionesPage() {
     return setLineFocus({ key: lineas[idx + 1].key, field: "cantidad" });
   }
 
+  // Al ABRIR una edición, las líneas llegan con precio manual (el guardado) y
+  // sin referencia del catálogo: sin esta pasada, todas dirían "sin precio en
+  // el catálogo" aunque sí lo tengan. Es un flag+efecto (no una llamada directa
+  // en openEdit) para que cotizar() vea el estado ya actualizado.
+  const [refrescarReferencias, setRefrescarReferencias] = useState(false);
+  useEffect(() => {
+    if (!refrescarReferencias) return;
+    setRefrescarReferencias(false);
+    for (const l of lineas) {
+      if (l.producto_id && Number(l.cantidad) > 0) cotizar(l.key, l.producto_id, l.presentacion, l.cantidad);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refrescarReferencias]);
+
   // Secuencia por línea: cada llamada a cotizar (aunque no llegue a pedir precio)
   // invalida las anteriores en vuelo, para que una respuesta vieja no pise el
   // precio/importe calculados con la cantidad más reciente.
@@ -395,6 +480,10 @@ export default function RemisionesPage() {
       const p = new URLSearchParams({ producto_id, presentacion, cantidad });
       if (clienteId) p.set("cliente_id", clienteId);
       if (sucursalId) p.set("sucursal_id", sucursalId);
+      // Sin serie/proyecto, una lista negociada por esas dimensiones sería
+      // invisible aquí y visible al facturar (mismo criterio que /oc y /cotizador).
+      if (serieCotizaId) p.set("serie_id", serieCotizaId);
+      if (proyectoId) p.set("proyecto_id", proyectoId);
       const r = await apiFetch<{
         precio: string | null; origen?: string | null;
         lista_id?: string | null; cantidad_minima?: number | null;
@@ -408,6 +497,8 @@ export default function RemisionesPage() {
         precioLista: r.precio == null ? null : String(r.precio),
         precioListaId: reescribible ? r.lista_id ?? null : null,
         precioTramo: reescribible ? r.cantidad_minima ?? null : null,
+        precioOrigen: r.precio == null ? null : origen || null,
+        cotizaFallo: false,
       };
       setLineas((ls) =>
         ls.map((l) => {
@@ -420,7 +511,9 @@ export default function RemisionesPage() {
         }),
       );
     } catch {
-      /* sin precio: se resolverá al guardar */
+      // Falla de red/servidor ≠ "sin precio en el catálogo": se marca para que
+      // el renglón lo diga distinto y "Actualizar precios" sirva de reintento.
+      if (cotizaSeq.current[key] === seq) setLinea(key, { cotizaFallo: true });
     }
   }
 
@@ -442,8 +535,8 @@ export default function RemisionesPage() {
   }
 
   // Sin esto, el precio se quedaba con el de la primera selección: cambiar de
-  // cliente, sucursal o almacén después de capturar líneas no re-cotizaba.
-  const contextoPrecios = `${clienteId}|${sucursalId}|${almacenId}`;
+  // cliente, sucursal, serie o almacén después de capturar líneas no re-cotizaba.
+  const contextoPrecios = `${clienteId}|${sucursalId}|${almacenId}|${serieCotizaId}|${proyectoId}`;
   const contextoPreciosPrev = useRef(contextoPrecios);
   useEffect(() => {
     if (contextoPreciosPrev.current === contextoPrecios) return;
@@ -1877,6 +1970,41 @@ export default function RemisionesPage() {
           </Field>
         </div>
 
+        {/* Con qué lista se está cotizando ESTE documento: se dice aquí, antes
+            de capturar, en vez de descubrirlo línea a línea en "sin precio". */}
+        {clienteId && ctxPrecios && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            {ctxPrecios.lista ? (
+              ctxPrecios.lista.origen === "lista_base" ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1 text-warning">
+                  <span className="font-semibold">$</span>
+                  Cotizando con la lista base «{ctxPrecios.lista.lista_nombre}» — sin negociación del cliente en este contexto
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1">
+                  <span className="font-semibold text-success">$</span>
+                  Precios: <b>{ctxPrecios.lista.lista_nombre}</b>
+                  <span className="text-muted">
+                    · {ORIGEN_LABEL[ctxPrecios.lista.origen] ?? ctxPrecios.lista.origen}
+                    {ctxPrecios.lista.proyecto_nombre ? ` (${ctxPrecios.lista.proyecto_nombre})`
+                      : ctxPrecios.lista.sucursal_nombre ? ` (${ctxPrecios.lista.sucursal_nombre})`
+                      : ctxPrecios.lista.serie_codigo ? ` (${ctxPrecios.lista.serie_codigo})` : ""}
+                  </span>
+                </span>
+              )
+            ) : (
+              <span className="inline-flex items-center rounded-full border border-danger/40 bg-surface-2 px-2.5 py-1 text-danger">
+                Sin lista de precios aplicable: las líneas saldrán sin precio
+              </span>
+            )}
+            {!sucursalId && ctxPrecios.listas_por_sucursal_omitidas > 0 && (
+              <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-2.5 py-1 text-warning">
+                Este cliente tiene precios por sucursal que NO aplican sin sucursal — elígela arriba
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="mt-4 rounded-xl border border-border p-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold">Líneas</h2>
@@ -1950,6 +2078,7 @@ export default function RemisionesPage() {
                   ) : (
                     <ProductoCombobox
                       label={l.label || l.texto}
+                      conPrecio={productosConPrecio}
                       onSelect={(p, t) => onPickProducto(l.key, p, t)}
                       autoFocus={lineFocus?.key === l.key && lineFocus?.field === "producto"}
                       onPaste={(e) => {
@@ -1966,6 +2095,7 @@ export default function RemisionesPage() {
                         <ProductoCombobox
                           label={l.label}
                           placeholder="Buscar producto…"
+                          conPrecio={productosConPrecio}
                           sugerencias={cands}
                           aliasTexto={l.texto}
                           clienteId={clienteId || null}
@@ -2023,18 +2153,27 @@ export default function RemisionesPage() {
                     if (!l.precio.trim() || !Number.isFinite(v) || v <= 0) {
                       return (
                         <div className="mt-0.5 text-[11px] text-warning">
-                          sin precio — captúralo para poder confirmar
+                          {l.cotizaFallo
+                            ? "no se pudo consultar el catálogo — «Actualizar precios» reintenta"
+                            : "sin precio — captúralo para poder confirmar"}
                         </div>
                       );
                     }
                     if (!l.precioManual) return null;
                     if (l.precioLista == null) {
-                      return <div className="mt-0.5 text-[11px] text-muted">sin precio en el catálogo</div>;
+                      return (
+                        <div className="mt-0.5 text-[11px] text-muted">
+                          {l.cotizaFallo
+                            ? "no se pudo consultar el catálogo — «Actualizar precios» reintenta"
+                            : "sin precio en el catálogo"}
+                        </div>
+                      );
                     }
                     if (Math.abs(v - Number(l.precioLista)) <= 0.01) return null;
                     return (
                       <div className="mt-0.5 text-[11px] text-muted">
                         catálogo {fmtMoney(Number(l.precioLista))}
+                        {l.precioOrigen ? ` · ${ORIGEN_LABEL[l.precioOrigen] ?? l.precioOrigen}` : ""}
                       </div>
                     );
                   })()}

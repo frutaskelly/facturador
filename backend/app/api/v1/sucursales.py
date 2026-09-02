@@ -137,6 +137,7 @@ def _hidratar(db, rows, *, cliente_id: Optional[UUID] = None, ctx=None):
         v = del_cliente.get(r.id)
         r.serie_factura_id = v.serie_factura_id if v else None
         r.serie_remision_id = v.serie_remision_id if v else None
+        r.es_default = bool(v.es_default) if v else False
         fact, rem = abanicos.get(v.id, ([], [])) if v else ([], [])
         r.series_factura_ids = fact
         r.series_remision_ids = rem
@@ -162,6 +163,7 @@ def _vinculo_out(db, vincs) -> list[ClienteSucursalOut]:
                 serie_remision_id=v.serie_remision_id,
                 series_factura_ids=fact,
                 series_remision_ids=rem,
+                es_default=bool(v.es_default),
             )
         )
     return out
@@ -364,6 +366,14 @@ def upsert_vinculo(
     data = payload.model_dump(exclude_unset=True)
     series_f = data.pop("series_factura_ids", None)
     series_r = data.pop("series_remision_ids", None)
+    # El default es a lo más UNO por cliente (índice parcial): marcar este
+    # vínculo desmarca el que lo fuera — antes del flush, o el índice truena.
+    if data.get("es_default"):
+        db.query(ClienteSucursal).filter(
+            ClienteSucursal.cliente_id == cliente_id,
+            ClienteSucursal.id != vinc.id,
+            ClienteSucursal.es_default.is_(True),
+        ).update({"es_default": False})
     for key, value in data.items():
         setattr(vinc, key, value)
     if series_f is not None or series_r is not None:

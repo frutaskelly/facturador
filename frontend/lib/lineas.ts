@@ -23,6 +23,10 @@ export type LineaForm = {
   precioLista?: string | null;
   precioListaId?: string | null;   // null cuando no se puede/debe reescribir
   precioTramo?: number | null;     // tramo del que habló la referencia
+  precioOrigen?: string | null;    // de qué lista/override salió la referencia
+  // La última cotización FALLÓ (red/servidor): no es lo mismo que "sin precio
+  // en el catálogo" y el renglón lo dice distinto.
+  cotizaFallo?: boolean;
   // Solo para líneas venidas de "Pegar de Excel": alimentan la columna Match IA
   // (visible únicamente mientras haya líneas pegadas por revisar).
   fromPaste?: boolean;

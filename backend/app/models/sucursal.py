@@ -63,6 +63,10 @@ class ClienteSucursal(Base, TimestampMixin):
     sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id", ondelete="CASCADE"), nullable=False, index=True)
     serie_factura_id = Column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"), nullable=True)
     serie_remision_id = Column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"), nullable=True)
+    # La plaza que los formularios preseleccionan cuando el cliente tiene
+    # varias: sin ella, capturar "sin sucursal" deja fuera toda negociación
+    # anclada a plaza. A lo más una por cliente (índice parcial en 0066).
+    es_default = Column(Boolean, nullable=False, server_default="false")
 
 
 class ClienteSucursalSerie(Base):

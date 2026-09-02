@@ -37,6 +37,7 @@ export function ProductoCombobox({
   sugerencias,
   onCrear,
   aliasTexto,
+  conPrecio,
 }: {
   label?: string;
   onSelect: (p: ProductoPick | null, texto: string) => void;
@@ -58,6 +59,10 @@ export function ProductoCombobox({
   /** Texto con el que se aprende el alias al confirmar un cruce. Por defecto es
    * lo tecleado; en Match IA es el texto ORIGINAL del cliente. */
   aliasTexto?: string;
+  /** Productos CON precio en el contexto del documento (de /precios/contexto).
+   * Se consulta en memoria — cero costo por tecleo. null = aún sin contexto,
+   * no se marca nada (mejor callar que marcar mal). */
+  conPrecio?: Set<string> | null;
 }) {
   const [q, setQ] = useState(label ?? "");
   const [open, setOpen] = useState(false);
@@ -237,11 +242,18 @@ export function ProductoCombobox({
                   <span className="font-medium">{c.nombre}</span>
                   <span className="ml-2 text-xs text-muted">{c.sku}</span>
                 </span>
-                {c.origen !== "exacto" && (
-                  <span className="shrink-0 rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">
-                    {c.origen === "ia" ? "IA" : c.origen === "alias" ? "alias" : `${c.score}%`}
-                  </span>
-                )}
+                <span className="flex shrink-0 items-center gap-1.5">
+                  {c.origen !== "exacto" && (
+                    <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">
+                      {c.origen === "ia" ? "IA" : c.origen === "alias" ? "alias" : `${c.score}%`}
+                    </span>
+                  )}
+                  {conPrecio && (conPrecio.has(c.producto_id) ? (
+                    <span className="text-xs font-semibold text-success" title="Con precio en el catálogo del cliente">$</span>
+                  ) : (
+                    <span className="text-[11px] text-warning" title="Sin precio en este contexto: habrá que capturarlo">sin $</span>
+                  ))}
+                </span>
               </button>
             ))}
           {!loading && (
