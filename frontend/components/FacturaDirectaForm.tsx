@@ -152,12 +152,6 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
     setUsoCfdi(cli?.uso_cfdi_default ?? USO_CFDI_FALLBACK);
     setFormaPago(cli?.forma_pago_default ?? FORMA_PAGO_FALLBACK);
     setMetodoPago(cli?.metodo_pago_default ?? METODO_PAGO_FALLBACK);
-    // Re-cotiza las líneas ya capturadas con la lista del nuevo cliente (si se
-    // capturaron sin cliente, o al cambiar de cliente, traían el precio de
-    // lista genérico y así se timbraría). Los precios manuales se respetan.
-    lineas.forEach((l) => {
-      if (l.producto_id && !l.precioManual) cotizar(l.key, l.producto_id, l.presentacion, l.cantidad, v);
-    });
     if (almacenes.length > 1) { setStep("almacen"); return; }
     setStep(null);
     setLineFocus({ key: lineas[0]?.key, field: "cantidad" });
@@ -202,22 +196,28 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
     return setLineFocus({ key: lineas[idx + 1].key, field: "cantidad" });
   }
 
+  // La serie con la que se cotiza: la elegida a mano o la que el resolutor
+  // previó — la misma que el backend fijará al guardar. Hay listas de precios
+  // pactadas por serie; sin este parámetro el resolutor no las ve y productos
+  // con precio salen "sin precio".
+  const serieCotiza = serieOverride || serieResuelta?.id || "";
+
   // Secuencia por línea para descartar cotizaciones obsoletas: con precio por
   // volumen, al teclear "15" salen dos requests y la respuesta de "1" puede
   // llegar al final → quedaría (y se timbraría) el precio del tier equivocado.
   const cotizaSeq = useRef<Record<string, number>>({});
 
-  // Cotiza el precio de lista del cliente. Sin sucursal: la factura directa no
-  // la tiene, así que el precio sale de la lista del cliente / del producto.
-  // `cliente` permite cotizar con un cliente recién elegido antes de que el
-  // estado `clienteId` se actualice.
-  async function cotizar(key: string, producto_id: string, presentacion: string, cantidad: string, cliente: string = clienteId) {
+  // Cotiza el precio de lista del cliente. Sin sucursal ni proyecto: la factura
+  // directa no los tiene, así que el precio sale de la lista del cliente (o de
+  // su serie) / del producto.
+  async function cotizar(key: string, producto_id: string, presentacion: string, cantidad: string) {
     if (!producto_id || !Number(cantidad)) return;
     const seq = (cotizaSeq.current[key] ?? 0) + 1;
     cotizaSeq.current[key] = seq;
     try {
       const p = new URLSearchParams({ producto_id, presentacion, cantidad });
-      if (cliente) p.set("cliente_id", cliente);
+      if (clienteId) p.set("cliente_id", clienteId);
+      if (serieCotiza) p.set("serie_id", serieCotiza);
       const r = await apiFetch<{ precio: string | null }>(`/api/v1/precios/cotizar?${p.toString()}`);
       if (cotizaSeq.current[key] !== seq) return; // ya salió una cotización más nueva para esta línea
       setLineas((ls) =>
@@ -232,6 +232,22 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
       /* sin precio de lista: el usuario lo captura a mano (el backend lo exige) */
     }
   }
+
+  // Re-cotiza las líneas capturadas cuando cambia el contexto de precios: al
+  // elegir/cambiar cliente (si se capturaron sin cliente traían el precio de
+  // lista genérico y así se timbraría) y cuando cambia la serie con la que se
+  // cotiza — incluida la resuelta, que llega async después de elegir cliente.
+  // Los precios manuales se respetan.
+  const contextoPrecios = `${clienteId}|${serieCotiza}`;
+  const contextoPreciosPrev = useRef(contextoPrecios);
+  useEffect(() => {
+    if (contextoPreciosPrev.current === contextoPrecios) return;
+    contextoPreciosPrev.current = contextoPrecios;
+    lineas.forEach((l) => {
+      if (l.producto_id && !l.precioManual) cotizar(l.key, l.producto_id, l.presentacion, l.cantidad);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextoPrecios]);
 
   function onPickProducto(key: string, pick: ProductoPick | null, texto: string) {
     if (!pick) {
