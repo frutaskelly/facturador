@@ -2276,6 +2276,11 @@
       ],
       "title": "Cliente Nombre"
      },
+     "es_default": {
+      "default": false,
+      "title": "Es Default",
+      "type": "boolean"
+     },
      "id": {
       "format": "uuid",
       "title": "Id",
@@ -2337,6 +2342,17 @@
    },
    "ClienteSucursalUpsert": {
     "properties": {
+     "es_default": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Es Default"
+     },
      "serie_factura_id": {
       "anyOf": [
        {
@@ -2953,6 +2969,92 @@
      }
     },
     "title": "ContactoOut",
+    "type": "object"
+   },
+   "ContextoListaOut": {
+    "properties": {
+     "lista_id": {
+      "format": "uuid",
+      "title": "Lista Id",
+      "type": "string"
+     },
+     "lista_nombre": {
+      "title": "Lista Nombre",
+      "type": "string"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "proyecto_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Nombre"
+     },
+     "serie_codigo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie Codigo"
+     },
+     "sucursal_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Nombre"
+     }
+    },
+    "required": [
+     "lista_id",
+     "lista_nombre",
+     "origen"
+    ],
+    "title": "ContextoListaOut",
+    "type": "object"
+   },
+   "ContextoPreciosOut": {
+    "properties": {
+     "lista": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/ContextoListaOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "listas_por_sucursal_omitidas": {
+      "default": 0,
+      "title": "Listas Por Sucursal Omitidas",
+      "type": "integer"
+     },
+     "productos_con_precio": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Productos Con Precio",
+      "type": "array"
+     }
+    },
+    "title": "ContextoPreciosOut",
     "type": "object"
    },
    "ConversionCreate": {
@@ -15959,6 +16061,11 @@
       "title": "Domicilio",
       "type": "object"
      },
+     "es_default": {
+      "default": false,
+      "title": "Es Default",
+      "type": "boolean"
+     },
      "id": {
       "format": "uuid",
       "title": "Id",
@@ -28038,6 +28145,146 @@
     "summary": "Iniciar En Pos",
     "tags": [
      "pos"
+    ]
+   }
+  },
+  "/api/v1/precios/contexto": {
+   "get": {
+    "description": "El contexto de precios de un documento, en UNA llamada por cambio de\nencabezado: qué lista cobraría el resolutor (para decirlo ANTES de capturar,\nno descubrirlo línea a línea), si hay negociaciones por plaza que se están\nquedando fuera por venir sin sucursal, y qué productos tienen precio aquí\n(para que el buscador marque $ sin cotizar candidato por candidato).",
+    "operationId": "contexto_precios_api_v1_precios_contexto_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "sucursal_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Sucursal Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "serie_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Serie Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "proyecto_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Proyecto Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "fecha",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Fecha"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ContextoPreciosOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Contexto Precios",
+    "tags": [
+     "precios"
     ]
    }
   },

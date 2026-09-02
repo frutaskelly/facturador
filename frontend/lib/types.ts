@@ -164,6 +164,8 @@ export type Sucursal = {
   serie_remision_id?: string | null;
   series_factura_ids?: string[];
   series_remision_ids?: string[];
+  /** Con ?cliente_id=X: si esta plaza es la default de ese cliente. */
+  es_default?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -178,6 +180,21 @@ export type ClienteSucursal = {
   serie_remision_id?: string | null;
   series_factura_ids?: string[];
   series_remision_ids?: string[];
+  es_default?: boolean;
+};
+
+/** GET /precios/contexto: qué lista aplica al documento y qué tiene precio. */
+export type ContextoPrecios = {
+  lista: {
+    lista_id: string;
+    lista_nombre: string;
+    origen: string;
+    proyecto_nombre?: string | null;
+    sucursal_nombre?: string | null;
+    serie_codigo?: string | null;
+  } | null;
+  listas_por_sucursal_omitidas: number;
+  productos_con_precio: string[];
 };
 
 export type TipoSerie = "FISCAL" | "NO_FISCAL";

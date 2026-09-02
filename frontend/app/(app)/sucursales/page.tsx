@@ -42,6 +42,7 @@ type FormVinculo = {
   series_remision_ids: string[];
   serie_factura_id: string;
   serie_remision_id: string;
+  es_default: boolean;
 };
 
 export default function SucursalesPage() {
@@ -172,6 +173,7 @@ export default function SucursalesPage() {
     series_remision_ids: [],
     serie_factura_id: "",
     serie_remision_id: "",
+    es_default: false,
   };
   const [vincModal, setVincModal] = useState<{ sucursalId: string; existente: boolean } | null>(null);
   const [vinc, setVinc] = useState<FormVinculo>(emptyVinc);
@@ -192,6 +194,7 @@ export default function SucursalesPage() {
       series_remision_ids: v.series_remision_ids ?? [],
       serie_factura_id: v.serie_factura_id ?? "",
       serie_remision_id: v.serie_remision_id ?? "",
+      es_default: v.es_default ?? false,
     });
     setVincModal({ sucursalId, existente: true });
   }
@@ -210,6 +213,7 @@ export default function SucursalesPage() {
         serie_remision_id: vinc.serie_remision_id || null,
         series_factura_ids: vinc.series_factura_ids,
         series_remision_ids: vinc.series_remision_ids,
+        es_default: vinc.es_default,
       });
       toast.success(vincModal.existente ? "Vínculo actualizado" : "Cliente vinculado");
       reloadDetalle(vincModal.sucursalId);
@@ -306,7 +310,15 @@ export default function SucursalesPage() {
     const vincs = d?.vinculos ?? [];
 
     const vCols: Column<ClienteSucursal>[] = [
-      { header: "Cliente", cell: (v) => <span className="font-medium">{v.cliente_nombre ?? cliName[v.cliente_id] ?? "—"}</span> },
+      {
+        header: "Cliente",
+        cell: (v) => (
+          <span className="font-medium">
+            {v.cliente_nombre ?? cliName[v.cliente_id] ?? "—"}
+            {v.es_default && <span className="ml-2"><Badge tone="success">default</Badge></span>}
+          </span>
+        ),
+      },
       {
         header: "Serie de factura",
         cell: (v) => (v.serie_factura_id && serieCodigo[v.serie_factura_id]
@@ -547,6 +559,17 @@ export default function SucursalesPage() {
               </div>
             </Field>
           </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={vinc.es_default}
+              onChange={(e) => setVinc({ ...vinc, es_default: e.target.checked })}
+            />
+            Sucursal por defecto de este cliente
+            <span className="text-xs text-muted">
+              (se preselecciona al capturar remisiones/facturas; marca a lo más una por cliente)
+            </span>
+          </label>
           <p className="text-xs text-muted">
             Sin serie palomeada, este cliente usa aquí sus series de cliente (o la default del negocio).
           </p>

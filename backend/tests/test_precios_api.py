@@ -531,3 +531,82 @@ def test_override_se_reescribe_en_vez_de_apilarse(client, env, auth_as):
         "cliente_id": env["cli1"], "producto_id": env["aguacate"]}).json()
     assert listado["total"] == 1
     assert float(_cot(client, h, env["aguacate"], cliente_id=env["cli1"])["precio"]) == 17.0
+
+
+# ── GET /precios/contexto: el chip "con qué lista se cotiza" + badge $ ──
+
+
+def _ctx(client, h, **params):
+    r = client.get("/api/v1/precios/contexto", headers=h, params=params)
+    assert r.status_code == 200
+    return r.json()
+
+
+def test_contexto_lista_del_cliente(client, env, auth_as):
+    """Cliente con lista asignada global: el contexto la nombra y lista sus
+    productos con precio (para el badge $ del buscador)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = _ctx(client, h, cliente_id=env["cli3"])
+    assert r["lista"]["origen"] == "lista_cliente"
+    assert r["lista"]["lista_id"] == env["menudeo"]
+    assert r["lista"]["lista_nombre"] == "Menudeo"
+    assert env["aguacate"] in r["productos_con_precio"]
+    assert r["listas_por_sucursal_omitidas"] == 0
+
+
+def test_contexto_cae_a_lista_base(client, env, auth_as):
+    """Cliente sin negociación propia: se dice que se cotiza con la base."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = _ctx(client, h, cliente_id=env["cli1"])
+    assert r["lista"]["origen"] == "lista_base"
+    assert r["lista"]["lista_id"] == env["unico"]
+
+
+def test_contexto_avisa_listas_por_sucursal_omitidas(client, env, auth_as):
+    """La negociación anclada a plaza NO aplica sin sucursal — y el contexto lo
+    dice (es el aviso "elige la sucursal" del formulario de remisiones)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    alta = client.post("/api/v1/asignaciones-precios", headers=h, json={
+        "lista_id": env["menudeo"], "cliente_id": env["cli1"], "sucursal_id": env["slp"]})
+    assert alta.status_code == 201
+
+    sin_plaza = _ctx(client, h, cliente_id=env["cli1"])
+    assert sin_plaza["lista"]["origen"] == "lista_base"
+    assert sin_plaza["listas_por_sucursal_omitidas"] == 1
+
+    con_plaza = _ctx(client, h, cliente_id=env["cli1"], sucursal_id=env["slp"])
+    assert con_plaza["lista"]["origen"] == "lista_sucursal"
+    assert con_plaza["lista"]["lista_id"] == env["menudeo"]
+    assert con_plaza["lista"]["sucursal_nombre"] == "SLP"
+    assert con_plaza["listas_por_sucursal_omitidas"] == 0
+    # el override de la plaza también cuenta como "con precio"
+    assert env["aguacate"] in con_plaza["productos_con_precio"]
+
+
+# ── es_default del vínculo cliente×plaza (sucursal que se preselecciona) ──
+
+
+def test_vinculo_es_default_unico_por_cliente(client, env, auth_as):
+    """Marcar una plaza como default la reporta en /sucursales?cliente_id= y
+    desmarca la que lo fuera: a lo más UNA por cliente."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+
+    r = client.put(f"/api/v1/sucursales/{env['slp']}/clientes/{env['cli1']}",
+                   headers=h, json={"es_default": True})
+    assert r.status_code == 200 and r.json()["es_default"] is True
+
+    listado = client.get("/api/v1/sucursales", headers=h,
+                         params={"cliente_id": env["cli1"], "limit": 200}).json()["items"]
+    defaults = {s["id"]: s["es_default"] for s in listado}
+    assert defaults[env["slp"]] is True
+    assert defaults[env["qro"]] is False
+
+    # mover la default a QRO desmarca SLP sola (índice parcial de por medio)
+    r = client.put(f"/api/v1/sucursales/{env['qro']}/clientes/{env['cli1']}",
+                   headers=h, json={"es_default": True})
+    assert r.status_code == 200
+    listado = client.get("/api/v1/sucursales", headers=h,
+                         params={"cliente_id": env["cli1"], "limit": 200}).json()["items"]
+    defaults = {s["id"]: s["es_default"] for s in listado}
+    assert defaults[env["qro"]] is True
+    assert defaults[env["slp"]] is False
