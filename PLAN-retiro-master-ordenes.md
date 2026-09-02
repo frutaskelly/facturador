@@ -4,8 +4,8 @@
 > (`index.js`, `sheets_push.py`, `ehmo_pedidos.py`), el Facturador en `main e03912c`, el
 > `PLAN-migracion-master-facturador.md` del 28-ago y 30 días de bitácora del router del bot
 > (2 al 31 de agosto). Versión legible con tablas y diagrama: artifact «Retiro del Master Órdenes».
-> Decisiones D9 a D17 resueltas por el dueño el 2 de septiembre de 2026 (marcadas en el texto);
-> D18 (dónde vive el original de cada orden) queda propuesta.
+> Decisiones D9 a D17 y D22 resueltas por el dueño el 2 de septiembre de 2026 (marcadas en el
+> texto); quedan abiertas D18 (dónde vive el original de cada orden) y D19-D21, del plan del agente.
 
 ## Objetivo
 
@@ -27,8 +27,9 @@ facturación del SAE, que sigue su calendario por cliente.
 - **46 comandos vivos en dos motores** que no comparten código (`sheets_push.py` para Balles/Jubran,
   `ehmo_pedidos.py` para EHMO/MAFAN). 7,294 comandos en 30 días solo en la tubería de Balles.
 - **El bot se vuelve un cliente delgado**: un comando = una llamada con vista previa y aplicar. El bot
-  conserva la conversación; el Facturador conserva la verdad. Un solo cruce de productos: el del
-  Facturador (los alias del bot ya se migraron el 28-ago).
+  conserva la conversación; el Facturador conserva la verdad. Un solo cruce de productos (el del
+  Facturador; los alias del bot ya se migraron el 28-ago) y una sola gramática de comandos para
+  todos los clientes: de 46 en dos motores a 20 globales (D22); los poco usados se retiran.
 - **El SAE sigue igual hasta el corte**: factura, importa masivos, recibe altas de producto con
   confirmación. Los pedidos y las facturas entran al SAE SOLO por el Excel masivo que genera el
   Facturador; nada se inyecta directo (D9). El espejo de catálogo lleva al Facturador lo que nazca en
@@ -87,69 +88,66 @@ vigencia.
    rastro y no estampa; escrituras cruzadas con confirmación; lo facturado no se toca.
 6. **Quién hizo qué**: la «Nota WhatsApp» del Master se vuelve actor externo en la bitácora.
 
-## Los comandos, uno por uno
+## Los comandos: una sola gramática
 
-Estado: EXISTE (ya lo hace el Facturador) · PARCIAL · FALTA · SE QUEDA (sigue en SAE/bot) · SE RETIRA (por decisión del dueño: D9, D13).
+**Decisión del 2-sep (D22): los comandos son GLOBALES.** La misma frase funciona para Balles,
+Jubran, EHMO y MAFAN, sin importar el motor ni el grupo; lo que cambia es el cliente al que apunta.
+De los 46 comandos de hoy quedan **20**: los repetidos entre motores se funden en uno y los que
+casi no se usan se retiran. Uso en 30 días: exacto para Balles/Jubran (bitácora del router); ≈ es
+aproximado de EHMO (sin bitácora) y «≈ pocos», uso sin conteo fiable; 0 es cero medido; raya, sin
+registro; «nuevo», comando que aún no existe; «bajo», unidades sueltas. La cifra suma las
+variantes absorbidas cuando hay conteo.
 
-### A · Entrada de órdenes
-| Comando | Uso | Hoy | Con el Facturador | Estado |
+### Los 20 que se quedan
+
+| Comando global | Absorbe | Uso 30 d | Con el Facturador | Estado |
 |---|---|---|---|---|
-| PDF de OC/requisición (Balles, Jubran) | 605 | Master+Summary, Drive, alarmas contra SAE; bandeja en 2º | La bandeja cruza y cotiza; el bot arma el acuse con esa respuesta; el archivo viaja con la orden (P12), Drive de respaldo | EXISTE |
-| Foto/Excel de pedido EHMO | ≈ | Cruce en el bot, Pedidos+Resumen, hojas por día a Drive; espeja | El bot lee la foto; cruce y hojas por día del Facturador (P4) | PARCIAL |
-| Foto de extras/reposiciones | ≈ | Lote EXTRA/REPOSICIÓN + Papelera; espeja | Tipo de partida en orden y remisión (P1) | PARCIAL |
-| `nueva OC <ubicación> <día>` | ≈ | Master EHMO; **no espeja** | Ingesta con canal MANUAL (el modelo ya lo admite) | PARCIAL |
+| PDF/foto/Excel al grupo (la entrada, no es comando) | Las tres tuberías de hoy; acuse, alarmas y preguntas de destino no cambian | 605 + fotos | La bandeja cruza y cotiza; el original viaja con la orden (P12, con D18) | EXISTE |
+| `nueva orden <cliente o ubicación> <día>` + partidas | El alta manual de EHMO, para cualquier cliente | ≈ pocos | Ingesta canal MANUAL (el modelo ya lo admite) | PARCIAL |
+| `actualiza OC <folio>` + líneas | Editar/borrar/agregar renglones; agregar y quitar partidas; kilos; partida a extra o reposición; corregir el producto (recruce y `reemplaza`, aprende el alias); cambio de semana. Siete comandos en una gramática | ≈235 | Edición con vista previa y aplicar (P2 sobre P1) | FALTA |
+| `bodega <folio> <fecha>` / `reparto` | La fecha de entrega para cualquier cliente | 44 | Fechas en orden y remisión (P1) + endpoint por lote (P2) | FALTA |
+| `cancela la OC <folio>` | — | 12 | Descartar; el aviso de pedido/factura ya hecha sale del espejo | EXISTE |
+| `une remisiones R-34-01 con R-34-02` | El código sin commitear del bot; nace global | nuevo | Operación de remisiones con vista previa (P2) | FALTA |
+| `pedido por ubicación <folio>` | Parte una orden de CONALEP en una entrega por plantel, con hoja por destino y fecha de bodega; hoy solo Balles, queda global | 10 | Reparto por punto de entrega sobre la orden (P2) y hojas por destino (P4) | FALTA |
+| `hoja de armado` por OC, fecha, semana, rango o entrega | Las dos variantes; FRUVE/SECOS; extras y reposiciones marcadas | ≈107 | Pivote desde remisiones y órdenes (P4), eje = fecha de bodega (P1) | FALTA |
+| `precio de <producto>` (ficha) | El comando más usado | 1,296 | Catálogo y listas espejadas (P6), sin sqlcmd ni túnel; la fuente no cambia hasta que las 7 listas vivas sean iguales | PARCIAL |
+| `crea producto <nombre> en la lista de <cliente o proyecto> a <precio>` | El alta de Balles y la de EHMO, una sintaxis; absorbe `busca SAT` (la clave SAT se sugiere sola) | ≈336 | SAE con «sí» como hoy + espejo puntual (P6) + reevaluación de órdenes que lo esperaban | FALTA |
+| `actualiza <precio, categoría o ficha> de <producto>` | Precio por clave, precios de una OC (regla de primera vez), categoría, campos de la ficha | 292 | Igual en SAE + espejo puntual: la lista nunca se desalinea | FALTA |
+| `lista de precios de <cliente o proyecto>` | Las listas por proyecto y la de Balles/Jubran | ≈18 | PDF/Excel existen; falta el permiso (P9) | PARCIAL |
+| `masivo de pedido` / `masivo de factura` | Los tres generadores de hoy; un archivo por empresa, cualquier cliente | ≈209 | Export del Facturador con folio real (P7); único camino al SAE (D9) | PARCIAL |
+| `factura de la OC <folio>` | «¿ya está timbrada?» y el ejemplo de factura (si no está timbrada, contesta con el ejemplo) | ≈80 | Desde el espejo (liga factura-orden-remisión); falta lectura al alcance de la clave (P8) | PARCIAL |
+| `factura <serie> <folio>` (PDF) | Los totales de la factura y el PDF del pedido | 35 | PDF del SAE mientras el SAE facture; totales del espejo | SE QUEDA |
+| `resumen de órdenes` por día, semana o cliente | Las dos variantes por motor; falta facturar antes de facturado con subtotal | en 613 · ≈8 | Resumen del Facturador (P3): texto y Excel | FALTA |
+| `pendientes de la OC <folio>` / `sin facturar` | El detalle de la orden: en EHMO el folio a secas contesta qué trae | 448 | Bandeja + espejo (P5, P8) | PARCIAL |
+| `sin precio` / `sin clave` | Alimentan la alerta de las 7/10/13/16/18 (D14) | ≈243 | Consulta agregada de la bandeja (P5) con importe en juego | PARCIAL |
+| `estado de cuenta <cliente>` | La hoja aparte de Google desaparece | 30 | Cobranza del Facturador con PDF; pagos de Balles/Jubran capturados ahí (D12) | PARCIAL |
+| `impuestos de <OC o factura>` | Las 6 variantes de hoy en una forma | 67 | Sin cambio de fondo | SE QUEDA |
+| `ayuda` / `manual` | Se reescriben el día que su perfil se apaga | 5 + ≈6 | Sin cambio | SE QUEDA |
 
-### B · Edición de la orden
-| Comando | Uso | Hoy | Con el Facturador | Estado |
-|---|---|---|---|---|
-| `actualiza OC 518` + líneas (kilos) | 155 | Reescribe cantidades en el Master | Edición de partidas con vista previa (P2); pendiente → orden, remisión → remisión, facturada → rechazo | FALTA |
-| `actualiza/borra/agrega renglón N OC F` | <10 | Una fila del Master | P2 por partida | FALTA |
-| `bodega <folio> <fecha>` / reparto | 44 | Summary G/H (eje del armado) | Fechas en orden y remisión (P1) + endpoint por lote (P2); «¿bodega o reparto?» se queda en el bot | FALTA |
-| `cancelar OC <folio>` | 12 | Marca CANCELADA; avisa pedido/factura | Descartar (existe); aviso desde el espejo | EXISTE |
-| EHMO: kilos, agrega, quita, partida a extra, recruce, semana | ≈3·42·6·8·—·2 | Editan Master y reenvían estado final; si ya hay remisión, diverge | Edición directa con vista previa (P2); lote y semana como campos (P1) | PARCIAL |
-| `OC <folio> reemplaza <a> con <b>` | ≈11 | Alias en JSON local; **no espeja** | Alias del Facturador (endpoint ya al alcance de la clave) | EXISTE |
-| `remisiones` / `une remisión` | nuevo, sin commitear | JSON local + Master | Unir remisiones con vista previa (P2); no debe nacer en el Master | FALTA |
+Los comandos de operación interna (`grupos`, `prueba alerta`, `conectar facturador`) siguen igual
+y no cuentan en los 20. Los de facturación nativa (timbrar desde el chat, registrar pago) se
+suman a la gramática después del corte de cada cliente, con la decisión D20.
 
-### C · Armado y entrega
-| Comando | Uso | Hoy | Con el Facturador | Estado |
-|---|---|---|---|---|
-| `hoja de armado` / `lista de compras` (Balles): por OC, fecha, rango, semana, periodo; FRUVE/SECOS | 72 | PDF pivote del Master; pide bodega o excluir | P4 desde remisiones/órdenes, eje = fecha de bodega (P1), FRUVE/SECOS por categoría | FALTA |
-| `hoja de armado <folio>` / `armado pdf` (EHMO) | ≈35 | Excel/PDF por entrega con extras y reposiciones | P4 por entrega (ubicación × día) con tipos de partida | FALTA |
+### Los que se retiran
 
-### D · Catálogo y precios (SAE ↔ Facturador)
-| Comando | Uso | Hoy | Con el Facturador | Estado |
-|---|---|---|---|---|
-| `crea producto CLAVE — UNIDAD — DESCR $` (Balles) | 305 | INSERT INVE02 + PRECIO_X_PROD02 con «sí» | Igual en SAE + espejo puntual (P6): producto, código SAE y precio en segundos | FALTA |
-| `agrega <producto> a la lista de <proyecto> en <$>` (EHMO) | ≈31 | Transacción SAE + relleno del Master | Igual + espejo puntual + re-evaluación de órdenes pendientes | FALTA |
-| `actualiza el precio a <$> <CLAVE>`, precios OC, categoría, ficha | 250 | Escriben SAE con «sí» | Igual + espejo puntual | FALTA |
-| `¿precio de <CLAVE>?` / ficha | 1,296 | sqlcmd al SAE en cada pregunta | Catálogo y listas del Facturador espejeadas; sin túnel | PARCIAL |
-| `dame la lista de precios` | ≈18 | Lista 3 / 5–9 del SAE | PDF/Excel de la lista (existen); falta permiso (P9) | PARCIAL |
-| `busca SAT` | — | Catálogo en el bot | Catálogo SAT del Facturador, ya al alcance | EXISTE |
-| `cotiza · CLAVE · Desc` / `actualizar rq` | 8 · 0 | Cotizador aparte; corrección escribe SAE | Cotizador del Facturador (replica el PDF); permiso (P9) + espejo puntual | PARCIAL |
+| Comando | Uso 30 d | Por qué se retira | Qué lo sustituye |
+|---|---|---|---|
+| `crear pedido SAE OC <folio>` | 37 | D9: nada se inyecta directo al SAE | El masivo de pedido con folio real; el mismo comando contesta con el archivo |
+| `actualiza pedido <n>` (edita FACTP02) | bajo | D9: escritura directa a pedidos | Editar la remisión y regenerar el masivo |
+| Prefactura (comando quitado el 3-ago; código vivo) | 0 | D9: insertaba facturas directas | Se borra en la Etapa 3 con sus disparadores |
+| `actualiza/borra/agrega renglón N OC F` | <10 | Repite `actualiza OC` | La gramática global de edición |
+| `actualizar rq <folio>` + precios | 0 | Sin un solo uso en la ventana | Corrección de requisiciones desde la pantalla del cotizador |
+| `cotiza · CLAVE · Desc` | 8 (todas 4-5 ago) | Casi sin uso | Pantalla del cotizador; si se extraña, se reactiva contra el Facturador |
+| `amarra OC <x> con la factura <y>` | ≈ pocos | El espejo liga solo (OC y folio interno) | Automático; el caso raro se corrige en `su_pedido` de la remisión |
+| `master facturas` | — | Reconstruía una hoja que ya no existirá | Espejo cada 30 min + resumen del espejo |
+| `revisión` y `conciliación` a mano | ≈2 | Ya corren solas (6 h y viernes 17) | Avisan al grupo interno cuando hay algo que ver |
+| `busca SAT <qué es>` | — | El alta sugiere la clave SAT sola | Dentro de `crea producto` |
+| `ignora productos <claves>` | 25 | Sí se usa, pero es configuración, no conversación | La pantalla del Facturador, que debe existir antes del retiro |
+| `cierra el periodo con carpeta X` | 3 | D13: el periodo es un filtro | Excel del periodo a Drive, a petición |
 
-### E · Pedidos y facturas en el SAE
-| Comando | Uso | Hoy | Con el Facturador | Estado |
-|---|---|---|---|---|
-| `crea pedido/factura massivo` | 127·28·≈54 | .xls del bot; OC en columna FOLIO (pendiente 12) | Export del Facturador (existe, ya en el cliente del bot) + folio real leído del SAE (P7); único camino de pedidos y facturas al SAE (D9) | PARCIAL |
-| `crear pedido SAE OC <folio>` | 37 | INSERT FACTP02 con «sí» | Se retira (D9): el pedido entra solo por el masivo de pedido del Facturador con folio real; el mismo comando responde con el masivo | SE RETIRA |
-| `factura de la OC` / `¿timbrada?` / `pendientes de la OC` | 5·448 | FACTF02 + CFDI02 | Desde el espejo; falta lectura al alcance (P8) | PARCIAL |
-| `factura ZHGO 301` (PDF), totales, ejemplo factura | 19 | SAE | PDF sigue del SAE; totales del espejo | SE QUEDA |
-| `amarra OC con factura` | ≈ | JSON local | El espejo liga por OC y folio interno; manual = corregir su_pedido | EXISTE |
-| `master facturas` / `conciliación` (viernes 17 h) | — | Master Facturas; Master↔SAE | Espejo 30 min + conciliación Facturador↔SAE (existen) + entregas sin facturar/dobles (P5) | PARCIAL |
-
-### F · Consultas y reportes
-| Comando | Uso | Hoy | Con el Facturador | Estado |
-|---|---|---|---|---|
-| `resumen de órdenes` (por semana; falta facturar antes de facturado) | en 613 · ≈8 | Summary/Resumen; Excel en EHMO | Resumen del Facturador (P3): texto y Excel por día/semana/cliente/punto | FALTA |
-| `sin precio` / `sin clave` + alerta 7/10/13/16/18 h | 219·≈24 | Master | Consulta agregada de la evaluación de bandeja (P5); horas iguales (D14) | PARCIAL |
-| `revisión` / `detalles OC` | ≈2 | Master | Detalle (existe) + duplicados/gemelas (P5) | PARCIAL |
-| `estado de cuenta` | 30 | Sheet aparte + SAE | Cobranza del Facturador (existe); pagos de Balles/Jubran se capturan en el Facturador desde ya (D12) | PARCIAL |
-| `impuestos` / IVA / IEPS | ≈60 | IMPU02 | Sin cambio | SE QUEDA |
-| pregunta libre | 613 | Claude + Master | Claude + resúmenes del Facturador | PARCIAL |
-| `cierra el periodo con carpeta X` | — | Archiva pestañas | Desaparece; Excel del periodo a Drive a petición (D13) | SE RETIRA |
-
-### G · Operación del bot
-`grupos`, `ayuda`, manuales, `prueba alerta`, `conectar facturador`: sin cambio.
+Los tres primeros retiros, los de D9, van en la Etapa 3; los demás, cuando su función global
+quede en vivo. Ninguno se borra antes de que su reemplazo funcione: el comando viejo contesta durante dos
+semanas diciendo cuál es el nuevo.
 
 ## Piezas nuevas del Facturador
 
@@ -173,7 +171,7 @@ Estado: EXISTE (ya lo hace el Facturador) · PARCIAL · FALTA · SE QUEDA (sigue
   nuevo/cambiado → lista correspondiente (3 → Balles/Jubran, 5–9 → proyectos, Tabasco → EHMO VH).
   Nunca desactiva ni borra; duplicados se desempatan por partidas facturadas; si la lista SAE no
   existe o difiere de lo facturado, toma el precio de la última factura no cancelada y avisa. Espejo puntual por
-  clave tras cada comando que escribe el SAE, y re-evaluación de órdenes pendientes. Sentido único
+  clave tras cada comando que escribe el SAE, y reevaluación de órdenes pendientes. Sentido único
   hasta el corte: el SAE manda y el Facturador lo sigue (D10).
 - **P7 Masivos con el folio real del SAE**: el bot deja su .xls; usa el export del Facturador y le
   pasa el siguiente folio real del SAE (`_sae_sig_folio_pedido` existe; hoy solo la llama el motor
@@ -182,7 +180,8 @@ Estado: EXISTE (ya lo hace el Facturador) · PARCIAL · FALTA · SE QUEDA (sigue
   (INSERT directo en FACTP02) se retira y el bot deja de escribir FACTP02/FOLIOSF02.
 - **P8 Lectura del espejo para el bot**: factura de la OC, estado SAT, totales, pendientes. El PDF
   sigue saliendo del SAE.
-- **P9 Permisos de conexión acotados**: leer espejo, leer listas y cotizar, editar partidas con
+- **P9 Permisos de conexión acotados**: leer espejo, leer listas (y cotizar, por si `cotiza` se
+  reactiva), editar partidas con
   propuesta, espejar catálogo, folio sugerido. Nunca `producto:gestionar` ni `cliente:gestionar`.
   Detalle: `factura:espejo` no está sembrado en el catálogo de permisos (solo en código).
 - **P10 Bitácora de eventos para el bot** (cola que el bot consulta cada minuto): orden convertida
@@ -280,7 +279,7 @@ los robots; lo que distingue a un tenant son filas en la base.
   Mini Conta. Solo cambian de fecha.
 - **28-ago**: espejo SAE, corte por cliente, outbox, y «el bot escribe el Master primero» para la
   ENTRADA de órdenes mientras el perfil siga encendido.
-- **De esta propuesta**: las seis reglas, P1-P12, D9-D18.
+- **De esta propuesta**: las seis reglas, P1-P12, D9-D18 y la gramática global de D22.
 
 ### Lo que se descarta
 
@@ -336,14 +335,15 @@ de producción. Menos de cinco minutos.
   por lista y proyecto, no solo la clave (ZMAFAN 168).
 - Las 86 llamadas a `runSheets(` y las lecturas del motor EHMO se redirigen a `facturador_client.py`
   detrás de `master.activo` (hay que crearlo). La ficha no cambia de fuente hasta la Fase 3 (D10).
-- `cotiza` se sirve del cotizador del Facturador. Cada comando llama `registrarAccion` (existe,
-  nadie la llama): es la medida de las fases siguientes.
+- El comando `cotiza` se retira (D22). Cada comando llama `registrarAccion` (existe, nadie la
+  llama): es la medida de las fases siguientes.
 - Arranca D12 y con ella el fix de fechas del Facturador (el «hoy» de cobranza sigue en UTC).
 - La lista blanca del router híbrido solo crece con lecturas que ya sirve el Facturador.
 
 **Fase 2 · Paridad de escritura** (semanas 3–5, con la Etapa 2; solo P12 depende de D18)
-- Toda edición va por P2 sobre P1 (actualiza OC, renglón, bodega/reparto, cancelar, kilos, agrega,
-  quita, extra, recruce, semana, une remisión, `actualizar rq`). El cruce del bot deja de correr. El
+- Toda edición va por P2 sobre P1 (la gramática global de D22: actualiza OC, bodega/reparto,
+  cancelar, kilos, agrega, quita, extra o reposición, corregir producto, semana, une remisiones).
+  El cruce del bot deja de correr. El
   original viaja con la orden (P12).
 - **Once estados `pending*` en memoria, no cinco** (1 Map + 10 variables). Siete pasan a número de
   propuesta sobre el núcleo de la Fase 0; ante un «sí» suelto el bot pregunta al Facturador qué propuesta viva tiene ese grupo y
@@ -370,7 +370,7 @@ de producción. Menos de cinco minutos.
   `cmd_massivo*`). El comando devuelve el export del Facturador con el folio sugerido de `_sae_sig_folio_pedido`.
 - Las lecturas SQL del SAE de los dos motores pasan a `conector_sae/` (solo lectura, clave de
   conexión tipo SAE separada de la del bot). Las escrituras que quedan (producto, precio, categoría,
-  cambios de ficha, `actualizar rq`) viven en un módulo pequeño del bot, con «sí» y espejo puntual.
+  cambios de ficha) viven en un módulo pequeño del bot, con «sí» y espejo puntual.
   El conector nunca escribe.
 - Candado del pendiente 11: no repreciar remisiones con `export_sae_at` sin regenerar o corregir el
   masivo. Extender `SERIES_POR_EMPRESA` a 04/05 cuando abra el onboarding.
@@ -441,7 +441,7 @@ depende de la Fase 3 para ese perfil, NO del apagado del Master; depende de D20)
 
 ## Decisiones del dueño
 
-El dueño resolvió D9 a D17 el 2-sep-2026. Quedan abiertas D18 (OneDrive) y D19–D21, que abre el plan del agente.
+El dueño resolvió D9 a D17 y D22 el 2-sep-2026. Quedan abiertas D18 (OneDrive) y D19–D21, que abre el plan del agente.
 
 | # | Decisión | Resolución o recomendación | Estado |
 |---|---|---|---|
@@ -454,6 +454,7 @@ El dueño resolvió D9 a D17 el 2-sep-2026. Quedan abiertas D18 (OneDrive) y D19
 | D15 | ¿Grupos apagados se encienden directo al Facturador? | **Decidido**: sí; ningún cliente nuevo conoce el Master. | DECIDIDO |
 | D16 | Código del cliente en el cotizador (pendiente 9b). | **Decidido**: leer la equivalencia SAE («02:7»); no abrir el campo autogenerado. | DECIDIDO |
 | D17 | ¿Fotos de EHMO se leen en el bot o en el Facturador? | **Decidido**: en el bot por ahora; revisar tras el corte. | DECIDIDO |
+| D22 | ¿Comandos por motor o unificados? | **Decidido**: una sola gramática global para todos los clientes; quedan 20 comandos y los poco usados o repetidos se retiran (ver «Los comandos: una sola gramática»). | DECIDIDO |
 | D18 | La orden original vive en Drive (y en la carpeta OneDrive de la Mac); el Facturador solo guarda el link. ¿Se sigue así? | **Propuesta**: el Facturador guarda el archivo (P12); OneDrive/Drive de respaldo durante la transición, opcionales después. | ABIERTA |
 | D19 | Tres registros del mismo grupo (config del bot, tabla `grupos` del agente, `grupos_whatsapp` del Facturador). | **Propuesta**: manda el Facturador (pantalla Conexiones); hasta la Fase 4 sin cambio. | ABIERTA |
 | D20 | Cliente ya cortado: ¿el bot aplica con «sí» timbrado, pago y alta de producto, o solo prepara la propuesta? P9 excluye CFDI nativo. | **Propuesta**: permiso de conexión nuevo acotado por cliente cortado, siempre con vista previa y «sí». Antes del primer corte. | ABIERTA |
@@ -475,7 +476,7 @@ El dueño resolvió D9 a D17 el 2-sep-2026. Quedan abiertas D18 (OneDrive) y D19
 
 Grupos y roles (el bot enruta por grupo y rol; los perfiles se declaran una vez en la Fase 0 —
 Balles/Jubran → `balles`, EHMO Pachuca → `ehmo` — sin cambiar lo que cada grupo puede pedir);
-sintaxis de comandos y confirmación sí/no; acuses, alarmas y PDFs; el SAE factura e importa los
+los comandos por chat con la gramática global de D22 y la confirmación sí/no; acuses, alarmas y PDFs; el SAE factura e importa los
 masivos de pedido y de factura hasta el corte por cliente; los originales siguen llegando a Drive
 durante la transición, con su link en cada orden (y, con D18 aprobada, el archivo en el
 Facturador); alertas y horarios.
