@@ -380,7 +380,10 @@ def test_partida_sin_codigo_del_cliente_detiene_el_lote(client, env, auth_as):
     pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
                      json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
     assert pv["ok"] is False
-    assert any("sin código del cliente" in e for e in pv["errores"])
+    err = next(e for e in pv["errores"] if "sin código del cliente" in e)
+    # El operador necesita saber QUÉ producto es y DÓNDE se arregla, no solo la línea.
+    assert "SIN CODIGO" in err
+    assert "Catálogo" in err
 
 
 def test_empresa_sae_se_decide_por_sucursal(client, env, auth_as):

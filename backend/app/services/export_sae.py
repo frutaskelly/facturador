@@ -50,7 +50,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session, selectinload
 
-from ..models import Cliente, ClienteExterno, Factura, ProductoCliente, Remision
+from ..models import Cliente, ClienteExterno, Factura, Producto, ProductoCliente, Remision
 from .series import resolver_serie
 
 # La marca del espejo ("ZHGO 233") también se captura a mano (PATCH de la
@@ -385,14 +385,25 @@ def preparar(
         # Una devolución total deja la línea viva con cantidad 0: SAE importaría
         # una partida en cero cuyo CFDI el PAC rechaza. Se exportan solo las vivas.
         vivas = [ln for ln in rem.lineas if Decimal(str(ln.cantidad_solicitada or 0)) > 0]
-        sin_codigo = []
-        for ln in vivas:
-            if (rem.cliente_facturacion_id, ln.producto_id) not in codigos:
-                sin_codigo.append(str(ln.numero_linea))
+        sin_codigo = [
+            ln for ln in vivas
+            if (rem.cliente_facturacion_id, ln.producto_id) not in codigos
+        ]
         if sin_codigo:
+            nombres = {
+                p.id: f"{p.sku} · {p.nombre}"
+                for p in db.query(Producto).filter(
+                    Producto.id.in_({ln.producto_id for ln in sin_codigo})
+                )
+            }
+            detalle = "; ".join(
+                f"línea {ln.numero_linea}: {nombres.get(ln.producto_id, '¿producto?')}"
+                for ln in sin_codigo
+            )
             res.errores.append(
                 f"{rem.folio_interno}: {len(sin_codigo)} partida(s) sin código del cliente "
-                f"(líneas {', '.join(sin_codigo)}) — SAE rechaza claves que no están en su inventario"
+                f"({detalle}) — SAE rechaza claves que no están en su inventario; "
+                f"asígnale su código en Clientes → {nombre_cli} → Catálogo"
             )
             continue
         if not vivas:
