@@ -27,7 +27,7 @@ from email_validator import EmailNotValidError, validate_email
 from rapidfuzz import fuzz
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, Field as PydField
-from sqlalchemy import BigInteger, func
+from sqlalchemy import BigInteger, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
@@ -183,6 +183,11 @@ def list_remisiones(
     fecha_hasta: Optional[date] = Query(default=None),
     # Solo las que llegaron sin revisar: es la bandeja de trabajo del revisor.
     revision_pendiente: Optional[bool] = Query(default=None),
+    # Buscar POR COMO LA NOMBRA QUIEN PREGUNTA: el folio interno, el pedido/OC
+    # del cliente ("HO-34") o el folio de factura de SAE. Va en el servidor
+    # porque el buscador de la tabla solo ve la página cargada y las remisiones
+    # viejas se le escapan.
+    q: Optional[str] = Query(default=None, max_length=120),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_tenant_db),
@@ -206,6 +211,24 @@ def list_remisiones(
         query = query.filter(Remision.fecha_remision >= fecha_desde)
     if fecha_hasta:
         query = query.filter(Remision.fecha_remision <= fecha_hasta)
+    if q and q.strip():
+        termino = q.strip()
+        variantes = {termino}
+        # SAE muestra los folios rellenos de ceros ("ZHGO 0000588") pero aquí
+        # se guardan sin ellos (regla del proyecto): se busca también la
+        # variante con los ceros a la izquierda de cada número quitados.
+        variantes.add(re.sub(r"(?<!\d)0+(?=\d)", "", termino))
+        condiciones = []
+        for v in variantes:
+            like = f"%{v}%"
+            condiciones += [
+                Remision.folio_interno.ilike(like),
+                Remision.su_pedido.ilike(like),
+                Remision.factura_sae.ilike(like),
+                # "ZHGO 588" y "ZHGO588" son la misma factura para quien pregunta.
+                func.replace(Remision.factura_sae, " ", "").ilike(like.replace(" ", "")),
+            ]
+        query = query.filter(or_(*condiciones))
     query = query.order_by(
         Remision.fecha_remision.desc(),
         _FOLIO_PREFIJO.desc(),

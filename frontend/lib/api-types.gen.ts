@@ -16305,6 +16305,7 @@ export interface operations {
                 fecha_desde?: string | null;
                 fecha_hasta?: string | null;
                 revision_pendiente?: boolean | null;
+                q?: string | null;
                 limit?: number;
                 offset?: number;
             };
