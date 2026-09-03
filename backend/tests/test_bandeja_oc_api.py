@@ -377,6 +377,62 @@ def test_pedido_ya_capturado_a_mano_no_genera_otra_remision(client, env, auth_as
     assert r.status_code == 200, r.text
 
 
+def test_pedido_con_formato_se_repite_y_no_bloquea(client, env, auth_as):
+    """EHMO y Río Libre no mandan folio: mandan «HO-34VIL-MIE», donde el número
+    es la SEMANA y las letras la plaza, el punto de entrega y el día. Ese texto
+    se repite entre entregas —RRIO7 y RRIO21, ambas facturadas, comparten
+    «CEN-35HUA-FYV»— así que no identifica un pedido y no puede frenar nada.
+    Tomarlo por folio (mirar solo sus dígitos) frenaba la semana entera."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    previa = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["ehmo"], "almacen_id": env["alm"],
+        "su_pedido": "HO-34VIL-MIE",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": "1",
+                    "precio_unitario": "10"}],
+    })
+    assert previa.status_code == 201, previa.text
+
+    body = {"almacen_id": env["alm"], "lineas": [{
+        "producto_id": env["prod"], "cantidad": "1", "precio_unitario": "10"}]}
+
+    # Otro punto de entrega de la MISMA semana: nada que ver, pasa.
+    otra = client.post("/api/v1/oc-recibidas", headers=h,
+                       json=_oc(folio_externo="HO-34ALB-LUN")).json()
+    client.patch(f"/api/v1/oc-recibidas/{otra['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+    assert client.post(f"/api/v1/oc-recibidas/{otra['id']}/crear-remision",
+                       headers=h, json=body).status_code == 200
+
+    # Y el MISMO texto repetido tampoco frena: es una entrega más, no un duplicado.
+    igual = client.post("/api/v1/oc-recibidas", headers=h,
+                        json=_oc(folio_externo="HO-34VIL-MIE")).json()
+    client.patch(f"/api/v1/oc-recibidas/{igual['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+    assert client.post(f"/api/v1/oc-recibidas/{igual['id']}/crear-remision",
+                       headers=h, json=body).status_code == 200
+
+
+def test_folio_numerico_no_choca_con_pedido_con_formato(client, env, auth_as):
+    """El folio 34 y «HO-34VIL-MIE» comparten dígitos pero no son el mismo
+    pedido: solo los folios numéricos se comparan entre sí."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    conformato = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["ehmo"], "almacen_id": env["alm"],
+        "su_pedido": "HO-34VIL-MIE",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": "1",
+                    "precio_unitario": "10"}],
+    })
+    assert conformato.status_code == 201, conformato.text
+
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(folio_externo="34")).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+    r = client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision", headers=h, json={
+        "almacen_id": env["alm"], "lineas": [{
+            "producto_id": env["prod"], "cantidad": "1", "precio_unitario": "10"}]})
+    assert r.status_code == 200, r.text
+
+
 def test_crear_remision_sin_cliente_es_422(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
