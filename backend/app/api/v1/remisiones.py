@@ -66,7 +66,7 @@ from ...services.producto_match import (
     normalizar_catalogo,
     productos_activos,
 )
-from ...services.precios import resolver_precio
+from ...services.precios import resolver_precios_lote
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ...services.sucursales import es_sucursal_de
 from ...schemas.common import Page
@@ -98,6 +98,72 @@ def _norm_codigo(v) -> str:
     """
     s = unicodedata.normalize("NFKD", str(v or "")).encode("ascii", "ignore").decode()
     return re.sub(r"\s+", "", s).upper()
+
+
+def _ensure_productos(db: Session, producto_ids) -> None:
+    """`ensure_fk(Producto)` para N líneas en UNA consulta.
+
+    Uno por línea eran N viajes a una BD remota (una remisión de 50 partidas
+    los pagaba todos antes de empezar a guardar). Se valida el conjunto de una
+    y basta con que falte uno: mismo 422 y mismo texto que daba `ensure_fk`.
+
+    No es un lujo de rendimiento: `ensure_fk` existe por RLS —Postgres no
+    aplica RLS al chequeo de una FK, así que un id de otro tenant pasaría el
+    constraint— y esta consulta corre en la misma sesión con el tenant puesto.
+    """
+    ids = {pid for pid in producto_ids if pid is not None}
+    if not ids:
+        return
+    vistos = {
+        row[0]
+        for row in db.query(Producto.id)
+        .filter(Producto.id.in_(ids), Producto.deleted_at.is_(None))
+        .all()
+    }
+    faltan = ids - vistos
+    if faltan:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="producto_id inválido o fuera de alcance",
+        )
+
+
+def _precios_de_lineas(db: Session, rem: Remision, lineas: list[dict]) -> list:
+    """Precio de cada línea, resolviendo en UN lote las que no lo traen.
+
+    El frontend omite `precio_unitario` en toda línea cuyo precio no se tecleó
+    a mano, así que una captura normal las manda casi todas sin precio: una
+    cascada de ~6-14 consultas POR LÍNEA contra la BD remota (50 partidas ≈ 25 s
+    de guardado). `resolver_precios_lote` da lo mismo en ~6 consultas totales.
+
+    Sin precio resuelto la línea entra en $0 a propósito: capturar sin precio
+    es legítimo mientras es borrador y el candado vive en `exigir_precios`.
+    """
+    faltantes = [i for i, ln in enumerate(lineas) if ln.get("precio_unitario") is None]
+    resueltos: dict[int, Decimal] = {}
+    if faltantes:
+        res = resolver_precios_lote(
+            db,
+            items=[
+                {
+                    "producto_id": lineas[i]["producto_id"],
+                    "presentacion": lineas[i]["presentacion"],
+                    "cantidad": lineas[i]["cantidad_solicitada"],
+                }
+                for i in faltantes
+            ],
+            cliente_id=rem.cliente_facturacion_id,
+            sucursal_id=rem.sucursal_id,
+            serie_id=rem.serie_id,
+            proyecto_id=rem.proyecto_id,
+            lista_id=rem.lista_precios_id,
+        )
+        for i, r in zip(faltantes, res, strict=True):
+            resueltos[i] = r["precio"] if r and r.get("precio") is not None else _ZERO
+    return [
+        ln["precio_unitario"] if ln.get("precio_unitario") is not None else resueltos[i]
+        for i, ln in enumerate(lineas)
+    ]
 
 
 def _fiscal_por_producto(db: Session, producto_ids) -> dict:
@@ -270,8 +336,7 @@ def create_remision(
         get_or_404(db, Sucursal, payload.sucursal_id)
         if not es_sucursal_de(db, payload.sucursal_id, payload.cliente_facturacion_id):
             raise HTTPException(status_code=422, detail="El cliente de la remisión no se surte de esa sucursal")
-    for ln in payload.lineas:
-        ensure_fk(db, Producto, ln.producto_id, "producto_id")
+    _ensure_productos(db, [ln.producto_id for ln in payload.lineas])
 
     # La serie se resuelve ANTES de precificar, no al foliar: además del folio,
     # decide qué lista de precios aplica (el negocio pacta por serie). Se
@@ -316,24 +381,26 @@ def create_remision(
     db.flush()
 
     fiscal = _fiscal_por_producto(db, [ln.producto_id for ln in payload.lineas])
+    # Precio: manual si se envía; si no, se resuelve por cliente/sucursal/volumen
+    # —todas las que falten, en UN lote—. Sin precio no se detiene la captura: la
+    # línea entra en 0 y se ve. El candado está más adelante: una remisión con
+    # líneas en 0 se guarda como borrador pero no se confirma ni se factura.
+    precios = _precios_de_lineas(
+        db, rem,
+        [
+            {
+                "producto_id": ln.producto_id,
+                "presentacion": ln.presentacion,
+                "cantidad_solicitada": ln.cantidad_solicitada,
+                "precio_unitario": ln.precio_unitario,
+            }
+            for ln in payload.lineas
+        ],
+    )
     subtotal = _ZERO
     iva_total = _ZERO
     ieps_total = _ZERO
-    for i, ln in enumerate(payload.lineas, start=1):
-        # Precio: manual si se envía; si no, se resuelve por cliente/sucursal/volumen.
-        precio = ln.precio_unitario
-        if precio is None:
-            res = resolver_precio(
-                db, producto_id=ln.producto_id, presentacion=ln.presentacion,
-                cantidad=ln.cantidad_solicitada,
-                cliente_id=payload.cliente_facturacion_id, sucursal_id=payload.sucursal_id,
-                serie_id=rem.serie_id, proyecto_id=rem.proyecto_id,
-                lista_id=rem.lista_precios_id,
-            )
-            # Sin precio no se detiene la captura: la línea entra en 0 y se ve.
-            # El candado está más adelante — una remisión con líneas en 0 se
-            # guarda como borrador pero no se confirma ni se factura.
-            precio = res["precio"] if res and res.get("precio") is not None else _ZERO
+    for i, (ln, precio) in enumerate(zip(payload.lineas, precios, strict=True), start=1):
         importe = ln.cantidad_solicitada * precio
         subtotal += importe
         prod, esq = fiscal.get(ln.producto_id, (None, None))
@@ -552,6 +619,13 @@ def update_remision(
     almacen_anterior = rem.almacen_id           # para detectar cambio de almacén
     data = payload.model_dump(exclude_unset=True)
     lineas_in = data.pop("lineas", None)
+    # `exclude_unset` también poda las líneas: una que no mande `presentacion`
+    # (tiene default "KILO" en el schema, así que omitirla es válido) salía del
+    # dict sin la llave y el endpoint reventaba con KeyError. El pop de arriba
+    # conserva la distinción "no mandó líneas" vs "las mandó"; si las mandó, se
+    # vuelven a volcar CON sus defaults.
+    if lineas_in is not None:
+        lineas_in = [ln.model_dump() for ln in payload.lineas]
     permitir_negativos = bool(data.pop("permitir_negativos", False))
     # «Dar por revisada» no es un campo más: solo se puede APAGAR (la marca la
     # pone la bandeja al pasar la orden sin revisar, no se enciende a mano) y no
@@ -625,8 +699,7 @@ def update_remision(
     if lineas_in is not None:
         if not lineas_in:
             raise HTTPException(status_code=422, detail="La remisión debe tener al menos una línea")
-        for ln in lineas_in:
-            ensure_fk(db, Producto, ln["producto_id"], "producto_id")
+        _ensure_productos(db, [ln["producto_id"] for ln in lineas_in])
 
         # ¿Cambió el detalle que AFECTA inventario (producto, presentación,
         # cantidad)? Si no, no se toca el inventario: se preserva la reserva
@@ -652,24 +725,23 @@ def update_remision(
                     _firma(l.producto_id, l.presentacion, l.cantidad_solicitada), []
                 ).append((l.lote_id, l.cantidad_surtida))
 
-        for old in list(rem.lineas):
-            db.delete(old)
+        # Borrado en bloque: `db.delete` por objeto emitía un viaje por línea
+        # (psycopg2 no agrupa DELETE). "fetch" no es opcional: `_liberar_reservas`
+        # deja las líneas sucias (les limpia lote_id/cantidad_surtida) y sin
+        # reconciliar la sesión el flush intentaría un UPDATE sobre filas ya
+        # borradas → StaleDataError. El flush sigue siendo necesario ANTES de
+        # insertar las nuevas por el unique (remision_id, numero_linea).
+        db.query(LineaRemision).filter(
+            LineaRemision.remision_id == rem.id
+        ).delete(synchronize_session="fetch")
+        db.expire(rem, ["lineas"])
         db.flush()
         fiscal = _fiscal_por_producto(db, [ln["producto_id"] for ln in lineas_in])
+        precios = _precios_de_lineas(db, rem, lineas_in)
         subtotal = _ZERO
         iva_total = _ZERO
         ieps_total = _ZERO
-        for i, ln in enumerate(lineas_in, start=1):
-            precio = ln.get("precio_unitario")
-            if precio is None:
-                res = resolver_precio(
-                    db, producto_id=ln["producto_id"], presentacion=ln["presentacion"],
-                    cantidad=ln["cantidad_solicitada"],
-                    cliente_id=rem.cliente_facturacion_id, sucursal_id=rem.sucursal_id,
-                    serie_id=rem.serie_id, proyecto_id=rem.proyecto_id,
-                    lista_id=rem.lista_precios_id,
-                )
-                precio = res["precio"] if res and res.get("precio") is not None else _ZERO
+        for i, (ln, precio) in enumerate(zip(lineas_in, precios, strict=True), start=1):
             importe = ln["cantidad_solicitada"] * precio
             subtotal += importe
             prod, esq = fiscal.get(ln["producto_id"], (None, None))

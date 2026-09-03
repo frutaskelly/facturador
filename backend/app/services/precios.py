@@ -316,6 +316,7 @@ def resolver_precios_lote(
     sucursal_id: Optional[UUID] = None,
     serie_id: Optional[UUID] = None,
     proyecto_id: Optional[UUID] = None,
+    lista_id: Optional[UUID] = None,
     fecha: Optional[date] = None,
 ) -> list[Optional[dict]]:
     """`resolver_precio` para N partidas con un puñado de consultas, no ~6×N.
@@ -327,10 +328,17 @@ def resolver_precios_lote(
     cascada corre en memoria con las mismas reglas y el mismo orden.
 
     `items` es una lista de {producto_id, presentacion, cantidad}; devuelve una
-    lista paralela con el mismo dict que daría `resolver_precio` (o None). No
-    contempla la lista forzada del documento (paso 3), que es por-remisión.
+    lista paralela con el mismo dict que daría `resolver_precio` (o None).
+    `lista_id` es la lista forzada del documento (paso 3): es por-documento, no
+    por-partida, así que entra a la carga masiva como una lista más y la cascada
+    en memoria la consulta en su escalón.
     La paridad con `resolver_precio` la vigila un test que corre ambos sobre la
     misma matriz de escenarios.
+
+    OJO con los tipos: aquí los precios se indexan por el UUID que devuelve la
+    BD, así que `producto_id` de cada item debe ser UUID — un str resolvería en
+    `resolver_precio` (SQLAlchemy lo coacciona en el filtro) pero aquí fallaría
+    en silencio por no acertar la llave del dict.
     """
     if not items:
         return []
@@ -394,6 +402,10 @@ def resolver_precios_lote(
     )
     base_lp = _lista_default(db)
     lista_ids = [a.lista_id for a in asignaciones]
+    # La forzada del documento entra al MISMO IN (no cuesta una consulta
+    # aparte); el dedupe cubre que sea también la asignada o la base.
+    if lista_id is not None and lista_id not in lista_ids:
+        lista_ids.append(lista_id)
     if base_lp is not None and base_lp.id not in lista_ids:
         lista_ids.append(base_lp.id)
 
@@ -441,6 +453,15 @@ def resolver_precios_lote(
             p = _resolver(lambda pr, _c: ov_cliente.get((pid, pr)))
             if p is not None:
                 res = {"precio": p, "origen": "override_cliente"}
+        # 3. lista forzada a mano en el documento. Mismo escalón que en
+        #    `resolver_precio`: después de los overrides y ANTES de las
+        #    asignaciones — si el documento fijó lista y esa lista tiene el
+        #    producto, manda ella y no la negociación general. Parcial igual
+        #    que las demás: si no lo trae, sigue la cascada.
+        if res is None and lista_id:
+            p = _resolver(lambda pr, cant: _precio_en(lista_id, pid, pr, cant))
+            if p is not None:
+                res = {"precio": p, "origen": "lista_forzada", "lista_id": str(lista_id)}
         if res is None:
             for asignacion in asignaciones:
                 p = _resolver(lambda pr, cant, _l=asignacion.lista_id: _precio_en(_l, pid, pr, cant))
