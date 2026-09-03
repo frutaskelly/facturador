@@ -17,6 +17,7 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
 import {
+  COTIZACIONES_A_LA_VEZ, enPool,
   fetchFiscalPreview, lineaDesdePegado, matchPresentacion,
   nuevaLinea, pegarLocalFallback, unidadBaseDesde,
   type FiscalPreview, type LineaForm,
@@ -233,6 +234,19 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
     }
   }
 
+  // Cotiza un conjunto de líneas a través del pool. Si mientras esperaba turno
+  // la línea recibió una cotización más nueva (el usuario editó cantidad o
+  // presentación), la pasada del pool la salta: la llamada nueva ya corre con
+  // los valores vigentes, y una vieja que ARRANCA después le ganaría el seq.
+  function cotizarLote(items: { key: string; producto_id: string; presentacion: string; cantidad: string }[]) {
+    const alEncolar = new Map(items.map((x) => [x.key, cotizaSeq.current[x.key] ?? 0]));
+    void enPool(items, COTIZACIONES_A_LA_VEZ, (x) =>
+      (cotizaSeq.current[x.key] ?? 0) === alEncolar.get(x.key)
+        ? cotizar(x.key, x.producto_id, x.presentacion, x.cantidad)
+        : Promise.resolve(),
+    );
+  }
+
   // Re-cotiza las líneas capturadas cuando cambia el contexto de precios: al
   // elegir/cambiar cliente (si se capturaron sin cliente traían el precio de
   // lista genérico y así se timbraría) y cuando cambia la serie con la que se
@@ -243,9 +257,7 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
   useEffect(() => {
     if (contextoPreciosPrev.current === contextoPrecios) return;
     contextoPreciosPrev.current = contextoPrecios;
-    lineas.forEach((l) => {
-      if (l.producto_id && !l.precioManual) cotizar(l.key, l.producto_id, l.presentacion, l.cantidad);
-    });
+    cotizarLote(lineas.filter((l) => l.producto_id && !l.precioManual));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contextoPrecios]);
 
@@ -300,7 +312,7 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
         const base = ls.filter((l) => l.producto_id || l.texto);
         return [...base, ...nuevas];
       });
-      nuevas.forEach((l) => l.producto_id && cotizar(l.key, l.producto_id, l.presentacion, l.cantidad));
+      cotizarLote(nuevas.filter((l) => l.producto_id));
       const porRevisar = nuevas.filter((l) => !l.producto_id).length;
       cerrarPaste();
       toast.success(`${nuevas.length} líneas agregadas` + (porRevisar ? ` · ${porRevisar} por revisar en Match IA` : ""));
@@ -366,10 +378,10 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
       });
       return next;
     });
-    valores.forEach((v, i) => {
+    cotizarLote(valores.flatMap((v, i) => {
       const l = lineas[idx + i];
-      if (l?.producto_id) cotizar(l.key, l.producto_id, l.presentacion, v.replace(",", "."));
-    });
+      return l?.producto_id ? [{ ...l, cantidad: v.replace(",", ".") }] : [];
+    }));
     toast.success(`${valores.length} cantidades pegadas`);
   }
 
