@@ -6,6 +6,10 @@
  *
  * La API (`toast.success/error/info`) no cambia, así que ninguna página necesita
  * tocarse. Los mensajes se encolan (FIFO) y se deduplican si llegan repetidos.
+ *
+ * Segundo argumento opcional: un atajo («Ir a…») que cierra el aviso y navega.
+ * Sirve para no perder de vista lo que se acaba de crear — p. ej. la remisión
+ * que nació de una OC, que si no hay que ir a buscarla a mano.
  */
 import {
   createContext,
@@ -15,15 +19,18 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AlertCircle, CheckCircle2, Info } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { AlertCircle, ArrowRight, CheckCircle2, Info } from "lucide-react";
 
 type Kind = "success" | "error" | "info";
-type Aviso = { kind: Kind; message: string };
+/** Atajo opcional del aviso: cierra el popup y navega a `href`. */
+export type ToastAccion = { label: string; href: string };
+type Aviso = { kind: Kind; message: string; accion?: ToastAccion };
 
 type ToastApi = {
-  success: (m: string) => void;
-  error: (m: string) => void;
-  info: (m: string) => void;
+  success: (m: string, accion?: ToastAccion) => void;
+  error: (m: string, accion?: ToastAccion) => void;
+  info: (m: string, accion?: ToastAccion) => void;
 };
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -49,23 +56,29 @@ const ESTILO: Record<Kind, { titulo: string; icono: ReactNode; fondo: string }> 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [cola, setCola] = useState<Aviso[]>([]);
   const okRef = useRef<HTMLButtonElement>(null);
+  const router = useRouter();
 
-  function push(kind: Kind, message: string) {
+  function push(kind: Kind, message: string, accion?: ToastAccion) {
     setCola((q) => {
       const ultimo = q[q.length - 1];
       if (ultimo && ultimo.kind === kind && ultimo.message === message) return q;
-      return [...q, { kind, message }];
+      return [...q, { kind, message, accion }];
     });
   }
 
   const api: ToastApi = {
-    success: (m) => push("success", m),
-    error: (m) => push("error", m),
-    info: (m) => push("info", m),
+    success: (m, a) => push("success", m, a),
+    error: (m, a) => push("error", m, a),
+    info: (m, a) => push("info", m, a),
   };
 
   function cerrar() {
     setCola((q) => q.slice(1));
+  }
+
+  function irA(href: string) {
+    cerrar();
+    router.push(href);
   }
 
   // Foco al botón OK al abrir; Enter/Escape lo cierran.
@@ -110,7 +123,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 )}
               </div>
             </div>
-            <div className="mt-5 flex justify-end">
+            <div className="mt-5 flex justify-end gap-2">
+              {actual.accion && (
+                <button
+                  onClick={() => irA(actual.accion!.href)}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium transition hover:bg-surface-2"
+                >
+                  {actual.accion.label}
+                  <ArrowRight size={15} aria-hidden="true" />
+                </button>
+              )}
               <button
                 ref={okRef}
                 onClick={cerrar}

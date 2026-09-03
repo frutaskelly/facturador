@@ -395,7 +395,13 @@ export default function Page() {
           })),
         }),
       });
-      toast.success(`Remisión ${d.remision_folio ?? ""} creada en borrador`);
+      toast.success(
+        `Remisión ${d.remision_folio ?? ""} creada en borrador`,
+        // Atajo a la remisión recién creada, ya filtrada por su folio.
+        d.remision_folio
+          ? { label: "Ver la remisión", href: `/remisiones?q=${encodeURIComponent(d.remision_folio)}` }
+          : undefined,
+      );
       router.push("/oc");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo crear la remisión");
@@ -415,7 +421,13 @@ export default function Page() {
         `/api/v1/oc-recibidas/${oc.id}/crear-remision-auto` + (almacenSel ? `?almacen_id=${almacenSel}` : ""),
         { method: "POST" }
       );
-      toast.success(`Remisión ${d.remision_folio ?? ""} creada en borrador`);
+      toast.success(
+        `Remisión ${d.remision_folio ?? ""} creada en borrador`,
+        // Atajo a la remisión recién creada, ya filtrada por su folio.
+        d.remision_folio
+          ? { label: "Ver la remisión", href: `/remisiones?q=${encodeURIComponent(d.remision_folio)}` }
+          : undefined,
+      );
       router.push("/oc");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "La orden ya no cruza completa; revísala a mano");
@@ -439,7 +451,13 @@ export default function Page() {
           (almacenSel ? `?almacen_id=${almacenSel}` : ""),
         { method: "POST" }
       );
-      toast.success(`Remisión ${d.remision_folio ?? ""} creada — te espera en Remisiones para revisar`);
+      toast.success(
+        `Remisión ${d.remision_folio ?? ""} creada — te espera en Remisiones para revisar`,
+        // Atajo a la remisión recién creada, ya filtrada por su folio.
+        d.remision_folio
+          ? { label: "Ver la remisión", href: `/remisiones?q=${encodeURIComponent(d.remision_folio)}` }
+          : undefined,
+      );
       router.push("/oc");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo pasar la orden");
