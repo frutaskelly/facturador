@@ -281,6 +281,89 @@ def test_confirm_with_real_weight_catch_weight(client, env, auth_as):
     assert float(_row()["disponible"]) == 100.0 and float(_row()["reservada"]) == 0.0
 
 
+def test_patch_confirmada_sin_tocar_cantidades_conserva_inventario(client, env, auth_as):
+    """Reeditar una CONFIRMADA cambiando SOLO el precio no debe mover
+    inventario: las líneas se reconstruyen (se borran en bloque y se reinsertan)
+    y la reserva se hereda por firma (producto, presentación, cantidad)."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _load_stock(client, h, env, "100", "4")
+    rem_id = _create_rem(client, h, env, "10", "5").json()["id"]
+    assert client.post(f"/api/v1/remisiones/{rem_id}/confirmar", headers=h).status_code == 200
+    disponible_tras_confirmar = float(_disp(client, h, env)["disponible"])
+    assert disponible_tras_confirmar == 90.0                      # 100 − 10
+
+    r = client.patch(f"/api/v1/remisiones/{rem_id}", headers=h, json={
+        "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "10",
+                    "precio_unitario": "9"}]})
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    assert cuerpo["estado"] == "CONFIRMADA"
+    assert len(cuerpo["lineas"]) == 1                             # no se duplicaron
+    assert float(cuerpo["subtotal"]) == 90.0                      # 10 × 9, reprecificado
+    # La cantidad no cambió → el inventario tampoco
+    assert float(_disp(client, h, env)["disponible"]) == disponible_tras_confirmar
+
+
+def test_patch_confirmada_con_mas_cantidad_re_reserva(client, env, auth_as):
+    """Si la edición SÍ cambia la cantidad, se libera la reserva previa y se
+    re-reserva con las líneas nuevas."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _load_stock(client, h, env, "100", "4")
+    rem_id = _create_rem(client, h, env, "10", "5").json()["id"]
+    client.post(f"/api/v1/remisiones/{rem_id}/confirmar", headers=h)
+
+    r = client.patch(f"/api/v1/remisiones/{rem_id}", headers=h, json={
+        "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "25",
+                    "precio_unitario": "5"}]})
+    assert r.status_code == 200, r.text
+    assert float(r.json()["subtotal"]) == 125.0
+    assert float(_disp(client, h, env)["disponible"]) == 75.0     # 100 − 25, no 100−10−25
+
+
+def test_patch_varias_lineas_sin_precio_las_cotiza_en_lote(client, env, auth_as):
+    """Guardar sin `precio_unitario` resuelve el precio de CADA línea (el
+    frontend lo omite salvo que se teclee a mano). Con varias partidas eso se
+    resuelve en un lote — el resultado debe ser el mismo que línea por línea."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    lista = client.post("/api/v1/listas-precios", headers=h,
+                        json={"codigo": "UNICO", "nombre": "Único"}).json()
+    # Con tramo: 7.50 al menudeo y 6.00 desde 10 — así el lote tiene que elegir
+    # tramo POR LÍNEA, no repetir el precio de la primera.
+    for precio, minimo in (("7.50", 1), ("6.00", 10)):
+        client.post(f"/api/v1/listas-precios/{lista['id']}/precios", headers=h,
+                    json={"producto_id": env["prod_a"], "precio_unitario": precio,
+                          "cantidad_minima": minimo})
+    rem_id = _create_rem(client, h, env, "1", "1").json()["id"]
+    r = client.patch(f"/api/v1/remisiones/{rem_id}", headers=h, json={
+        "lineas": [
+            {"producto_id": env["prod_a"], "cantidad_solicitada": "2"},
+            {"producto_id": env["prod_a"], "cantidad_solicitada": "15"},
+            {"producto_id": env["prod_bulto_a"], "cantidad_solicitada": "4"},
+        ]})
+    assert r.status_code == 200, r.text
+    lineas = sorted(r.json()["lineas"], key=lambda l: l["numero_linea"])
+    assert len(lineas) == 3
+    assert float(lineas[0]["precio_unitario"]) == 7.5             # tramo menudeo
+    assert float(lineas[1]["precio_unitario"]) == 6.0             # tramo mayoreo (15 ≥ 10)
+    assert float(lineas[2]["precio_unitario"]) == 0.0             # sin precio: entra en 0
+    assert float(r.json()["subtotal"]) == 105.0                   # 2×7.50 + 15×6 + 0
+
+
+def test_patch_producto_fuera_de_alcance_es_422(client, env, auth_as):
+    """La validación de productos en bloque debe seguir cazando un id inválido
+    aunque venga acompañado de otros buenos (existe por RLS: Postgres no aplica
+    RLS al chequeo de la FK, así que el constraint solo no basta)."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    rem_id = _create_rem(client, h, env, "1", "1").json()["id"]
+    r = client.patch(f"/api/v1/remisiones/{rem_id}", headers=h, json={
+        "lineas": [
+            {"producto_id": env["prod_a"], "cantidad_solicitada": "1", "precio_unitario": "5"},
+            {"producto_id": str(uuid.uuid4()), "cantidad_solicitada": "1", "precio_unitario": "5"},
+        ]})
+    assert r.status_code == 422, r.text
+    assert "producto_id" in r.text
+
+
 def test_confirm_insufficient_stock(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     rem_id = _create_rem(client, h, env, "30", "5").json()["id"]  # no stock loaded

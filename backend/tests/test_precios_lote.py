@@ -69,7 +69,11 @@ def env(db_engine):
         l_cli = ListaPrecios(tenant_id=tid, codigo="LCLI", nombre="Del cliente")
         l_proy = ListaPrecios(tenant_id=tid, codigo="LPRO", nombre="Del proyecto (parcial)")
         l_ven = ListaPrecios(tenant_id=tid, codigo="LVEN", nombre="Vencida")
-        db.add_all([base, l_cli, l_proy, l_ven]); db.flush()
+        # La que el documento fija a mano (paso 3): PARCIAL a propósito — trae
+        # AGUA con tramos y MANZANA solo en KILO, para que se vea que una
+        # forzada que no tiene el producto sigue cayendo en cascada.
+        l_for = ListaPrecios(tenant_id=tid, codigo="LFOR", nombre="Forzada del documento")
+        db.add_all([base, l_cli, l_proy, l_ven, l_for]); db.flush()
 
         hoy = date.today()
         precios = [
@@ -85,6 +89,11 @@ def env(db_engine):
             (l_proy, agua, "KILO", "17.5", 1, None, None),
             # lista vencida: precio irresistible que NO debe aplicar
             (l_ven, agua, "KILO", "1", 1, None, hoy - timedelta(days=1)),
+            # forzada: AGUA con tramos propios y MANZANA en KILO (CAJA por
+            # factor). NADA sigue sin precio aquí: la forzada es parcial.
+            (l_for, agua, "KILO", "15", 1, None, None),
+            (l_for, agua, "KILO", "13", 10, None, None),
+            (l_for, caja, "KILO", "27", 1, None, None),
         ]
         for lp, prod, pres, precio, cmin, desde, hasta in precios:
             db.add(Precio(tenant_id=tid, lista_id=lp.id, producto_id=prod.id,
@@ -116,6 +125,7 @@ def env(db_engine):
             "db": db, "tid": tid,
             "agua": agua.id, "caja": caja.id, "nada": nada.id, "del": del_.id,
             "cli": cli.id, "suc": suc.id, "serie": serie.id, "proy": proy.id,
+            "l_for": l_for.id, "l_cli": l_cli.id, "l_ven": l_ven.id, "base": base.id,
         }
     finally:
         for table in _PURGE:
@@ -150,6 +160,21 @@ def _contextos(env):
         {"cliente_id": env["cli"], "proyecto_id": env["proy"]},
         {"cliente_id": env["cli"], "sucursal_id": env["suc"],
          "serie_id": env["serie"], "proyecto_id": env["proy"]},
+        # Lista forzada del documento (paso 3), que es lo que pasan las
+        # remisiones: sola, compitiendo con overrides, y con la cascada entera.
+        {"lista_id": env["l_for"]},
+        {"cliente_id": env["cli"], "lista_id": env["l_for"]},
+        {"cliente_id": env["cli"], "sucursal_id": env["suc"], "lista_id": env["l_for"]},
+        {"cliente_id": env["cli"], "sucursal_id": env["suc"],
+         "serie_id": env["serie"], "proyecto_id": env["proy"], "lista_id": env["l_for"]},
+        # Forzada == la asignada al cliente, y == la base: el dedupe del IN no
+        # debe cambiar el origen que se reporta.
+        {"cliente_id": env["cli"], "lista_id": env["l_cli"]},
+        {"lista_id": env["base"]},
+        # Forzada VENCIDA (sus precios murieron ayer) y forzada inexistente:
+        # ambas deben caer limpio al resto de la cascada.
+        {"cliente_id": env["cli"], "lista_id": env["l_ven"]},
+        {"cliente_id": env["cli"], "lista_id": uuid.UUID(int=0)},
     ]
 
 
@@ -206,6 +231,44 @@ def test_el_lote_respeta_precedencias_concretas(env, db_engine):
     assert lote[3]["precio"] == Decimal("288.00") and lote[3]["origen"] == "override_sucursal"
     # Sin precio en ningún lado
     assert lote[4] is None
+
+
+def test_lista_forzada_precedencias_concretas(env, db_engine):
+    """La lista que el documento fija a mano (lo que manda una remisión con
+    `lista_precios_id`): gana a la negociación, pierde con los overrides, y no
+    es exclusiva — lo que no trae sigue cayendo en cascada."""
+    items = [
+        {"producto_id": env["agua"], "presentacion": "KILO", "cantidad": Decimal("5")},
+        {"producto_id": env["agua"], "presentacion": "KILO", "cantidad": Decimal("15")},
+        {"producto_id": env["agua"], "presentacion": "KILO", "cantidad": Decimal("0.5")},
+        {"producto_id": env["caja"], "presentacion": "CAJA", "cantidad": Decimal("2")},
+        {"producto_id": env["nada"], "presentacion": "KILO", "cantidad": Decimal("1")},
+    ]
+    with _sesion_tenant(db_engine, env["tid"]) as db:
+        # Sin overrides ni asignaciones: habla solo la forzada.
+        sola = resolver_precios_lote(db, items=items, lista_id=env["l_for"])
+        # Con cliente+sucursal: los overrides de MANZANA deben ganarle.
+        con_ovr = resolver_precios_lote(
+            db, items=items, cliente_id=env["cli"], sucursal_id=env["suc"],
+            proyecto_id=env["proy"], lista_id=env["l_for"],
+        )
+    # AGUA 5 → tramo de la forzada $15 (no el $25 de la base)
+    assert sola[0]["precio"] == Decimal("15") and sola[0]["origen"] == "lista_forzada"
+    assert sola[0]["lista_id"] == str(env["l_for"])
+    assert "asignacion_id" not in sola[0]      # la forzada no viene de una asignación
+    # AGUA 15 → tramo de mayoreo de la forzada $13
+    assert sola[1]["precio"] == Decimal("13")
+    # AGUA 0.5 → debajo del tramo más chico se cobra ESE ($15), no "sin precio"
+    assert sola[2]["precio"] == Decimal("15")
+    # MANZANA CAJA → sin precio propio: KILO de la forzada ($27) × factor 12
+    assert sola[3]["precio"] == Decimal("324.00") and sola[3]["origen"] == "lista_forzada"
+    # La forzada es PARCIAL: lo que no trae no tiene precio de ningún lado
+    assert sola[4] is None
+
+    # El override de la sucursal ($24 × 12) sigue ganándole a la forzada...
+    assert con_ovr[3]["precio"] == Decimal("288.00") and con_ovr[3]["origen"] == "override_sucursal"
+    # ...pero para AGUA (sin override vigente) la forzada gana al proyecto $17.50
+    assert con_ovr[0]["precio"] == Decimal("15") and con_ovr[0]["origen"] == "lista_forzada"
 
 
 def test_desempate_determinista_en_overrides(env, db_engine):
