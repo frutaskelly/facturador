@@ -1078,3 +1078,180 @@ def test_la_lista_de_remisiones_filtra_las_que_faltan_por_revisar(client, env, a
     assert [x["id"] for x in por_revisar["items"]] == [rid]
     revisadas = client.get("/api/v1/remisiones?revision_pendiente=false", headers=h).json()
     assert rid not in [x["id"] for x in revisadas["items"]]
+
+
+# ─── la orden cambió DESPUÉS de volverse remisión (0067) ─────────────────────
+#
+# El reenvío de una orden ya remisionada no toca la captura —una remisión no se
+# corrige sola— pero hasta 0067 tampoco decía nada: el Master se quedaba con la
+# versión nueva y la remisión con la vieja, y eso se descubría cuando el cliente
+# reclamaba. Estas pruebas fijan que se detecte, que NO se pise nada, y que la
+# incidencia se cierre con nombre y motivo en vez de "marcar como leída".
+
+def _oc_remisionada(client, h, env, **over):
+    """Una OC resuelta y ya convertida en remisión BORRADOR."""
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(**over)).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+    body = {"almacen_id": env["alm"], "lineas": [{
+        "producto_id": env["prod"], "cantidad": "25", "precio_unitario": "18.50",
+        "texto_original": "JITOMATE SALADET"}]}
+    return client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision",
+                       headers=h, json=body).json()
+
+
+def test_reenvio_identico_no_abre_incidencia(client, env, auth_as):
+    """El bot reintenta por timeout: eso no es un cambio y no debe avisar."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    hecho = _oc_remisionada(client, h, env)
+
+    again = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=hecho["origen_externo"])).json()
+    assert again["cambio_abierto"] is False
+    assert again["cambio_detectado_at"] is None
+
+
+def test_reenvio_con_cambios_abre_la_incidencia_sin_tocar_la_remision(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    hecho = _oc_remisionada(client, h, env)
+
+    cambiada = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=hecho["origen_externo"],
+        fecha_entrega="2026-09-05",
+        lineas=[
+            {"descripcion": "JITOMATE SALADET", "cantidad": "40", "unidad": "KG"},
+            {"descripcion": "CEBOLLA BLANCA", "cantidad": "8", "unidad": "KG"},
+        ])).json()
+
+    assert cambiada["cambio_abierto"] is True
+    assert cambiada["cambio_detectado_at"]
+    resumen = cambiada["cambio_resumen"]
+    assert "1 partida nueva" in resumen and "1 partida cambiada" in resumen
+    assert "2026-09-05" in resumen
+
+    # Nada de la captura se movió: misma remisión, mismo estado, y `payload`
+    # sigue siendo la versión con la que se remisionó (es la evidencia).
+    assert cambiada["remision_id"] == hecho["remision_id"]
+    assert cambiada["estado"] == "ASIGNADA"
+    congelado = cambiada["payload"]["lineas"]
+    assert [(x["descripcion"], x["cantidad"]) for x in congelado] == [("JITOMATE SALADET", "25")]
+    assert len(cambiada["payload_nuevo"]["lineas"]) == 2
+
+    d = cambiada["cambio_detalle"]["lineas"]
+    assert [x["descripcion"] for x in d["nuevas"]] == ["CEBOLLA BLANCA"]
+    assert d["quitadas"] == []
+    assert d["cambiadas"][0]["ahora"][0]["cantidad"] == "40"
+
+
+def test_reordenar_las_partidas_no_es_un_cambio(client, env, auth_as):
+    """El PDF llega con las partidas en otro orden: mismo pedido, sin aviso."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    dos = [{"descripcion": "JITOMATE SALADET", "cantidad": "25", "unidad": "KG"},
+           {"descripcion": "CEBOLLA BLANCA", "cantidad": "8", "unidad": "KG"}]
+    hecho = _oc_remisionada(client, h, env, lineas=dos)
+
+    again = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=hecho["origen_externo"], lineas=list(reversed(dos)))).json()
+    assert again["cambio_abierto"] is False
+
+
+def test_el_mismo_reenvio_cambiado_no_vuelve_a_avisar(client, env, auth_as):
+    """Un aviso por cada reintento es la forma más rápida de que los ignoren."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    hecho = _oc_remisionada(client, h, env)
+    nuevas = [{"descripcion": "JITOMATE SALADET", "cantidad": "40", "unidad": "KG"}]
+
+    a = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=hecho["origen_externo"], lineas=nuevas)).json()
+    b = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=hecho["origen_externo"], lineas=nuevas)).json()
+    assert a["cambio_detectado_at"] == b["cambio_detectado_at"]
+
+
+def test_volver_a_la_version_remisionada_cierra_la_incidencia(client, env, auth_as):
+    """El cliente deshizo su corrección: ya no hay nada que atender."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    hecho = _oc_remisionada(client, h, env)
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=hecho["origen_externo"],
+        lineas=[{"descripcion": "JITOMATE SALADET", "cantidad": "40", "unidad": "KG"}]))
+
+    vuelta = client.post("/api/v1/oc-recibidas", headers=h,
+                         json=_oc(origen_externo=hecho["origen_externo"])).json()
+    assert vuelta["cambio_abierto"] is False
+    assert vuelta["cambio_resuelto_at"]
+    assert "volvió a coincidir" in vuelta["cambio_resuelto_nota"]
+
+
+def test_resolver_el_cambio_exige_nota_y_no_se_cierra_dos_veces(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    hecho = _oc_remisionada(client, h, env)
+    oc_id = hecho["id"]
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=hecho["origen_externo"],
+        lineas=[{"descripcion": "JITOMATE SALADET", "cantidad": "40", "unidad": "KG"}]))
+
+    assert client.post(f"/api/v1/oc-recibidas/{oc_id}/cambio/resolver",
+                       headers=h, json={"nota": "  "}).status_code == 422
+
+    r = client.post(f"/api/v1/oc-recibidas/{oc_id}/cambio/resolver", headers=h,
+                    json={"nota": "Corregí la remisión BORRADOR a 40 KG"})
+    assert r.status_code == 200, r.text
+    cerrada = r.json()
+    assert cerrada["cambio_abierto"] is False
+    assert cerrada["cambio_resuelto_por"]
+    assert cerrada["cambio_resuelto_nota"] == "Corregí la remisión BORRADOR a 40 KG"
+    # El diff NO se borra: es la evidencia de qué se decidió y sobre qué.
+    assert cerrada["cambio_detalle"]["lineas"]["cambiadas"]
+
+    assert client.post(f"/api/v1/oc-recibidas/{oc_id}/cambio/resolver", headers=h,
+                       json={"nota": "otra vez"}).status_code == 409
+
+
+def test_sin_cambio_no_se_puede_resolver(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    hecho = _oc_remisionada(client, h, env)
+    assert client.post(f"/api/v1/oc-recibidas/{hecho['id']}/cambio/resolver",
+                       headers=h, json={"nota": "nada que ver"}).status_code == 409
+
+
+def test_el_filtro_de_la_bandeja_solo_trae_las_abiertas(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    # Folios DISTINTOS: el guard de duplicados (PR #100) rechaza remisionar dos
+    # órdenes con el mismo «su pedido», y aquí hacen falta dos remisiones vivas.
+    tranquila = _oc_remisionada(client, h, env, folio_externo=f"T{uuid.uuid4().hex[:5]}")
+    ruidosa = _oc_remisionada(client, h, env, folio_externo=f"R{uuid.uuid4().hex[:5]}")
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=ruidosa["origen_externo"],
+        lineas=[{"descripcion": "JITOMATE SALADET", "cantidad": "40", "unidad": "KG"}]))
+
+    abiertas = client.get("/api/v1/oc-recibidas?cambio_abierto=true", headers=h).json()
+    ids = [x["id"] for x in abiertas["items"]]
+    assert ruidosa["id"] in ids
+    assert tranquila["id"] not in ids
+
+    client.post(f"/api/v1/oc-recibidas/{ruidosa['id']}/cambio/resolver", headers=h,
+                json={"nota": "hablé con el cliente, se entrega lo original"})
+    despues = client.get("/api/v1/oc-recibidas?cambio_abierto=true", headers=h).json()
+    assert ruidosa["id"] not in [x["id"] for x in despues["items"]]
+
+
+def test_una_orden_descartada_que_cambia_no_revive(client, env, auth_as):
+    """Descartar es una decisión de una persona; un reenvío no la deshace."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+    client.post(f"/api/v1/oc-recibidas/{oc['id']}/descartar", headers=h,
+                params={"motivo": "duplicada"})
+    again = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=oc["origen_externo"],
+        lineas=[{"descripcion": "OTRA COSA", "cantidad": "1", "unidad": "PZ"}])).json()
+    assert again["estado"] == "DESCARTADA"
+    assert again["cambio_abierto"] is False

@@ -19,6 +19,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ProductoCombobox } from "@/components/ProductoCombobox";
+import { CambioPanel } from "../cambio";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { Page } from "@/lib/hooks";
@@ -539,6 +540,10 @@ export default function Page() {
             kilos, líneas y precios se hacen en la remisión.
           </Alert>
         ) : null}
+        {/* Va DEBAJO del aviso de la remisión y antes de todo lo demás: si el
+            documento cambió después de capturar, eso manda sobre cualquier otra
+            cosa que se pueda hacer en esta pantalla. */}
+        <CambioPanel oc={oc} canWrite={canWrite} onResuelto={() => void cargar()} />
 
         {auto?.ok && autoDesfasado && !bloqueada ? (
           <p className="text-sm text-muted">

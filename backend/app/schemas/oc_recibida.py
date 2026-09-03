@@ -51,6 +51,16 @@ class OCRecibidaIn(BaseModel):
     lineas: list[LineaOCRecibidaIn] = Field(default_factory=list)
 
 
+class ResolverCambioIn(BaseModel):
+    """Cerrar la incidencia de una orden que cambió después de remisionarse.
+
+    La nota es obligatoria a propósito: la acción correcta depende del estado de
+    la remisión (corregirla si es BORRADOR, decidir si ya está CONFIRMADA,
+    sustituir el CFDI si ya se facturó) y ninguna de las tres la puede hacer el
+    sistema solo. Lo que queda registrado es qué decidió la persona."""
+    nota: str = Field(min_length=3, max_length=500)
+
+
 class OCRecibidaUpdate(BaseModel):
     """Corrección manual desde la bandeja."""
     cliente_id: Optional[uuid.UUID] = None
@@ -174,6 +184,12 @@ class OCRecibidaOut(ORMModel):
     ambiguo: bool = False
     remision_id: Optional[uuid.UUID] = None
     remision_folio: Optional[str] = None
+    # La orden cambió DESPUÉS de volverse remisión. `abierto` = nadie la ha
+    # atendido todavía; el resumen es lo que se enseña en la lista y lo que
+    # viaja al aviso de WhatsApp.
+    cambio_abierto: bool = False
+    cambio_detectado_at: Optional[datetime] = None
+    cambio_resumen: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -187,6 +203,14 @@ class OCRecibidaOut(ORMModel):
 
 class OCRecibidaDetailOut(OCRecibidaOut):
     payload: dict = Field(default_factory=dict)
+    # La versión POSTERIOR del documento y el diff contra la que se remisionó.
+    # `payload` no se toca nunca una vez que hay remisión: es la evidencia de
+    # con qué se capturó.
+    payload_nuevo: Optional[dict] = None
+    cambio_detalle: Optional[dict] = None
+    cambio_resuelto_at: Optional[datetime] = None
+    cambio_resuelto_por: Optional[uuid.UUID] = None
+    cambio_resuelto_nota: Optional[str] = None
     lineas: list[LineaOCRecibidaOut] = Field(default_factory=list)
     auto: Optional[AutoRemisionOut] = None
     # La serie con la que se foliaria la remisión de esta orden; la pantalla

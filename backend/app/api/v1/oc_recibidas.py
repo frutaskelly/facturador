@@ -17,7 +17,7 @@ permisos nuevos ni una migración de catálogo.
 from __future__ import annotations
 
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -47,9 +47,10 @@ from ...schemas.oc_recibida import (
     OCRecibidaIn,
     OCRecibidaOut,
     OCRecibidaUpdate,
+    ResolverCambioIn,
 )
 from ...models import ProductoCliente
-from ...services import cliente_match
+from ...services import cliente_match, oc_cambios
 from ...services.precios import resolver_precios_lote
 from ...services.proyecto_alcance import proyecto_aplica
 from ...services.sucursales import es_sucursal_de
@@ -226,6 +227,41 @@ def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
         )
 
 
+def _detectar_cambio(db: Session, oc: OCRecibida, data: dict, ctx: AuthContext) -> None:
+    """La orden ya tiene remisión y llegó otra versión de su documento.
+
+    No se pisa nada —la remisión ya capturada no se corrige sola— pero deja de
+    ser invisible: la versión nueva se guarda aparte con su diff y se abre una
+    incidencia que alguien tiene que cerrar. Es el único punto del sistema donde
+    "no hacer nada" era también "no decir nada".
+    """
+    d = oc_cambios.diff(oc.payload, data)
+    if d is None:
+        # El documento volvió a coincidir con el que generó la remisión: o es el
+        # reintento normal del bot, o el cliente deshizo su corrección. Si había
+        # algo abierto, ya no hay nada que atender y se cierra solo — dejarlo
+        # abierto entrena al equipo a ignorar la bandera.
+        if oc.cambio_detectado_at is not None and oc.cambio_resuelto_at is None:
+            oc.cambio_resuelto_at = datetime.now(timezone.utc)
+            oc.cambio_resuelto_nota = "El documento volvió a coincidir con la remisión"
+            oc.updated_by = ctx.user_id
+            db.flush()
+        return
+    if (oc.payload_nuevo is not None
+            and oc_cambios.huella(oc.payload_nuevo) == oc_cambios.huella(data)):
+        # Exactamente el mismo reenvío que ya abrió la incidencia. El bot
+        # reintenta por timeout; un aviso por reintento y nadie los lee.
+        return
+    oc.payload_nuevo = data
+    oc.cambio_detalle = d
+    oc.cambio_detectado_at = datetime.now(timezone.utc)
+    oc.cambio_resuelto_at = None
+    oc.cambio_resuelto_por = None
+    oc.cambio_resuelto_nota = None
+    oc.updated_by = ctx.user_id
+    db.flush()
+
+
 @router.post("", response_model=OCRecibidaDetailOut, status_code=status.HTTP_201_CREATED)
 def ingesta(
     payload: OCRecibidaIn,
@@ -255,6 +291,11 @@ def ingesta(
                     existente.archivo_nombre = payload.archivo_nombre
                 existente.updated_by = ctx.user_id
                 db.flush()
+            # Descartada = alguien decidió que no procede; que llegue otra
+            # versión no revive esa decisión. Con remisión es distinto: ahí sí
+            # hay algo capturado que puede haber quedado desfasado.
+            if existente.remision_id is not None:
+                _detectar_cambio(db, existente, data, ctx)
             return _detalle(db, existente)
         existente.payload = data
         existente.folio_externo = payload.folio_externo
@@ -313,6 +354,10 @@ def listar(
     jid: Optional[str] = Query(default=None, max_length=120),
     remitente: Optional[str] = Query(default=None, max_length=254),
     sin_cliente: bool = Query(default=False),
+    # Las que cambiaron después de remisionarse y nadie ha atendido. Es un
+    # filtro aparte y no un `estado`: la orden sigue ASIGNADA, lo que está
+    # abierto es la incidencia.
+    cambio_abierto: bool = Query(default=False),
     q: Optional[str] = Query(default=None, max_length=254),
     # Rango sobre la fecha de RECEPCIÓN (no la del documento): es como el
     # operador piensa la bandeja — "lo que llegó hoy", "lo de esta semana".
@@ -346,6 +391,11 @@ def listar(
         query = query.filter(OCRecibida.remitente == remitente)
     if sin_cliente:
         query = query.filter(OCRecibida.cliente_id.is_(None))
+    if cambio_abierto:
+        query = query.filter(
+            OCRecibida.cambio_detectado_at.isnot(None),
+            OCRecibida.cambio_resuelto_at.is_(None),
+        )
     if q:
         like = f"%{q}%"
         # También el punto de entrega y las observaciones del documento: es
@@ -1456,6 +1506,35 @@ def descartar(
     db.flush()
     db.refresh(oc)
     return oc
+
+
+@router.post("/{oc_id}/cambio/resolver", response_model=OCRecibidaDetailOut)
+def resolver_cambio(
+    oc_id: UUID,
+    payload: ResolverCambioIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Cierra el aviso de "esta orden cambió después de remisionarse".
+
+    No corrige la remisión: la corrección depende de en qué estado está
+    (BORRADOR se edita, CONFIRMADA ya salió de almacén, FACTURADA necesita
+    sustitución) y ninguna de las tres es un botón. Esto registra QUIÉN lo miró
+    y QUÉ decidió, que es lo que faltaba para poder cerrarlo de verdad en vez de
+    marcarlo como leído.
+    """
+    oc = get_or_404(db, OCRecibida, oc_id, soft=False, for_update=True)
+    if oc.cambio_detectado_at is None:
+        raise HTTPException(status_code=409, detail="Esta orden no tiene ningún cambio que atender")
+    if oc.cambio_resuelto_at is not None:
+        raise HTTPException(status_code=409, detail="Ese cambio ya se había atendido")
+    oc.cambio_resuelto_at = datetime.now(timezone.utc)
+    oc.cambio_resuelto_por = ctx.user_id
+    oc.cambio_resuelto_nota = payload.nota.strip()
+    oc.updated_by = ctx.user_id
+    db.flush()
+    db.refresh(oc)
+    return _detalle(db, oc)
 
 
 @router.post("/{oc_id}/reabrir", response_model=OCRecibidaDetailOut)

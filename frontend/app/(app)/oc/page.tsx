@@ -26,6 +26,9 @@ import type { Cliente, GrupoBandeja, OCRecibida, OCRecibidaDetalle, Proyecto } f
 import { CANAL_TONE, estadoTexto, precioNormalizado } from "./cruce";
 
 const WRITE = "remision:gestionar";
+// Valor del selector de estado que en realidad es un filtro aparte: la orden
+// sigue ASIGNADA, lo que está abierto es la incidencia del documento que cambió.
+const FILTRO_CAMBIO = "__CAMBIO__";
 
 /** El vistazo rápido de una orden (slidedown de la lista): las partidas como
  *  venían y el punto de entrega. Abrir el documento y trabajarla (cruzar,
@@ -89,7 +92,19 @@ function VistazoOC({ id }: { id: string }) {
 
 function estadoBadge(oc: OCRecibida) {
   const b = estadoTexto(oc);
-  return <Badge tone={b.tone}>{b.texto}</Badge>;
+  // El aviso va JUNTO al estado, no en su lugar: "Remisión R-1204" sigue
+  // siendo lo primero que se busca en la fila, y encima que esa remisión
+  // quedó desfasada respecto al documento que mandó el cliente.
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <Badge tone={b.tone}>{b.texto}</Badge>
+      {oc.cambio_abierto ? (
+        <span title={oc.cambio_resumen ?? "El documento cambió después de remisionar"}>
+          <Badge tone="danger">Cambió</Badge>
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 export default function Page() {
@@ -143,7 +158,9 @@ export default function Page() {
   }, [proyectos, clienteFiltro, clientesDelGrupo]);
 
   // Resumen del día: la foto que el Master daba de un vistazo.
-  const [resumen, setResumen] = useState<{ hoy: number; pendientes: number; conRemision: number } | null>(null);
+  const [resumen, setResumen] = useState<
+    { hoy: number; pendientes: number; conRemision: number; cambiaron: number } | null
+  >(null);
   useEffect(() => {
     const hoy = new Date().toLocaleDateString("en-CA");
     const totalDe = (qs: string) =>
@@ -152,8 +169,9 @@ export default function Page() {
       totalDe(`fecha_desde=${hoy}&fecha_hasta=${hoy}`),
       totalDe("estado=PENDIENTE"),
       totalDe(`estado=ASIGNADA&fecha_desde=${hoy}&fecha_hasta=${hoy}`),
+      totalDe("cambio_abierto=true"),
     ])
-      .then(([h, p, c]) => setResumen({ hoy: h, pendientes: p, conRemision: c }))
+      .then(([h, p, c, k]) => setResumen({ hoy: h, pendientes: p, conRemision: c, cambiaron: k }))
       .catch(() => setResumen(null));
   }, [rows]);
 
@@ -183,7 +201,11 @@ export default function Page() {
   const reload = useCallback(() => {
     setError(false);          // un fallo transitorio no puede dejar la bandeja muerta
     const qs = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) });
-    if (estado) qs.set("estado", estado);
+    // "Cambiaron tras remisionar" no es un estado —la orden sigue ASIGNADA—,
+    // pero vive en el mismo selector porque es como el equipo piensa la
+    // bandeja: un solo lugar para elegir qué montón quiere trabajar.
+    if (estado === FILTRO_CAMBIO) qs.set("cambio_abierto", "true");
+    else if (estado) qs.set("estado", estado);
     if (busca) qs.set("q", busca);
     if (clienteFiltro) qs.set("cliente_id", clienteFiltro);
     if (proyectoFiltro) qs.set("proyecto_id", proyectoFiltro);
@@ -475,6 +497,7 @@ export default function Page() {
               >
                 <option value="PENDIENTE">Por revisar</option>
                 <option value="ASIGNADA">Ya con remisión</option>
+                <option value={FILTRO_CAMBIO}>Cambiaron tras remisionar</option>
                 <option value="DESCARTADA">Descartadas</option>
                 <option value="">Todas</option>
               </Select>
@@ -488,6 +511,17 @@ export default function Page() {
           <span>Hoy llegaron <strong className="text-foreground tabular-nums">{resumen.hoy}</strong></span>
           <span>· con remisión hoy <strong className="text-foreground tabular-nums">{resumen.conRemision}</strong></span>
           <span>· por revisar (todas) <strong className={`tabular-nums ${resumen.pendientes ? "text-amber-700" : "text-foreground"}`}>{resumen.pendientes}</strong></span>
+          {/* Solo aparece cuando hay algo: un contador en 0 permanente es un
+              adorno, y a los adornos se les deja de hacer caso. */}
+          {resumen.cambiaron ? (
+            <button
+              type="button"
+              className="text-rose-700 underline underline-offset-2"
+              onClick={() => { setEstado(FILTRO_CAMBIO); setOffset(0); }}
+            >
+              · cambiaron tras remisionar <strong className="tabular-nums">{resumen.cambiaron}</strong>
+            </button>
+          ) : null}
         </div>
       ) : null}
 
