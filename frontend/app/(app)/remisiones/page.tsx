@@ -28,6 +28,7 @@ import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
 import {
+  COTIZACIONES_A_LA_VEZ, enPool,
   fetchFiscalPreview, lineaDesdePegado, matchPresentacion,
   nuevaLinea, pegarLocalFallback, unidadBaseDesde,
   type FiscalPreview, type LineaForm,
@@ -461,9 +462,7 @@ export default function RemisionesPage() {
   useEffect(() => {
     if (!refrescarReferencias) return;
     setRefrescarReferencias(false);
-    for (const l of lineas) {
-      if (l.producto_id && Number(l.cantidad) > 0) cotizar(l.key, l.producto_id, l.presentacion, l.cantidad);
-    }
+    cotizarLote(lineas.filter((l) => l.producto_id && Number(l.cantidad) > 0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refrescarReferencias]);
 
@@ -517,21 +516,34 @@ export default function RemisionesPage() {
     }
   }
 
+  // Cotiza un conjunto de líneas a través del pool. Si mientras esperaba turno
+  // la línea recibió una cotización más nueva (el usuario editó cantidad o
+  // presentación), la pasada del pool la salta: la llamada nueva ya corre con
+  // los valores vigentes, y una vieja que ARRANCA después le ganaría el seq.
+  function cotizarLote(items: { key: string; producto_id: string; presentacion: string; cantidad: string }[]) {
+    const alEncolar = new Map(items.map((x) => [x.key, cotizaSeq.current[x.key] ?? 0]));
+    void enPool(items, COTIZACIONES_A_LA_VEZ, (x) =>
+      (cotizaSeq.current[x.key] ?? 0) === alEncolar.get(x.key)
+        ? cotizar(x.key, x.producto_id, x.presentacion, x.cantidad)
+        : Promise.resolve(),
+    );
+  }
+
   // Re-cotiza todas las líneas con producto y cantidad. `forzar` (el botón
   // "Actualizar precios") descarta también los precios tecleados a mano; el
   // refresco automático al cambiar cliente/sucursal los respeta.
   function recotizarLineas(forzar: boolean) {
-    let n = 0;
+    const objetivo: LineaForm[] = [];
     for (const l of lineas) {
       if (!l.producto_id || !Number(l.cantidad)) continue;
       if (l.precioManual) {
         if (!forzar) continue;
         setLinea(l.key, { precioManual: false });
       }
-      n++;
-      cotizar(l.key, l.producto_id, l.presentacion, l.cantidad);
+      objetivo.push(l);
     }
-    return n;
+    cotizarLote(objetivo);
+    return objetivo.length;
   }
 
   // Sin esto, el precio se quedaba con el de la primera selección: cambiar de
@@ -614,7 +626,7 @@ export default function RemisionesPage() {
       const base = ls.filter((l) => l.producto_id || l.texto);
       return [...base, ...nuevas];
     });
-    nuevas.forEach((l) => l.producto_id && cotizar(l.key, l.producto_id, l.presentacion, l.cantidad));
+    cotizarLote(nuevas.filter((l) => l.producto_id));
     const porRevisar = nuevas.filter((l) => !l.producto_id).length;
     toast.success(`${nuevas.length} líneas agregadas` + (porRevisar ? ` · ${porRevisar} por revisar en Match IA` : ""));
   }
@@ -709,10 +721,10 @@ export default function RemisionesPage() {
       });
       return next;
     });
-    valores.forEach((v, i) => {
+    cotizarLote(valores.flatMap((v, i) => {
       const l = lineas[idx + i];
-      if (l?.producto_id) cotizar(l.key, l.producto_id, l.presentacion, v.replace(",", "."));
-    });
+      return l?.producto_id ? [{ ...l, cantidad: v.replace(",", ".") }] : [];
+    }));
     toast.success(`${valores.length} cantidades pegadas`);
   }
 
@@ -753,7 +765,7 @@ export default function RemisionesPage() {
       else next.push(linea);
     });
     setLineas(next);
-    paraCotizar.forEach((l) => cotizar(l.key, l.producto_id, l.presentacion, l.cantidad));
+    cotizarLote(paraCotizar);
     toast.success(`${valores.length} productos pegados`);
   }
 

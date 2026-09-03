@@ -221,3 +221,33 @@ export async function fetchFiscalPreview(lineas: LineaForm[]): Promise<FiscalPre
     ),
   };
 }
+
+// ── Cotizaciones en ráfaga ──────────────────────────────────────────────────
+// Una remisión de 50+ partidas disparaba una petición GET /precios/cotizar por
+// línea, TODAS a la vez (al abrir la edición, al pegar de Excel o con
+// "Actualizar precios"). La estampida saturaba el backend en producción y las
+// conexiones se reseteaban: el guardado moría con "No se pudo conectar con el
+// servidor" y cada renglón marcaba "no se pudo consultar el catálogo". El pool
+// corre las MISMAS peticiones, pero con pocas en vuelo a la vez.
+export const COTIZACIONES_A_LA_VEZ = 6;
+
+/** Corre `tarea` sobre cada elemento con a lo más `limite` en vuelo. Un fallo
+ *  en una tarea no detiene a las demás (cotizar ya atrapa y marca el suyo). */
+export async function enPool<T>(
+  items: readonly T[],
+  limite: number,
+  tarea: (item: T) => Promise<unknown>,
+): Promise<void> {
+  let i = 0;
+  const carril = async (): Promise<void> => {
+    while (i < items.length) {
+      const item = items[i++];
+      try {
+        await tarea(item);
+      } catch {
+        /* la tarea reporta su propio fallo; el pool sigue con las demás */
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limite, items.length) }, carril));
+}
