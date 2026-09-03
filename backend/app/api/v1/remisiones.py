@@ -148,6 +148,20 @@ _FOLIO_PREFIJO = func.regexp_replace(Remision.folio_interno, r"\d+$", "")
 _FOLIO_NUMERO = func.cast(func.substring(Remision.folio_interno, r"(\d+)$"), BigInteger)
 
 
+def _adjuntar_sin_clave(db: Session, tenant_id, rems: list) -> None:
+    """Cuelga de cada remisión cuántas partidas vivas NO tienen clave SAE del
+    cliente — el preflight del candado del export: que el revisor lo vea al
+    revisar, no hasta que el lote ya está armado en el modal de exportar.
+    Cuenta con el MISMO helper que la validación (services/export_sae), así los
+    números siempre casan. Una remisión ya amparada por SAE no se marca."""
+    from ...services.export_sae import lineas_sin_clave
+
+    pendientes = [r for r in rems if not r.factura_sae and r.estado != "CANCELADA"]
+    faltan = lineas_sin_clave(db, tenant_id, pendientes)
+    for r in rems:
+        r.sin_clave_sae = len(faltan.get(r.id, [])) or None
+
+
 def _adjuntar_oc(db: Session, rems: list) -> None:
     """Cuelga de cada remisión su OC original, en DOS consultas para toda la
     página: la que la generó (`remision_id`) y, si no la hay, la que traiga el
@@ -235,8 +249,11 @@ def list_remisiones(
         _FOLIO_NUMERO.desc().nullslast(),
         Remision.folio_interno.desc(),
     )
-    return paginate(query, RemisionOut, limit, offset,
-                    preparar=lambda rows: _adjuntar_oc(db, rows))
+    def _preparar(rows: list) -> None:
+        _adjuntar_oc(db, rows)
+        _adjuntar_sin_clave(db, ctx.tenant_id, rows)
+
+    return paginate(query, RemisionOut, limit, offset, preparar=_preparar)
 
 
 @router.post("", response_model=RemisionDetailOut, status_code=status.HTTP_201_CREATED)
@@ -406,6 +423,10 @@ def _nombres_para_pdf(db: Session, rems: list[Remision]) -> dict:
         db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all()
     ) if prod_ids else {}
     cli_ids = {r.cliente_facturacion_id for r in rems if r.cliente_facturacion_id}
+    # Con clave por plaza (0067) puede haber fila genérica Y por sucursal para
+    # el mismo (cliente, producto): la llave lleva la sucursal y cada remisión
+    # resuelve con SU plaza — misma regla que el export (sucursal gana, cae la
+    # genérica, la de otra plaza no se presta).
     pcs = {}
     if cli_ids and prod_ids:
         for pc in (
@@ -416,12 +437,15 @@ def _nombres_para_pdf(db: Session, rems: list[Remision]) -> dict:
             )
             .all()
         ):
-            pcs[(pc.cliente_id, pc.producto_id)] = pc
+            pcs[(pc.cliente_id, pc.producto_id, pc.sucursal_id)] = pc
     out: dict = {}
     for r in rems:
         nombres: dict = {}
         for ln in r.lineas:
-            pc = pcs.get((r.cliente_facturacion_id, ln.producto_id))
+            pc = (
+                pcs.get((r.cliente_facturacion_id, ln.producto_id, r.sucursal_id))
+                if r.sucursal_id is not None else None
+            ) or pcs.get((r.cliente_facturacion_id, ln.producto_id, None))
             base = (pc.nombre_cliente or "").strip() if pc else ""
             base = base or interno.get(ln.producto_id) or str(ln.producto_id)
             codigo = (pc.codigo_cliente or "").strip() if pc else ""
@@ -444,6 +468,24 @@ def get_remision(
     for ln in rem.lineas:
         ln.producto_nombre = names.get(ln.producto_id)
     _adjuntar_oc(db, [rem])
+    # Preflight de claves SAE: el conteo del encabezado Y la marca por línea,
+    # con el mismo helper que valida el export para que los números casen.
+    rem.sin_clave_sae = None
+    if not rem.factura_sae and rem.estado != "CANCELADA":
+        from ...services.export_sae import lineas_sin_clave
+
+        faltan = lineas_sin_clave(db, ctx.tenant_id, [rem]).get(rem.id, [])
+        if faltan:
+            rem.sin_clave_sae = len(faltan)  # mismo conteo que la lista
+            sin = set(faltan)
+            for ln in rem.lineas:
+                # Solo líneas VIVAS: una devolución total deja la línea en 0 y
+                # no cuenta para el export — marcarla haría que el panel liste
+                # más renglones que el conteo del encabezado.
+                ln.sin_clave_sae = (
+                    ln.producto_id in sin
+                    and Decimal(str(ln.cantidad_solicitada or 0)) > 0
+                )
     return rem
 
 

@@ -87,14 +87,22 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
   useEffect(() => {
     if (!clienteId) { setPresCliente({}); return; }
     let active = true;
-    apiFetch<{ producto_id: string; presentacion?: string | null }[]>(
+    apiFetch<{ producto_id: string; presentacion?: string | null; sucursal_id?: string | null }[]>(
       `/api/v1/clientes/${clienteId}/catalogo`
     )
       .then((rows) => {
         if (!active) return;
-        setPresCliente(Object.fromEntries(
-          rows.filter((r) => r.presentacion).map((r) => [r.producto_id, r.presentacion as string])
-        ));
+        // El catálogo puede traer fila genérica + filas por sucursal del mismo
+        // producto: aquí manda la GENÉRICA (la factura directa no carga plaza),
+        // no la fila que venga al final del arreglo.
+        const map: Record<string, string> = {};
+        for (const r of rows) {
+          if (!r.presentacion) continue;
+          if (!(r.producto_id in map) || r.sucursal_id == null) {
+            map[r.producto_id] = r.presentacion;
+          }
+        }
+        setPresCliente(map);
       })
       .catch(() => { if (active) setPresCliente({}); });
     return () => { active = false; };

@@ -299,6 +299,9 @@ export type LineaRemision = {
   ieps_importe?: string;
   lote_id?: string | null;
   notas?: string | null;
+  // Preflight del export a SAE: esta línea no tiene clave del cliente (ni de
+  // su sucursal ni genérica). Solo viene en el detalle.
+  sin_clave_sae?: boolean | null;
 };
 
 export type Remision = {
@@ -327,6 +330,9 @@ export type Remision = {
   oc_id?: string | null;
   oc_archivo_url?: string | null;
   oc_archivo_nombre?: string | null;
+  // Preflight del export a SAE: cuántas partidas vivas no tienen clave del
+  // cliente (el mismo conteo que detiene el lote al exportar). null = ninguna.
+  sin_clave_sae?: number | null;
   factura_estado?: "BORRADOR" | "TIMBRADA" | "CANCELADA" | null;
   factura_id?: string | null;
   subtotal: string;
@@ -561,6 +567,10 @@ export type ProductoClienteRow = {
   codigo_cliente?: string | null;
   nombre_cliente?: string | null;
   presentacion?: string | null;    // la unidad con la que ese cliente compra
+  // null = fila genérica (todas las plazas); con valor = clave de ESA plaza
+  // (caso EHMO: Pachuca y Villahermosa usan claves distintas en SAE).
+  sucursal_id?: string | null;
+  sucursal_nombre?: string | null;
 };
 // Línea parseada desde un pegado de Excel (backend detecta columnas + cruza).
 export type LineaPegada = {

@@ -23,6 +23,10 @@ Cuatro trampas que este módulo hereda resueltas del bot:
    CAMBIADA en silencio (ZHGO 312, 324, 335, 365-369 — una timbrada así).
 2. **La CLAVE es la del cliente** (producto_clientes.codigo_cliente = CVE_ART
    de SAE), nunca el SKU interno: SAE rechaza claves que no existen en INVE02.
+   Y es POR PLAZA cuando el cliente vive en dos empresas SAE (EHMO:
+   "ESPINACAPZA" en Pachuca, "ESPINACASKG" en Villahermosa) — la fila con
+   sucursal gana, la genérica ampara al resto, y la clave de OTRA plaza jamás
+   se presta: mandaría el artículo equivocado a la otra empresa.
 3. **La Observación es la llave de conciliación**: "OC <su_pedido> …" es como
    el resto del sistema (bot, Master, estado de cuenta) casa la factura de SAE
    con su orden. Se arma con el MISMO formato.
@@ -50,7 +54,15 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session, selectinload
 
-from ..models import Cliente, ClienteExterno, Factura, Producto, ProductoCliente, Remision
+from ..models import (
+    Cliente,
+    ClienteExterno,
+    Factura,
+    LineaRemision,
+    Producto,
+    ProductoCliente,
+    Remision,
+)
 from .series import resolver_serie
 
 # La marca del espejo ("ZHGO 233") también se captura a mano (PATCH de la
@@ -205,7 +217,9 @@ def _clave_para_remision(pares: list, sucursal_id) -> tuple:
 
 
 def _codigos_cliente(db: Session, tenant_id: UUID, cliente_ids: set) -> dict:
-    """{(cliente_id, producto_id): codigo_cliente} — la CVE_ART que SAE conoce."""
+    """{(cliente_id, producto_id, sucursal_id): codigo_cliente} — la CVE_ART
+    que SAE conoce. sucursal_id None = fila genérica; una línea concreta se
+    resuelve con codigo_cliente_de(), nunca indexando el dict directo."""
     filas = (
         db.query(ProductoCliente)
         .filter(
@@ -215,7 +229,60 @@ def _codigos_cliente(db: Session, tenant_id: UUID, cliente_ids: set) -> dict:
         )
         .all()
     )
-    return {(f.cliente_id, f.producto_id): f.codigo_cliente for f in filas}
+    return {
+        (f.cliente_id, f.producto_id, f.sucursal_id): f.codigo_cliente for f in filas
+    }
+
+
+def codigo_cliente_de(
+    codigos: dict, cliente_id, producto_id, sucursal_id
+) -> Optional[str]:
+    """La clave para UNA línea: la fila de SU sucursal gana; si no hay, cae la
+    genérica. La clave de OTRA plaza jamás ampara (misma regla que
+    _clave_para_remision): prestarla mandaría a la otra empresa SAE una clave
+    que su inventario no conoce — o, peor, que sí conoce y es otro artículo."""
+    if sucursal_id is not None:
+        clave = codigos.get((cliente_id, producto_id, sucursal_id))
+        if clave is not None:
+            return clave
+    return codigos.get((cliente_id, producto_id, None))
+
+
+def lineas_sin_clave(db: Session, tenant_id: UUID, rems: list) -> dict:
+    """{remision_id: [producto_id, ...]} de partidas VIVAS sin clave del cliente.
+
+    El preflight de la lista/detalle de remisiones cuenta con ESTE helper para
+    usar el mismo criterio que preparar() (cantidad > 0, sucursal gana →
+    genérica): si contaran distinto, el operador vería números que no casan
+    con el candado del export. Consulta las líneas en batch (sin N+1)."""
+    ids = [r.id for r in rems]
+    if not ids:
+        return {}
+    por_rem = {r.id: r for r in rems}
+    codigos = _codigos_cliente(
+        db, tenant_id, {r.cliente_facturacion_id for r in rems}
+    )
+    filas = (
+        db.query(
+            LineaRemision.remision_id,
+            LineaRemision.producto_id,
+            LineaRemision.cantidad_solicitada,
+        )
+        .filter(LineaRemision.remision_id.in_(ids))
+        .order_by(LineaRemision.numero_linea)
+        .all()
+    )
+    out: dict = {}
+    for rem_id, producto_id, cantidad in filas:
+        if Decimal(str(cantidad or 0)) <= 0:
+            continue
+        rem = por_rem[rem_id]
+        clave = codigo_cliente_de(
+            codigos, rem.cliente_facturacion_id, producto_id, rem.sucursal_id
+        )
+        if clave is None:
+            out.setdefault(rem_id, []).append(producto_id)
+    return out
 
 
 def _num(v) -> float:
@@ -387,17 +454,22 @@ def preparar(
         vivas = [ln for ln in rem.lineas if Decimal(str(ln.cantidad_solicitada or 0)) > 0]
         sin_codigo = [
             ln for ln in vivas
-            if (rem.cliente_facturacion_id, ln.producto_id) not in codigos
+            if codigo_cliente_de(
+                codigos, rem.cliente_facturacion_id, ln.producto_id, rem.sucursal_id
+            ) is None
         ]
         if sin_codigo:
-            nombres = {
+            # nombres_prod, NO `nombres`: reasignar el dict {cliente: legal_name}
+            # del lote hacía que las remisiones siguientes imprimieran "?" como
+            # nombre de cliente en sus errores.
+            nombres_prod = {
                 p.id: f"{p.sku} · {p.nombre}"
                 for p in db.query(Producto).filter(
                     Producto.id.in_({ln.producto_id for ln in sin_codigo})
                 )
             }
             detalle = "; ".join(
-                f"línea {ln.numero_linea}: {nombres.get(ln.producto_id, '¿producto?')}"
+                f"línea {ln.numero_linea}: {nombres_prod.get(ln.producto_id, '¿producto?')}"
                 for ln in sin_codigo
             )
             res.errores.append(
@@ -738,7 +810,17 @@ def generar(
         # Solo partidas vivas: una devolución total deja la línea con cantidad
         # 0, y SAE importaría un concepto en cero que el PAC rechaza.
         for ln in (x for x in rem.lineas if Decimal(str(x.cantidad_solicitada or 0)) > 0):
-            clave = codigos[(rem.cliente_facturacion_id, ln.producto_id)]
+            clave = codigo_cliente_de(
+                codigos, rem.cliente_facturacion_id, ln.producto_id, rem.sucursal_id
+            )
+            if clave is None:
+                # preparar(bloquear=True) ya validó: llegar aquí sin clave es un
+                # bug de resolución, y una CVE vacía en el archivo importaría
+                # silenciosamente mal en SAE.
+                raise RuntimeError(
+                    f"{rem.folio_interno} línea {ln.numero_linea}: sin clave del "
+                    "cliente al generar (preparar la dejó pasar)"
+                )
             if tipo == "FACTURA":
                 vals = [folio_txt, doc.cliente_sae, f_txt, su_pedido_txt, clave,
                         _num(ln.cantidad_solicitada), _num(ln.precio_unitario), ""]

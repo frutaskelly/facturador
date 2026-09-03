@@ -422,9 +422,14 @@ class ProductoClienteOut(BaseModel):
     codigo_cliente: Optional[str] = None
     nombre_cliente: Optional[str] = None
     presentacion: Optional[str] = None
+    # None = fila genérica (todas las plazas); con valor = clave de ESA plaza.
+    sucursal_id: Optional[uuid.UUID] = None
+    sucursal_nombre: Optional[str] = None
 
 
 class ProductoClienteUpsert(BaseModel):
     codigo_cliente: Optional[str] = Field(default=None, max_length=50)
     nombre_cliente: Optional[str] = Field(default=None, max_length=254)
     presentacion: Optional[str] = Field(default=None, max_length=20)
+    # Omitida/None = upsert de la fila genérica; con valor, el de la plaza.
+    sucursal_id: Optional[uuid.UUID] = None

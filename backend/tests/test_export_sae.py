@@ -458,3 +458,172 @@ def test_export_factura_exige_cliente_en_espejo(client, env, auth_as):
     finally:
         db.query(_C).filter(_C.id == env["cli"]).update({"espejo_sae": True})
         db.commit(); db.close()
+
+
+def test_clave_por_sucursal_gana_y_generica_ampara(client, env, auth_as):
+    """Claves POR PLAZA (caso EHMO): la fila de producto_clientes CON sucursal
+    decide para las remisiones de esa sucursal; las demás caen a la genérica.
+    El archivo debe llevar la CVE de la plaza — mandar la de otra empresa SAE
+    importaría el artículo equivocado."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suc = crear_sucursal(db, tenant_id=env["tenant"], cliente_id=env["cli"],
+                             nombre="Villahermosa")
+        db.add(ProductoCliente(tenant_id=env["tenant"], cliente_id=env["cli"],
+                               producto_id=env["prod"], sucursal_id=suc.id,
+                               codigo_cliente="ACEITETABKG"))
+        db.commit()
+        suc_id = str(suc.id)
+    finally:
+        db.close()
+
+    # Remisión SIN sucursal → clave genérica.
+    rem_gen = _rem(client, h, env)
+    r = client.post("/api/v1/remisiones/export-sae", headers=h,
+                    json={"ids": [rem_gen["id"]], "tipo": "FACTURA",
+                          "folios": {"ZHGO": 500}, "fecha": "2026-09-03"})
+    assert r.status_code == 200, r.text
+    hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_name("Facturas")
+    assert [c.value for c in hoja.row(1)][4] == "ACEI-ACEI-639"
+
+    # Remisión DE la sucursal → su clave pisa a la genérica.
+    rem_suc = _rem(client, h, env, su_pedido="9902", sucursal_id=suc_id)
+    r = client.post("/api/v1/remisiones/export-sae", headers=h,
+                    json={"ids": [rem_suc["id"]], "tipo": "FACTURA",
+                          "folios": {"ZHGO": 501}, "fecha": "2026-09-03"})
+    assert r.status_code == 200, r.text
+    hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_name("Facturas")
+    assert [c.value for c in hoja.row(1)][4] == "ACEITETABKG"
+
+
+def test_clave_de_otra_plaza_no_ampara(client, env, auth_as):
+    """Un producto cuya ÚNICA clave es de una plaza: las remisiones de otras
+    plazas (o sin sucursal) se detienen igual que si no hubiera clave — la
+    lección EHMO: prestar la clave de Pachuca a Tabasco mandaría a SAE una
+    clave que su inventario no conoce, o que es OTRO artículo."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        suc_a = crear_sucursal(db, tenant_id=env["tenant"], cliente_id=env["cli"],
+                               nombre="Plaza A")
+        suc_b = crear_sucursal(db, tenant_id=env["tenant"], cliente_id=env["cli"],
+                               nombre="Plaza B")
+        nuevo = Producto(tenant_id=env["tenant"], sku=f"8{suffix}",
+                         nombre="SOLO PLAZA A", clave_sat="50300000", unidad_sat="KGM")
+        db.add(nuevo); db.flush()
+        db.add(ProductoCliente(tenant_id=env["tenant"], cliente_id=env["cli"],
+                               producto_id=nuevo.id, sucursal_id=suc_a.id,
+                               codigo_cliente="SOLOA-001"))
+        db.commit()
+        nuevo_id, suc_a_id, suc_b_id = str(nuevo.id), str(suc_a.id), str(suc_b.id)
+    finally:
+        db.close()
+
+    lineas = [{"producto_id": nuevo_id, "cantidad_solicitada": 2, "precio_unitario": 10}]
+
+    # Sin sucursal: no hay genérica que ampare → se detiene.
+    rem = _rem(client, h, env, lineas=lineas)
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
+    assert pv["ok"] is False
+    assert any("sin código del cliente" in e for e in pv["errores"])
+
+    # Con OTRA sucursal: la clave de la plaza A no se presta → se detiene.
+    rem_b = _rem(client, h, env, su_pedido="9903", sucursal_id=suc_b_id, lineas=lineas)
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem_b["id"]], "tipo": "FACTURA"}).json()
+    assert pv["ok"] is False
+    assert any("sin código del cliente" in e for e in pv["errores"])
+
+    # Con SU sucursal: pasa.
+    rem_a = _rem(client, h, env, su_pedido="9904", sucursal_id=suc_a_id, lineas=lineas)
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem_a["id"]], "tipo": "FACTURA"}).json()
+    assert pv["ok"] is True, pv
+
+
+def test_preflight_sin_clave_en_lista_y_detalle(client, env, auth_as):
+    """El preflight: la lista y el detalle avisan 'N partidas sin clave SAE'
+    ANTES del modal de exportar, con el mismo conteo que detiene el lote; y al
+    capturar la clave en el catálogo del cliente, el aviso se apaga."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        nuevo = Producto(tenant_id=env["tenant"], sku=f"7{suffix}",
+                         nombre="SIN CLAVE AUN", clave_sat="50300000", unidad_sat="KGM")
+        db.add(nuevo); db.commit()
+        nuevo_id = str(nuevo.id)
+    finally:
+        db.close()
+    rem = _rem(client, h, env, lineas=[
+        {"producto_id": env["prod"], "cantidad_solicitada": 5, "precio_unitario": 836},
+        {"producto_id": nuevo_id, "cantidad_solicitada": 2, "precio_unitario": 10},
+    ])
+
+    # Lista: la fila trae el conteo.
+    filas = client.get("/api/v1/remisiones", headers=h,
+                       params={"q": rem["folio_interno"]}).json()["items"]
+    fila = next(f for f in filas if f["id"] == rem["id"])
+    assert fila["sin_clave_sae"] == 1
+
+    # Detalle: el conteo Y la línea exacta.
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["sin_clave_sae"] == 1
+    marcas = {ln["producto_id"]: ln.get("sin_clave_sae") for ln in det["lineas"]}
+    assert marcas[nuevo_id] is True
+    assert not marcas[env["prod"]]
+
+    # Capturar la clave en el catálogo apaga el aviso (y el export pasa).
+    r = client.put(f"/api/v1/clientes/{env['cli']}/catalogo/{nuevo_id}", headers=h,
+                   json={"codigo_cliente": "NUEV-001"})
+    assert r.status_code == 200, r.text
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["sin_clave_sae"] is None
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
+    assert pv["ok"] is True, pv
+
+
+def test_catalogo_cliente_generica_y_por_sucursal_conviven(client, env, auth_as):
+    """El catálogo del cliente acepta la fila genérica Y una por sucursal para
+    el mismo producto, las devuelve juntas y borra solo la que se le pide."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suc = crear_sucursal(db, tenant_id=env["tenant"], cliente_id=env["cli"],
+                             nombre="Tabasco Cat")
+        db.commit()
+        suc_id = str(suc.id)
+    finally:
+        db.close()
+
+    # La genérica ya existe (fixture). Se agrega la de la plaza.
+    r = client.put(f"/api/v1/clientes/{env['cli']}/catalogo/{env['prod']}", headers=h,
+                   json={"codigo_cliente": "ACEITETABKG", "sucursal_id": suc_id})
+    assert r.status_code == 200, r.text
+    assert r.json()["sucursal_id"] == suc_id
+
+    rows = client.get(f"/api/v1/clientes/{env['cli']}/catalogo", headers=h).json()
+    del_prod = [x for x in rows if x["producto_id"] == env["prod"]]
+    assert len(del_prod) == 2
+    assert del_prod[0]["sucursal_id"] is None          # la genérica primero
+    assert del_prod[0]["codigo_cliente"] == "ACEI-ACEI-639"
+    assert del_prod[1]["sucursal_id"] == suc_id
+    assert del_prod[1]["codigo_cliente"] == "ACEITETABKG"
+
+    # Editar la genérica NO toca la de la plaza (el lookup filtra sucursal).
+    r = client.put(f"/api/v1/clientes/{env['cli']}/catalogo/{env['prod']}", headers=h,
+                   json={"codigo_cliente": "ACEI-ACEI-639", "nombre_cliente": "ACEITE"})
+    assert r.status_code == 200, r.text
+    assert r.json()["sucursal_id"] is None
+
+    # Borrar la de la plaza deja viva la genérica.
+    r = client.delete(f"/api/v1/clientes/{env['cli']}/catalogo/{env['prod']}",
+                      headers=h, params={"sucursal_id": suc_id})
+    assert r.status_code == 204
+    rows = client.get(f"/api/v1/clientes/{env['cli']}/catalogo", headers=h).json()
+    del_prod = [x for x in rows if x["producto_id"] == env["prod"]]
+    assert len(del_prod) == 1 and del_prod[0]["sucursal_id"] is None

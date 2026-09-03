@@ -89,12 +89,22 @@ def build_payload(db: Session, factura: Factura) -> dict:
     # IdentificationNumber (NoIdentificacion) = código del cliente o el SKU —
     # siempre viaja, así todos los CFDI llevan una clave rastreable sin duplicar
     # productos por cliente.
+    # Con claves por plaza (producto_clientes.sucursal_id), la GENÉRICA manda
+    # en el CFDI nativo: se ordena para que pise a las scoped en el dict. Las
+    # claves por plaza existen para el masivo de SAE (cada plaza exporta a su
+    # empresa); la factura nativa no carga plaza por línea hoy.
     alias_cliente = {
         pc.producto_id: pc
         for pc in db.query(ProductoCliente)
         .filter(
             ProductoCliente.cliente_id == factura.cliente_id,
             ProductoCliente.producto_id.in_(prod_ids),
+        )
+        # Y desempate por sucursal_id: si solo hay filas scoped (sin genérica),
+        # que al menos gane SIEMPRE la misma, no la que el heap devuelva hoy.
+        .order_by(
+            ProductoCliente.sucursal_id.is_(None).asc(),
+            ProductoCliente.sucursal_id.asc(),
         )
         .all()
     } if prod_ids else {}

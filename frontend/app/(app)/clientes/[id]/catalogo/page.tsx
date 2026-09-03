@@ -20,7 +20,8 @@ import { useToast } from "@/components/ui/Toast";
 import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
-import type { Cliente, ProductoClienteRow } from "@/lib/types";
+import type { Page } from "@/lib/hooks";
+import type { Cliente, ProductoClienteRow, Sucursal } from "@/lib/types";
 
 const WRITE = "cliente:gestionar";
 
@@ -29,6 +30,10 @@ type FormState = {
   producto_nombre: string;
   codigo_cliente: string;
   nombre_cliente: string;
+  // "" = fila genérica (todas las plazas); un id = la clave de ESA plaza.
+  // Identifica la fila junto con producto_id: un producto puede tener la
+  // genérica Y una por sucursal (claves SAE distintas por plaza, caso EHMO).
+  sucursal_id: string;
   esNuevo: boolean;
 };
 
@@ -40,6 +45,7 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
 
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [rows, setRows] = useState<ProductoClienteRow[] | null>(null);
+  const [sucursales, setSucursales] = useState<Sucursal[]>([]);
   const [error, setError] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
   const [toDelete, setToDelete] = useState<ProductoClienteRow | null>(null);
@@ -53,6 +59,10 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
 
   useEffect(() => {
     apiFetch<Cliente>(`/api/v1/clientes/${id}`).then(setCliente).catch(() => setError(true));
+    // Las plazas del cliente, para capturar una clave por sucursal (EHMO).
+    apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${id}&limit=200`)
+      .then((p) => setSucursales(p.items))
+      .catch(() => setSucursales([]));
     reload();
   }, [id, reload]);
 
@@ -73,6 +83,7 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
         body: JSON.stringify({
           codigo_cliente: form.codigo_cliente.trim() || null,
           nombre_cliente: form.nombre_cliente.trim() || null,
+          sucursal_id: form.sucursal_id || null,
         }),
       });
       toast.success("Guardado");
@@ -88,7 +99,10 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
   async function confirmDelete() {
     if (!toDelete) return;
     try {
-      await apiFetch(`/api/v1/clientes/${id}/catalogo/${toDelete.producto_id}`, {
+      // La sucursal identifica la fila: borrar la de una plaza no debe
+      // arrastrar la genérica (ni al revés).
+      const qs = toDelete.sucursal_id ? `?sucursal_id=${toDelete.sucursal_id}` : "";
+      await apiFetch(`/api/v1/clientes/${id}/catalogo/${toDelete.producto_id}${qs}`, {
         method: "DELETE",
       });
       toast.success("Eliminado — sus facturas usarán el nombre y SKU internos");
@@ -108,6 +122,17 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
     ) },
     { header: "Código del cliente", cell: (r) => r.codigo_cliente ?? "—" },
     { header: "Nombre del cliente", cell: (r) => r.nombre_cliente ?? "—" },
+    {
+      header: "Sucursal",
+      cell: (r) =>
+        r.sucursal_id ? (
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+            {r.sucursal_nombre ?? "plaza"}
+          </span>
+        ) : (
+          <span className="text-xs text-muted">Todas</span>
+        ),
+    },
     {
       header: "",
       className: "text-right w-1",
@@ -152,6 +177,7 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
                     producto_nombre: "",
                     codigo_cliente: "",
                     nombre_cliente: "",
+                    sucursal_id: "",
                     esNuevo: true,
                   })
                 }
@@ -175,6 +201,7 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
                   producto_nombre: `${r.producto_nombre} (${r.producto_sku})`,
                   codigo_cliente: r.codigo_cliente ?? "",
                   nombre_cliente: r.nombre_cliente ?? "",
+                  sucursal_id: r.sucursal_id ?? "",
                   esNuevo: false,
                 })
             : undefined
@@ -248,6 +275,34 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
                 placeholder="JITOMATE ROMA"
               />
             </Field>
+            <Field
+              label="Sucursal"
+              hint="Solo si esta plaza usa una clave distinta a la general — la exportación a SAE usa la de la plaza y cae a la general"
+            >
+              {form.esNuevo ? (
+                <select
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  value={form.sucursal_id}
+                  onChange={(e) => setForm({ ...form, sucursal_id: e.target.value })}
+                >
+                  <option value="">Todas (clave general)</option>
+                  {sucursales.map((s) => (
+                    <option key={s.id} value={s.id}>{s.nombre}</option>
+                  ))}
+                </select>
+              ) : (
+                // La sucursal identifica la fila: cambiarla sería otra fila,
+                // no una edición — se crea desde "Agregar producto".
+                <Input
+                  value={
+                    form.sucursal_id
+                      ? sucursales.find((s) => s.id === form.sucursal_id)?.nombre ?? "Plaza"
+                      : "Todas (clave general)"
+                  }
+                  disabled
+                />
+              )}
+            </Field>
           </div>
         ) : null}
       </Modal>
@@ -255,7 +310,11 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
       <ConfirmDialog
         open={toDelete !== null}
         title="Quitar del catálogo del cliente"
-        message={`¿Quitar "${toDelete?.producto_nombre}"? Sus facturas volverán a usar el nombre y SKU internos.`}
+        message={
+          toDelete?.sucursal_id
+            ? `¿Quitar la clave de "${toDelete?.producto_nombre}" para ${toDelete?.sucursal_nombre ?? "esa plaza"}? La plaza volverá a usar la clave general del cliente.`
+            : `¿Quitar "${toDelete?.producto_nombre}"? Sus facturas volverán a usar el nombre y SKU internos.`
+        }
         onClose={() => setToDelete(null)}
         onConfirm={confirmDelete}
       />

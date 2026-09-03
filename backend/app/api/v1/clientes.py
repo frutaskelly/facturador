@@ -426,13 +426,19 @@ def catalogo_cliente(
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     get_or_404(db, Cliente, cliente_id)
     rows = (
-        db.query(ProductoCliente, Producto)
+        db.query(ProductoCliente, Producto, Sucursal.nombre)
         .join(Producto, Producto.id == ProductoCliente.producto_id)
+        .outerjoin(Sucursal, Sucursal.id == ProductoCliente.sucursal_id)
         .filter(
             ProductoCliente.cliente_id == cliente_id,
             Producto.deleted_at.is_(None),
         )
-        .order_by(Producto.nombre.asc())
+        # La genérica primero y sus plazas debajo, por producto.
+        .order_by(
+            Producto.nombre.asc(),
+            ProductoCliente.sucursal_id.is_(None).desc(),
+            Sucursal.nombre.asc(),
+        )
         .all()
     )
     return [
@@ -443,8 +449,10 @@ def catalogo_cliente(
             codigo_cliente=pc.codigo_cliente,
             nombre_cliente=pc.nombre_cliente,
             presentacion=pc.presentacion,
+            sucursal_id=pc.sucursal_id,
+            sucursal_nombre=suc_nombre,
         )
-        for pc, p in rows
+        for pc, p, suc_nombre in rows
     ]
 
 
@@ -465,17 +473,28 @@ def upsert_catalogo_cliente(
             status_code=422,
             detail="Captura el código y/o el nombre que usa el cliente",
         )
+    sucursal = None
+    if payload.sucursal_id is not None:
+        sucursal = get_or_404(db, Sucursal, payload.sucursal_id)
+    # El filtro por sucursal_id va explícito: fila genérica y filas por plaza
+    # conviven para el mismo (cliente, producto) — sin él, one_or_none truena.
     pc = (
         db.query(ProductoCliente)
         .filter(
             ProductoCliente.cliente_id == cliente_id,
             ProductoCliente.producto_id == producto_id,
+            ProductoCliente.sucursal_id.is_(None)
+            if payload.sucursal_id is None
+            else ProductoCliente.sucursal_id == payload.sucursal_id,
         )
         .one_or_none()
     )
     if pc is None:
         pc = ProductoCliente(
-            tenant_id=ctx.tenant_id, cliente_id=cliente_id, producto_id=producto_id
+            tenant_id=ctx.tenant_id,
+            cliente_id=cliente_id,
+            producto_id=producto_id,
+            sucursal_id=payload.sucursal_id,
         )
         db.add(pc)
     pc.codigo_cliente = codigo
@@ -493,6 +512,8 @@ def upsert_catalogo_cliente(
         codigo_cliente=pc.codigo_cliente,
         nombre_cliente=pc.nombre_cliente,
         presentacion=pc.presentacion,
+        sucursal_id=pc.sucursal_id,
+        sucursal_nombre=sucursal.nombre if sucursal else None,
     )
 
 
@@ -500,15 +521,22 @@ def upsert_catalogo_cliente(
 def delete_catalogo_cliente(
     cliente_id: UUID,
     producto_id: UUID,
+    sucursal_id: Optional[UUID] = Query(default=None),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
+    """Borra UNA fila del catálogo: sin `sucursal_id`, la genérica; con él, la
+    de esa plaza. Nunca las dos de un jalón — borrar la genérica no debe
+    arrastrar en silencio la clave que otra plaza sí usa."""
     get_or_404(db, Cliente, cliente_id)
     (
         db.query(ProductoCliente)
         .filter(
             ProductoCliente.cliente_id == cliente_id,
             ProductoCliente.producto_id == producto_id,
+            ProductoCliente.sucursal_id.is_(None)
+            if sucursal_id is None
+            else ProductoCliente.sucursal_id == sucursal_id,
         )
         .delete()
     )

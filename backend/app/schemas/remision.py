@@ -35,6 +35,9 @@ class LineaRemisionOut(ORMModel):
     ieps_importe: Decimal = Decimal("0")
     lote_id: Optional[uuid.UUID] = None
     notas: Optional[str] = None
+    # Preflight del export a SAE: True = esta línea no tiene clave del cliente
+    # (ni de su sucursal ni genérica). Solo viene en el detalle.
+    sin_clave_sae: Optional[bool] = None
 
 
 class RemisionCreate(BaseModel):
@@ -142,6 +145,10 @@ class RemisionOut(ORMModel):
     oc_id: Optional[uuid.UUID] = None
     oc_archivo_url: Optional[str] = None
     oc_archivo_nombre: Optional[str] = None
+    # Preflight del export a SAE: cuántas partidas vivas NO tienen clave del
+    # cliente (el mismo conteo que detiene el lote en el modal de exportar).
+    # None = todas la tienen, o la remisión ya está amparada/cancelada.
+    sin_clave_sae: Optional[int] = None
     subtotal: Decimal
     descuento: Decimal
     iva: Decimal
