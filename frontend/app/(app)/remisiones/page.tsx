@@ -2506,7 +2506,7 @@ export default function RemisionesPage() {
         onConfirm={confirmar} onClose={() => setToConfirm(null)} loading={saving} />
       <ConfirmDialog open={toCancel !== null} title="Cancelar remisión"
         message={`¿Cancelar ${toCancel?.folio_interno}? Se liberará el inventario reservado.`}
-        confirmLabel="Cancelada" confirmVariant="danger"
+        confirmLabel="Sí, cancelar la remisión" cancelLabel="Volver" confirmVariant="danger"
         onConfirm={cancelar} onClose={() => setToCancel(null)} loading={saving} />
       <ConfirmDialog open={facturarSobregiro !== null} title="Existencia insuficiente"
         message={`${facturarSobregiro?.grupos.length ?? 0} factura(s) no tienen existencia suficiente para el/los borrador(es). ¿Facturar de todas formas? El inventario quedará en negativo (sobregiro).`}
@@ -2835,7 +2835,7 @@ export default function RemisionesPage() {
         onConfirm={() => setCancelBulkStep(2)} onClose={() => setCancelBulkStep(0)} loading={bulkBusy} />
       <ConfirmDialog open={cancelBulkStep === 2} title="Confirmación final"
         message={`Esta acción no se puede deshacer. Se cancelarán de forma definitiva: ${cancelablesSel.map((r) => r.folio_interno).join(", ")}. ¿Confirmas la cancelación?`}
-        confirmLabel="Sí, cancelar definitivamente" confirmVariant="danger"
+        confirmLabel="Sí, cancelar definitivamente" cancelLabel="Volver" confirmVariant="danger"
         onConfirm={() => { void bulkCancelar(); }} onClose={() => setCancelBulkStep(0)} loading={bulkBusy} />
 
       <Modal
