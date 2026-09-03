@@ -16,12 +16,14 @@ permisos nuevos ni una migración de catálogo.
 """
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1008,6 +1010,38 @@ def crear_remision(
     p = oc.payload or {}
     origen = f"OC:{oc.origen_externo}"[:120]
     folio = (oc.folio_externo or "").strip()
+    # El candado por `origen_externo` no ve las remisiones capturadas a mano:
+    # la OC 25297 se capturó como «OC 25297» el día que llegó y la bandeja
+    # generó otra remisión al procesarla después. Se compara solo por dígitos
+    # (sin «OC », espacios ni ceros a la izquierda) y por cliente; acotado a 90
+    # días porque un folio de OC puede reciclarse con los años.
+    clave = re.sub(r"\D", "", folio).lstrip("0")
+    if clave:
+        dup = (
+            db.query(Remision)
+            .filter(
+                Remision.cliente_facturacion_id == oc.cliente_id,
+                Remision.deleted_at.is_(None),
+                Remision.estado != "CANCELADA",
+                Remision.created_at >= func.now() - timedelta(days=90),
+                func.ltrim(
+                    func.regexp_replace(
+                        func.coalesce(Remision.su_pedido, ""), r"\D", "", "g"
+                    ), "0",
+                ) == clave,
+            )
+            .order_by(Remision.created_at)
+            .first()
+        )
+        if dup is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"El pedido {folio} ya está en la remisión "
+                    f"{dup.folio_interno} de este cliente; revísala (o cancélala) "
+                    "antes de generar otra desde la bandeja."
+                ),
+            )
     # Las observaciones de la remisión: se imprimen en su PDF y pasan tal cual a
     # las de la factura al facturarla. El punto de entrega va primero porque es
     # lo que el equipo busca ahí. «OC <folio>» se conserva con ese formato exacto

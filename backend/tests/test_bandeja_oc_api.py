@@ -348,6 +348,35 @@ def test_crear_remision_liga_y_no_se_puede_dos_veces(client, env, auth_as):
     ).status_code == 409
 
 
+def test_pedido_ya_capturado_a_mano_no_genera_otra_remision(client, env, auth_as):
+    """El caso de la OC 25297: la remisión se capturó a mano («OC 25297») y al
+    procesar la bandeja días después salió un segundo folio con el mismo
+    pedido. El cruce es por dígitos: «OC 1188» y «1188» son el mismo pedido."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    manual = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["ehmo"], "almacen_id": env["alm"],
+        "su_pedido": "OC 1188",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": "25",
+                    "precio_unitario": "18.50"}],
+    })
+    assert manual.status_code == 201, manual.text
+
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+    body = {"almacen_id": env["alm"], "lineas": [{
+        "producto_id": env["prod"], "cantidad": "25", "precio_unitario": "18.50"}]}
+    r = client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision", headers=h, json=body)
+    assert r.status_code == 409, r.text
+    assert manual.json()["folio_interno"] in r.json()["detail"]
+
+    # Cancelada la capturada a mano, la orden sí puede generar su remisión.
+    ok = client.post(f"/api/v1/remisiones/{manual.json()['id']}/cancelar", headers=h)
+    assert ok.status_code == 200, ok.text
+    r = client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision", headers=h, json=body)
+    assert r.status_code == 200, r.text
+
+
 def test_crear_remision_sin_cliente_es_422(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
@@ -552,8 +581,13 @@ def test_el_almacen_se_resuelve_como_la_serie(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
 
+    # Cada intento es una OC distinta: repetir el folio para el mismo cliente
+    # ahora es un duplicado y la bandeja lo rechaza.
+    folios = iter(("2001", "2002", "2003"))
+
     def _crear():
-        oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+        oc = client.post("/api/v1/oc-recibidas", headers=h,
+                         json=_oc(folio_externo=next(folios))).json()
         client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
                      json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"],
                            "aprender": False})
@@ -629,8 +663,12 @@ def test_la_serie_del_grupo_gana_sobre_la_del_cliente(client, env, auth_as):
     propia = client.post("/api/v1/series", headers=h, json={
         "codigo": "GRUPO1", "tipo_documento": "REMISION", "tipo": "NO_FISCAL"}).json()
 
+    # Folio distinto por orden: el mismo pedido dos veces ya es un duplicado.
+    folios = iter(("3001", "3002"))
+
     def _remision(**over):
-        oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(jid=jid, **over)).json()
+        oc = client.post("/api/v1/oc-recibidas", headers=h,
+                         json=_oc(jid=jid, folio_externo=next(folios), **over)).json()
         client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
                      json={"cliente_id": env["ehmo"], "aprender": False})
         hecho = client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision", headers=h, json={
