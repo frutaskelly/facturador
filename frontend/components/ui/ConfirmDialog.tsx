@@ -8,6 +8,7 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel = "Eliminar",
+  cancelLabel = "Cancelar",
   confirmVariant = "danger",
   onConfirm,
   onClose,
@@ -17,6 +18,10 @@ export function ConfirmDialog({
   title: string;
   message: string;
   confirmLabel?: string;
+  /** Texto del botón que descarta el diálogo. Se cambia cuando la acción
+   *  confirmada ya se llama "cancelar" (cancelar una remisión, una orden), para
+   *  que los dos botones no digan lo mismo y se descarte sin querer. */
+  cancelLabel?: string;
   /** Estilo del botón de confirmar. `danger` (rojo, por defecto) para acciones
    *  destructivas; `primary` (azul) o `success` (verde) para confirmaciones
    *  no destructivas. */
@@ -34,7 +39,7 @@ export function ConfirmDialog({
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
-            Cancelar
+            {cancelLabel}
           </Button>
           <Button variant={confirmVariant} onClick={onConfirm} disabled={loading}>
             {confirmLabel}
