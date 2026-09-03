@@ -330,7 +330,12 @@ export interface paths {
         /** Upsert Catalogo Cliente */
         put: operations["upsert_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__put"];
         post?: never;
-        /** Delete Catalogo Cliente */
+        /**
+         * Delete Catalogo Cliente
+         * @description Borra UNA fila del catálogo: sin `sucursal_id`, la genérica; con él, la
+         *     de esa plaza. Nunca las dos de un jalón — borrar la genérica no debe
+         *     arrastrar en silencio la clave que otra plaza sí usa.
+         */
         delete: operations["delete_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__delete"];
         options?: never;
         head?: never;
@@ -6711,6 +6716,8 @@ export interface components {
             producto_id: string;
             /** Producto Nombre */
             producto_nombre?: string | null;
+            /** Sin Clave Sae */
+            sin_clave_sae?: boolean | null;
         };
         /** ListaAsignacionCreate */
         ListaAsignacionCreate: {
@@ -8159,6 +8166,10 @@ export interface components {
             producto_nombre: string;
             /** Producto Sku */
             producto_sku: string;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+            /** Sucursal Nombre */
+            sucursal_nombre?: string | null;
         };
         /** ProductoClienteUpsert */
         ProductoClienteUpsert: {
@@ -8168,6 +8179,8 @@ export interface components {
             nombre_cliente?: string | null;
             /** Presentacion */
             presentacion?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
         };
         /** ProductoCreate */
         ProductoCreate: {
@@ -8830,6 +8843,8 @@ export interface components {
             revision_pendiente: boolean;
             /** Serie Id */
             serie_id?: string | null;
+            /** Sin Clave Sae */
+            sin_clave_sae?: number | null;
             /** Su Pedido */
             su_pedido?: string | null;
             /** Subtotal */
@@ -8923,6 +8938,8 @@ export interface components {
             revision_pendiente: boolean;
             /** Serie Id */
             serie_id?: string | null;
+            /** Sin Clave Sae */
+            sin_clave_sae?: number | null;
             /** Su Pedido */
             su_pedido?: string | null;
             /** Subtotal */
@@ -10573,7 +10590,9 @@ export interface operations {
     };
     delete_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                sucursal_id?: string | null;
+            };
             header?: {
                 "X-Tenant-Id"?: string | null;
             };

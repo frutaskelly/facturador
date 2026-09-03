@@ -1206,9 +1206,14 @@ def _ejecutar_import(
     ids_clientes_sel = [c.id for c in clientes]
     pc_previos: dict[tuple, ProductoCliente] = {}
     if ids_clientes_sel:
+        # Solo genéricas: el import no conoce plazas, y sin este filtro una
+        # fila por sucursal pisaría a la genérica en el dict (o al revés).
         for pc in (
             db.query(ProductoCliente)
-            .filter(ProductoCliente.cliente_id.in_(ids_clientes_sel))
+            .filter(
+                ProductoCliente.cliente_id.in_(ids_clientes_sel),
+                ProductoCliente.sucursal_id.is_(None),
+            )
             .all()
         ):
             pc_previos[(pc.cliente_id, pc.producto_id)] = pc
@@ -1506,12 +1511,16 @@ def catalogo_cliente_batch(
         p for (p,) in db.query(Producto.id)
         .filter(Producto.id.in_(ids_prod), Producto.deleted_at.is_(None)).all()
     }
+    # Solo filas GENÉRICAS: la importación de listas escribe la clave general
+    # del cliente; las filas por sucursal (claves por plaza, caso EHMO) se
+    # administran en su catálogo y aquí ni se leen ni se pisan.
     previos = {
         (pc.cliente_id, pc.producto_id): pc
         for pc in db.query(ProductoCliente)
         .filter(
             ProductoCliente.cliente_id.in_([c.id for c in clientes]),
             ProductoCliente.producto_id.in_(ids_prod),
+            ProductoCliente.sucursal_id.is_(None),
         )
         .all()
     }

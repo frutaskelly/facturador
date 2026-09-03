@@ -222,10 +222,15 @@ def cotizar_documento(
     # normal (alias del cliente → alias global → exacto → difuso).
     codigos: dict[str, Optional[UUID]] = {}
     presentacion_cliente: dict[UUID, str] = {}
+    # Genérica al FINAL (last-wins): con filas por plaza (0067), la
+    # presentación sugerida sale de la genérica de forma determinista.
     for pc in db.query(ProductoCliente).filter(
         ProductoCliente.tenant_id == tenant_id,
         ProductoCliente.cliente_id == cliente_id,
         ProductoCliente.codigo_cliente.isnot(None),
+    ).order_by(
+        ProductoCliente.sucursal_id.is_(None).asc(),
+        ProductoCliente.sucursal_id.asc(),
     ):
         cod = _norm_codigo(pc.codigo_cliente)
         codigos[cod] = None if (cod in codigos and codigos[cod] != pc.producto_id) else (
@@ -389,10 +394,14 @@ def cotizar_requisicion(
             por_sku.setdefault(_norm_codigo(p.sku), p.id)
     codigos_cliente: dict[str, Optional[UUID]] = {}
     presentacion_cliente: dict[UUID, str] = {}
+    # Genérica al FINAL (last-wins): determinista con filas por plaza (0067).
     for pc in db.query(ProductoCliente).filter(
         ProductoCliente.tenant_id == tenant_id,
         ProductoCliente.cliente_id == cliente.id,
         ProductoCliente.codigo_cliente.isnot(None),
+    ).order_by(
+        ProductoCliente.sucursal_id.is_(None).asc(),
+        ProductoCliente.sucursal_id.asc(),
     ):
         cod = _norm_codigo(pc.codigo_cliente)
         codigos_cliente[cod] = None if (cod in codigos_cliente and codigos_cliente[cod] != pc.producto_id) \

@@ -7922,6 +7922,17 @@
        }
       ],
       "title": "Producto Nombre"
+     },
+     "sin_clave_sae": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sin Clave Sae"
      }
     },
     "required": [
@@ -12200,6 +12211,29 @@
      "producto_sku": {
       "title": "Producto Sku",
       "type": "string"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     },
+     "sucursal_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Nombre"
      }
     },
     "required": [
@@ -12247,6 +12281,18 @@
        }
       ],
       "title": "Presentacion"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
      }
     },
     "title": "ProductoClienteUpsert",
@@ -14415,6 +14461,17 @@
       ],
       "title": "Serie Id"
      },
+     "sin_clave_sae": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sin Clave Sae"
+     },
      "su_pedido": {
       "anyOf": [
        {
@@ -14703,6 +14760,17 @@
        }
       ],
       "title": "Serie Id"
+     },
+     "sin_clave_sae": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sin Clave Sae"
      },
      "su_pedido": {
       "anyOf": [
@@ -18758,6 +18826,7 @@
   },
   "/api/v1/clientes/{cliente_id}/catalogo/{producto_id}": {
    "delete": {
+    "description": "Borra UNA fila del catálogo: sin `sucursal_id`, la genérica; con él, la\nde esa plaza. Nunca las dos de un jalón — borrar la genérica no debe\narrastrar en silencio la clave que otra plaza sí usa.",
     "operationId": "delete_catalogo_cliente_api_v1_clientes__cliente_id__catalogo__producto_id__delete",
     "parameters": [
      {
@@ -18778,6 +18847,23 @@
        "format": "uuid",
        "title": "Producto Id",
        "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "sucursal_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Sucursal Id"
       }
      },
      {

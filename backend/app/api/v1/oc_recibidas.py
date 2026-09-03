@@ -398,6 +398,13 @@ def _codigos_para(db: Session, cliente_id) -> tuple[dict, dict, dict]:
         # quienes comparten códigos. Sin filtro, cada apertura de OC traía la
         # tabla entera.
         q = q.filter(ProductoCliente.codigo_cliente.isnot(None))
+    # Genérica al FINAL (last-wins en pres_cliente): con filas por plaza (0067)
+    # la presentación sugerida sale de la genérica, no de la plaza que el heap
+    # devuelva hoy; y entre scoped, siempre la misma.
+    q = q.order_by(
+        ProductoCliente.sucursal_id.is_(None).asc(),
+        ProductoCliente.sucursal_id.asc(),
+    )
     for pc in q.all():
         cod = _norm_codigo(pc.codigo_cliente or "")
         if not cod:
@@ -1094,27 +1101,47 @@ def _registrar_codigos(db: Session, ctx: AuthContext, oc: OCRecibida, lineas) ->
     SOLO cuando el producto aún no tiene código para ese cliente: el código
     preferido de salida (el que se imprime y timbra) no se pisa desde la
     bandeja — eso es tarea del catálogo del cliente, con permiso de catálogo.
+
+    La excepción es el cliente con claves POR PLAZA (EHMO): si la genérica ya
+    existe con OTRA clave y la OC trae sucursal, la clave del documento se
+    aprende scoped a esa sucursal — es la lista del cliente para esa plaza, no
+    un pisotón a la genérica. Filas mínimas: sin conflicto no se scopea nada.
     """
     con_clave = [ln for ln in lineas if (getattr(ln, "clave", None) or "").strip()]
     if not con_clave:
         return
     existentes = {
-        pc.producto_id: pc
+        (pc.producto_id, pc.sucursal_id): pc
         for pc in db.query(ProductoCliente)
         .filter(ProductoCliente.cliente_id == oc.cliente_id)
         .all()
     }
     for ln in con_clave:
-        if ln.producto_id in existentes:
-            continue
-        db.add(ProductoCliente(
+        clave = ln.clave.strip()[:50]
+        generica = existentes.get((ln.producto_id, None))
+        scoped = (
+            existentes.get((ln.producto_id, oc.sucursal_id))
+            if oc.sucursal_id else None
+        )
+        if scoped is not None:
+            continue  # esa plaza ya tiene su clave — no se pisa
+        if generica is None:
+            sucursal_id = None  # genérica por default: vale para todas las plazas
+        elif oc.sucursal_id and (generica.codigo_cliente or "") != clave:
+            sucursal_id = oc.sucursal_id  # conflicto real → clave de ESTA plaza
+        else:
+            continue  # misma clave que la genérica, o sin sucursal que decida
+        fila = ProductoCliente(
             tenant_id=ctx.tenant_id, cliente_id=oc.cliente_id,
-            producto_id=ln.producto_id,
-            codigo_cliente=ln.clave.strip()[:50],
+            producto_id=ln.producto_id, sucursal_id=sucursal_id,
+            codigo_cliente=clave,
             nombre_cliente=(ln.texto_original or "").strip()[:254] or None,
             presentacion=ln.presentacion,
-        ))
-        existentes[ln.producto_id] = True  # una sola fila por producto en este lote
+        )
+        db.add(fila)
+        # el objeto (no un centinela): una línea repetida en este mismo lote
+        # debe poder leer .codigo_cliente de lo que se acaba de agregar
+        existentes[(ln.producto_id, sucursal_id)] = fila
     db.flush()
 
 

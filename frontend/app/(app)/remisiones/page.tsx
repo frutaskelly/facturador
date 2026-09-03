@@ -1000,6 +1000,9 @@ export default function RemisionesPage() {
           <div><span className="text-muted">Fecha:</span> {fmtDate(d.fecha_remision)}</div>
           <div><span className="text-muted">Estado:</span> <Badge tone={ESTADO_TONE[d.estado] ?? "muted"}>{d.estado}</Badge></div>
           {d.revision_pendiente ? <Badge tone="warning">POR REVISAR</Badge> : null}
+          {(d.sin_clave_sae ?? 0) > 0 ? (
+            <Badge tone="warning">{d.sin_clave_sae} SIN CLAVE SAE</Badge>
+          ) : null}
         </div>
         {d.revision_pendiente ? (
           <Alert tone="warning">
@@ -1008,6 +1011,29 @@ export default function RemisionesPage() {
             confirma, no se factura y no sale a SAE hasta que la des por revisada — ábrela con
             «Editar» para hacerlo.
           </Alert>
+        ) : null}
+        {(d.sin_clave_sae ?? 0) > 0 ? (
+          <div className="mt-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
+            <div className="mb-1 font-medium">
+              {d.sin_clave_sae === 1
+                ? "1 partida sin clave SAE del cliente"
+                : `${d.sin_clave_sae} partidas sin clave SAE del cliente`}
+            </div>
+            <p className="mb-2 text-xs text-muted">
+              SAE rechaza claves que no están en su inventario, así que la exportación se va a
+              detener con este mismo conteo. Asígnales su código en Clientes →{" "}
+              {cliName[d.cliente_facturacion_id] ?? "el cliente"} → Catálogo (si la plaza usa clave
+              propia, captúrala con su sucursal).
+            </p>
+            <ul className="space-y-0.5">
+              {d.lineas.filter((l) => l.sin_clave_sae).map((l) => (
+                <li key={l.id} className="tabular-nums">
+                  <span className="text-muted">{l.numero_linea}.</span>{" "}
+                  {l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id}
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : null}
         {(d.partidas_por_cruzar?.length ?? 0) > 0 ? (
           <div className="mt-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
@@ -1863,6 +1889,16 @@ export default function RemisionesPage() {
           <Badge tone={ESTADO_TONE[r.estado] ?? "muted"}>{r.estado}</Badge>
           {r.revision_pendiente ? (
             <div className="mt-0.5 text-xs font-medium text-amber-700">POR REVISAR</div>
+          ) : null}
+          {(r.sin_clave_sae ?? 0) > 0 ? (
+            // El preflight del export: el mismo conteo que detendrá el lote en
+            // el modal de exportar, pero visible desde que se revisa.
+            <div
+              className="mt-0.5 text-xs font-medium text-amber-700"
+              title="Partidas sin clave SAE del cliente — asígnalas en Clientes → Catálogo"
+            >
+              {r.sin_clave_sae} SIN CLAVE SAE
+            </div>
           ) : null}
         </div>
       ),
