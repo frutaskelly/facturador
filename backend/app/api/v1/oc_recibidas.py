@@ -1012,10 +1012,16 @@ def crear_remision(
     folio = (oc.folio_externo or "").strip()
     # El candado por `origen_externo` no ve las remisiones capturadas a mano:
     # la OC 25297 se capturó como «OC 25297» el día que llegó y la bandeja
-    # generó otra remisión al procesarla después. Se compara solo por dígitos
-    # (sin «OC », espacios ni ceros a la izquierda) y por cliente; acotado a 90
-    # días porque un folio de OC puede reciclarse con los años.
-    clave = re.sub(r"\D", "", folio).lstrip("0")
+    # generó otra remisión al procesarla después.
+    #
+    # Solo un folio PURAMENTE numérico identifica un pedido: «OC 25297» y
+    # «25297» son el mismo. Los pedidos con formato —«HO-34VIL-MIE» de EHMO,
+    # «CEN-35HUA-EMB» de Río Libre— llevan la SEMANA y el punto de entrega, no
+    # un folio: se repiten legítimamente entre entregas (RRIO7 y RRIO21, ambas
+    # facturadas, comparten «CEN-35HUA-FYV»), así que ahí un duplicado no se
+    # puede deducir del texto y no se bloquea nada.
+    m = re.fullmatch(r"(?:OC[\s.:-]*)?0*(\d+)", folio, re.IGNORECASE)
+    clave = m.group(1) if m else None
     if clave:
         dup = (
             db.query(Remision)
@@ -1024,6 +1030,13 @@ def crear_remision(
                 Remision.deleted_at.is_(None),
                 Remision.estado != "CANCELADA",
                 Remision.created_at >= func.now() - timedelta(days=90),
+                # El mismo criterio del lado guardado: solo folios numéricos
+                # entran a la comparación, con «OC » y ceros a la izquierda
+                # fuera. El primer filtro garantiza que quitar los no-dígitos
+                # del segundo no pueda juntar dos pedidos distintos.
+                func.coalesce(Remision.su_pedido, "").op("~*")(
+                    r"^\s*(OC[\s.:-]*)?[0-9]+\s*$"
+                ),
                 func.ltrim(
                     func.regexp_replace(
                         func.coalesce(Remision.su_pedido, ""), r"\D", "", "g"
