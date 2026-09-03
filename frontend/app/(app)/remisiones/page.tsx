@@ -161,6 +161,12 @@ export default function RemisionesPage() {
     const t = setTimeout(() => setBuscaAplicada(busca.trim()), 300);
     return () => clearTimeout(t);
   }, [busca]);
+  // Deep-link desde la bandeja de OC (?q=<folio de la remisión recién creada>):
+  // el atajo del aviso cae aquí ya filtrado, sin buscar el folio a mano.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) { setBusca(q); setBuscaAplicada(q); }
+  }, []);
   const listPath = useMemo(() => {
     const p = new URLSearchParams({ limit: "200" });
     if (fDesde) p.set("fecha_desde", fDesde);

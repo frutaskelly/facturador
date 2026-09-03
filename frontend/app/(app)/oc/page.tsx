@@ -294,7 +294,13 @@ export default function Page() {
         `/api/v1/oc-recibidas/${aPasar.id}/crear-remision-sin-revisar`,
         { method: "POST" }
       );
-      toast.success(`Remisión ${d.remision_folio ?? ""} creada — te espera en Remisiones para revisar`);
+      toast.success(
+        `Remisión ${d.remision_folio ?? ""} creada — te espera en Remisiones para revisar`,
+        // Atajo a la remisión recién creada, ya filtrada por su folio.
+        d.remision_folio
+          ? { label: "Ver la remisión", href: `/remisiones?q=${encodeURIComponent(d.remision_folio)}` }
+          : undefined,
+      );
       setAPasar(null);
       reload();
     } catch (e) {
