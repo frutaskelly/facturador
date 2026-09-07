@@ -92,9 +92,21 @@ export default function FacturasPage() {
     const t = setTimeout(() => setBuscaAplicada(busca.trim()), 300);
     return () => clearTimeout(t);
   }, [busca]);
-  const { data, loading, error, reload } = useResource<Page<Factura>>(
-    `/api/v1/facturas?limit=50${buscaAplicada ? `&q=${encodeURIComponent(buscaAplicada)}` : ""}`,
-  );
+  // Filtros de lista (server-side, como en Remisiones): la lista trae una página
+  // acotada, así que las facturas de un cliente que factura poco se pierden
+  // entre el histórico si no se puede acotar por cliente o por fechas.
+  const [fDesde, setFDesde] = useState("");
+  const [fHasta, setFHasta] = useState("");
+  const [fCliente, setFCliente] = useState("");
+  const listPath = useMemo(() => {
+    const p = new URLSearchParams({ limit: "200" });
+    if (fDesde) p.set("fecha_desde", fDesde);
+    if (fHasta) p.set("fecha_hasta", fHasta);
+    if (fCliente) p.set("cliente_id", fCliente);
+    if (buscaAplicada) p.set("q", buscaAplicada);
+    return `/api/v1/facturas?${p.toString()}`;
+  }, [fDesde, fHasta, fCliente, buscaAplicada]);
+  const { data, loading, error, reload } = useResource<Page<Factura>>(listPath);
   const rows = data?.items ?? [];
 
   // Alta de factura directa (captura a mano, sin remisión): ocupa la pantalla
@@ -606,15 +618,40 @@ export default function FacturasPage() {
         )}
       />
 
-      <div className="mb-3 flex items-center gap-3">
-        <SearchBox
-          value={busca}
-          onChange={setBusca}
-          placeholder="Buscar por folio, UUID u orden (p. ej. SN-33NER-JUE)"
-          className="max-w-md"
-        />
-        {buscaAplicada && !loading && (
-          <span className="text-sm text-muted">
+      {/* Filtros */}
+      <div className="mb-3 flex flex-wrap items-end gap-3">
+        <Field label="Buscar">
+          <SearchBox
+            value={busca}
+            onChange={setBusca}
+            placeholder="Folio, UUID u orden (p. ej. SN-33NER-JUE)"
+            className="w-72"
+          />
+        </Field>
+        <Field label="Desde">
+          <Input type="date" value={fDesde} onChange={(e) => setFDesde(e.target.value)} />
+        </Field>
+        <Field label="Hasta">
+          <Input type="date" value={fHasta} onChange={(e) => setFHasta(e.target.value)} />
+        </Field>
+        <Field label="Cliente">
+          <Select className="min-w-64" value={fCliente} onChange={(e) => setFCliente(e.target.value)} aria-label="Filtrar por cliente">
+            <option value="">Todos</option>
+            {clientes.map((c) => (
+              <option key={c.id} value={c.id}>{c.legal_name}</option>
+            ))}
+          </Select>
+        </Field>
+        {(busca || fDesde || fHasta || fCliente) && (
+          <Button
+            variant="secondary"
+            onClick={() => { setBusca(""); setFDesde(""); setFHasta(""); setFCliente(""); }}
+          >
+            Limpiar filtros
+          </Button>
+        )}
+        {(buscaAplicada || fDesde || fHasta || fCliente) && !loading && (
+          <span className="pb-2 text-sm text-muted">
             {data?.total ?? 0} resultado{(data?.total ?? 0) === 1 ? "" : "s"}
           </span>
         )}
