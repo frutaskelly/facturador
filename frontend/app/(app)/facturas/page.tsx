@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Download, Eye, FileCode2, FileText, Mail, Plus, Replace, Stamp, Trash2, X } from "lucide-react";
+import { Download, Eye, FileCode2, FileText, FileX, Mail, Plus, Replace, Stamp, Trash2, X } from "lucide-react";
 
 import { FacturaDirectaForm } from "@/components/FacturaDirectaForm";
 import { SincronizarSae } from "@/components/SincronizarSae";
@@ -447,12 +447,16 @@ export default function FacturasPage() {
   // Cancelar N (solo timbradas). El motivo 01 exige un UUID de sustitución POR
   // factura, así que en lote solo se ofrecen 02/03/04.
   const [cancelBulkOpen, setCancelBulkOpen] = useState(false);
+  // Segundo popup: cancelar en lote ante el SAT no se deshace, así que el botón
+  // del primer diálogo NO dispara nada — abre esta confirmación.
+  const [cancelBulkConfirm, setCancelBulkConfirm] = useState(false);
   const [bulkCancelMotivo, setBulkCancelMotivo] = useState("02");
   const [bulkCancelInventario, setBulkCancelInventario] = useState<"devolucion" | "perdida">("devolucion");
 
   function abrirCancelBulk() {
     setBulkCancelMotivo("02");
     setBulkCancelInventario("devolucion");
+    setCancelBulkConfirm(false);
     setCancelBulkOpen(true);
   }
 
@@ -472,6 +476,7 @@ export default function FacturasPage() {
       const partes = [`Canceladas: ${ok}${sufijoAmbiente}`];
       if (fail) partes.push(`${fail} con error`);
       toast[fail === 0 ? "success" : "error"](partes.join(" · "));
+      setCancelBulkConfirm(false);
       setCancelBulkOpen(false);
       clearSelection();
       reload();
@@ -486,16 +491,20 @@ export default function FacturasPage() {
       .catch((e) => toast.error(e instanceof ApiError ? e.message : "No se pudo abrir el PDF"));
   }
 
-  // XML N: descargas individuales secuenciales (solo timbradas tienen XML).
-  async function bulkXml() {
+  // XML y PDF de N: los dos archivos de cada factura, descargas individuales
+  // secuenciales (solo timbradas tienen XML). El navegador puede pedir permiso
+  // para bajar varios archivos seguidos.
+  async function bulkXmlPdf() {
     setBulkBusy(true);
     try {
       let fail = 0;
       for (const f of timbradasSel) {
-        try { await apiDownload(`/api/v1/facturas/${f.id}/xml`, `${f.serie}${f.folio}.xml`); }
-        catch { fail += 1; }
+        for (const tipo of ["xml", "pdf"] as const) {
+          try { await apiDownload(`/api/v1/facturas/${f.id}/${tipo}`, `${f.serie}${f.folio}.${tipo}`); }
+          catch { fail += 1; }
+        }
       }
-      if (fail) toast.error(`${fail} XML no se pudieron descargar`);
+      if (fail) toast.error(`${fail} archivo(s) no se pudieron descargar`);
     } finally { setBulkBusy(false); }
   }
 
@@ -667,8 +676,8 @@ export default function FacturasPage() {
               <FileText size={16} /> Imprimir ({selected.length})
             </Button>
             {timbradasSel.length > 0 && (
-              <Button variant="secondary" onClick={() => { void bulkXml(); }} disabled={bulkBusy}>
-                <FileCode2 size={16} /> XML ({timbradasSel.length})
+              <Button variant="secondary" onClick={() => { void bulkXmlPdf(); }} disabled={bulkBusy}>
+                <FileCode2 size={16} /> XML y PDF ({timbradasSel.length})
               </Button>
             )}
             {canWrite && timbradasSel.length > 0 && (
@@ -682,8 +691,8 @@ export default function FacturasPage() {
               </Button>
             )}
             {canCancelar && timbradasSel.length > 0 && (
-              <Button variant="danger" onClick={abrirCancelBulk} disabled={bulkBusy}>
-                <X size={16} /> Cancelar ({timbradasSel.length})
+              <Button variant="secondary" onClick={abrirCancelBulk} disabled={bulkBusy}>
+                <FileX size={16} /> Cancelar Factura ({timbradasSel.length})
               </Button>
             )}
           </div>
@@ -795,7 +804,7 @@ export default function FacturasPage() {
         title={`Cancelar ${timbradasSel.length} factura(s)`}
         footer={<>
           <Button variant="secondary" onClick={() => setCancelBulkOpen(false)} disabled={bulkBusy}>Cerrar</Button>
-          <Button variant="danger" onClick={() => void bulkCancelar()} disabled={bulkBusy}>
+          <Button variant="danger" onClick={() => setCancelBulkConfirm(true)} disabled={bulkBusy}>
             {bulkBusy ? "Cancelando…" : `Cancelar ${timbradasSel.length}`}
           </Button>
         </>}>
@@ -822,6 +831,15 @@ export default function FacturasPage() {
           )}
         </div>
       </Modal>
+
+      {/* Confirmación del lote de cancelación: va DESPUÉS del Modal para quedar
+          encima de él, y al descartarla se vuelve al diálogo sin cancelar nada. */}
+      <ConfirmDialog open={cancelBulkOpen && cancelBulkConfirm}
+        title={`¿Cancelar ${timbradasSel.length} factura(s)?`}
+        message={`Se cancelarán ${timbradasSel.length} factura(s) ante el ${ambiente === "producción" ? "SAT" : "PAC (sandbox)"} con el motivo ${bulkCancelMotivo}, y ${bulkCancelInventario === "devolucion" ? "la mercancía regresará al almacén" : "la mercancía se dará de baja como merma"}. Esto no se puede deshacer.${emisor}`}
+        confirmLabel="Estoy seguro" cancelLabel="No estoy seguro" confirmVariant="danger"
+        onConfirm={() => void bulkCancelar()}
+        onClose={() => setCancelBulkConfirm(false)} loading={bulkBusy} />
 
       {/* ── Lote: enviar por correo (un correo por cliente) ── */}
       <Modal open={bulkSendOpen} onClose={() => setBulkSendOpen(false)} title="Enviar facturas por correo" wide
