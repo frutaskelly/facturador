@@ -9575,6 +9575,11 @@ export interface components {
             /** Origen */
             origen: string;
             /**
+             * Pisado Por
+             * @default 0
+             */
+            pisado_por: number;
+            /**
              * Producto Id
              * Format: uuid
              */

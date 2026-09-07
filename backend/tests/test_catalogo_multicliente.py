@@ -188,6 +188,35 @@ def test_alias_global_por_defecto_y_alcance_en_conflicto(client, env, auth_as):
         db.close()
 
 
+def test_el_vocabulario_no_llama_conflicto_a_lo_que_la_cascada_resuelve(client, env, auth_as):
+    """Que un texto lleve a otro producto PARA OTRO CLIENTE no es un conflicto.
+
+    La cascada lo resuelve sola (cliente+sucursal > cliente > global) y que cada
+    cliente le diga distinto a cosas distintas es justo para lo que existe el
+    alcance. Marcarlo teñía la pantalla de ámbar sin nada que arreglar. Lo que
+    sí se cuenta es a cuántos clientes contradice el global: un global que todos
+    pisan suele estar mal puesto, y se cobra en los clientes sin regla propia.
+    """
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "chile de la casa", "producto_id": env["serrano"]})
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "chile de la casa", "producto_id": env["jalapeno"],
+                      "cliente_id": env["ehmo"]})
+
+    r = client.get("/api/v1/productos/vocabulario?q=chile de la casa", headers=h)
+    assert r.status_code == 200
+    filas = [f for f in r.json()["items"] if f["texto"] == "chile de la casa"]
+    assert len(filas) == 2
+    # Ninguna es conflicto: no hay dos reglas peleando en el MISMO alcance.
+    assert [f["ambiguo"] for f in filas] == [False, False]
+
+    global_, del_cliente = (f for f in sorted(filas, key=lambda f: f["cliente_id"] is not None))
+    assert global_["cliente_id"] is None
+    assert global_["pisado_por"] == 1          # EHMO le dijo que era otra cosa
+    assert del_cliente["pisado_por"] == 0      # el del cliente no lo pisa nadie
+
+
 def test_la_ficha_del_producto_enseña_sus_alias_y_marca_los_ambiguos(client, env, auth_as):
     """Hasta ahora los alias solo se podían crear: no había dónde verlos, y un
     alias mal apuntado dejaba órdenes sin cotizar en silencio."""

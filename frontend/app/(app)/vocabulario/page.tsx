@@ -30,6 +30,10 @@ type Fila = {
   sucursal_nombre: string | null;
   origen: string;
   ambiguo: boolean;
+  /** Sólo en las filas globales: a cuántos clientes se les dijo que ese texto
+   *  es OTRO producto. No es un error — la cascada lo resuelve — pero un global
+   *  contradicho por todos suele estar mal puesto. */
+  pisado_por: number;
 };
 
 type Cliente = { id: string; legal_name: string };
@@ -87,8 +91,10 @@ export default function VocabularioPage() {
 
   // Filtros de la pantalla (el buscador de la tabla afina dentro de esto).
   const [alcance, setAlcance] = useState("");        // "" = todos
-  const [soloConflictos, setSoloConflictos] = useState(false);
-  const conflictos = filas.filter((f) => f.ambiguo).length;
+  const [soloRevisar, setSoloRevisar] = useState(false);
+  // Lo que amerita una mirada: un choque real (dos reglas del mismo alcance) o
+  // un global al que sus clientes contradicen.
+  const porRevisar = filas.filter((f) => f.ambiguo || f.pisado_por > 0).length;
 
   const [aQuitar, setAQuitar] = useState<Fila | null>(null);
 
@@ -197,7 +203,14 @@ export default function VocabularioPage() {
           {f.ambiguo && (
             <p className="mt-0.5 flex items-start gap-1 text-xs text-amber-700">
               <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-              Este mismo texto lleva a otro producto en otro alcance
+              Dos reglas del mismo alcance llevan a productos distintos: nadie decide
+            </p>
+          )}
+          {f.pisado_por > 0 && (
+            <p className="mt-0.5 text-xs text-muted">
+              {f.pisado_por === 1
+                ? "1 cliente lo tiene apuntado a otro producto (ese cliente gana)"
+                : `${f.pisado_por} clientes lo tienen apuntado a otro producto (ellos ganan)`}
             </p>
           )}
         </div>
@@ -259,13 +272,21 @@ export default function VocabularioPage() {
       cell: (f) => <Badge tone="muted">{f.origen}</Badge>,
     },
     {
-      header: "Conflicto",
-      key: "conflicto",
+      header: "Por revisar",
+      key: "revisar",
       hiddenByDefault: true,
       sortable: true,
-      sortValue: (f) => (f.ambiguo ? 1 : 0),
-      exportValue: (f) => (f.ambiguo ? "SÍ" : ""),
-      cell: (f) => (f.ambiguo ? <Badge tone="warning">Sí</Badge> : <span className="text-muted">—</span>),
+      sortValue: (f) => (f.ambiguo ? 2 : f.pisado_por > 0 ? 1 : 0),
+      exportValue: (f) =>
+        f.ambiguo ? "CONFLICTO" : f.pisado_por > 0 ? `${f.pisado_por} clientes lo pisan` : "",
+      cell: (f) =>
+        f.ambiguo ? (
+          <Badge tone="warning">Conflicto</Badge>
+        ) : f.pisado_por > 0 ? (
+          <Badge tone="muted">Lo pisan {f.pisado_por}</Badge>
+        ) : (
+          <span className="text-muted">—</span>
+        ),
     },
   ];
 
@@ -310,11 +331,11 @@ export default function VocabularioPage() {
           ))}
         </Select>
         <Button
-          variant={soloConflictos ? "primary" : "secondary"}
-          onClick={() => setSoloConflictos((v) => !v)}
-          disabled={conflictos === 0}
+          variant={soloRevisar ? "primary" : "secondary"}
+          onClick={() => setSoloRevisar((v) => !v)}
+          disabled={porRevisar === 0}
         >
-          <AlertTriangle size={15} /> Solo conflictos ({conflictos})
+          <AlertTriangle size={15} /> Solo por revisar ({porRevisar})
         </Button>
         {!cargando && (
           <span className="text-sm text-muted">
@@ -336,18 +357,20 @@ export default function VocabularioPage() {
         exportFilename="vocabulario"
         searchPlaceholder="Buscar por texto o por producto…"
         rowFilter={(f) =>
-          (!soloConflictos || f.ambiguo) &&
+          (!soloRevisar || f.ambiguo || f.pisado_por > 0) &&
           (alcance === "" ||
             (alcance === GLOBAL ? f.cliente_id === null : f.cliente_id === alcance))
         }
-        rowFilterKey={`${alcance}|${soloConflictos}`}
+        rowFilterKey={`${alcance}|${soloRevisar}`}
         rowClassName={(f) => (f.ambiguo ? "bg-amber-50/60" : undefined)}
       />
 
       <p className="mt-3 text-xs text-muted">
-        <b>Todos los clientes</b> aplica a quien no tenga regla propia — ahí caen los clientes
-        nuevos, así que cambiarlo pide permiso de gestión. Una regla <b>del cliente</b> siempre
-        gana sobre la global.
+        Manda lo más específico: la regla <b>del cliente en su plaza</b>, luego la <b>del
+        cliente</b>, y al final la de <b>todos los clientes</b>. Que un texto lleve a otro
+        producto para otro cliente no es un error: por eso sólo se marcan los choques dentro
+        de un mismo alcance. La global es la base — aplica a quien no tenga regla propia, ahí
+        caen los clientes nuevos, y por eso cambiarla pide permiso de gestión.
       </p>
 
       {/* Editar: el texto y el producto se confirman juntos con Guardar. */}

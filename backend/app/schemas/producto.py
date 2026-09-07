@@ -192,8 +192,13 @@ class VocabularioOut(BaseModel):
     sucursal_id: Optional[uuid.UUID] = None
     sucursal_nombre: Optional[str] = None
     origen: str
-    # El mismo texto lleva a otro producto en otro alcance.
+    # Dos reglas del MISMO alcance llevan a productos distintos: nadie decide.
+    # Que el mismo texto lleve a otro producto para otro cliente NO entra aquí
+    # — eso lo resuelve la cascada (cliente+sucursal > cliente > global).
     ambiguo: bool = False
+    # Sólo en las filas globales: a cuántos clientes se les dijo que ese texto
+    # es OTRO producto. Un global contradicho por todos suele estar mal puesto.
+    pisado_por: int = 0
 
 
 class AliasIn(BaseModel):
