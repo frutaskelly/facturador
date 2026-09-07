@@ -256,6 +256,8 @@ def _revertir_factura_directa(db: Session, ctx, factura, *, perdida: bool) -> No
 def list_facturas(
     estado: Optional[str] = Query(default=None, max_length=20),
     cliente_id: Optional[UUID] = Query(default=None),
+    fecha_desde: Optional[date] = Query(default=None),
+    fecha_hasta: Optional[date] = Query(default=None),
     # Buscar la factura POR COMO LA NOMBRA QUIEN PREGUNTA: puede ser el folio
     # fiscal ("ZMAFAN 167"), el UUID que trae el SAT, o —lo más común en la
     # operación— el folio interno de la entrega ("SN-33NER-JUE"), que vive en
@@ -274,6 +276,11 @@ def list_facturas(
         query = query.filter(Factura.estado == estado)
     if cliente_id is not None:
         query = query.filter(Factura.cliente_id == cliente_id)
+    if fecha_desde:
+        query = query.filter(Factura.fecha >= fecha_desde)
+    if fecha_hasta:
+        # `fecha` es timestamp: el día "hasta" se incluye completo.
+        query = query.filter(Factura.fecha < fecha_hasta + timedelta(days=1))
     if q and q.strip():
         termino = q.strip()
         like = f"%{termino}%"

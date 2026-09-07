@@ -12399,6 +12399,8 @@ export interface operations {
             query?: {
                 estado?: string | null;
                 cliente_id?: string | null;
+                fecha_desde?: string | null;
+                fecha_hasta?: string | null;
                 q?: string | null;
                 limit?: number;
                 offset?: number;
