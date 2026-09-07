@@ -528,17 +528,50 @@ def vocabulario(
         base.order_by(Producto.nombre, ProductoAlias.cliente_id.nullsfirst(), ProductoAlias.alias)
         .offset(offset).limit(limit).all()
     )
-    # ¿Cuáles de estos textos llevan a más de un producto? Una consulta para todos.
+    # Qué marcar en rojo. Que un texto lleve a otro producto para OTRO cliente
+    # no es un conflicto: la cascada lo resuelve sola (cliente+sucursal >
+    # cliente > global) y que cada quien llame a lo suyo a su manera es lo
+    # normal — marcarlo teñía media pantalla de ámbar sin nada que arreglar.
+    # Conflicto de verdad es que DOS reglas del MISMO alcance lleven a
+    # productos distintos: ahí nadie decide y gana el orden físico de la tabla.
+    # Aparte se cuenta, sólo en la fila GLOBAL, a cuántos clientes les dijeron
+    # otra cosa: es la pista de un global mal apuntado (el «AJO» que apuntaba a
+    # ajonjolí), que se cobra en los clientes que aún no tienen regla propia.
     normas = {a.alias_normalizado for a, _, _, _ in filas}
-    ambiguos = set()
+    ambiguos: set[str] = set()
+    pisado: dict[tuple[str, UUID], int] = {}
     if normas:
-        ambiguos = {
-            n for (n,) in db.query(ProductoAlias.alias_normalizado)
-            .filter(ProductoAlias.alias_normalizado.in_(normas))
-            .group_by(ProductoAlias.alias_normalizado)
-            .having(func.count(func.distinct(ProductoAlias.producto_id)) > 1)
+        # El filtro por tenant va explícito: en las pruebas la BD corre como
+        # superusuario (RLS apagado) y sin él se cuelan los alias de otro tenant.
+        hermanos = (
+            db.query(
+                ProductoAlias.alias_normalizado,
+                ProductoAlias.cliente_id,
+                ProductoAlias.sucursal_id,
+                ProductoAlias.producto_id,
+            )
+            .filter(
+                ProductoAlias.tenant_id == ctx.tenant_id,
+                ProductoAlias.alias_normalizado.in_(normas),
+            )
             .all()
-        }
+        )
+        por_alcance: dict[tuple[str, Optional[UUID], Optional[UUID]], set[UUID]] = {}
+        por_cliente: dict[str, list[tuple[UUID, UUID]]] = {}
+        for norm, cli_id, suc_id, prod_id in hermanos:
+            por_alcance.setdefault((norm, cli_id, suc_id), set()).add(prod_id)
+            if cli_id is not None:
+                por_cliente.setdefault(norm, []).append((cli_id, prod_id))
+        ambiguos = {norm for (norm, _, _), prods in por_alcance.items() if len(prods) > 1}
+        for a, _, _, _ in filas:
+            if a.cliente_id is not None:
+                continue
+            otros = {
+                cli for cli, prod in por_cliente.get(a.alias_normalizado, [])
+                if prod != a.producto_id
+            }
+            if otros:
+                pisado[(a.alias_normalizado, a.producto_id)] = len(otros)
     return Page[VocabularioOut](
         items=[
             VocabularioOut(
@@ -547,6 +580,7 @@ def vocabulario(
                 cliente_id=a.cliente_id, cliente_nombre=cli,
                 sucursal_id=a.sucursal_id, sucursal_nombre=suc,
                 ambiguo=a.alias_normalizado in ambiguos,
+                pisado_por=pisado.get((a.alias_normalizado, a.producto_id), 0),
             )
             for a, p, cli, suc in filas
         ],

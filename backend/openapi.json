@@ -16649,6 +16649,11 @@
       "title": "Origen",
       "type": "string"
      },
+     "pisado_por": {
+      "default": 0,
+      "title": "Pisado Por",
+      "type": "integer"
+     },
      "producto_id": {
       "format": "uuid",
       "title": "Producto Id",
