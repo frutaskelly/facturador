@@ -142,6 +142,20 @@ class EspejoSyncEstadoOut(BaseModel):
     pendiente: Optional[EspejoSyncOut] = None
 
 
+class EspejoClienteSaeOut(BaseModel):
+    """Un cliente compartido entre SAE y el Facturador: su número en SAE
+    (CVE_CLPV, sacado de la equivalencia 'empresa:numero') y quién es acá."""
+    empresa: str
+    clave: str
+    cliente: str
+
+
+class EspejoClientesSaeOut(BaseModel):
+    """La lista con la que el conector acota su pasada: facturas de clientes
+    fuera de ella ni se leen a detalle ni se mandan — no tienen a dónde llegar."""
+    clientes: List[EspejoClienteSaeOut]
+
+
 class EspejoSyncReporteIn(BaseModel):
     """El conector reporta cómo le fue: con solicitud_id cierra la del botón;
     sin él registra una pasada automática ya terminada."""

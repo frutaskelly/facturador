@@ -605,6 +605,102 @@ def test_pasada_automatica_del_espejo_reporta_fecha(client, env, auth_as, sin_se
     assert est["ultima"]["estado"] == "ERROR" and est["pendiente"] is None
 
 
+def _envejecer_sync(sol_id: str, minutos: int) -> None:
+    """Corre el reloj de una corrida hacia atrás, directo en la base."""
+    db = SessionLocal()
+    db.execute(text(
+        "UPDATE espejo_syncs SET solicitada_at = now() - (:m || ' minutes')::interval, "
+        "iniciada_at = CASE WHEN iniciada_at IS NULL THEN NULL "
+        "ELSE now() - (:m || ' minutes')::interval END WHERE id = :i"),
+        {"m": minutos, "i": sol_id})
+    db.commit(); db.close()
+
+
+def test_sync_atorada_en_curso_expira_y_el_boton_revive(client, env, auth_as, sin_sesion):
+    """El bug del 3-sep-2026: el conector reclamó la solicitud y murió sin
+    reportar. La fila quedaba EN_CURSO eterna —solo se re-reclaman PENDIENTE y
+    la poda solo borra terminadas— y la UI se quedaba «Sincronizando…» con el
+    botón deshabilitado para siempre. El propio GET la expira pasada una hora."""
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    sol = client.post("/api/v1/facturas/espejo/sync", headers=h).json()
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    rec = client.get("/api/v1/facturas/espejo/sync/pendiente", headers=hk).json()
+    assert rec["id"] == sol["id"] and rec["estado"] == "EN_CURSO"
+    _envejecer_sync(sol["id"], 61)
+
+    auth_as(env["dueno"])
+    est = client.get("/api/v1/facturas/espejo/sync", headers=h).json()
+    assert est["pendiente"] is None
+    assert est["ultima"]["id"] == sol["id"] and est["ultima"]["estado"] == "ERROR"
+    assert "expirada" in est["ultima"]["resultado"]["errores"][0]
+
+    # y el botón vuelve a encolar una solicitud NUEVA (antes devolvía la muerta)
+    otra = client.post("/api/v1/facturas/espejo/sync", headers=h).json()
+    assert otra["id"] != sol["id"] and otra["estado"] == "PENDIENTE"
+
+
+def test_sync_pendiente_vieja_expira_pero_la_fresca_no(client, env, auth_as, sin_sesion):
+    """Una PENDIENTE que nadie recogió en 45 min es un bot caído y expira; una
+    recién pedida (o una EN_CURSO de hace un rato) sigue viva y el GET la
+    respeta — expirar corridas legítimas mataría syncs largas de verdad."""
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    sol = client.post("/api/v1/facturas/espejo/sync", headers=h).json()
+    est = client.get("/api/v1/facturas/espejo/sync", headers=h).json()
+    assert est["pendiente"]["id"] == sol["id"]          # fresca: no se toca
+
+    _envejecer_sync(sol["id"], 40)
+    est = client.get("/api/v1/facturas/espejo/sync", headers=h).json()
+    assert est["pendiente"]["id"] == sol["id"]          # 40 min: aún viva
+
+    _envejecer_sync(sol["id"], 46)
+    est = client.get("/api/v1/facturas/espejo/sync", headers=h).json()
+    assert est["pendiente"] is None
+    assert est["ultima"]["estado"] == "ERROR"
+
+
+def test_en_curso_reciente_sobrevive_al_corte_de_pendiente(client, env, auth_as, sin_sesion):
+    """Una corrida reclamada hace 50 min sigue dentro de su hora: el corte de
+    EN_CURSO (60 min) es más holgado que el de PENDIENTE (45)."""
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    sol = client.post("/api/v1/facturas/espejo/sync", headers=h).json()
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.get("/api/v1/facturas/espejo/sync/pendiente", headers=hk)
+    _envejecer_sync(sol["id"], 50)
+
+    auth_as(env["dueno"])
+    est = client.get("/api/v1/facturas/espejo/sync", headers=h).json()
+    assert est["pendiente"] is not None and est["pendiente"]["id"] == sol["id"]
+
+
+def test_espejo_clientes_compartidos_solo_confirmados_en_espejo(client, env, auth_as, sin_sesion):
+    """GET /espejo/clientes: la lista con la que el conector acota su pasada.
+    Entra la equivalencia SAE CONFIRMADA de un cliente en espejo; quedan fuera
+    las SUGERIDAS y los clientes sin el candado espejo_sae."""
+    db = SessionLocal()
+    try:
+        fuera = Cliente(tenant_id=env["tenant"], codigo="CL2",
+                        legal_name="SIN ESPEJO SA", rfc="XAXX010101000",
+                        espejo_sae=False)
+        db.add(fuera); db.flush()
+        db.add(ClienteExterno(tenant_id=env["tenant"], sistema="SAE", clave="02:9",
+                              clave_normalizada="02 9", cliente_id=fuera.id,
+                              origen="MANUAL", confianza="CONFIRMADA"))
+        cli_id = uuid.UUID(env["cli"])
+        db.add(ClienteExterno(tenant_id=env["tenant"], sistema="SAE", clave="03:4",
+                              clave_normalizada="03 4", cliente_id=cli_id,
+                              origen="BOT", confianza="SUGERIDA"))
+        db.commit()
+    finally:
+        db.close()
+
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    r = client.get("/api/v1/facturas/espejo/clientes", headers=hk)
+    assert r.status_code == 200, r.text
+    clientes = r.json()["clientes"]
+    assert {(c["empresa"], c["clave"]) for c in clientes} == {("02", "6")}
+    assert clientes[0]["cliente"] == "DISTRIBUIDORA JUBRAN"
+
+
 # ─── Reintento del cruce: la remisión llega DESPUÉS que la factura ───────────
 # La sync del conector solo re-manda ~3 días de FECHA_DOC: si la remisión se
 # crea después de la última pasada de su factura por el espejo, el cruce
