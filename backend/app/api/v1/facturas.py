@@ -21,7 +21,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field as PydField
-from sqlalchemy import func, or_, true as sa_true
+from sqlalchemy import and_, func, or_, true as sa_true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -51,6 +51,8 @@ from ...schemas.common import Page
 from ...schemas.factura import (
     CancelarFacturaIn,
     EnviarFacturaIn,
+    EspejoClienteSaeOut,
+    EspejoClientesSaeOut,
     EspejoSyncEstadoOut,
     EspejoSyncOut,
     EspejoSyncReporteIn,
@@ -716,6 +718,44 @@ def _puede_pedir_sync(ctx: AuthContext = Depends(get_auth_context)) -> AuthConte
     )
 
 
+# Cortes de expiración de las corridas del espejo. El conector recoge una
+# solicitud en ≤60 s y index.js mata la corrida a los 45 min: una PENDIENTE que
+# nadie recogió en 45 min es un bot caído, y una EN_CURSO sin reporte en 60 min
+# es un proceso que murió a medias. Sin este corte la fila EN_CURSO era eterna
+# —solo se re-reclaman PENDIENTE y la poda solo borra terminadas— y la UI se
+# quedaba «Sincronizando…» con el botón muerto (pasó del 3 al 8-sep-2026).
+_SYNC_PENDIENTE_MAX = timedelta(minutes=45)
+_SYNC_EN_CURSO_MAX = timedelta(minutes=60)
+
+
+def _expirar_syncs_muertas(db: Session, tenant_id) -> None:
+    """Cierra como ERROR las corridas que ya nadie va a reportar.
+
+    El corte de edad va en el WHERE, ANTES del FOR UPDATE: la UI sondea este
+    camino cada 5 s con la solicitud viva por definición, y bloquear la fila
+    sana en cada poll haría que el reclamo del conector (skip_locked) se la
+    saltara justo cuando alguien acaba de presionar el botón. Con el corte en
+    el WHERE, el poll común no toma ningún lock ni escribe nada."""
+    ahora = datetime.now(timezone.utc)
+    muertas = (db.query(EspejoSync)
+               .filter(EspejoSync.tenant_id == tenant_id,
+                       or_(and_(EspejoSync.estado == "PENDIENTE",
+                                EspejoSync.solicitada_at < ahora - _SYNC_PENDIENTE_MAX),
+                           and_(EspejoSync.estado == "EN_CURSO",
+                                func.coalesce(EspejoSync.iniciada_at, EspejoSync.solicitada_at)
+                                < ahora - _SYNC_EN_CURSO_MAX)))
+               .with_for_update(skip_locked=True).all())
+    for s in muertas:
+        motivo = ("el conector la reclamó y no reportó en 60 min (la corrida "
+                  "murió a medias)" if s.estado == "EN_CURSO"
+                  else "el conector no la recogió en 45 min — revisa que el "
+                       "bot esté corriendo")
+        s.estado = "ERROR"
+        s.terminada_at = ahora
+        s.resultado = {"errores": [f"expirada: {motivo}"]}
+    db.flush()
+
+
 @router.get("/espejo/sync", response_model=EspejoSyncEstadoOut)
 def espejo_sync_estado(
     db: Session = Depends(get_tenant_db),
@@ -724,6 +764,7 @@ def espejo_sync_estado(
     """La fecha de «SAE actualizado» (última corrida terminada del espejo) y la
     solicitud viva si hay una en cola o corriendo. Es lo que la UI pinta junto
     al botón, y lo que sondea después de presionarlo."""
+    _expirar_syncs_muertas(db, ctx.tenant_id)
     base = db.query(EspejoSync).filter(EspejoSync.tenant_id == ctx.tenant_id)
     ultima = (base.filter(EspejoSync.terminada_at.isnot(None))
               .order_by(EspejoSync.terminada_at.desc()).first())
@@ -741,6 +782,7 @@ def solicitar_espejo_sync(
     solicitud; el conector (que sí consulta SAE por sqlcmd) la reclama en su
     siguiente vuelta, corre el espejo y reporta. Idempotente: si ya hay una
     viva, se devuelve esa en vez de encolar otra."""
+    _expirar_syncs_muertas(db, ctx.tenant_id)
     viva = (db.query(EspejoSync)
             .filter(EspejoSync.tenant_id == ctx.tenant_id,
                     EspejoSync.estado.in_(("PENDIENTE", "EN_CURSO")))
@@ -762,8 +804,8 @@ def reclamar_espejo_sync(
 ):
     """El conector pregunta si alguien pidió sincronizar. Reclamar marca la
     solicitud EN_CURSO (skip_locked: dos conectores no se pisan) — si el
-    conector muere a medias, la fila queda EN_CURSO y la siguiente pasada
-    automática la cierra vía reporte con su solicitud_id o queda a la vista."""
+    conector muere a medias, `_expirar_syncs_muertas` la cierra como ERROR
+    pasada una hora y el botón vuelve a servir."""
     sol = (db.query(EspejoSync)
            .filter(EspejoSync.tenant_id == ctx.tenant_id,
                    EspejoSync.estado == "PENDIENTE")
@@ -811,6 +853,50 @@ def reportar_espejo_sync(
     db.flush()
     db.refresh(sol)
     return sol
+
+
+@router.get("/espejo/clientes", response_model=EspejoClientesSaeOut)
+def espejo_clientes_sae(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("factura:espejo")),
+):
+    """Los clientes COMPARTIDOS entre SAE y el Facturador — con los que el
+    conector acota su pasada.
+
+    Son las equivalencias SAE CONFIRMADAS de clientes vivos y bajo el candado
+    del espejo (`clientes.espejo_sae`): exactamente los que POST /espejo
+    aceptaría. Una factura de un cliente fuera de esta lista rebotaría con 422
+    en cada pasada; con la lista, el conector la omite desde el SELECT a SAE y
+    la reporta como omitida en vez de como error eterno."""
+    filas = (
+        db.query(ClienteExterno, Cliente.legal_name)
+        .join(Cliente, Cliente.id == ClienteExterno.cliente_id)
+        .filter(
+            ClienteExterno.tenant_id == ctx.tenant_id,
+            ClienteExterno.sistema == "SAE",
+            ClienteExterno.confianza == "CONFIRMADA",
+            Cliente.espejo_sae.is_(True),
+            Cliente.deleted_at.is_(None),
+        )
+        .all()
+    )
+    clientes = []
+    for eq, nombre in filas:
+        # La clave es '<empresa>:<numero>' ('02:5'), pero POST /espejo cruza
+        # por la NORMALIZADA — que vuelve espacio cualquier separador ('02-5' y
+        # '02 5' también espejean). Parsear solo la cruda con ':' dejaría a
+        # esos clientes fuera del filtro en silencio: se parte la normalizada
+        # y la cruda queda de respaldo. Sin dos pedazos no hay CVE_CLPV que
+        # darle al conector y la fila se omite.
+        partes = (eq.clave_normalizada or "").split()
+        if len(partes) != 2:
+            empresa, sep, numero = (eq.clave or "").partition(":")
+            partes = [empresa.strip(), numero.strip()] if sep else []
+        if len(partes) != 2 or not partes[0] or not partes[1]:
+            continue
+        clientes.append(EspejoClienteSaeOut(
+            empresa=partes[0], clave=partes[1], cliente=nombre))
+    return EspejoClientesSaeOut(clientes=clientes)
 
 
 @router.post("/espejo", response_model=FacturaDetailOut, status_code=status.HTTP_201_CREATED)

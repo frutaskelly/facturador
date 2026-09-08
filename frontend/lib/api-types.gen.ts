@@ -1246,6 +1246,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/facturas/espejo/clientes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Espejo Clientes Sae
+         * @description Los clientes COMPARTIDOS entre SAE y el Facturador — con los que el
+         *     conector acota su pasada.
+         *
+         *     Son las equivalencias SAE CONFIRMADAS de clientes vivos y bajo el candado
+         *     del espejo (`clientes.espejo_sae`): exactamente los que POST /espejo
+         *     aceptaría. Una factura de un cliente fuera de esta lista rebotaría con 422
+         *     en cada pasada; con la lista, el conector la omite desde el SELECT a SAE y
+         *     la reporta como omitida en vez de como error eterno.
+         */
+        get: operations["espejo_clientes_sae_api_v1_facturas_espejo_clientes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/facturas/espejo/resumen": {
         parameters: {
             query?: never;
@@ -1315,8 +1342,8 @@ export interface paths {
          * Reclamar Espejo Sync
          * @description El conector pregunta si alguien pidió sincronizar. Reclamar marca la
          *     solicitud EN_CURSO (skip_locked: dos conectores no se pisan) — si el
-         *     conector muere a medias, la fila queda EN_CURSO y la siguiente pasada
-         *     automática la cierra vía reporte con su solicitud_id o queda a la vista.
+         *     conector muere a medias, `_expirar_syncs_muertas` la cierra como ERROR
+         *     pasada una hora y el botón vuelve a servir.
          */
         get: operations["reclamar_espejo_sync_api_v1_facturas_espejo_sync_pendiente_get"];
         put?: never;
@@ -5430,6 +5457,28 @@ export interface components {
             mensaje?: string | null;
             /** To */
             to?: string | null;
+        };
+        /**
+         * EspejoClienteSaeOut
+         * @description Un cliente compartido entre SAE y el Facturador: su número en SAE
+         *     (CVE_CLPV, sacado de la equivalencia 'empresa:numero') y quién es acá.
+         */
+        EspejoClienteSaeOut: {
+            /** Clave */
+            clave: string;
+            /** Cliente */
+            cliente: string;
+            /** Empresa */
+            empresa: string;
+        };
+        /**
+         * EspejoClientesSaeOut
+         * @description La lista con la que el conector acota su pasada: facturas de clientes
+         *     fuera de ella ni se leen a detalle ni se mandan — no tienen a dónde llegar.
+         */
+        EspejoClientesSaeOut: {
+            /** Clientes */
+            clientes: components["schemas"]["EspejoClienteSaeOut"][];
         };
         /** EspejoPrecioItem */
         EspejoPrecioItem: {
@@ -12565,6 +12614,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FacturaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    espejo_clientes_sae_api_v1_facturas_espejo_clientes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EspejoClientesSaeOut"];
                 };
             };
             /** @description Validation Error */

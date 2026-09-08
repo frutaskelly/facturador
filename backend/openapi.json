@@ -4449,6 +4449,47 @@
     "title": "EnviarRemisionesLoteIn",
     "type": "object"
    },
+   "EspejoClienteSaeOut": {
+    "description": "Un cliente compartido entre SAE y el Facturador: su número en SAE\n(CVE_CLPV, sacado de la equivalencia 'empresa:numero') y quién es acá.",
+    "properties": {
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "cliente": {
+      "title": "Cliente",
+      "type": "string"
+     },
+     "empresa": {
+      "title": "Empresa",
+      "type": "string"
+     }
+    },
+    "required": [
+     "empresa",
+     "clave",
+     "cliente"
+    ],
+    "title": "EspejoClienteSaeOut",
+    "type": "object"
+   },
+   "EspejoClientesSaeOut": {
+    "description": "La lista con la que el conector acota su pasada: facturas de clientes\nfuera de ella ni se leen a detalle ni se mandan — no tienen a dónde llegar.",
+    "properties": {
+     "clientes": {
+      "items": {
+       "$ref": "#/components/schemas/EspejoClienteSaeOut"
+      },
+      "title": "Clientes",
+      "type": "array"
+     }
+    },
+    "required": [
+     "clientes"
+    ],
+    "title": "EspejoClientesSaeOut",
+    "type": "object"
+   },
    "EspejoPrecioItem": {
     "properties": {
      "clave": {
@@ -22865,6 +22906,61 @@
     ]
    }
   },
+  "/api/v1/facturas/espejo/clientes": {
+   "get": {
+    "description": "Los clientes COMPARTIDOS entre SAE y el Facturador — con los que el\nconector acota su pasada.\n\nSon las equivalencias SAE CONFIRMADAS de clientes vivos y bajo el candado\ndel espejo (`clientes.espejo_sae`): exactamente los que POST /espejo\naceptaría. Una factura de un cliente fuera de esta lista rebotaría con 422\nen cada pasada; con la lista, el conector la omite desde el SELECT a SAE y\nla reporta como omitida en vez de como error eterno.",
+    "operationId": "espejo_clientes_sae_api_v1_facturas_espejo_clientes_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EspejoClientesSaeOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Espejo Clientes Sae",
+    "tags": [
+     "facturas"
+    ]
+   }
+  },
   "/api/v1/facturas/espejo/resumen": {
    "get": {
     "description": "Qué tiene el espejo de esa serie: folio, total y estado.\n\nEs la contraparte de la conciliación Facturador↔SAE (criterio de la Etapa 3\ndel plan): el conector compara ESTO contra lo que SAE tiene y detecta las\nfacturas que nunca llegaron al espejo — si falta una, el estado de cuenta\ndel cliente miente y nadie se entera.\n\nDeliberadamente gated por `factura:espejo` y no por `menu:facturas`: la\nclave del conector puede verificar SU trabajo sin ganar acceso de lectura\na toda la facturación. Devuelve lo mínimo para cuadrar, no el detalle.",
@@ -23065,7 +23161,7 @@
   },
   "/api/v1/facturas/espejo/sync/pendiente": {
    "get": {
-    "description": "El conector pregunta si alguien pidió sincronizar. Reclamar marca la\nsolicitud EN_CURSO (skip_locked: dos conectores no se pisan) — si el\nconector muere a medias, la fila queda EN_CURSO y la siguiente pasada\nautomática la cierra vía reporte con su solicitud_id o queda a la vista.",
+    "description": "El conector pregunta si alguien pidió sincronizar. Reclamar marca la\nsolicitud EN_CURSO (skip_locked: dos conectores no se pisan) — si el\nconector muere a medias, `_expirar_syncs_muertas` la cierra como ERROR\npasada una hora y el botón vuelve a servir.",
     "operationId": "reclamar_espejo_sync_api_v1_facturas_espejo_sync_pendiente_get",
     "parameters": [
      {
