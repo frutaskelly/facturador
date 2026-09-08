@@ -56,11 +56,19 @@ function detailToMessage(detail: unknown, fallback: string): string {
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {
     return detail
-      .map((d) =>
-        d && typeof d === "object" && typeof (d as { msg?: unknown }).msg === "string"
-          ? (d as { msg: string }).msg
-          : JSON.stringify(d)
-      )
+      .map((d) => {
+        if (!d || typeof d !== "object" || typeof (d as { msg?: unknown }).msg !== "string") {
+          return JSON.stringify(d);
+        }
+        // El campo que falló viene en `loc` (["body", "rfc"]); sin él el aviso
+        // dice el problema pero no dónde, y no hay nada que ir a corregir.
+        const loc = (d as { loc?: unknown }).loc;
+        const campo = Array.isArray(loc)
+          ? loc.filter((x) => typeof x === "string" && x !== "body").pop()
+          : undefined;
+        const msg = (d as { msg: string }).msg;
+        return campo ? `${campo}: ${msg}` : msg;
+      })
       .join("; ");
   }
   // Los errores con datos traen su texto en `mensaje`: sin esto el usuario ve

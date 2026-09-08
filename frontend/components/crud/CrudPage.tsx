@@ -321,21 +321,34 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
 
   async function save() {
     if (!form) return;
+    // Se revisan TODOS los campos antes de avisar: cortar en el primero obliga
+    // a descubrir lo que falta de uno en uno, un popup por vuelta.
+    const faltantes: string[] = [];
+    const invalidos: string[] = [];
     for (const f of campos) {
       const isReadonly = f.readonly || f.readOnly;
+      if (isReadonly) continue;
       const v = form[f.name];
-      if (f.required && !isReadonly && typeof v === "string" && !v.trim()) {
-        toast.error(`${f.label} es obligatorio`);
-        return;
+      if (f.required && typeof v === "string" && !v.trim()) {
+        faltantes.push(f.label);
+        continue; // sin valor no hay nada que validar
       }
       // Validación local del campo: bloquea el guardado con el motivo exacto.
-      if (f.validate && !isReadonly) {
+      if (f.validate) {
         const motivo = f.validate(String(v ?? ""), form);
-        if (motivo) {
-          toast.error(`${f.label}: ${motivo}`);
-          return;
-        }
+        if (motivo) invalidos.push(`${f.label}: ${motivo}`);
       }
+    }
+    if (faltantes.length || invalidos.length) {
+      toast.error(
+        [
+          faltantes.length && `Falta capturar: ${faltantes.join(", ")}.`,
+          ...invalidos,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+      return;
     }
     try {
       const payload = config.toPayload(form);
