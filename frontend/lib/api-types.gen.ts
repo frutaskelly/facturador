@@ -4915,6 +4915,11 @@ export interface components {
         ContextoPreciosOut: {
             lista?: components["schemas"]["ContextoListaOut"] | null;
             /**
+             * Listas Por Proyecto Omitidas
+             * @default 0
+             */
+            listas_por_proyecto_omitidas: number;
+            /**
              * Listas Por Sucursal Omitidas
              * @default 0
              */

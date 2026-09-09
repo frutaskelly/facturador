@@ -292,6 +292,18 @@ def contexto_precios(
         )
         omitidas += _vigente(q, PrecioOverride, fecha).count()
 
+    # El mismo dato para PROYECTO: las negociaciones de MAFAN/EHMO viven
+    # ancladas a proyecto, y un documento sin proyecto no las ve. Con el
+    # conteo, la pantalla puede decir "elige el proyecto" en vez del rojo
+    # seco "sin lista aplicable" (incidencia ClickUp 86bbxpb51).
+    por_proyecto = 0
+    if cliente_id is not None and proyecto_id is None:
+        q = db.query(ListaAsignacion.id).filter(
+            ListaAsignacion.cliente_id == cliente_id,
+            ListaAsignacion.proyecto_id.isnot(None),
+        )
+        por_proyecto = _vigente(q, ListaAsignacion, fecha).count()
+
     # Qué productos tienen precio en este contexto: los de las listas que
     # aplican (asignaciones + base) más los overrides de la misma cascada.
     con_precio: set[UUID] = set()
@@ -321,6 +333,7 @@ def contexto_precios(
     return ContextoPreciosOut(
         lista=lista_out,
         listas_por_sucursal_omitidas=omitidas,
+        listas_por_proyecto_omitidas=por_proyecto,
         productos_con_precio=sorted(con_precio, key=str),
     )
 

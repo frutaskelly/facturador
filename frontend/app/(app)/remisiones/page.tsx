@@ -34,7 +34,7 @@ import {
   nuevaLinea, pegarLocalFallback, unidadBaseDesde,
   type FiscalPreview, type LineaForm,
 } from "@/lib/lineas";
-import type { Almacen, Cliente, ContextoPrecios, LineaPegada, LineaRemision, MatchResult, OCRecibida, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
+import type { Almacen, Cliente, ContextoPrecios, LineaPegada, LineaRemision, MatchResult, OCRecibida, Producto, Proyecto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "remision:gestionar";
 
@@ -132,6 +132,11 @@ export default function RemisionesPage() {
 
   // catálogos
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=200");
+  // Proyectos: las negociaciones de MAFAN/EHMO viven ancladas a proyecto, y
+  // una remisión sin proyecto no las ve al cotizar (incidencia 86bbxpb51).
+  const proyectosRes = useResource<Page<Proyecto>>(
+    can(me, "menu:clientes") ? "/api/v1/proyectos?activo=true&limit=500" : null,
+  );
   // Un usuario de portal (solo sus clientes) no tiene estos menús: pedir los
   // catálogos daría 403 seguro; null = no pedir y trabajar con listas vacías.
   const almacenesRes = useResource<Page<Almacen>>(
@@ -308,6 +313,27 @@ export default function RemisionesPage() {
   const clienteOpts: ComboOption[] = useMemo(() => clientes.map((c) => ({ value: c.id, label: c.legal_name })), [clientes]);
   const sucursalOpts: ComboOption[] = useMemo(() => sucursales.map((s) => ({ value: s.id, label: s.nombre })), [sucursales]);
   const almacenOpts: ComboOption[] = useMemo(() => almacenes.map((a) => ({ value: a.id, label: a.nombre })), [almacenes]);
+  const proyectos = proyectosRes.data?.items ?? [];
+  // Solo los proyectos que pueden aplicar a ESTE documento: del cliente (o
+  // globales) y de su plaza cuando el proyecto tiene alcance declarado.
+  const proyectoOpts = useMemo(
+    () =>
+      proyectos.filter((p) =>
+        p.activo
+        && (!p.cliente_id || p.cliente_id === clienteId)
+        && (!p.sucursal_id || !sucursalId || p.sucursal_id === sucursalId)),
+    [proyectos, clienteId, sucursalId],
+  );
+  // Si el cliente o la plaza cambian y el proyecto elegido ya no aplica, se
+  // suelta; con UN solo proyecto posible se preselecciona (sigue editable).
+  // En edición no se toca solo: el proyecto guardado puede estar inactivo y
+  // seguir siendo el correcto.
+  useEffect(() => {
+    if (mode !== "create" || editId) return;
+    if (proyectoId && !proyectoOpts.some((p) => p.id === proyectoId)) { setProyectoId(""); return; }
+    if (!proyectoId && clienteId && proyectoOpts.length === 1) setProyectoId(proyectoOpts[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, editId, clienteId, sucursalId, proyectoOpts]);
   const serieOpts: ComboOption[] = useMemo(
     () => [
       { value: "", label: `Automática${serieResuelta ? ` · ${serieResuelta.codigo}` : ""}` },
@@ -539,6 +565,13 @@ export default function RemisionesPage() {
           // que se compara al final para ofrecer guardarlo.
           if (l.precioManual) return { ...l, ...ref, importe: Number(l.precio || 0) * Number(cantidad) };
           const precio = r.precio ?? "";
+          if (precio === "" && l.precio !== "") {
+            // Una cotización vacía no borra un precio ya puesto (el del
+            // documento importado, o uno tecleado cuyo flag se soltó): no
+            // trae nada mejor que ofrecer. Vuelve manual para que el guardado
+            // lo mande tal cual — al backend, una línea sin precio le vale $0.
+            return { ...l, ...ref, precioManual: true, importe: Number(l.precio || 0) * Number(cantidad) };
+          }
           return { ...l, ...ref, precio: precio === "" ? "" : String(precio), importe: Number(precio || 0) * Number(cantidad) };
         }),
       );
@@ -592,9 +625,15 @@ export default function RemisionesPage() {
 
   function onPickProducto(key: string, pick: ProductoPick | null, texto: string) {
     if (!pick) {
-      // Sin producto no hay precio: se limpian también precio/importe para que
-      // la línea no siga sumando en los totales.
-      setLinea(key, { producto_id: "", label: "", texto, precio: "", precioManual: false, importe: 0,
+      // Sin producto no hay precio de LISTA; el manual (tecleado o del
+      // documento) se queda con su partida. Sin manual, se limpia también el
+      // importe para que la línea no siga sumando en los totales.
+      const l = lineas.find((x) => x.key === key);
+      const manual = l?.precioManual ?? false;
+      setLinea(key, { producto_id: "", label: "", texto,
+                      precio: manual && l ? l.precio : "",
+                      precioManual: manual,
+                      importe: manual && l ? Number(l.precio || 0) * Number(l.cantidad || 0) : 0,
                       precioLista: null, precioListaId: null, precioTramo: null });
       return;
     }
@@ -697,8 +736,14 @@ export default function RemisionesPage() {
     const l = lineas.find((x) => x.key === key);
     if (!l) return;
     if (!pick) {
-      setLinea(key, { producto_id: "", label: "", presentaciones: [], precio: "", precioManual: false,
-                      importe: 0, precioLista: null, precioListaId: null, precioTramo: null });
+      // Al despejar el producto (cada tecla en esta caja lo hace) el precio
+      // MANUAL se conserva: es de la partida del documento, no del producto
+      // que se estaba probando. Solo el precio de lista se suelta.
+      setLinea(key, { producto_id: "", label: "", presentaciones: [],
+                      precio: l.precioManual ? l.precio : "",
+                      precioManual: l.precioManual,
+                      importe: l.precioManual ? Number(l.precio || 0) * Number(l.cantidad || 0) : 0,
+                      precioLista: null, precioListaId: null, precioTramo: null });
       return;
     }
     const presKeys = Object.keys(pick.presentaciones ?? {});
@@ -813,6 +858,7 @@ export default function RemisionesPage() {
       sucursal_id: sucursalId || null,
       almacen_id: almacenId || null,
       serie_id: serieOverride || null,
+      proyecto_id: proyectoId || null,
       // La columna es NOT NULL: con fecha vacía se omite el campo (mandar null
       // en el PATCH provoca un 500); el backend conserva/asigna la suya.
       ...(fecha ? { fecha_remision: fecha } : {}),
@@ -2169,6 +2215,18 @@ export default function RemisionesPage() {
               disabled={editId != null}
             />
           </Field>
+          {(proyectoOpts.length > 0 || proyectoId) && (
+            <Field label="Proyecto" hint="Las listas negociadas por proyecto solo cotizan con él">
+              <Select value={proyectoId} onChange={(e) => setProyectoId(e.target.value)}>
+                <option value="">Sin proyecto</option>
+                {proyectoOpts.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombre}{p.sucursal_nombre ? ` · ${p.sucursal_nombre}` : ""}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
           <Field label="Consecutivo (informativo)">
             <Input value={editId ? editFolio ?? "—" : folioPreview} readOnly disabled aria-label="Folio consecutivo" />
           </Field>
@@ -2204,6 +2262,11 @@ export default function RemisionesPage() {
             {!sucursalId && ctxPrecios.listas_por_sucursal_omitidas > 0 && (
               <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-2.5 py-1 text-warning">
                 Este cliente tiene precios por sucursal que NO aplican sin sucursal — elígela arriba
+              </span>
+            )}
+            {!proyectoId && ctxPrecios.listas_por_proyecto_omitidas > 0 && (
+              <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-2.5 py-1 text-warning">
+                Las listas de este cliente van por PROYECTO y sin proyecto no aplican — elígelo arriba
               </span>
             )}
           </div>
