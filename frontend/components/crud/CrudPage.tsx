@@ -694,7 +694,7 @@ function FieldActionButton({
   // Huella (este campo + los de `watch`) contra la que se verificó con éxito.
   // Si cualquiera cambia después, se limpia "Verificado" para no mostrar un
   // resultado obsoleto (p. ej. el RFC quedó igual pero el CP cambió).
-  const fingerprint = [value, ...(action.watch ?? []).map((k) => String(form[k] ?? ""))].join(" ");
+  const fingerprint = [value, ...(action.watch ?? []).map((k) => String(form[k] ?? ""))].join("\u0000");
   const [verifiedFingerprint, setVerifiedFingerprint] = useState<string | null>(null);
   // Huella con la que la verificación FALLÓ: pinta el botón en rojo hasta que
   // el usuario corrija el dato (antes solo salía un aviso y el botón quedaba
