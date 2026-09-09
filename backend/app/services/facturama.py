@@ -262,12 +262,31 @@ class FacturamaClient:
             return False, None
 
     def cancel_cfdi(self, cfdi_id: str, motive: str, uuid_replacement: Optional[str] = None) -> dict:
-        params = {"type": "issued", "motive": motive}
+        """Cancela ante el PAC. Los CFDI de esta app se timbran por la API
+        multiemisor (POST /3/cfdis), y esos se cancelan por su propia ruta:
+        DELETE /api-lite/cfdis/{id} — la clásica /cfdi/{id}?type=issued los
+        rechaza con 400 (así falló la primera cancelación nativa, 10-sep-2026).
+        La clásica queda de respaldo solo si la lite no rutea (404/405/401,
+        p. ej. una cuenta sin multiemisor); un 400 de la lite es respuesta
+        de negocio y NO cae al respaldo."""
+        params = {"motive": motive}
         if uuid_replacement:
             params["uuidReplacement"] = uuid_replacement
         with self._client() as c:
-            r = c.delete(f"/cfdi/{cfdi_id}", params=params)
+            r = c.delete(f"/api-lite/cfdis/{cfdi_id}", params=params)
+            if r.status_code in (401, 404, 405):
+                log.warning(
+                    "Facturama cancel api-lite %s %s | RESPONSE=%s — probando ruta clásica",
+                    cfdi_id, r.status_code, r.text[:500],
+                )
+                r = c.delete(f"/cfdi/{cfdi_id}", params={**params, "type": "issued"})
             if r.status_code >= 400:
+                # El detalle del PAC queda en el log del backend, no solo en el
+                # 502 que viaja al navegador (que la UI suele resumir).
+                log.warning(
+                    "Facturama cancel %s %s | RESPONSE=%s",
+                    cfdi_id, r.status_code, r.text[:1000],
+                )
                 raise FacturamaError(f"cancel_cfdi failed: {r.status_code} {r.text}")
             return r.json() if r.text else {}
 
