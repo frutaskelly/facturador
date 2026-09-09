@@ -78,7 +78,24 @@ class FacturaDirectaIn(BaseModel):
     forma_pago: Optional[str] = Field(default=None, max_length=5)
     metodo_pago: Optional[str] = Field(default=None, max_length=5)
     notas: Optional[str] = None
+    # OC del cliente: la directa no tiene remisión donde anotarla.
+    su_pedido: Optional[str] = Field(default=None, max_length=30)
     lineas: List[LineaFacturaDirectaIn] = Field(min_length=1)
+
+
+class FacturaUpdate(BaseModel):
+    """Edición de una factura en BORRADOR (nativa). Los campos de cabecera
+    aplican a cualquier borrador; `lineas` y `almacen_id` solo a la DIRECTA
+    (en una desde-remisiones los conceptos vienen de sus remisiones y en una
+    sustituta se copian verbatim de la original). Serie/folio/cliente no se
+    tocan: para cambiarlos se descarta el borrador y se captura de nuevo."""
+    uso_cfdi: Optional[str] = Field(default=None, max_length=5)
+    forma_pago: Optional[str] = Field(default=None, max_length=5)
+    metodo_pago: Optional[str] = Field(default=None, max_length=5)
+    notas: Optional[str] = None
+    su_pedido: Optional[str] = Field(default=None, max_length=30)
+    almacen_id: Optional[uuid.UUID] = None
+    lineas: Optional[List[LineaFacturaDirectaIn]] = Field(default=None, min_length=1)
 
 
 class LineaFacturaEspejoIn(BaseModel):
@@ -171,8 +188,14 @@ class LineaFacturaOut(ORMModel):
     producto_id: Optional[uuid.UUID] = None
     clave_prod_serv: str
     clave_unidad: str
+    # Con qué presentación se capturó (directas desde 0071); NULL en líneas
+    # históricas y en facturas desde remisiones.
+    presentacion: Optional[str] = None
     descripcion: str
     cantidad: Decimal
+    # Directas: cantidad en unidad base. Para líneas anteriores a 0071 la UI
+    # reconstruye la presentación con el factor cantidad_base/cantidad.
+    cantidad_base: Optional[Decimal] = None
     valor_unitario: Decimal
     importe: Decimal
     descuento: Decimal
@@ -192,6 +215,9 @@ class FacturaOut(ORMModel):
     serie: str
     folio: int
     cliente_id: uuid.UUID
+    # Solo directas: almacén del que descuenta al timbrar. La UI lo usa además
+    # para distinguir el borrador DIRECTO (líneas editables) del resto.
+    almacen_id: Optional[uuid.UUID] = None
     # nueva → vieja: la factura previa que ESTA sustituye (relación CFDI "04").
     # Debe ir ANTES del campo `uuid` de abajo (ese sombrea el módulo uuid).
     sustituye_a_factura_id: Optional[uuid.UUID] = None
@@ -224,6 +250,7 @@ class FacturaOut(ORMModel):
     uuid_sustitucion: Optional[str] = None
     pdf_url: Optional[str] = None
     notas: Optional[str] = None
+    su_pedido: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

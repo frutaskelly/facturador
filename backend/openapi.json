@@ -5349,6 +5349,18 @@
    },
    "FacturaDetailOut": {
     "properties": {
+     "almacen_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Almacen Id"
+     },
      "cliente_id": {
       "format": "uuid",
       "title": "Cliente Id",
@@ -5498,6 +5510,17 @@
      "serie": {
       "title": "Serie",
       "type": "string"
+     },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
      },
      "subtotal": {
       "title": "Subtotal",
@@ -5665,6 +5688,18 @@
        }
       ],
       "title": "Serie Id"
+     },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "maxLength": 30,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
      },
      "uso_cfdi": {
       "anyOf": [
@@ -5851,6 +5886,18 @@
    },
    "FacturaOut": {
     "properties": {
+     "almacen_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Almacen Id"
+     },
      "cliente_id": {
       "format": "uuid",
       "title": "Cliente Id",
@@ -5993,6 +6040,17 @@
       "title": "Serie",
       "type": "string"
      },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
+     },
      "subtotal": {
       "title": "Subtotal",
       "type": "string"
@@ -6078,6 +6136,99 @@
      "updated_at"
     ],
     "title": "FacturaOut",
+    "type": "object"
+   },
+   "FacturaUpdate": {
+    "description": "Edición de una factura en BORRADOR (nativa). Los campos de cabecera\naplican a cualquier borrador; `lineas` y `almacen_id` solo a la DIRECTA\n(en una desde-remisiones los conceptos vienen de sus remisiones y en una\nsustituta se copian verbatim de la original). Serie/folio/cliente no se\ntocan: para cambiarlos se descarta el borrador y se captura de nuevo.",
+    "properties": {
+     "almacen_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Almacen Id"
+     },
+     "forma_pago": {
+      "anyOf": [
+       {
+        "maxLength": 5,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Forma Pago"
+     },
+     "lineas": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/LineaFacturaDirectaIn"
+        },
+        "minItems": 1,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lineas"
+     },
+     "metodo_pago": {
+      "anyOf": [
+       {
+        "maxLength": 5,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Metodo Pago"
+     },
+     "notas": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notas"
+     },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "maxLength": 30,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
+     },
+     "uso_cfdi": {
+      "anyOf": [
+       {
+        "maxLength": 5,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uso Cfdi"
+     }
+    },
+    "title": "FacturaUpdate",
     "type": "object"
    },
    "GrupoBandejaOut": {
@@ -7393,6 +7544,17 @@
       "title": "Cantidad",
       "type": "string"
      },
+     "cantidad_base": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cantidad Base"
+     },
      "clave_prod_serv": {
       "title": "Clave Prod Serv",
       "type": "string"
@@ -7447,6 +7609,17 @@
      "objeto_imp": {
       "title": "Objeto Imp",
       "type": "string"
+     },
+     "presentacion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
      },
      "producto_id": {
       "anyOf": [
@@ -23516,6 +23689,79 @@
      }
     ],
     "summary": "Get Factura",
+    "tags": [
+     "facturas"
+    ]
+   },
+   "patch": {
+    "description": "Edita una factura en BORRADOR (nativa): cabecera para cualquier borrador;\n`lineas`/`almacen_id` solo para la DIRECTA. En una desde-remisiones los\nconceptos vienen de sus remisiones (se descarta y re-genera) y en una\nsustituta se copian verbatim de la original. Serie, folio y cliente no se\ntocan — para cambiarlos se descarta el borrador y se captura de nuevo.",
+    "operationId": "update_factura_api_v1_facturas__factura_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "factura_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Factura Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/FacturaUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FacturaDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Update Factura",
     "tags": [
      "facturas"
     ]

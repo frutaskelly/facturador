@@ -62,6 +62,7 @@ from ...schemas.factura import (
     FacturaDirectaIn,
     FacturaEspejoIn,
     FacturaOut,
+    FacturaUpdate,
     SustituirIn,
     TimbrarIn,
 )
@@ -568,6 +569,81 @@ def factura_desde_remisiones(
     return factura
 
 
+def _cargar_productos_directa(db: Session, lineas):
+    """Productos y esquemas de impuesto de las líneas de una directa; valida
+    que existan y que cada presentación capturada sea del producto."""
+    prod_ids = {ln.producto_id for ln in lineas}
+    productos = {
+        p.id: p
+        for p in db.query(Producto)
+        .filter(Producto.id.in_(prod_ids), Producto.deleted_at.is_(None))
+        .all()
+    }
+    if len(productos) != len(prod_ids):
+        raise HTTPException(status_code=404, detail="Uno o más productos no existen")
+    # Presentación desconocida caería a factor 1 y descontaría inventario con la
+    # magnitud equivocada (p. ej. "ARPILLA" mal tecleada = 1 kg en vez de 20).
+    for ln in lineas:
+        prod = productos.get(ln.producto_id)
+        if ln.presentacion and prod is not None and ln.presentacion not in (prod.presentaciones or {}):
+            raise HTTPException(
+                status_code=422,
+                detail=f"El producto {prod.nombre} no tiene la presentación '{ln.presentacion}'",
+            )
+    esq_ids = {p.esquema_impuesto_id for p in productos.values() if p.esquema_impuesto_id}
+    esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.id.in_(esq_ids)).all()}
+    return productos, esquemas
+
+
+def _reemplazar_lineas_directa(db: Session, ctx, factura, lineas, productos, esquemas) -> None:
+    """Vuelca las líneas de una factura DIRECTA (alta o reedición del borrador)
+    y recalcula sus totales. En reedición reemplaza las existentes: la directa
+    no toca inventario hasta timbrar, así que no hay reservas que preservar."""
+    db.query(LineaFactura).filter(
+        LineaFactura.factura_id == factura.id
+    ).delete(synchronize_session="fetch")
+    db.expire(factura, ["lineas"])
+    db.flush()
+
+    calc_lineas = []
+    for numero, ln in enumerate(lineas, start=1):
+        prod = productos.get(ln.producto_id)
+        esq = esquemas.get(prod.esquema_impuesto_id) if prod and prod.esquema_impuesto_id else None
+        cantidad = Decimal(ln.cantidad)
+        valor_unitario = Decimal(ln.precio_unitario)
+        # A 2 decimales (centavos), como el resto del cálculo fiscal (fiscal._q):
+        # si la línea se guarda a 4 decimales, la suma de importes de líneas no
+        # cuadra con el subtotal del comprobante y el PAC rechaza el timbrado.
+        importe = (cantidad * valor_unitario).quantize(Decimal("0.01"))
+        clave_unidad = presentacion_sat(prod, ln.presentacion) or (prod.unidad_sat if prod else "H87")
+        # Cantidad en unidad base (para descontar inventario al timbrar).
+        cantidad_base = cantidad * presentacion_factor(prod, ln.presentacion)
+        calc = _fiscal_calc(prod, esq, importe, cantidad)
+        calc_lineas.append(calc)
+        db.add(LineaFactura(
+            tenant_id=ctx.tenant_id, factura_id=factura.id, numero_linea=numero,
+            producto_id=ln.producto_id,
+            clave_prod_serv=(prod.clave_sat if prod else "01010101"),
+            clave_unidad=clave_unidad, presentacion=ln.presentacion,
+            descripcion=(prod.nombre if prod else "Producto"),
+            cantidad=cantidad, cantidad_base=cantidad_base,
+            valor_unitario=valor_unitario, importe=importe, objeto_imp="02",
+            iva_tasa=calc["iva_tasa"], iva_importe=calc["iva_importe"],
+            ieps_tipo=calc["ieps_tipo"], ieps_valor=calc["ieps_valor"], ieps_importe=calc["ieps_importe"],
+            ret_iva_importe=calc["ret_iva_importe"], ret_isr_importe=calc["ret_isr_importe"],
+        ))
+
+    tot = totales(calc_lineas)
+    factura.subtotal = tot["subtotal"]
+    factura.descuento = tot["descuento"]
+    factura.iva_trasladado = tot["iva_trasladado"]
+    factura.ieps_trasladado = tot["ieps_trasladado"]
+    factura.ret_iva = tot["ret_iva"]
+    factura.ret_isr = tot["ret_isr"]
+    factura.total = tot["total"]
+    db.flush()
+
+
 @router.post("/directa", response_model=FacturaDetailOut, status_code=status.HTTP_201_CREATED)
 def factura_directa(
     payload: FacturaDirectaIn,
@@ -598,26 +674,9 @@ def factura_directa(
     ensure_fk(db, Almacen, payload.almacen_id, "almacen_id")   # de dónde sale el stock
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
 
-    prod_ids = {ln.producto_id for ln in payload.lineas}
-    productos = {
-        p.id: p
-        for p in db.query(Producto)
-        .filter(Producto.id.in_(prod_ids), Producto.deleted_at.is_(None))
-        .all()
-    }
-    if len(productos) != len(prod_ids):
-        raise HTTPException(status_code=404, detail="Uno o más productos no existen")
-    # Presentación desconocida caería a factor 1 y descontaría inventario con la
-    # magnitud equivocada (p. ej. "ARPILLA" mal tecleada = 1 kg en vez de 20).
-    for ln in payload.lineas:
-        prod = productos.get(ln.producto_id)
-        if ln.presentacion and prod is not None and ln.presentacion not in (prod.presentaciones or {}):
-            raise HTTPException(
-                status_code=422,
-                detail=f"El producto {prod.nombre} no tiene la presentación '{ln.presentacion}'",
-            )
-    esq_ids = {p.esquema_impuesto_id for p in productos.values() if p.esquema_impuesto_id}
-    esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.id.in_(esq_ids)).all()}
+    # Se valida ANTES de consumir folio: un producto/presentación inválido no
+    # debe quemar el consecutivo.
+    productos, esquemas = _cargar_productos_directa(db, payload.lineas)
 
     if serie_obj is not None:
         folio = consumir_folio(db, serie_obj.id)
@@ -640,45 +699,91 @@ def factura_directa(
         metodo_pago=payload.metodo_pago or cliente.metodo_pago_default or "PPD",
         lugar_expedicion=tenant.domicilio_fiscal_cp,
         almacen_id=payload.almacen_id,
-        notas=payload.notas, created_by=ctx.user_id, estado="BORRADOR",
+        notas=payload.notas,
+        su_pedido=(payload.su_pedido or "").strip() or None,
+        created_by=ctx.user_id, estado="BORRADOR",
     )
     db.add(factura); db.flush()
+    _reemplazar_lineas_directa(db, ctx, factura, payload.lineas, productos, esquemas)
+    db.refresh(factura)
+    return factura
 
-    calc_lineas = []
-    for numero, ln in enumerate(payload.lineas, start=1):
-        prod = productos.get(ln.producto_id)
-        esq = esquemas.get(prod.esquema_impuesto_id) if prod and prod.esquema_impuesto_id else None
-        cantidad = Decimal(ln.cantidad)
-        valor_unitario = Decimal(ln.precio_unitario)
-        # A 2 decimales (centavos), como el resto del cálculo fiscal (fiscal._q):
-        # si la línea se guarda a 4 decimales, la suma de importes de líneas no
-        # cuadra con el subtotal del comprobante y el PAC rechaza el timbrado.
-        importe = (cantidad * valor_unitario).quantize(Decimal("0.01"))
-        clave_unidad = presentacion_sat(prod, ln.presentacion) or (prod.unidad_sat if prod else "H87")
-        # Cantidad en unidad base (para descontar inventario al timbrar).
-        cantidad_base = cantidad * presentacion_factor(prod, ln.presentacion)
-        calc = _fiscal_calc(prod, esq, importe, cantidad)
-        calc_lineas.append(calc)
-        db.add(LineaFactura(
-            tenant_id=ctx.tenant_id, factura_id=factura.id, numero_linea=numero,
-            producto_id=ln.producto_id,
-            clave_prod_serv=(prod.clave_sat if prod else "01010101"),
-            clave_unidad=clave_unidad, descripcion=(prod.nombre if prod else "Producto"),
-            cantidad=cantidad, cantidad_base=cantidad_base,
-            valor_unitario=valor_unitario, importe=importe, objeto_imp="02",
-            iva_tasa=calc["iva_tasa"], iva_importe=calc["iva_importe"],
-            ieps_tipo=calc["ieps_tipo"], ieps_valor=calc["ieps_valor"], ieps_importe=calc["ieps_importe"],
-            ret_iva_importe=calc["ret_iva_importe"], ret_isr_importe=calc["ret_isr_importe"],
-        ))
 
-    tot = totales(calc_lineas)
-    factura.subtotal = tot["subtotal"]
-    factura.descuento = tot["descuento"]
-    factura.iva_trasladado = tot["iva_trasladado"]
-    factura.ieps_trasladado = tot["ieps_trasladado"]
-    factura.ret_iva = tot["ret_iva"]
-    factura.ret_isr = tot["ret_isr"]
-    factura.total = tot["total"]
+@router.patch("/{factura_id}", response_model=FacturaDetailOut)
+def update_factura(
+    factura_id: UUID,
+    payload: FacturaUpdate,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Edita una factura en BORRADOR (nativa): cabecera para cualquier borrador;
+    `lineas`/`almacen_id` solo para la DIRECTA. En una desde-remisiones los
+    conceptos vienen de sus remisiones (se descarta y re-genera) y en una
+    sustituta se copian verbatim de la original. Serie, folio y cliente no se
+    tocan — para cambiarlos se descarta el borrador y se captura de nuevo."""
+    factura = get_or_404(db, Factura, factura_id)
+    if factura.origen == "ESPEJO_SAE":
+        raise HTTPException(
+            status_code=409,
+            detail="Una factura espejo se corrige en SAE; la sincronización actualiza el reflejo",
+        )
+    if factura.estado != "BORRADOR":
+        raise HTTPException(status_code=409, detail="Solo se puede editar una factura en borrador")
+    # Un intento de timbrado PENDIENTE = el servidor murió a media llamada y el
+    # CFDI puede EXISTIR en el PAC con el contenido actual. Editar antes de
+    # reconciliar divorciaría el borrador de ese CFDI; reintentar el timbrado
+    # reconcilia por OrderNumber y resuelve en qué quedó.
+    en_vuelo = db.query(TimbradoIntento).filter(
+        TimbradoIntento.factura_id == factura.id,
+        TimbradoIntento.estado == "PENDIENTE",
+    ).first()
+    if en_vuelo is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Hay un timbrado pendiente de reconciliar; vuelve a timbrar "
+                   "la factura (o descártala) antes de editarla",
+        )
+
+    data = payload.model_dump(exclude_unset=True)
+    lineas_enviadas = "lineas" in data
+    data.pop("lineas", None)
+
+    # Directa = tiene almacén (la desde-remisiones y la sustituta van sin él).
+    es_directa = factura.almacen_id is not None
+    if not es_directa and lineas_enviadas:
+        if factura.sustituye_a_factura_id is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Los conceptos de una sustituta se copian de la factura original; "
+                       "descártala y vuelve a crearla con «Sustituir»",
+            )
+        raise HTTPException(
+            status_code=409,
+            detail="Los conceptos vienen de las remisiones ligadas; descarta el borrador, "
+                   "edita las remisiones y vuelve a generarlo",
+        )
+    if not es_directa and "almacen_id" in data:
+        raise HTTPException(status_code=409, detail="Solo la factura directa tiene almacén")
+    if es_directa and "almacen_id" in data and data["almacen_id"] is None:
+        raise HTTPException(status_code=422, detail="La factura directa necesita un almacén")
+    if data.get("almacen_id") is not None:
+        ensure_fk(db, Almacen, data["almacen_id"], "almacen_id")
+        factura.almacen_id = data["almacen_id"]
+
+    # Cabecera. Los tres campos fiscales son NOT NULL: un null explícito se
+    # ignora en vez de tirar la fila.
+    for key in ("uso_cfdi", "forma_pago", "metodo_pago"):
+        if data.get(key):
+            setattr(factura, key, data[key])
+    if "notas" in data:
+        factura.notas = data["notas"]
+    if "su_pedido" in data:
+        factura.su_pedido = (data["su_pedido"] or "").strip() or None
+
+    if lineas_enviadas and payload.lineas is not None:
+        productos, esquemas = _cargar_productos_directa(db, payload.lineas)
+        _reemplazar_lineas_directa(db, ctx, factura, payload.lineas, productos, esquemas)
+
     db.flush()
     db.refresh(factura)
     return factura
