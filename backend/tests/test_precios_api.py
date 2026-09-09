@@ -583,6 +583,32 @@ def test_contexto_avisa_listas_por_sucursal_omitidas(client, env, auth_as):
     assert env["aguacate"] in con_plaza["productos_con_precio"]
 
 
+def test_contexto_avisa_listas_por_proyecto_omitidas(client, env, auth_as):
+    """La negociación anclada a PROYECTO no aplica si el documento no lo trae —
+    la incidencia de MAFAN/EHMO (ClickUp 86bbxpb51): la lista "sí estaba
+    asignada", pero el alta de remisión cotizaba sin proyecto y el aviso rojo
+    no decía qué faltaba. El contexto ahora trae el conteo para que la
+    pantalla pida elegir el proyecto."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    proy = client.post("/api/v1/proyectos", headers=h, json={
+        "nombre": "SEGURIDAD PUBLICA", "cliente_id": env["cli1"]})
+    assert proy.status_code == 201, proy.text
+    alta = client.post("/api/v1/asignaciones-precios", headers=h, json={
+        "lista_id": env["menudeo"], "cliente_id": env["cli1"],
+        "proyecto_id": proy.json()["id"]})
+    assert alta.status_code == 201, alta.text
+
+    sin_proyecto = _ctx(client, h, cliente_id=env["cli1"])
+    assert sin_proyecto["lista"]["origen"] == "lista_base"
+    assert sin_proyecto["listas_por_proyecto_omitidas"] == 1
+
+    con_proyecto = _ctx(client, h, cliente_id=env["cli1"], proyecto_id=proy.json()["id"])
+    assert con_proyecto["lista"]["origen"] == "lista_proyecto"
+    assert con_proyecto["lista"]["lista_id"] == env["menudeo"]
+    assert con_proyecto["lista"]["proyecto_nombre"] == "SEGURIDAD PUBLICA"
+    assert con_proyecto["listas_por_proyecto_omitidas"] == 0
+
+
 # ── es_default del vínculo cliente×plaza (sucursal que se preselecciona) ──
 
 

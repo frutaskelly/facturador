@@ -297,8 +297,10 @@ def _norm_sku(v: str) -> str:
 
 def _num_txt(v) -> str:
     """Los números del lector vienen float; la línea los viaja como texto (el
-    front los formatea). 10.0 debe llegar como '10', no como '10.0'."""
-    if v is None:
+    front los formatea). 10.0 debe llegar como '10', no como '10.0'. El cero
+    llega como VACÍO — misma regla que el pegado (`cero_vacio`): un $0 del
+    OCR no es un precio, y como texto '0' bloqueaba la cotización automática."""
+    if v is None or (isinstance(v, (int, float)) and float(v) == 0):
         return ""
     if isinstance(v, float) and v.is_integer():
         return str(int(v))

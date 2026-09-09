@@ -146,6 +146,9 @@ class ContextoPreciosOut(BaseModel):
     # Negociaciones del cliente ancladas a plaza que NO aplican porque el
     # documento viene sin sucursal — el aviso "elige la sucursal".
     listas_por_sucursal_omitidas: int = 0
+    # Lo mismo pero ancladas a PROYECTO: MAFAN y EHMO negocian por proyecto, y
+    # sin este dato el aviso decía "sin lista aplicable" sin decir qué faltaba.
+    listas_por_proyecto_omitidas: int = 0
     # Productos que SÍ tienen precio en este contexto (listas aplicables +
     # overrides): alimenta el badge $ del buscador sin cotizar uno por uno.
     productos_con_precio: list[uuid.UUID] = Field(default_factory=list)

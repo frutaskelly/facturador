@@ -194,6 +194,9 @@ export type ContextoPrecios = {
     serie_codigo?: string | null;
   } | null;
   listas_por_sucursal_omitidas: number;
+  /** Asignaciones del cliente ancladas a proyecto que un documento sin
+   *  proyecto no puede ganar — alimenta el aviso "elige el proyecto". */
+  listas_por_proyecto_omitidas: number;
   productos_con_precio: string[];
 };
 

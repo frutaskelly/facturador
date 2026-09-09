@@ -3040,6 +3040,11 @@
        }
       ]
      },
+     "listas_por_proyecto_omitidas": {
+      "default": 0,
+      "title": "Listas Por Proyecto Omitidas",
+      "type": "integer"
+     },
      "listas_por_sucursal_omitidas": {
       "default": 0,
       "title": "Listas Por Sucursal Omitidas",
