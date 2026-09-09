@@ -241,6 +241,10 @@ export type DataTableProps<T> = {
   /** Activa una columna de casillas (checkbox) a la izquierda para seleccionar
    *  filas. La selección persiste entre orden/búsqueda/paginación. */
   selectable?: boolean;
+  /** Decide qué filas admiten casilla. Las que devuelvan `false` se dibujan sin
+   *  ella y quedan fuera del «seleccionar todo»: para tablas donde conviven
+   *  filas de otra naturaleza, sobre las que las acciones en lote no aplican. */
+  selectableRow?: (row: T) => boolean;
   /** Se llama con los OBJETOS de fila seleccionados cuando cambia la selección. */
   onSelectionChange?: (rows: T[]) => void;
   /** Al cambiar este valor, el componente limpia su selección interna (útil para
@@ -288,6 +292,7 @@ export function DataTable<T>({
   pageSizeOptions = [10, 25, 50, 100],
   defaultPageSize = 25,
   selectable,
+  selectableRow,
   onSelectionChange,
   selectionResetKey,
   initialSelectedKeys,
@@ -532,9 +537,14 @@ export function DataTable<T>({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ver nota de `selectedRows` sobre `rowKey`
   }, [selectedRows]);
 
-  // Casilla de cabecera: marca/indeterminada según las filas FILTRADAS.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- ver nota de `selectedRows` sobre `rowKey`
-  const filteredKeys = useMemo(() => filteredRows.map((row, i) => keyOf(row, i)), [filteredRows]);
+  // Casilla de cabecera: marca/indeterminada según las filas FILTRADAS que
+  // además admiten casilla (`selectableRow`); las que no, ni cuentan ni se
+  // marcan con «seleccionar todo».
+  const filteredKeys = useMemo(
+    () => filteredRows.flatMap((row, i) => (selectableRow?.(row) ?? true ? [keyOf(row, i)] : [])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ver nota de `selectedRows` sobre `rowKey`; `selectableRow` es igual de estable
+    [filteredRows],
+  );
   const selectedFilteredCount = useMemo(
     () => filteredKeys.reduce<number>((n, k) => (selectedKeys.has(k) ? n + 1 : n), 0),
     [filteredKeys, selectedKeys],
@@ -944,11 +954,13 @@ export function DataTable<T>({
                     >
                       {selectable && (
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            checked={selectedKeys.has(key)}
-                            onChange={() => toggleRowSelected(key)}
-                            aria-label="Seleccionar fila"
-                          />
+                          {selectableRow?.(row) ?? true ? (
+                            <Checkbox
+                              checked={selectedKeys.has(key)}
+                              onChange={() => toggleRowSelected(key)}
+                              aria-label="Seleccionar fila"
+                            />
+                          ) : null}
                         </td>
                       )}
                       {expandable && (
