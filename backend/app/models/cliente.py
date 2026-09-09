@@ -77,9 +77,12 @@ class Cliente(Base, TimestampMixin, SoftDeleteMixin):
         UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"), nullable=True
     )
 
-    # Candado de la migración (0055): mientras el cliente esté "en espejo", su
-    # facturación vive en SAE — crear facturas NATIVAS para él devuelve 409
-    # (emitir aquí Y en SAE = dos CFDI reales por la misma venta ante el SAT).
-    # El corte es POR CLIENTE: este switch se apaga cliente por cliente.
+    # Candado de la migración (0055): el cliente PARTICIPA en el espejo de SAE
+    # (sus reflejos entran y se actualizan; sin el flag, facturar nativo está
+    # abierto). OJO desde la 0070: el corte a emisión nativa es POR SERIE
+    # (series.espejo_sae) — NO apagues este switch para "completar" un corte
+    # parcial: apagarlo rompe el espejo de lo histórico y de las plazas que
+    # siguen en SAE (EHMO Tabasco). Se apaga solo cuando el cliente entero
+    # dejó SAE y sus reflejos ya no se mueven.
     espejo_sae = Column(Boolean, nullable=False, server_default=text("false"))
 

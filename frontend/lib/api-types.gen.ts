@@ -9279,6 +9279,11 @@ export interface components {
              */
             es_default: boolean;
             /**
+             * Espejo Sae
+             * @default false
+             */
+            espejo_sae: boolean;
+            /**
              * Folio Actual
              * @default 0
              */
@@ -9342,6 +9347,11 @@ export interface components {
              * @default false
              */
             es_default: boolean;
+            /**
+             * Espejo Sae
+             * @default false
+             */
+            espejo_sae: boolean;
             /** Folio Actual */
             folio_actual: number;
             /**
@@ -9412,6 +9422,8 @@ export interface components {
             activa?: boolean | null;
             /** Es Default */
             es_default?: boolean | null;
+            /** Espejo Sae */
+            espejo_sae?: boolean | null;
             /** Folio Actual */
             folio_actual?: number | null;
             /** Nombre */

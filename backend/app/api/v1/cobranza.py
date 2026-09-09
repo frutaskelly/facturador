@@ -24,6 +24,7 @@ from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import Cliente, Factura, ReciboPago, ReciboPagoFactura, Tenant, TimbradoIntento
 from ...services.cfdi import emisor_rfc_esperado
 from ...services.facturama import FacturamaClient, FacturamaError
+from ...services.onboarding import exigir_listo_para_facturar
 from ...services.rep import build_payload_rep
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import get_or_404
@@ -447,6 +448,12 @@ def timbrar_recibo(
     if not client.configured:
         raise HTTPException(status_code=503, detail="Facturama no está configurado")
 
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    # Multi-emisor: mismo gate que timbrar_factura, y ANTES de tomar FOR UPDATE
+    # sobre las facturas del recibo — el gate consulta al PAC y no debe correr
+    # sosteniendo esos locks.
+    exigir_listo_para_facturar(client, tenant, settings)
+
     filas = db.query(ReciboPagoFactura).filter(ReciboPagoFactura.recibo_id == recibo.id).all()
     docs = []
     for rf in filas:
@@ -460,7 +467,6 @@ def timbrar_recibo(
         docs.append((rf, f))
 
     cliente = db.query(Cliente).filter(Cliente.id == recibo.cliente_id).one()
-    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
 
     # Bitácora anti-doble-timbrado (igual que facturas): PENDIENTE fresco = mutex;
     # viejo = reconcilia contra el PAC por serie/folio antes de re-timbrar.

@@ -242,6 +242,54 @@ def test_rep_solo_ppd_timbrada(client, env, auth):
     assert r.status_code == 422 and "PPD timbrada" in r.json()["detail"]
 
 
+def test_rep_gate_multiemisor_sin_csd_es_422(client, env, auth, fake_pac, monkeypatch):
+    """Con multiemisor prendido, un tenant que no está listo (sin CSD propio /
+    datos fiscales) recibe el mismo 422 accionable que timbrar factura — no el
+    error crudo del PAC (502)."""
+    import app.core.config as cfg
+    monkeypatch.setattr(cfg.settings, "FACTURAMA_MULTIEMISOR", True)
+    fid = _factura_ppd_timbrada(env, total=100, dias_atras=1, folio=77)
+    h = _h(env); hoy = datetime.now(timezone.utc).isoformat()
+    r = client.post("/api/v1/cobranza/recibos-pago", headers=h, json={
+        "cliente_id": env["cli"], "fecha_pago": hoy, "forma_pago": "03", "monto": "100",
+        "facturas": [{"factura_id": fid, "importe": "100"}]})
+    assert r.status_code == 201, r.text
+    t = client.post(f"/api/v1/cobranza/recibos-pago/{r.json()['id']}/timbrar", headers=h)
+    assert t.status_code == 422, t.text
+    assert "no está lista para facturar" in t.json()["detail"]
+
+
+def test_rep_gate_multiemisor_listo_timbra(client, env, auth, monkeypatch):
+    """Con datos fiscales completos y el CSD del RFC del tenant en Facturama,
+    el gate deja pasar y el REP se timbra igual que antes."""
+    import app.core.config as cfg
+    monkeypatch.setattr(cfg.settings, "FACTURAMA_MULTIEMISOR", True)
+
+    rfc = "COB800101AA1"           # formato SAT válido (el del fixture no lo es)
+    db = SessionLocal()
+    try:
+        db.query(Tenant).filter(Tenant.id == env["tenant_id"]).update({"rfc": rfc})
+        db.commit()
+    finally:
+        db.close()
+
+    class _PACConCSD(_FakePAC):
+        def listar_csds(self):
+            return [{"Rfc": rfc}]
+
+    monkeypatch.setattr(cobranza_mod, "FacturamaClient", _PACConCSD)
+
+    fid = _factura_ppd_timbrada(env, total=200, dias_atras=1, folio=78)
+    h = _h(env); hoy = datetime.now(timezone.utc).isoformat()
+    r = client.post("/api/v1/cobranza/recibos-pago", headers=h, json={
+        "cliente_id": env["cli"], "fecha_pago": hoy, "forma_pago": "03", "monto": "200",
+        "facturas": [{"factura_id": fid, "importe": "200"}]})
+    assert r.status_code == 201, r.text
+    t = client.post(f"/api/v1/cobranza/recibos-pago/{r.json()['id']}/timbrar", headers=h)
+    assert t.status_code == 200, t.text
+    assert t.json()["estado"] == "TIMBRADO"
+
+
 # ── F3: cancelación del REP + candado en cancelar_factura ────────────────────
 def _timbrar_rep(client, env, h, fid, *, monto):
     hoy = datetime.now(timezone.utc).isoformat()
