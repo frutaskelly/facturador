@@ -390,8 +390,14 @@ export type LineaFactura = {
   producto_id: string;
   clave_prod_serv: string;
   clave_unidad: string;
+  // Presentación con la que se capturó (directas desde 0071); null en líneas
+  // históricas y en facturas desde remisiones.
+  presentacion?: string | null;
   descripcion: string;
   cantidad: string;
+  // Directas: cantidad en unidad base. Para líneas anteriores a 0071 la UI
+  // reconstruye la presentación con el factor cantidad_base/cantidad.
+  cantidad_base?: string | null;
   valor_unitario: string;
   importe: string;
   descuento: string;
@@ -409,6 +415,9 @@ export type Factura = {
   serie: string;
   folio: number;
   cliente_id: string;
+  // Solo directas: almacén del que descuenta al timbrar. La UI lo usa además
+  // para distinguir el borrador DIRECTO (líneas editables) del resto.
+  almacen_id?: string | null;
   uso_cfdi: string;
   forma_pago: string;
   metodo_pago: string;
@@ -433,6 +442,9 @@ export type Factura = {
   sustituye_a_factura_id?: string | null;
   uuid_sustitucion?: string | null;
   notas?: string | null;
+  // OC del cliente ("su pedido"): la captura la factura directa, que no tiene
+  // remisión donde anotarla; en las demás es editable en el borrador.
+  su_pedido?: string | null;
   created_at: string;
   updated_at: string;
 };

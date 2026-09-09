@@ -32,12 +32,15 @@ import type {
 
 type Props = {
   ambiente: string;
+  // Modo edición: el BORRADOR directo cuyos datos se precargan. El guardado
+  // hace PATCH (no POST) y serie/folio/cliente no se tocan.
+  editar?: FacturaDetail | null;
   onClose: () => void;                       // volver al listado
   onSaved: (f: FacturaDetail) => void;       // recargar la lista
 };
 
 /**
- * Alta de "factura directa": captura una factura sin remisión previa.
+ * Alta (y edición del borrador) de "factura directa": captura sin remisión.
  * Comparte con Remisiones el editor de líneas (pegado de Excel, Match IA y alta
  * de producto al vuelo) vía `lib/lineas`, pero NO sus acciones: aquí se guarda
  * un BORRADOR o se timbra ante el PAC.
@@ -48,9 +51,9 @@ type Props = {
  *    resuelve solo si va vacío; aquí no).
  *  - No hay sucursal ni fecha: la factura toma la fecha del timbrado.
  */
-export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
+export function FacturaDirectaForm({ ambiente, editar, onClose, onSaved }: Props) {
   const toast = useToast();
-  const { post, loading: saving } = useMutation();
+  const { post, patch, loading: saving } = useMutation();
 
   // catálogos
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=200");
@@ -63,17 +66,53 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
   const series = seriesRes.data?.items ?? [];
   const prodById = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p])), [productos]);
 
-  // cabecera
-  const [clienteId, setClienteId] = useState("");
-  const [almacenId, setAlmacenId] = useState("");
+  // cabecera (en edición se precarga del borrador)
+  const [clienteId, setClienteId] = useState(editar?.cliente_id ?? "");
+  const [almacenId, setAlmacenId] = useState(editar?.almacen_id ?? "");
   const [serieOverride, setSerieOverride] = useState("");
-  const [usoCfdi, setUsoCfdi] = useState(USO_CFDI_FALLBACK);
-  const [formaPago, setFormaPago] = useState(FORMA_PAGO_FALLBACK);
-  const [metodoPago, setMetodoPago] = useState(METODO_PAGO_FALLBACK);
-  const [notas, setNotas] = useState("");
-  const [lineas, setLineas] = useState<LineaForm[]>([nuevaLinea()]);
+  const [usoCfdi, setUsoCfdi] = useState(editar?.uso_cfdi ?? USO_CFDI_FALLBACK);
+  const [formaPago, setFormaPago] = useState(editar?.forma_pago ?? FORMA_PAGO_FALLBACK);
+  const [metodoPago, setMetodoPago] = useState(editar?.metodo_pago ?? METODO_PAGO_FALLBACK);
+  const [notas, setNotas] = useState(editar?.notas ?? "");
+  // OC del cliente ("su pedido"): la directa no tiene remisión donde anotarla.
+  const [suPedido, setSuPedido] = useState(editar?.su_pedido ?? "");
+  const [lineas, setLineas] = useState<LineaForm[]>(editar ? [] : [nuevaLinea()]);
   // paso del flujo por teclado: cuál caja se auto-abre/enfoca
-  const [step, setStep] = useState<"cliente" | "almacen" | null>("cliente");
+  const [step, setStep] = useState<"cliente" | "almacen" | null>(editar ? null : "cliente");
+
+  // Modo edición: las líneas del borrador se siembran cuando el catálogo de
+  // productos ya cargó (de ahí salen label y presentaciones). El precio se
+  // marca manual para que la re-cotización no pise lo guardado. Una línea sin
+  // `presentacion` (anterior a la migración 0071) se reconstruye con el factor
+  // cantidad_base/cantidad; sin factor, cae al default del producto.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!editar || seeded.current || productos.length === 0) return;
+    seeded.current = true;
+    setLineas(editar.lineas.map((l) => {
+      const prod = prodById[l.producto_id];
+      const presKeys = Object.keys(prod?.presentaciones ?? {});
+      const cant = Number(l.cantidad);
+      const base = Number(l.cantidad_base ?? 0);
+      const factor = cant && base ? base / cant : null;
+      const porFactor = factor === null
+        ? null
+        : Object.entries(prod?.presentaciones ?? {})
+            .find(([, f]) => Math.abs(Number(f) - factor) < 1e-6)?.[0] ?? null;
+      const presentacion = l.presentacion ?? porFactor
+        ?? prod?.presentacion_default ?? prod?.unidad_base ?? presKeys[0] ?? "PIEZA";
+      return nuevaLinea({
+        producto_id: l.producto_id,
+        label: prod?.nombre ?? l.descripcion,
+        presentaciones: presKeys,
+        presentacion,
+        cantidad: String(cant),
+        precio: String(Number(l.valor_unitario)),
+        precioManual: true,
+        importe: cant * Number(l.valor_unitario),
+      });
+    }));
+  }, [editar, productos, prodById]);
 
   // Un solo almacén → se elige solo (el selector sigue visible y editable).
   useEffect(() => {
@@ -455,6 +494,7 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
       forma_pago: formaPago || null,
       metodo_pago: metodoPago || null,
       notas: notas || null,
+      su_pedido: suPedido.trim() || null,
       lineas: lns.map((l) => ({
         producto_id: l.producto_id,
         cantidad: l.cantidad,
@@ -462,6 +502,16 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
         presentacion: l.presentacion || null,
       })),
     };
+  }
+
+  // Guarda la factura: POST del alta, o PATCH del borrador en edición (sin
+  // cliente ni serie — el backend no los toca).
+  async function persistir(): Promise<FacturaDetail | null> {
+    const payload = construirPayload();
+    if (!payload) return null;
+    if (!editar) return post<FacturaDetail>("/api/v1/facturas/directa", payload);
+    const { cliente_id: _cli, serie_id: _ser, ...cambios } = payload;
+    return patch<FacturaDetail>(`/api/v1/facturas/${editar.id}`, cambios);
   }
 
   const [choiceOpen, setChoiceOpen] = useState(false);
@@ -477,16 +527,17 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
     setChoiceOpen(true);
   }
 
-  // "Borrador": crea la factura sin timbrar y sin tocar el inventario.
+  // "Borrador": crea (o actualiza, en edición) la factura sin timbrar y sin
+  // tocar el inventario.
   async function guardarBorrador() {
     if (busy || submitRef.current) return;
-    const payload = construirPayload();
-    if (!payload) return;
+    if (!construirPayload()) return;   // valida y togglea el toast si falta algo
     submitRef.current = true;
     setChoiceOpen(false);
     try {
-      const f = await post<FacturaDetail>("/api/v1/facturas/directa", payload);
-      toast.success(`Factura ${f.serie}${f.folio} guardada (borrador)`);
+      const f = await persistir();
+      if (!f) return;
+      toast.success(`Factura ${f.serie}${f.folio} ${editar ? "actualizada" : "guardada"} (borrador)`);
       onSaved(f);
       onClose();
     } catch (e) {
@@ -496,20 +547,22 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
     }
   }
 
-  // "Timbrar": crea el borrador y lo timbra ante el PAC. El timbrado descuenta
-  // el inventario del almacén elegido. Si el timbrado falla, el borrador YA
-  // existe: salimos al listado para reintentar desde ahí sin duplicarlo.
+  // "Timbrar": crea (o actualiza) el borrador y lo timbra ante el PAC. El
+  // timbrado descuenta el inventario del almacén elegido. Si el timbrado
+  // falla, el borrador YA existe: salimos al listado para reintentar desde
+  // ahí sin duplicarlo.
   async function guardarYTimbrar() {
     if (busy || submitRef.current) return;
-    const payload = construirPayload();
-    if (!payload) return;
+    if (!construirPayload()) return;
     submitRef.current = true;
     setChoiceOpen(false);
     let creada: FacturaDetail;
     try {
-      creada = await post<FacturaDetail>("/api/v1/facturas/directa", payload);
+      const f = await persistir();
+      if (!f) { submitRef.current = false; return; }
+      creada = f;
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo crear la factura");
+      toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la factura");
       submitRef.current = false;
       return;
     }
@@ -580,26 +633,34 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
   return (
     <div>
       <PageHeader
-        title="Nueva factura"
+        title={editar ? `Editar factura ${editar.serie}${editar.folio}` : "Nueva factura"}
         subtitle={
-          ambiente === "producción"
-            ? "Captura directa (sin remisión) — al timbrar el CFDI es real ante el SAT y descuenta inventario"
-            : "Captura directa (sin remisión) — al timbrar se descuenta inventario (PAC en sandbox)"
+          editar
+            ? "Borrador directo — al guardar se recalculan los totales; serie, folio y cliente no cambian"
+            : ambiente === "producción"
+              ? "Captura directa (sin remisión) — al timbrar el CFDI es real ante el SAT y descuenta inventario"
+              : "Captura directa (sin remisión) — al timbrar se descuenta inventario (PAC en sandbox)"
         }
         actions={<Button variant="secondary" onClick={onClose}><X size={16} /> Cancelar</Button>}
       />
 
       <div className="grid grid-cols-1 gap-4 rounded-xl border border-border p-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Field label="Cliente" required hint="Escribe y usa ↑/↓ · Enter para seleccionar y avanzar">
-          <KeyboardCombobox
-            options={clienteOpts}
-            value={clienteId}
-            onSelect={selectCliente}
-            autoOpen={step === "cliente"}
-            placeholder="Buscar cliente…"
-            emptyText="Sin clientes"
-          />
-        </Field>
+        {editar ? (
+          <Field label="Cliente" hint="Para cambiarlo, descarta el borrador y captura de nuevo">
+            <Input value={clientes.find((c) => c.id === clienteId)?.legal_name ?? "…"} readOnly disabled />
+          </Field>
+        ) : (
+          <Field label="Cliente" required hint="Escribe y usa ↑/↓ · Enter para seleccionar y avanzar">
+            <KeyboardCombobox
+              options={clienteOpts}
+              value={clienteId}
+              onSelect={selectCliente}
+              autoOpen={step === "cliente"}
+              placeholder="Buscar cliente…"
+              emptyText="Sin clientes"
+            />
+          </Field>
+        )}
         <Field label="Almacén" required hint="De aquí sale el inventario al timbrar">
           <KeyboardCombobox
             options={almacenOpts}
@@ -611,16 +672,32 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
             emptyText="Sin almacenes"
           />
         </Field>
-        <Field label="Serie">
-          <KeyboardCombobox
-            options={serieOpts}
-            value={serieOverride}
-            onSelect={setSerieOverride}
-            placeholder="Serie…"
+        {editar ? (
+          <Field label="Folio">
+            <Input value={`${editar.serie}${editar.folio}`} readOnly disabled aria-label="Folio" />
+          </Field>
+        ) : (
+          <>
+            <Field label="Serie">
+              <KeyboardCombobox
+                options={serieOpts}
+                value={serieOverride}
+                onSelect={setSerieOverride}
+                placeholder="Serie…"
+              />
+            </Field>
+            <Field label="Consecutivo (informativo)">
+              <Input value={folioPreview} readOnly disabled aria-label="Folio consecutivo" />
+            </Field>
+          </>
+        )}
+        <Field label="Su pedido (OC)" hint="La orden de compra del cliente">
+          <Input
+            value={suPedido}
+            maxLength={30}
+            placeholder="p. ej. 4500123456"
+            onChange={(e) => setSuPedido(e.target.value)}
           />
-        </Field>
-        <Field label="Consecutivo (informativo)">
-          <Input value={folioPreview} readOnly disabled aria-label="Folio consecutivo" />
         </Field>
         <Field label="Uso del CFDI" hint="Predeterminado del cliente">
           <Select value={usoCfdi} onChange={(e) => setUsoCfdi(e.target.value)}>
@@ -785,7 +862,7 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
               <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fmtMoney(totalPreview)}</span></div>
             </div>
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={resetForm} disabled={busy}>Borrar</Button>
+              {!editar && <Button variant="secondary" onClick={resetForm} disabled={busy}>Borrar</Button>}
               <Button onClick={abrirGuardar} disabled={busy}>
                 {timbrando ? <>Timbrando<LoadingDots /></> : saving ? "Guardando…" : "Guardar"}
               </Button>
@@ -811,7 +888,7 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
         onCreated={aplicarProductoCreado}
       />
 
-      <Modal open={choiceOpen} onClose={() => setChoiceOpen(false)} title="Guardar factura"
+      <Modal open={choiceOpen} onClose={() => setChoiceOpen(false)} title={editar ? "Guardar cambios" : "Guardar factura"}
         footer={
           <>
             <Button variant="secondary" onClick={() => setChoiceOpen(false)} disabled={busy}>Cancelar</Button>
@@ -819,9 +896,9 @@ export function FacturaDirectaForm({ ambiente, onClose, onSaved }: Props) {
             <Button onClick={guardarYTimbrar} disabled={busy}>Timbrar</Button>
           </>
         }>
-        <p className="mb-2 text-sm text-muted">Elige cómo guardar la factura:</p>
+        <p className="mb-2 text-sm text-muted">{editar ? "Elige cómo guardar los cambios:" : "Elige cómo guardar la factura:"}</p>
         <ul className="ml-4 list-disc space-y-1 text-sm text-muted">
-          <li><strong>Borrador</strong>: se guarda sin timbrar y <strong>sin afectar el inventario</strong>. Puedes timbrarla después desde la lista.</li>
+          <li><strong>Borrador</strong>: {editar ? "los cambios se guardan" : "se guarda"} sin timbrar y <strong>sin afectar el inventario</strong>. Puedes timbrarla después desde la lista.</li>
           <li>
             <strong>Timbrar</strong>: se envía al PAC {ambiente === "producción" ? "en producción (CFDI real ante el SAT)" : "en modo sandbox (prueba)"}
             {" "}y se <strong>descuenta el inventario</strong>{almacenNombre ? ` de ${almacenNombre}` : ""}.

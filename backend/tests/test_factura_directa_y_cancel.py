@@ -480,3 +480,100 @@ def test_devolucion_valida_estado_y_cantidad(client, env, auth):
     r2 = client.post(f"/api/v1/remisiones/{rem2['id']}/devolucion", headers=h, json={
         "lineas": [{"linea_id": rem2["lineas"][0]["id"], "cantidad": "6"}]})
     assert r2.status_code == 422
+
+
+# ── Edición del borrador (PATCH /facturas/{id}) ───────────────────────────────
+def _directa_borrador(client, env, su_pedido=None):
+    body = {"cliente_id": env["cli"], "almacen_id": env["alm"], "lineas": [
+        {"producto_id": env["prod"], "cantidad": "10", "precio_unitario": "20"},
+    ]}
+    if su_pedido is not None:
+        body["su_pedido"] = su_pedido
+    r = client.post("/api/v1/facturas/directa", headers=_h(env), json=body)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_directa_guarda_su_pedido(client, env, auth):
+    f = _directa_borrador(client, env, su_pedido="OC-77")
+    assert f["su_pedido"] == "OC-77"
+    assert f["almacen_id"] == env["alm"]
+
+
+def test_editar_directa_cabecera_y_lineas(client, env, auth):
+    """El PATCH de una directa en borrador reemplaza líneas, recalcula totales
+    y actualiza cabecera; serie/folio no se mueven y el inventario no se toca."""
+    f = _directa_borrador(client, env, su_pedido="OC-77")
+    r = client.patch(f"/api/v1/facturas/{f['id']}", headers=_h(env), json={
+        "su_pedido": "  OC-88  ", "notas": "editada", "metodo_pago": "PUE",
+        "lineas": [
+            {"producto_id": env["prod"], "cantidad": "4", "precio_unitario": "25"},
+            {"producto_id": env["prod"], "cantidad": "2", "precio_unitario": "10"},
+        ]})
+    assert r.status_code == 200, r.text
+    g = r.json()
+    assert g["su_pedido"] == "OC-88"                # normalizado (strip)
+    assert g["notas"] == "editada"
+    assert g["metodo_pago"] == "PUE"
+    assert (g["serie"], g["folio"]) == (f["serie"], f["folio"])
+    assert len(g["lineas"]) == 2
+    assert float(g["subtotal"]) == 120.0            # 4×25 + 2×10
+    assert float(g["iva_trasladado"]) == 19.2
+    assert float(g["total"]) == 139.2
+    # editar el borrador sigue sin tocar inventario
+    assert _disponible(env) == (None, None)
+
+
+def test_editar_solo_en_borrador_y_nunca_espejo(client, env, auth):
+    f = _directa_borrador(client, env)
+    db = SessionLocal()
+    try:
+        from app.models import Factura
+        row = db.query(Factura).filter(Factura.id == uuid.UUID(f["id"])).one()
+        row.estado = "TIMBRADA"; row.uuid = str(uuid.uuid4())
+        db.commit()
+    finally:
+        db.close()
+    r = client.patch(f"/api/v1/facturas/{f['id']}", headers=_h(env), json={"notas": "x"})
+    assert r.status_code == 409
+
+    g = _directa_borrador(client, env)
+    db = SessionLocal()
+    try:
+        from app.models import Factura
+        row = db.query(Factura).filter(Factura.id == uuid.UUID(g["id"])).one()
+        row.origen = "ESPEJO_SAE"
+        db.commit()
+    finally:
+        db.close()
+    r = client.patch(f"/api/v1/facturas/{g['id']}", headers=_h(env), json={"notas": "x"})
+    assert r.status_code == 409
+
+
+def test_editar_desde_remisiones_solo_cabecera(client, env, auth):
+    """En una factura desde remisiones la cabecera (su_pedido, uso CFDI…) se
+    edita, pero líneas y almacén rebotan: los conceptos vienen de las remisiones."""
+    h = _h(env)
+    client.post("/api/v1/inventario/movimientos", headers=h, json={
+        "tipo": "ENTRADA_COMPRA", "producto_id": env["prod"], "almacen_id": env["alm"],
+        "cantidad": "100", "costo_unitario": "5"})
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "almacen_id": env["alm"],
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": "30",
+                    "precio_unitario": "20"}]}).json()
+    client.post(f"/api/v1/remisiones/{rem['id']}/confirmar", headers=h)
+    fac = client.post("/api/v1/facturas/desde-remisiones", headers=h,
+                      json={"remision_ids": [rem["id"]]}).json()
+
+    r = client.patch(f"/api/v1/facturas/{fac['id']}", headers=h,
+                     json={"su_pedido": "OC-9", "uso_cfdi": "G01"})
+    assert r.status_code == 200, r.text
+    assert r.json()["su_pedido"] == "OC-9"
+    assert r.json()["uso_cfdi"] == "G01"
+
+    r = client.patch(f"/api/v1/facturas/{fac['id']}", headers=h, json={
+        "lineas": [{"producto_id": env["prod"], "cantidad": "1", "precio_unitario": "1"}]})
+    assert r.status_code == 409
+    r = client.patch(f"/api/v1/facturas/{fac['id']}", headers=h,
+                     json={"almacen_id": env["alm"]})
+    assert r.status_code == 409

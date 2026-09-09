@@ -98,6 +98,10 @@ class Factura(Base, TimestampMixin, SoftDeleteMixin):
     )
 
     notas = Column(Text)
+    # OC del cliente ("su pedido"), como en remisiones. En una factura desde
+    # remisiones la OC vive en cada remisión ligada; aquí la captura la factura
+    # DIRECTA, que no tiene remisión donde anotarla.
+    su_pedido = Column(String(30))
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
 
     lineas = relationship(
@@ -127,6 +131,10 @@ class LineaFactura(Base):
 
     clave_prod_serv = Column(String(8), nullable=False)
     clave_unidad = Column(String(3), nullable=False)
+    # La presentación con la que se capturó la línea (directa). clave_unidad y
+    # cantidad_base se DERIVAN de ella al guardar; sin persistirla, la edición
+    # del borrador no puede reconstruir qué eligió el usuario.
+    presentacion = Column(String(20))
     descripcion = Column(String(1000), nullable=False)
     cantidad = Column(Numeric(18, 6), nullable=False)
     # Factura directa: cantidad en unidad base y lote afectado, para descontar al

@@ -1421,7 +1421,15 @@ export interface paths {
         delete: operations["descartar_factura_api_v1_facturas__factura_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Factura
+         * @description Edita una factura en BORRADOR (nativa): cabecera para cualquier borrador;
+         *     `lineas`/`almacen_id` solo para la DIRECTA. En una desde-remisiones los
+         *     conceptos vienen de sus remisiones (se descarta y re-genera) y en una
+         *     sustituta se copian verbatim de la original. Serie, folio y cliente no se
+         *     tocan — para cambiarlos se descarta el borrador y se captura de nuevo.
+         */
+        patch: operations["update_factura_api_v1_facturas__factura_id__patch"];
         trace?: never;
     };
     "/api/v1/facturas/{factura_id}/cancelar": {
@@ -5840,6 +5848,8 @@ export interface components {
         };
         /** FacturaDetailOut */
         FacturaDetailOut: {
+            /** Almacen Id */
+            almacen_id?: string | null;
             /**
              * Cliente Id
              * Format: uuid
@@ -5909,6 +5919,8 @@ export interface components {
             saldo_insoluto: string;
             /** Serie */
             serie: string;
+            /** Su Pedido */
+            su_pedido?: string | null;
             /** Subtotal */
             subtotal: string;
             /** Sustituye A Factura Id */
@@ -5962,6 +5974,8 @@ export interface components {
             serie?: string | null;
             /** Serie Id */
             serie_id?: string | null;
+            /** Su Pedido */
+            su_pedido?: string | null;
             /** Uso Cfdi */
             uso_cfdi?: string | null;
         };
@@ -6010,6 +6024,8 @@ export interface components {
         };
         /** FacturaOut */
         FacturaOut: {
+            /** Almacen Id */
+            almacen_id?: string | null;
             /**
              * Cliente Id
              * Format: uuid
@@ -6074,6 +6090,8 @@ export interface components {
             saldo_insoluto: string;
             /** Serie */
             serie: string;
+            /** Su Pedido */
+            su_pedido?: string | null;
             /** Subtotal */
             subtotal: string;
             /** Sustituye A Factura Id */
@@ -6098,6 +6116,30 @@ export interface components {
             uuid?: string | null;
             /** Uuid Sustitucion */
             uuid_sustitucion?: string | null;
+        };
+        /**
+         * FacturaUpdate
+         * @description Edición de una factura en BORRADOR (nativa). Los campos de cabecera
+         *     aplican a cualquier borrador; `lineas` y `almacen_id` solo a la DIRECTA
+         *     (en una desde-remisiones los conceptos vienen de sus remisiones y en una
+         *     sustituta se copian verbatim de la original). Serie/folio/cliente no se
+         *     tocan: para cambiarlos se descarta el borrador y se captura de nuevo.
+         */
+        FacturaUpdate: {
+            /** Almacen Id */
+            almacen_id?: string | null;
+            /** Forma Pago */
+            forma_pago?: string | null;
+            /** Lineas */
+            lineas?: components["schemas"]["LineaFacturaDirectaIn"][] | null;
+            /** Metodo Pago */
+            metodo_pago?: string | null;
+            /** Notas */
+            notas?: string | null;
+            /** Su Pedido */
+            su_pedido?: string | null;
+            /** Uso Cfdi */
+            uso_cfdi?: string | null;
         };
         /**
          * GrupoBandejaOut
@@ -6624,6 +6666,8 @@ export interface components {
         LineaFacturaOut: {
             /** Cantidad */
             cantidad: string;
+            /** Cantidad Base */
+            cantidad_base?: string | null;
             /** Clave Prod Serv */
             clave_prod_serv: string;
             /** Clave Unidad */
@@ -6648,6 +6692,8 @@ export interface components {
             numero_linea: number;
             /** Objeto Imp */
             objeto_imp: string;
+            /** Presentacion */
+            presentacion?: string | null;
             /** Producto Id */
             producto_id?: string | null;
             /** Ret Isr Importe */
@@ -12980,6 +13026,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_factura_api_v1_facturas__factura_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                factura_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FacturaUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FacturaDetailOut"];
+                };
             };
             /** @description Validation Error */
             422: {

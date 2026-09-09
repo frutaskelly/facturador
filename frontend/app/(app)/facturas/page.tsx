@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Download, Eye, FileCode2, FileText, FileX, Mail, Plus, Replace, Stamp, Trash2, X } from "lucide-react";
+import { Download, Eye, FileCode2, FileText, FileX, Mail, Pencil, Plus, Replace, Stamp, Trash2, X } from "lucide-react";
 
 import { FacturaDirectaForm } from "@/components/FacturaDirectaForm";
 import { SincronizarSae } from "@/components/SincronizarSae";
@@ -112,6 +112,8 @@ export default function FacturasPage() {
   // Alta de factura directa (captura a mano, sin remisión): ocupa la pantalla
   // completa como el alta de remisión, en vez de un modal.
   const [mode, setMode] = useState<"list" | "create">("list");
+  // Edición de un BORRADOR directo: el mismo formulario, precargado.
+  const [editando, setEditando] = useState<FacturaDetail | null>(null);
 
   // ── generar desde remisiones ──
   const [genOpen, setGenOpen] = useState(false);
@@ -229,6 +231,7 @@ export default function FacturasPage() {
           <div><span className="text-muted">Cliente:</span> {cliName[d.cliente_id] ?? "—"}</div>
           <div><span className="text-muted">Fecha:</span> {fmtDate(d.fecha)}</div>
           <div><span className="text-muted">Estado:</span> <Badge tone={ESTADO_TONE[d.estado] ?? "muted"}>{d.estado}</Badge></div>
+          {d.su_pedido && <div><span className="text-muted">Su pedido:</span> {d.su_pedido}</div>}
           {d.uuid && <div><span className="text-muted">UUID:</span> <span className="font-mono text-xs">{d.uuid}</span></div>}
           {d.fecha_timbrado && <div><span className="text-muted">Timbrada:</span> {fmtDateTime(d.fecha_timbrado)}</div>}
           {d.sustituye_a_factura_id && (
@@ -372,6 +375,52 @@ export default function FacturasPage() {
     } finally {
       setEnviarBusy(false);
     }
+  }
+
+  // ── Editar un borrador ──
+  // La DIRECTA (con almacén) abre el formulario completo con sus líneas; el
+  // resto (desde remisiones / sustituta) abre el diálogo de cabecera — sus
+  // conceptos vienen de las remisiones o de la factura original.
+  const [toEditarCab, setToEditarCab] = useState<FacturaDetail | null>(null);
+  const [cabUso, setCabUso] = useState("");
+  const [cabForma, setCabForma] = useState("");
+  const [cabMetodo, setCabMetodo] = useState("");
+  const [cabSuPedido, setCabSuPedido] = useState("");
+  const [cabNotas, setCabNotas] = useState("");
+
+  async function abrirEditar(f: Factura) {
+    setActBusy(true);
+    try {
+      const d = await apiFetch<FacturaDetail>(`/api/v1/facturas/${f.id}`);
+      if (d.almacen_id) {
+        setEditando(d);
+      } else {
+        setCabUso(d.uso_cfdi); setCabForma(d.forma_pago); setCabMetodo(d.metodo_pago);
+        setCabSuPedido(d.su_pedido ?? ""); setCabNotas(d.notas ?? "");
+        setToEditarCab(d);
+      }
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo cargar la factura");
+    } finally { setActBusy(false); }
+  }
+
+  async function guardarCabecera() {
+    if (!toEditarCab) return;
+    setActBusy(true);
+    try {
+      await apiFetch(`/api/v1/facturas/${toEditarCab.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          uso_cfdi: cabUso, forma_pago: cabForma, metodo_pago: cabMetodo,
+          su_pedido: cabSuPedido.trim() || null, notas: cabNotas || null,
+        }),
+      });
+      toast.success(`Factura ${toEditarCab.serie}${toEditarCab.folio} actualizada`);
+      invalidar(toEditarCab.id);
+      setToEditarCab(null); reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo guardar");
+    } finally { setActBusy(false); }
   }
 
   // ── Sustituir (refacturación): crea la factura sustituta (copia ligada con
@@ -568,12 +617,19 @@ export default function FacturasPage() {
     { header: "Subtotal", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.subtotal) },
     { header: "IVA", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.iva_trasladado) },
     { header: "Total", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.total) },
+    { header: "Su pedido", truncate: true, exportValue: (f) => f.su_pedido ?? "",
+      cell: (f) => <span title={f.su_pedido ?? ""}>{f.su_pedido ?? "—"}</span> },
     { header: "Nota", truncate: true, exportValue: (f) => f.notas ?? "", cell: (f) => <span title={f.notas ?? ""}>{f.notas ?? "—"}</span> },
   ];
 
   const rowActions: RowAction<Factura>[] = [
     { id: "timbrar", label: "Timbrar", icon: <Stamp size={15} />, tone: "success",
       onClick: (f) => setToTimbrar(f), hidden: (f) => !(canWrite && f.estado === "BORRADOR") },
+    // Solo borradores nativos: una espejo se corrige en SAE y una timbrada ya
+    // es un CFDI emitido (se sustituye o se cancela, no se edita).
+    { id: "editar", label: "Editar", icon: <Pencil size={15} />,
+      onClick: (f) => { void abrirEditar(f); },
+      hidden: (f) => !(canWrite && f.estado === "BORRADOR" && f.origen !== "ESPEJO_SAE") },
     { id: "preview", label: "Ver factura", icon: <Eye size={15} />,
       onClick: (f) => previsualizar(f), hidden: (f) => f.estado !== "TIMBRADA" },
     { id: "pdf", label: "Descargar PDF", icon: <Download size={15} />,
@@ -599,12 +655,13 @@ export default function FacturasPage() {
   ];
 
   // ───────────────────────── render ─────────────────────────
-  if (mode === "create") {
+  if (mode === "create" || editando) {
     return (
       <FacturaDirectaForm
         ambiente={ambiente}
-        onClose={() => setMode("list")}
-        onSaved={reload}
+        editar={editando}
+        onClose={() => { setMode("list"); setEditando(null); }}
+        onSaved={(f) => { invalidar(f.id); reload(); }}
       />
     );
   }
@@ -939,6 +996,59 @@ export default function FacturasPage() {
               </Alert>
             </>
           )}
+        </div>
+      </Modal>
+
+      {/* Editar cabecera de un borrador NO directo (desde remisiones / sustituta):
+          los conceptos no se tocan aquí — vienen de las remisiones o de la
+          factura original. */}
+      <Modal
+        open={toEditarCab !== null}
+        onClose={() => setToEditarCab(null)}
+        title={`Editar factura ${toEditarCab?.serie ?? ""}${toEditarCab?.folio ?? ""}`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setToEditarCab(null)} disabled={actBusy}>Cerrar</Button>
+            <Button onClick={() => { void guardarCabecera(); }} disabled={actBusy}>
+              {actBusy ? "Guardando…" : "Guardar cambios"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Alert tone="info">
+            {toEditarCab?.sustituye_a_factura_id
+              ? <>Los conceptos de una <strong>sustituta</strong> se copian de la factura original y no se editan; aquí solo la cabecera.</>
+              : <>Los conceptos vienen de las <strong>remisiones ligadas</strong>. Para cambiarlos, descarta el borrador, edita las remisiones y vuelve a generar la factura.</>}
+          </Alert>
+          <Field label="Su pedido (OC)" hint="La orden de compra del cliente">
+            <Input
+              value={cabSuPedido}
+              maxLength={30}
+              placeholder="p. ej. 4500123456"
+              onChange={(e) => setCabSuPedido(e.target.value)}
+            />
+          </Field>
+          <Field label="Uso de CFDI">
+            <Select value={cabUso} onChange={(e) => setCabUso(e.target.value)}>
+              {USO_CFDI_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+          </Field>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Forma de pago">
+              <Select value={cabForma} onChange={(e) => setCabForma(e.target.value)}>
+                {FORMA_PAGO_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </Select>
+            </Field>
+            <Field label="Método de pago">
+              <Select value={cabMetodo} onChange={(e) => setCabMetodo(e.target.value)}>
+                {METODO_PAGO_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <Field label="Notas">
+            <Textarea rows={2} value={cabNotas} onChange={(e) => setCabNotas(e.target.value)} />
+          </Field>
         </div>
       </Modal>
 
