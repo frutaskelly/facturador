@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, RefreshCw, Sparkles, Trash2, Undo2, Upload, X, FileSearch } from "lucide-react";
+import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, RefreshCw, Sparkles, Trash2, Undo2, Upload, Wand2, X, FileSearch } from "lucide-react";
 
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
@@ -21,7 +21,7 @@ import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SearchBox } from "@/components/ui/SearchBox";
 import { SincronizarSae } from "@/components/SincronizarSae";
-import { OrdenesPorResolver } from "./OrdenesPorResolver";
+import { useOrdenesPorResolver } from "./useOrdenesPorResolver";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiDownloadPost, apiFetch, apiOpenInTab } from "@/lib/api";
@@ -34,7 +34,7 @@ import {
   nuevaLinea, pegarLocalFallback, unidadBaseDesde,
   type FiscalPreview, type LineaForm,
 } from "@/lib/lineas";
-import type { Almacen, Cliente, ContextoPrecios, LineaPegada, LineaRemision, MatchResult, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
+import type { Almacen, Cliente, ContextoPrecios, LineaPegada, LineaRemision, MatchResult, OCRecibida, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "remision:gestionar";
 
@@ -47,6 +47,14 @@ const NUEVA_PRESENTACION = "__nueva_pres__";
 // selectedRows/onSelectionChange).
 const EMPTY_REMISIONES: Remision[] = [];
 
+// Una fila de la lista: o es una remisión, o es una orden que llegó por
+// WhatsApp/correo y no pudo volverse remisión sola. Las dos viven en la misma
+// tabla —no hay bandeja aparte—, así que la fila dice de cuál se trata y cada
+// columna dibuja la mitad que le toca.
+type Fila =
+  | { id: string; rem: Remision; oc?: undefined }
+  | { id: string; oc: OCRecibida; rem?: undefined };
+
 const ESTADO_TONE: Record<string, "default" | "success" | "warning" | "muted" | "danger" | "accent"> = {
   BORRADOR: "warning",
   // Reservada: la ampara una factura de SAE, pero la mercancía no ha salido.
@@ -54,6 +62,9 @@ const ESTADO_TONE: Record<string, "default" | "success" | "warning" | "muted" | 
   CONFIRMADA: "success",
   FACTURADA: "accent",
   CANCELADA: "danger",
+  // No es un estado de remisión: es el de las órdenes por resolver, que aún no
+  // son ninguna. Se lee igual que los demás porque ocupa la misma columna.
+  REVISAR: "warning",
 };
 
 // Tono del estado de la FACTURA vinculada (columna "Factura" de la lista).
@@ -181,7 +192,22 @@ export default function RemisionesPage() {
   // lista
   const { data, loading, error, reload } = useResource<Page<Remision>>(listPath);
   const rows = data?.items ?? EMPTY_REMISIONES;
-  const filteredRows = rows;
+
+  // Lo que llegó por WhatsApp/correo y no pudo volverse remisión solo. No tiene
+  // pantalla propia: entra en esta misma tabla con los mismos filtros.
+  const porResolver = useOrdenesPorResolver({
+    filtros: { desde: fDesde, hasta: fHasta, clienteId: fCliente, q: buscaAplicada },
+    onCambio: reload,
+  });
+  // Arriba las órdenes: son la cola de trabajo, y el histórico de remisiones las
+  // sepultaría. Al ordenar por cualquier columna se intercalan con el resto.
+  const filteredRows = useMemo<Fila[]>(
+    () => [
+      ...porResolver.ordenes.map((oc) => ({ id: `oc:${oc.id}`, oc })),
+      ...rows.map((rem) => ({ id: rem.id, rem })),
+    ],
+    [porResolver.ordenes, rows],
+  );
 
   // ── selección de filas (acciones en lote) ──
   const [selected, setSelected] = useState<Remision[]>([]);
@@ -975,7 +1001,9 @@ export default function RemisionesPage() {
     });
   }
 
-  async function verDetalle(r: Remision) {
+  async function verDetalle(f: Fila) {
+    if (!f.rem) return; // una orden por resolver enseña lo que ya trae, sin pedir nada
+    const r = f.rem;
     if (detalles[r.id] || detalleLoading.has(r.id)) return; // ya cargado / en curso
     setDetalleLoading((s) => new Set(s).add(r.id));
     try {
@@ -988,8 +1016,57 @@ export default function RemisionesPage() {
     }
   }
 
+  // El panel de una orden que aún no es remisión. Enseña lo que hace falta para
+  // decidir —de dónde llegó, a qué punto va y qué la trabó— sin pedir nada al
+  // servidor: todo eso viaja ya en la fila.
+  function renderDetalleOrden(oc: OCRecibida) {
+    const datos: [string, string | null | undefined][] = [
+      ["Llegó por", oc.canal],
+      ["Remitente", oc.remitente],
+      ["Su pedido", oc.folio_externo],
+      ["Punto de entrega", oc.punto_entrega],
+      ["Sucursal", oc.sucursal_nombre],
+      ["Proyecto", oc.proyecto_nombre],
+      ["Recibida", fmtDate(oc.recibida_at)],
+    ];
+    return (
+      <div className="rounded-xl border border-border bg-background p-4 text-sm">
+        <p className="mb-3">
+          <span className="text-muted">Qué falta:</span>{" "}
+          {oc.motivo || "Sin motivo registrado"}
+        </p>
+        <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1">
+          {datos.filter(([, v]) => v).map(([k, v]) => (
+            <div key={k}><span className="text-muted">{k}:</span> {v}</div>
+          ))}
+        </div>
+        {oc.observaciones ? (
+          <p className="mb-3"><span className="text-muted">Observaciones:</span> {oc.observaciones}</p>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {oc.archivo_url ? (
+            <Button variant="secondary" onClick={() => window.open(oc.archivo_url!, "_blank", "noopener")}>
+              <FileSearch size={16} /> Ver la orden original
+            </Button>
+          ) : null}
+          {porResolver.puedeResolver ? (
+            <Button
+              variant="success"
+              disabled={porResolver.ocupada === oc.id}
+              onClick={() => porResolver.resolver(oc)}
+            >
+              <Wand2 size={16} /> {porResolver.ocupada === oc.id ? "Pasando…" : "Pasar a remisiones"}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
   // Contenido del panel que se despliega bajo la fila al hacer clic.
-  function renderDetalle(r: Remision) {
+  function renderDetalle(f: Fila) {
+    if (!f.rem) return renderDetalleOrden(f.oc);
+    const r = f.rem;
     const d = detalles[r.id];
     if (!d) {
       return <div className="flex justify-center py-6"><Spinner /></div>;
@@ -1811,45 +1888,77 @@ export default function RemisionesPage() {
   // barra de scroll horizontal que obligaba a irse a la derecha para ver las
   // opciones. El detalle fiscal (subtotal, IEPS, IVA) y la nota siguen ahí,
   // ocultos de arranque y a un clic en el menú «Columnas».
-  const columns: Column<Remision>[] = [
+  // El cliente de una orden puede no estar resuelto todavía: entonces se enseña
+  // de quién llegó, que es lo único que se sabe de ella (y suele bastar para
+  // reconocerla).
+  function nombreCliente(f: Fila): string {
+    if (f.rem) return cliName[f.rem.cliente_facturacion_id] ?? "";
+    return f.oc.cliente_nombre
+      ?? (f.oc.cliente_id ? cliName[f.oc.cliente_id] : null)
+      ?? f.oc.remitente
+      ?? "Sin cliente";
+  }
+
+  // Cada columna en dos mitades: la de la remisión (la de siempre) y la de la
+  // orden por resolver, que casi nunca tiene qué poner —no hay folio, ni
+  // factura, ni total hasta que sea remisión— y dice «—» sin disimulo.
+  const sinDato = <span className="text-muted">—</span>;
+
+  const columns: Column<Fila>[] = [
     {
       header: "Folio / Pedido",
       sortable: true,
-      sortValue: (r) => r.folio_interno,
-      exportValue: (r) => r.folio_interno,
-      cell: (r) => (
+      // Ordenar: la orden no tiene folio, así que se agrupa al final. Exportar:
+      // ahí sí va el del cliente — es lo que se teclea en el buscador de la
+      // tabla para encontrarla, y sin esto no la hallaría.
+      sortValue: (f) => (f.rem ? f.rem.folio_interno : ""),
+      exportValue: (f) => (f.rem ? f.rem.folio_interno : f.oc.folio_externo ?? ""),
+      cell: (f) => (
         <div className="whitespace-nowrap">
-          <div className="font-medium">{r.folio_interno}</div>
-          <div className="text-xs text-muted">
-            {r.su_pedido ? <span className="tabular-nums">{r.su_pedido}</span> : "sin pedido"}
-          </div>
+          {f.rem ? (
+            <>
+              <div className="font-medium">{f.rem.folio_interno}</div>
+              <div className="text-xs text-muted">
+                {f.rem.su_pedido ? <span className="tabular-nums">{f.rem.su_pedido}</span> : "sin pedido"}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* El folio lo pone el sistema al crear la remisión: mientras la
+                  orden no lo sea, no hay ninguno que enseñar. */}
+              <div className="text-muted">sin folio</div>
+              <div className="text-xs text-muted">
+                {f.oc.folio_externo ? <span className="tabular-nums">{f.oc.folio_externo}</span> : "sin pedido"}
+              </div>
+            </>
+          )}
         </div>
       ),
     },
     {
       header: "Factura / SAE",
       sortable: true,
-      sortValue: (r) => r.factura_folio ?? "",
-      exportValue: (r) => r.factura_folio ?? "",
-      cell: (r) => (
+      sortValue: (f) => f.rem?.factura_folio ?? "",
+      exportValue: (f) => f.rem?.factura_folio ?? "",
+      cell: (f) => (f.rem ? (
         <div className="whitespace-nowrap">
           <div>
-            {r.factura_folio ? (
+            {f.rem.factura_folio ? (
               <span className="inline-flex items-center gap-1.5">
-                {r.factura_id ? (
+                {f.rem.factura_id ? (
                   <button
                     type="button"
                     title="Ver la factura"
-                    onClick={(e) => { e.stopPropagation(); router.push(`/facturas?ver=${r.factura_id}`); }}
+                    onClick={(e) => { e.stopPropagation(); router.push(`/facturas?ver=${f.rem!.factura_id}`); }}
                     className="font-medium text-accent hover:underline"
                   >
-                    {r.factura_folio}
+                    {f.rem.factura_folio}
                   </button>
                 ) : (
-                  <span className="font-medium">{r.factura_folio}</span>
+                  <span className="font-medium">{f.rem.factura_folio}</span>
                 )}
-                {r.factura_estado && (
-                  <Badge tone={FACTURA_TONE[r.factura_estado] ?? "muted"}>{r.factura_estado}</Badge>
+                {f.rem.factura_estado && (
+                  <Badge tone={FACTURA_TONE[f.rem.factura_estado] ?? "muted"}>{f.rem.factura_estado}</Badge>
                 )}
               </span>
             ) : (
@@ -1857,10 +1966,10 @@ export default function RemisionesPage() {
             )}
           </div>
           <div className="text-xs text-muted">
-            {r.factura_sae ? <span className="tabular-nums">SAE {r.factura_sae}</span> : "sin SAE"}
+            {f.rem.factura_sae ? <span className="tabular-nums">SAE {f.rem.factura_sae}</span> : "sin SAE"}
           </div>
         </div>
-      ),
+      ) : sinDato),
     },
     // La elástica: es la que cede ancho cuando la ventana es angosta, y corta
     // con «…» en vez de partir el renglón (era la que hacía filas de 81 px).
@@ -1869,68 +1978,93 @@ export default function RemisionesPage() {
       sortable: true,
       truncate: true,
       className: "min-w-[170px]",
-      sortValue: (r) => cliName[r.cliente_facturacion_id] ?? "",
-      exportValue: (r) => cliName[r.cliente_facturacion_id] ?? "",
-      cell: (r) => (
-        <span title={cliName[r.cliente_facturacion_id] ?? ""}>
-          {cliName[r.cliente_facturacion_id] ?? "—"}
-        </span>
-      ),
+      sortValue: (f) => nombreCliente(f),
+      exportValue: (f) => nombreCliente(f),
+      cell: (f) => <span title={nombreCliente(f)}>{nombreCliente(f) || "—"}</span>,
     },
     {
       header: "Fecha",
       sortable: true,
-      sortValue: (r) => r.fecha_remision,
+      // La de la orden es la de RECEPCIÓN: es la única que tiene, y es la que
+      // el operador usa para ubicarla («lo que entró ayer»).
+      sortValue: (f) => (f.rem ? f.rem.fecha_remision : f.oc.recibida_at),
       className: "whitespace-nowrap",
-      cell: (r) => fmtDate(r.fecha_remision),
+      cell: (f) => fmtDate(f.rem ? f.rem.fecha_remision : f.oc.recibida_at),
     },
     {
       header: "Estado",
       sortable: true,
-      sortValue: (r) => r.estado,
+      sortValue: (f) => (f.rem ? f.rem.estado : "REVISAR"),
+      exportValue: (f) => (f.rem ? f.rem.estado : `REVISAR — ${f.oc.motivo ?? ""}`),
       // «Por revisar» va JUNTO al estado, no en su lugar: la remisión sigue
       // siendo un BORRADOR con todo lo que eso implica; lo que añade la marca
       // es que nadie ha mirado sus unidades ni sus precios todavía.
-      cell: (r) => (
+      cell: (f) => (f.rem ? (
         <div className="whitespace-nowrap">
-          <Badge tone={ESTADO_TONE[r.estado] ?? "muted"}>{r.estado}</Badge>
-          {r.revision_pendiente ? (
+          <Badge tone={ESTADO_TONE[f.rem.estado] ?? "muted"}>{f.rem.estado}</Badge>
+          {f.rem.revision_pendiente ? (
             <div className="mt-0.5 text-xs font-medium text-amber-700">POR REVISAR</div>
           ) : null}
-          {(r.sin_clave_sae ?? 0) > 0 ? (
+          {(f.rem.sin_clave_sae ?? 0) > 0 ? (
             // El preflight del export: el mismo conteo que detendrá el lote en
             // el modal de exportar, pero visible desde que se revisa.
             <div
               className="mt-0.5 text-xs font-medium text-amber-700"
               title="Partidas sin clave SAE del cliente — asígnalas en Clientes → Catálogo"
             >
-              {r.sin_clave_sae} SIN CLAVE SAE
+              {f.rem.sin_clave_sae} SIN CLAVE SAE
             </div>
           ) : null}
         </div>
-      ),
+      ) : (
+        // El motivo va aquí, en el texto normal de la tabla: es lo que hay que
+        // leer para resolverla, y en amarillo sobre amarillo no se leía.
+        <div>
+          <Badge tone="warning">REVISAR</Badge>
+          {/* `whitespace-normal` a propósito: la tabla pone `truncate` en las
+              celdas cuando hay anchos guardados, y el motivo cortado a una
+              línea no dice qué hay que arreglar. El ancho tope evita que un
+              motivo largo estire la columna. */}
+          <div className="mt-0.5 max-w-[240px] whitespace-normal text-xs" title={f.oc.motivo ?? ""}>
+            {f.oc.motivo || "Sin motivo registrado"}
+          </div>
+        </div>
+      )),
     },
     {
       header: "Total",
       sortable: true,
-      sortValue: (r) => r.total,
-      exportValue: (r) => r.total,
+      sortValue: (f) => (f.rem ? f.rem.total : ""),
+      exportValue: (f) => (f.rem ? f.rem.total : ""),
       className: "text-right",
-      cell: (r) => (
+      cell: (f) => (f.rem ? (
         <div className="whitespace-nowrap">
-          <div className="font-medium tabular-nums">{fmtMoney(r.total)}</div>
-          <div className="text-xs text-muted tabular-nums">sub {fmtMoney(r.subtotal)}</div>
+          <div className="font-medium tabular-nums">{fmtMoney(f.rem.total)}</div>
+          <div className="text-xs text-muted tabular-nums">sub {fmtMoney(f.rem.subtotal)}</div>
         </div>
-      ),
+      ) : sinDato),
     },
     // Detalle fiscal y nota: ocultas de arranque, disponibles en «Columnas».
-    { header: "Subtotal", hiddenByDefault: true, className: "text-right tabular-nums", sortable: true, sortValue: (r) => r.subtotal, cell: (r) => fmtMoney(r.subtotal) },
-    { header: "IEPS", hiddenByDefault: true, className: "text-right tabular-nums", sortable: true, sortValue: (r) => r.ieps, cell: (r) => fmtMoney(r.ieps) },
-    { header: "IVA", hiddenByDefault: true, className: "text-right tabular-nums", sortable: true, sortValue: (r) => r.iva, cell: (r) => fmtMoney(r.iva) },
-    { header: "Nota", hiddenByDefault: true, truncate: true, exportValue: (r) => r.notas ?? "", cell: (r) => <span title={r.notas ?? ""}>{r.notas ?? "—"}</span> },
+    { header: "Subtotal", hiddenByDefault: true, className: "text-right tabular-nums", sortable: true, sortValue: (f) => f.rem?.subtotal ?? "", cell: (f) => (f.rem ? fmtMoney(f.rem.subtotal) : sinDato) },
+    { header: "IEPS", hiddenByDefault: true, className: "text-right tabular-nums", sortable: true, sortValue: (f) => f.rem?.ieps ?? "", cell: (f) => (f.rem ? fmtMoney(f.rem.ieps) : sinDato) },
+    { header: "IVA", hiddenByDefault: true, className: "text-right tabular-nums", sortable: true, sortValue: (f) => f.rem?.iva ?? "", cell: (f) => (f.rem ? fmtMoney(f.rem.iva) : sinDato) },
+    { header: "Nota", hiddenByDefault: true, truncate: true, exportValue: (f) => (f.rem ? f.rem.notas ?? "" : f.oc.observaciones ?? ""), cell: (f) => { const t = f.rem ? f.rem.notas : f.oc.observaciones; return <span title={t ?? ""}>{t ?? "—"}</span>; } },
   ];
 
-  const rowActions: RowAction<Remision>[] = [
+  // Las acciones de remisión no aplican a una orden por resolver: se esconden
+  // solas en esas filas, que tienen las suyas (resolver, ver el documento,
+  // descartar). Así el bloque de abajo sigue hablando solo de remisiones.
+  function soloRemision(a: RowAction<Remision>): RowAction<Fila> {
+    const icono = a.icon;
+    return {
+      ...a,
+      icon: typeof icono === "function" ? (f: Fila) => (f.rem ? icono(f.rem) : null) : icono,
+      onClick: (f) => { if (f.rem) a.onClick(f.rem); },
+      hidden: (f) => !f.rem || (a.hidden?.(f.rem) ?? false),
+    };
+  }
+
+  const accionesRemision: RowAction<Remision>[] = [
     { id: "editar", label: "Editar", icon: <Pencil size={15} />, onClick: (r) => { void openEdit(r); },
       hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "RESERVADO" || r.estado === "CONFIRMADA")
         && (!r.factura_id || r.factura_estado === "CANCELADA")) },
@@ -1953,6 +2087,24 @@ export default function RemisionesPage() {
     { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => { void imprimirRemision(r); } },
     { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />, onClick: enviarRemision,
       hidden: () => !canWrite },
+  ];
+
+  // Las de la orden por resolver: la salida buena (volverla remisión) y la
+  // salida mala (descartarla), más el documento con el que llegó.
+  const rowActions: RowAction<Fila>[] = [
+    ...accionesRemision.map(soloRemision),
+    { id: "resolver", label: "Pasar a remisiones", tone: "success",
+      icon: (f) => (porResolver.ocupada === f.oc?.id
+        ? <Spinner className="h-4 w-4 border" />
+        : <Wand2 size={15} />),
+      onClick: (f) => { if (f.oc) porResolver.resolver(f.oc); },
+      hidden: (f) => !f.oc || !porResolver.puedeResolver },
+    { id: "oc-doc", label: "Ver la orden original", icon: <FileSearch size={15} />,
+      onClick: (f) => { window.open(f.oc!.archivo_url!, "_blank", "noopener"); },
+      hidden: (f) => !f.oc?.archivo_url },
+    { id: "descartar", label: "Descartar", icon: <Trash2 size={15} />, tone: "danger",
+      onClick: (f) => { if (f.oc) porResolver.descartar(f.oc); },
+      hidden: (f) => !f.oc || !porResolver.puedeResolver },
   ];
 
   // ───────────────────────── render ─────────────────────────
@@ -2379,6 +2531,20 @@ export default function RemisionesPage() {
         actions={(
           <>
             <SincronizarSae onSynced={reload} />
+            {/* El lote: convierte de golpe todo lo que ya cruce. Solo asoma
+                cuando hay órdenes esperando, y lo que quede después es lo que
+                de verdad necesita una mano fila por fila. */}
+            {porResolver.puedeResolver && porResolver.ordenes.length > 0 && (
+              <Button
+                variant="secondary"
+                disabled={porResolver.procesando}
+                title="Convierte de una vez las órdenes que ya crucen solas; las que queden necesitan una mano"
+                onClick={() => { void porResolver.procesarTodo(); }}
+              >
+                <Wand2 size={16} />
+                {porResolver.procesando ? "Procesando…" : "Procesar órdenes"}
+              </Button>
+            )}
             {canWrite && (
               <>
                 <Button variant="secondary" onClick={() => importInputRef.current?.click()}>
@@ -2390,10 +2556,6 @@ export default function RemisionesPage() {
           </>
         )}
       />
-
-      {/* Lo que llegó por WhatsApp/correo y no pudo volverse remisión solo:
-          la única bandeja que queda vive aquí, no en un menú aparte. */}
-      <OrdenesPorResolver onCambio={reload} />
 
       {/* Filtros */}
       <div className="mb-3 flex flex-wrap items-end gap-3">
@@ -2436,11 +2598,15 @@ export default function RemisionesPage() {
             Limpiar filtros
           </Button>
         )}
-        {buscaAplicada && !loading && (
-          <span className="pb-2 text-sm text-muted">
-            {data?.total ?? 0} resultado{(data?.total ?? 0) === 1 ? "" : "s"}
-          </span>
-        )}
+        {buscaAplicada && !loading && (() => {
+          // Las órdenes por resolver son filas de la tabla: cuentan.
+          const n = (data?.total ?? 0) + porResolver.ordenes.length;
+          return (
+            <span className="pb-2 text-sm text-muted">
+              {n} resultado{n === 1 ? "" : "s"}
+            </span>
+          );
+        })()}
       </div>
 
       {/* Barra de acciones en lote */}
@@ -2498,15 +2664,21 @@ export default function RemisionesPage() {
         loading={loading}
         error={error}
         empty="Sin remisiones"
-        rowKey={(r) => r.id}
+        rowKey={(f) => f.id}
         actions={rowActions}
         onRowExpand={verDetalle}
         renderExpanded={renderDetalle}
         storageKey="remisiones-v2"
         selectable
-        onSelectionChange={setSelected}
+        // Las acciones en lote (imprimir, facturar, exportar a SAE) son de
+        // remisiones: una orden por resolver no tiene qué aportarles.
+        selectableRow={(f) => !f.oc}
+        onSelectionChange={(fs) => setSelected(fs.flatMap((f) => (f.rem ? [f.rem] : [])))}
         selectionResetKey={selectionResetKey}
       />
+
+      {/* Resolver / descartar una orden: los diálogos viven fuera de la tabla. */}
+      {porResolver.modales}
 
       <ConfirmDialog open={toConfirm !== null} title="Confirmar remisión"
         message={`¿Confirmar ${toConfirm?.folio_interno}? Se reservará el inventario.`}
