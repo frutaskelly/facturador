@@ -57,7 +57,7 @@ class OCRecibida(Base, TimestampMixin):
     proyecto_id = Column(UUID(as_uuid=True), ForeignKey("proyectos.id", ondelete="SET NULL"))
     candidatos = Column(JSONB)
     ambiguo = Column(Boolean, nullable=False, server_default=text("false"))
-    remision_id = Column(UUID(as_uuid=True), ForeignKey("remisiones.id", ondelete="SET NULL"))
+    remision_id = Column(UUID(as_uuid=True), ForeignKey("remisiones.id", ondelete="SET NULL"), index=True)
     payload = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))

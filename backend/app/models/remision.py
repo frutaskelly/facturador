@@ -79,7 +79,7 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     notas = Column(Text)
     nota_entrega = Column(Text)
     # Fase 6: una factura cruza una o varias remisiones (NULL = sin facturar).
-    factura_id = Column(UUID(as_uuid=True), ForeignKey("facturas.id", ondelete="SET NULL"))
+    factura_id = Column(UUID(as_uuid=True), ForeignKey("facturas.id", ondelete="SET NULL"), index=True)
     # Folio de la factura que ampara esta remisión en SAE ("ZHGO 233"). Es de
     # OTRO sistema: texto libre, sin FK. Tenerlo pone la remisión en RESERVADO.
     # Lo escribe el ESPEJO (cuando la factura existe en SAE) o una captura
