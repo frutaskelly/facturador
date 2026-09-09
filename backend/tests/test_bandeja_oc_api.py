@@ -403,13 +403,12 @@ def test_pedido_con_formato_se_repite_y_no_bloquea(client, env, auth_as):
     assert client.post(f"/api/v1/oc-recibidas/{otra['id']}/crear-remision",
                        headers=h, json=body).status_code == 200
 
-    # Y el MISMO texto repetido tampoco frena: es una entrega más, no un duplicado.
+    # Y el MISMO texto repetido tampoco frena: es una entrega más, no un
+    # duplicado. El PATCH de arriba ya aprendió cliente y destino, así que esta
+    # ni siquiera espera un humano: la ingesta misma la vuelve remisión.
     igual = client.post("/api/v1/oc-recibidas", headers=h,
                         json=_oc(folio_externo="HO-34VIL-MIE")).json()
-    client.patch(f"/api/v1/oc-recibidas/{igual['id']}", headers=h,
-                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
-    assert client.post(f"/api/v1/oc-recibidas/{igual['id']}/crear-remision",
-                       headers=h, json=body).status_code == 200
+    assert igual["estado"] == "ASIGNADA" and igual["remision_id"]
 
 
 def test_folio_numerico_no_choca_con_pedido_con_formato(client, env, auth_as):
@@ -1078,3 +1077,121 @@ def test_la_lista_de_remisiones_filtra_las_que_faltan_por_revisar(client, env, a
     assert [x["id"] for x in por_revisar["items"]] == [rid]
     revisadas = client.get("/api/v1/remisiones?revision_pendiente=false", headers=h).json()
     assert rid not in [x["id"] for x in revisadas["items"]]
+
+
+# ─── ingesta directa: lo que resuelve nace remisión «por revisar» ────────────
+# El ticket «Une los menús»: la bandeja dejó de ser parada obligatoria. La
+# orden que trae cliente y destino resueltos genera su remisión en el mismo
+# request de ingesta; lo que no cruza queda PENDIENTE con su motivo y se
+# resuelve en la franja de órdenes por resolver de /remisiones.
+
+def _destino_resuelto(client, h, env):
+    """RFC → cliente y hospital → sucursal: todo lo que una orden necesita
+    para volverse remisión sin que nadie la toque."""
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    _externo(client, h, "UBICACION", "villahermosa:JUAN GRAHAM", env["ehmo"],
+             sucursal_id=env["suc"])
+
+
+def test_ingesta_con_destino_resuelto_nace_remision_por_revisar(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _destino_resuelto(client, h, env)
+
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+    assert oc["estado"] == "ASIGNADA", oc
+    assert oc["remision_id"] and oc["remision_folio"]
+
+    rem = client.get(f"/api/v1/remisiones/{oc['remision_id']}", headers=h).json()
+    assert rem["estado"] == "BORRADOR"
+    assert rem["revision_pendiente"] is True    # el freno viaja puesto
+    assert rem["su_pedido"] == "1188"
+
+    # Idempotencia intacta: el reintento del bot devuelve la MISMA captura.
+    again = client.post("/api/v1/oc-recibidas", headers=h,
+                        json=_oc(origen_externo=oc["origen_externo"])).json()
+    assert again["remision_id"] == oc["remision_id"]
+    assert client.get("/api/v1/remisiones", headers=h).json()["total"] == 1
+
+
+def test_ingesta_duplicada_de_una_captura_manual_queda_pendiente(client, env, auth_as):
+    """El candado de PR #100 visto desde la ingesta: no revienta al bot y deja
+    el motivo escrito, con el folio de la remisión que ya existe."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _destino_resuelto(client, h, env)
+
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["ehmo"],
+        "sucursal_id": env["suc"],
+        "almacen_id": env["alm"],
+        "su_pedido": "OC 1188",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": "10",
+                    "precio_unitario": "20"}],
+    })
+    assert rem.status_code == 201, rem.text
+
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+    assert oc["estado"] == "PENDIENTE"
+    assert oc["remision_id"] is None
+    assert oc["motivo"].startswith("No se pudo pasar a remisiones en automático")
+    assert rem.json()["folio_interno"] in oc["motivo"]
+
+
+def test_ingesta_que_no_cruza_nada_queda_pendiente_con_motivo(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _destino_resuelto(client, h, env)
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(lineas=[
+        {"descripcion": "ZZZ NADA DE ESTO EXISTE", "cantidad": "1", "unidad": "PZA"},
+    ])).json()
+    assert oc["estado"] == "PENDIENTE" and oc["remision_id"] is None
+    assert "Ninguna partida" in oc["motivo"]
+
+
+def test_reintento_no_convierte_lo_detenido_a_mano(client, env, auth_as):
+    """Una orden que un humano asignó (y dejó quieta a propósito) no se vuelve
+    remisión porque el bot la reenvíe; el lote explícito sí la toma."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+    assert oc["estado"] == "PENDIENTE"       # el hospital no está mapeado
+
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+    again = client.post("/api/v1/oc-recibidas", headers=h,
+                        json=_oc(origen_externo=oc["origen_externo"])).json()
+    assert again["estado"] == "PENDIENTE" and again["remision_id"] is None
+
+    r = client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["creadas"] == 1
+    hecha = client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()
+    assert hecha["estado"] == "ASIGNADA" and hecha["remision_id"]
+
+
+def test_procesar_pendientes_destraba_el_backlog_al_mapear_el_hospital(client, env, auth_as):
+    """Aprender un destino destraba TODAS las órdenes acumuladas de ese punto
+    de entrega en una pasada, sin abrirlas una por una. Lo marcado EN DUDA por
+    un humano no lo toca ningún lote."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+
+    a = client.post("/api/v1/oc-recibidas", headers=h, json=_oc()).json()
+    b = client.post("/api/v1/oc-recibidas", headers=h,
+                    json=_oc(folio_externo="1189")).json()
+    dudosa = client.post("/api/v1/oc-recibidas", headers=h,
+                         json=_oc(folio_externo="1190")).json()
+    assert {a["estado"], b["estado"], dudosa["estado"]} == {"PENDIENTE"}
+    client.patch(f"/api/v1/oc-recibidas/{dudosa['id']}", headers=h,
+                 json={"motivo": "EN DUDA - entró dos veces; revisar antes de remisionar"})
+
+    _externo(client, h, "UBICACION", "villahermosa:JUAN GRAHAM", env["ehmo"],
+             sucursal_id=env["suc"])
+    r = client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=h).json()
+    assert r["creadas"] == 2
+    assert r["restantes"] == 0               # la dudosa no cuenta como candidata
+
+    for creada in (a, b):
+        hecha = client.get(f"/api/v1/oc-recibidas/{creada['id']}", headers=h).json()
+        assert hecha["estado"] == "ASIGNADA" and hecha["remision_id"]
+    quieta = client.get(f"/api/v1/oc-recibidas/{dudosa['id']}", headers=h).json()
+    assert quieta["estado"] == "PENDIENTE" and quieta["remision_id"] is None
+    assert quieta["motivo"].startswith("EN DUDA")

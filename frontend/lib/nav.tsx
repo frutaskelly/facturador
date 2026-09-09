@@ -7,7 +7,6 @@ import {
   FolderTree,
   Hash,
   Home,
-  Inbox,
   Languages,
   Library,
   Plug,
@@ -55,7 +54,6 @@ export const NAV: NavSection[] = [
     icon: Home,
     items: [
       { label: "Dashboard", href: "/dashboard", perm: "menu:dashboard", icon: LayoutDashboard },
-      { label: "Bandeja de órdenes", href: "/oc", perm: "menu:oc", icon: Inbox },
       { label: "Remisiones", href: "/remisiones", perm: "menu:remisiones", icon: FileText },
       { label: "Facturas", href: "/facturas", perm: "menu:facturas", icon: Receipt },
       { label: "Cobranza (REP)", href: "/cobranza", perm: "menu:facturas", icon: HandCoins },

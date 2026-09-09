@@ -79,10 +79,13 @@ estabilidad → 4) corte de facturación.**
                           │ bot (sin cambios de fondo)
             ┌─────────────┴──────────────┐
             ▼ 1º (respaldo, como hoy)     ▼ 2º (PRIMARIO, con outbox)
-     Master Google Sheets          FACTURADOR  /oc  (bandeja)
-                                          │ asignar / corregir / un clic
+     Master Google Sheets          FACTURADOR  POST /oc-recibidas
+                                          │ ingesta directa (sep-2026: la
+                                          │ pantalla /oc se retiró; lo que no
+                                          │ resuelve queda en la franja de
+                                          │ «órdenes por resolver» de /remisiones)
                                           ▼
-                                   REMISIÓN (serie del grupo, precios de lista)
+                                   REMISIÓN «por revisar» (serie del grupo, precios de lista)
                                           │ selección por lote
                                           ▼
                               EXPORT EXCEL MASIVO SAE  ←← pieza nueva (H1)

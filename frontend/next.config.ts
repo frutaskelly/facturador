@@ -14,6 +14,15 @@ const nextConfig: NextConfig = {
   // and the `eslint` config key, so linting is configured separately later.
   allowedDevOrigins: ["localhost:3012", "127.0.0.1", LAN_ORIGIN],
 
+  async redirects() {
+    return [
+      // La bandeja de órdenes se fusionó en Remisiones (ticket «Une los
+      // menús», sep-2026); los marcadores viejos siguen llegando a un lugar útil.
+      { source: "/oc", destination: "/remisiones", permanent: false },
+      { source: "/oc/:id", destination: "/remisiones", permanent: false },
+    ];
+  },
+
   async headers() {
     return [
       {

@@ -502,10 +502,10 @@ export default function Page() {
 
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Link
-                    href="/oc"
+                    href="/remisiones"
                     className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium hover:bg-surface-2"
                   >
-                    <Inbox size={16} /> Ir a la bandeja
+                    <Inbox size={16} /> Ir a remisiones
                   </Link>
                   <Button variant="secondary" onClick={probar} disabled={ocupado}>
                     <RefreshCw size={16} /> Probar conexión

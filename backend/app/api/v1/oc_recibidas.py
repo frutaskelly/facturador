@@ -1,21 +1,20 @@
-"""Bandeja de órdenes de compra — ingesta desatendida y revisión humana.
+"""Ingesta de órdenes de compra — de documento a remisión, sin escala.
 
-Toda orden entra por aquí (WhatsApp, correo, captura) antes de volverse
-remisión. El backend intenta resolver el cliente y la sucursal con las
-equivalencias registradas; lo que no resuelve NO se adivina ni se descarta:
-queda PENDIENTE con su motivo para que alguien lo cierre desde la UI.
+Toda orden entra por aquí (WhatsApp, correo, captura) y, si el cliente y el
+destino se resuelven con las equivalencias registradas, nace su remisión EN EL
+MISMO REQUEST, marcada `revision_pendiente`: se revisa en /remisiones, donde
+los frenos (no se confirma, no se factura, no sale al export de SAE) ya viven.
 
-Por qué la bandeja y no crear la remisión directo: la remisión no puede guardar
-de dónde vino el documento, ni qué decía el original, ni que el sistema dudó. Y
-crear una remisión de un cliente adivinado quema un folio de la serie que ya no
-se recupera.
-
-Permisos: se reusan los de remisiones (`menu:remisiones` / `remision:gestionar`)
-— la bandeja ES la antesala de la remisión, y así el rol del bot no necesita
-permisos nuevos ni una migración de catálogo.
+`oc_recibidas` dejó de ser una pantalla propia y quedó como antesala: guarda de
+dónde vino el documento, qué decía el original y por qué el sistema dudó. Lo
+que NO se resuelve solo (cliente ambiguo, punto de entrega sin sucursal, un
+posible duplicado) NO se adivina ni se descarta: queda PENDIENTE con su motivo
+y se cierra desde la franja «órdenes por resolver» de /remisiones — crear una
+remisión de un cliente adivinado quema un folio de la serie que no se recupera.
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import date, timedelta
 from decimal import Decimal
@@ -27,6 +26,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ...core.config import settings
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
     Almacen,
@@ -47,6 +47,7 @@ from ...schemas.oc_recibida import (
     OCRecibidaIn,
     OCRecibidaOut,
     OCRecibidaUpdate,
+    ProcesarPendientesOut,
 )
 from ...models import ProductoCliente
 from ...services import cliente_match
@@ -66,6 +67,8 @@ from ...services.producto_match import (
 from ._helpers import ensure_fk, get_or_404, paginate
 
 router = APIRouter(prefix="/oc-recibidas", tags=["bandeja de OC"])
+
+logger = logging.getLogger(__name__)
 
 # Su propio menú desde 0057: compartir permiso con remisiones dejaba la
 # bandeja (órdenes de TODOS los clientes) a la vista de cualquier rol que
@@ -226,6 +229,60 @@ def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
         )
 
 
+def _puede_intentarse(oc: OCRecibida) -> bool:
+    """¿Esta orden es candidata a volverse remisión sin humano?
+
+    Mismas condiciones para la ingesta (al llegar cada orden) y para el proceso
+    en lote (el backlog). Lo que no pasa por aquí se queda PENDIENTE, con su
+    motivo, en la franja de órdenes por resolver de /remisiones.
+    """
+    if oc.estado != "PENDIENTE" or oc.remision_id is not None:
+        return False
+    if oc.cliente_id is None or oc.ambiguo:
+        return False
+    if not (oc.payload or {}).get("lineas"):
+        return False
+    # Sin sucursal resuelta no se folia: la serie —y con ella la lista de
+    # precios— de una plaza no es la de otra, y un folio quemado en la serie
+    # equivocada no se recupera. El destino lo asigna un humano en la franja.
+    if oc.sucursal_id is None and oc.punto_entrega:
+        return False
+    return True
+
+
+_AUTO_PREFIJO = "No se pudo pasar a remisiones en automático: "
+
+
+def _intentar_remision_auto(db: Session, ctx: AuthContext, oc: OCRecibida) -> bool:
+    """Intenta que la orden nazca remisión «por revisar», sin detener a nadie.
+
+    Lo que cruza pasa directo a /remisiones con `revision_pendiente` (ahí ya
+    viven los frenos de confirmar, facturar y exportar); lo que no —un posible
+    duplicado, ninguna partida cruzada— queda PENDIENTE con el motivo escrito.
+    Jamás propaga una excepción: quien llama puede ser la ingesta del bot, y
+    un error aquí no puede costarle la orden.
+    """
+    if not _puede_intentarse(oc):
+        return False
+    try:
+        with db.begin_nested():
+            # `almacen_id=None` explícito: llamada directa a la función del
+            # endpoint, sin FastAPI que traduzca el default Query(None).
+            crear_remision_sin_revisar(oc.id, db=db, ctx=ctx, almacen_id=None)
+        return True
+    except HTTPException as exc:
+        detalle = str(exc.detail)
+    except Exception:
+        logger.exception("Auto-remisión de la OC %s", oc.id)
+        detalle = "error inesperado; revísala y pásala a mano"
+    # El savepoint ya se revirtió; el motivo solo se escribe si la orden sigue
+    # esperando (otro request pudo ganarle la conversión mientras tanto).
+    db.refresh(oc)
+    if oc.remision_id is None and oc.estado == "PENDIENTE":
+        oc.motivo = (_AUTO_PREFIJO + detalle)[:500]
+    return False
+
+
 @router.post("", response_model=OCRecibidaDetailOut, status_code=status.HTTP_201_CREATED)
 def ingesta(
     payload: OCRecibidaIn,
@@ -237,6 +294,11 @@ def ingesta(
     Un reintento (timeout de red del bot a media madrugada) actualiza el payload
     de la orden que ya existe y devuelve 200 en vez de crear una segunda. Si esa
     orden ya generó su remisión, no se toca nada: el documento ya está capturado.
+
+    La orden que resuelve cliente y destino nace remisión «por revisar» en este
+    mismo request; la que no, queda PENDIENTE con su motivo. En ambos casos la
+    respuesta es la misma orden (con `remision_id` y estado ASIGNADA cuando la
+    remisión ya existe) — el bot no necesita distinguir los caminos.
     """
     data = payload.model_dump(mode="json")
     existente = (
@@ -263,10 +325,13 @@ def ingesta(
         existente.archivo_url = payload.archivo_url
         existente.updated_by = ctx.user_id
         # Solo se re-resuelve lo que nadie ha tocado. Un reintento por timeout no
-        # puede borrar la asignación que un humano ya hizo en la bandeja; para
-        # forzar el recálculo está /reabrir, que es explícito.
+        # puede borrar la asignación que un humano ya hizo (ni convertir a sus
+        # espaldas una orden que dejó detenida a propósito); para forzar el
+        # recálculo está /reabrir, que es explícito.
         if existente.resuelto_via != "MANUAL":
             _resolver_y_aplicar(db, existente)
+            if settings.OC_INGESTA_DIRECTA:
+                _intentar_remision_auto(db, ctx, existente)
         db.flush()
         db.refresh(existente)
         return _detalle(db, existente)
@@ -301,6 +366,8 @@ def ingesta(
             raise HTTPException(status_code=409, detail="Orden duplicada")
         return _detalle(db, ganador)
     db.refresh(oc)
+    if settings.OC_INGESTA_DIRECTA and _intentar_remision_auto(db, ctx, oc):
+        db.refresh(oc)
     return _detalle(db, oc)
 
 
@@ -1435,6 +1502,65 @@ def crear_remision_sin_revisar(
         rem.partidas_por_cruzar = por_cruzar
         db.flush()
     return out
+
+
+@router.post("/procesar-pendientes", response_model=ProcesarPendientesOut)
+def procesar_pendientes(
+    limite: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Pasa a Remisiones, en lote, todo lo pendiente que cruce solo.
+
+    El mismo intento que hace la ingesta con cada orden al llegar, aplicado al
+    backlog: lo acumulado de antes del cambio, y lo que falló y alguien ya
+    corrigió (una sucursal asignada, una remisión duplicada que se canceló).
+    Procesa hasta `limite` por llamada — cada conversión resuelve catálogo y
+    precios contra la BD y un lote grande se saldría del timeout; se repite
+    mientras `restantes` no llegue a cero.
+
+    Cada orden no tocada por un humano se RE-resuelve antes del intento: así el
+    hospital que alguien acaba de mapear a su sucursal destraba de una vez todas
+    las órdenes acumuladas de ese hospital, sin abrirlas una por una.
+
+    Se saltan las que un intento previo ya explicó (su motivo trae el prefijo
+    del intento automático — se reintentan una por una desde la franja, ya con
+    la causa corregida) y las marcadas EN DUDA por un humano: esa duda la puso
+    una persona y la resuelve una persona, no un lote.
+
+    El que llama repite mientras `creadas` avance; cuando llega en cero, lo que
+    quede (`restantes`) necesita una mano: asignar destino, resolver una duda.
+    """
+    def _query():
+        q = db.query(OCRecibida).filter(
+            OCRecibida.estado == "PENDIENTE",
+            OCRecibida.remision_id.is_(None),
+            OCRecibida.cliente_id.isnot(None),
+            ~func.coalesce(OCRecibida.motivo, "").ilike("EN DUDA%"),
+            ~func.coalesce(OCRecibida.motivo, "").like(f"{_AUTO_PREFIJO}%"),
+        )
+        if ctx.cliente_scope:
+            q = q.filter(OCRecibida.cliente_id.in_(ctx.cliente_scope))
+        return q
+
+    candidatas = _query().order_by(OCRecibida.recibida_at).limit(limite).all()
+    creadas = fallidas = 0
+    for fila in candidatas:
+        # El candado por fila (no al armar la lista): otro request pudo
+        # convertirla o descartarla mientras el lote avanzaba.
+        oc = get_or_404(db, OCRecibida, fila.id, soft=False, for_update=True)
+        if oc.resuelto_via != "MANUAL":
+            _resolver_y_aplicar(db, oc)
+        if _intentar_remision_auto(db, ctx, oc):
+            creadas += 1
+        else:
+            fallidas += 1
+    db.flush()
+    return ProcesarPendientesOut(
+        creadas=creadas,
+        fallidas=fallidas,
+        restantes=_query().count(),
+    )
 
 
 @router.post("/{oc_id}/descartar", response_model=OCRecibidaOut)

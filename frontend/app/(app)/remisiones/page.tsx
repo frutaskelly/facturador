@@ -21,6 +21,7 @@ import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SearchBox } from "@/components/ui/SearchBox";
 import { SincronizarSae } from "@/components/SincronizarSae";
+import { OrdenesPorResolver } from "./OrdenesPorResolver";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiDownloadPost, apiFetch, apiOpenInTab } from "@/lib/api";
@@ -1945,13 +1946,10 @@ export default function RemisionesPage() {
       onClick: (r) => { void abrirDevolucion(r); },
       hidden: (r) => !(canWrite && r.estado === "CONFIRMADA") },
     { id: "oc", label: "Ver la OC original", icon: <FileSearch size={15} />,
-      // Siempre visible: si se escondiera cuando no hay OC, la acción
-      // aparecería y desaparecería por renglón y no habría manera de ir a
-      // buscarla. Sin documento, lleva a la bandeja filtrada por ese folio.
-      onClick: (r) => {
-        if (r.oc_archivo_url) { window.open(r.oc_archivo_url, "_blank", "noopener"); return; }
-        router.push(r.su_pedido ? `/oc?q=${encodeURIComponent(r.su_pedido)}` : "/oc");
-      } },
+      // Solo cuando hay documento: la bandeja de órdenes ya no existe como
+      // pantalla, así que sin archivo no hay a dónde llevar a nadie.
+      onClick: (r) => { window.open(r.oc_archivo_url!, "_blank", "noopener"); },
+      hidden: (r) => !r.oc_archivo_url },
     { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => { void imprimirRemision(r); } },
     { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />, onClick: enviarRemision,
       hidden: () => !canWrite },
@@ -2392,6 +2390,10 @@ export default function RemisionesPage() {
           </>
         )}
       />
+
+      {/* Lo que llegó por WhatsApp/correo y no pudo volverse remisión solo:
+          la única bandeja que queda vive aquí, no en un menú aparte. */}
+      <OrdenesPorResolver onCambio={reload} />
 
       {/* Filtros */}
       <div className="mb-3 flex flex-wrap items-end gap-3">
