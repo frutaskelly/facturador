@@ -83,6 +83,10 @@ export default function UsuariosPage() {
   // Limitar a clientes (alcance de la membresía)
   const [scopeFor, setScopeFor] = useState<Membership | null>(null);
   const [scopeSel, setScopeSel] = useState<Set<string>>(new Set());
+  // "Ve todos" es un estado propio, no "la lista quedó vacía": marcar los
+  // clientes de hoy uno por uno deja una lista FIJA y el cliente nuevo no
+  // entra. Solo el alcance vacío incluye a los que vengan después.
+  const [scopeTodos, setScopeTodos] = useState(true);
   const [savingScope, setSavingScope] = useState(false);
 
   // Acceso a otras empresas del grupo
@@ -129,6 +133,7 @@ export default function UsuariosPage() {
 
   function openScope(m: Membership) {
     setScopeSel(new Set(m.cliente_scope ?? []));
+    setScopeTodos(!m.cliente_scope?.length);
     setClientesNeeded(true);
     setScopeFor(m);
   }
@@ -139,7 +144,7 @@ export default function UsuariosPage() {
     try {
       // Reemplazo completo: [] y null significan "sin límite" para el backend.
       await patch(`/api/v1/memberships/${scopeFor.id}`, {
-        cliente_scope: scopeSel.size ? [...scopeSel] : null,
+        cliente_scope: scopeTodos ? null : [...scopeSel],
       });
       toast.success("Alcance actualizado");
       setScopeFor(null);
@@ -470,7 +475,13 @@ export default function UsuariosPage() {
             <Button variant="secondary" onClick={() => setScopeFor(null)}>
               Cancelar
             </Button>
-            <Button onClick={() => void saveScope()} disabled={savingScope}>
+            {/* Sin "todos" y sin nadie marcado no hay nada que guardar: guardarlo
+                daría alcance vacío, que el backend lee como "todos" — lo
+                contrario de lo que se acaba de pedir. */}
+            <Button
+              onClick={() => void saveScope()}
+              disabled={savingScope || (!scopeTodos && scopeSel.size === 0)}
+            >
               {savingScope ? "Guardando…" : "Guardar"}
             </Button>
           </>
@@ -478,23 +489,40 @@ export default function UsuariosPage() {
       >
         <div className="space-y-3">
           <p className="text-sm text-muted">{scopeFor?.user_full_name || scopeFor?.user_email}</p>
-          <p className="text-sm">
-            Sin selección = ve todos los clientes. Con selección, el usuario SOLO ve remisiones,
-            facturas, precios y órdenes de esos clientes.
-          </p>
-          <ClienteScopePicker
-            clientes={clientes}
-            loading={clientesRes.loading}
-            selected={scopeSel}
-            onToggle={(id) =>
-              setScopeSel((prev) => {
-                const next = new Set(prev);
-                if (next.has(id)) next.delete(id);
-                else next.add(id);
-                return next;
-              })
-            }
-          />
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2">
+            <Checkbox
+              checked={scopeTodos}
+              onChange={() => setScopeTodos((v) => !v)}
+            />
+            <span className="text-sm">
+              <b>Visibilidad a todos los clientes</b>
+              <span className="block text-muted">
+                Los clientes que se den de alta después se agregan solos.
+              </span>
+            </span>
+          </label>
+          {!scopeTodos && (
+            <p className="text-sm">
+              El usuario SOLO ve remisiones, facturas, precios y órdenes de los clientes que
+              marques. Los que se creen después <b>no</b> los verá, ni siquiera los que capture
+              él mismo.
+            </p>
+          )}
+          {!scopeTodos && (
+            <ClienteScopePicker
+              clientes={clientes}
+              loading={clientesRes.loading}
+              selected={scopeSel}
+              onToggle={(id) =>
+                setScopeSel((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(id)) next.delete(id);
+                  else next.add(id);
+                  return next;
+                })
+              }
+            />
+          )}
         </div>
       </Modal>
 
