@@ -14,7 +14,10 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
+
+from .conftest import crear_sucursal
 from app.models import (
+    Almacen,
     Cliente,
     ClienteExterno,
     Membership,
@@ -29,7 +32,9 @@ from app.models import (
 _PURGE = (
     "timbrado_intentos", "recibo_pago_facturas", "recibos_pago",
     "lineas_factura", "facturas", "lineas_remision", "remisiones",
+    "movimientos_inventario", "lotes_inventario", "almacenes",
     "conexiones", "cliente_externos", "producto_clientes", "productos",
+    "cliente_sucursal_series", "cliente_sucursales", "sucursales",
     "series", "clientes", "espejo_syncs",
 )
 
@@ -53,7 +58,8 @@ def env(db_engine):
         dueno = {"sub": sub, "email": u.email, "tenant_id": t.id}
 
         serie_f = Serie(tenant_id=t.id, codigo="ZHGO", tipo="FISCAL",
-                        tipo_documento="FACTURA", nombre="Balles y Jubran")
+                        tipo_documento="FACTURA", nombre="Balles y Jubran",
+                        espejo_sae=True)   # serie espejada (como la deja el backfill 0070)
         serie_r = Serie(tenant_id=t.id, codigo="RZHGO", tipo="NO_FISCAL",
                         tipo_documento="REMISION", nombre="Balles y Jubran")
         db.add_all([serie_f, serie_r]); db.flush()
@@ -422,6 +428,102 @@ def test_candados_del_espejo(client, env, auth_as, sin_sesion):
         "facturas": [{"factura_id": fid, "importe": "100.00"}]})
     assert recibo.status_code == 422
     assert "espejo" in recibo.json()["detail"]
+
+
+def test_corte_por_serie_permite_nativa_de_cliente_espejado(client, env, auth_as, sin_sesion):
+    """El corte del SAE es por serie/plaza, no por cliente: el mismo cliente
+    espejado factura nativo cuando la venta resuelve una serie ya cortada
+    (espejo_sae apagado — el caso EHMO Pachuca/FEHMOHOS), y sigue bloqueado
+    si la venta cae en la serie espejada (la otra plaza)."""
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+
+    db = SessionLocal()
+    try:
+        f_corte = Serie(tenant_id=env["tenant"], codigo="FHGO", tipo="FISCAL",
+                        tipo_documento="FACTURA", nombre="cortada del SAE")
+        alm = Almacen(tenant_id=env["tenant"], codigo="ALM-01", nombre="Central")
+        db.add_all([f_corte, alm]); db.flush()
+        almacen_id = str(alm.id)
+        f_corte_id = str(f_corte.id)
+        # Como tras el corte: el cliente apunta a la serie nativa y la plaza
+        # cortada existe como vínculo cliente×sucursal.
+        db.query(Cliente).filter(Cliente.id == uuid.UUID(env["cli"])).update(
+            {"serie_factura_id": f_corte.id})
+        suc = crear_sucursal(db, tenant_id=env["tenant"],
+                             cliente_id=uuid.UUID(env["cli"]), nombre="Pachuca",
+                             serie_factura_id=f_corte.id)
+        sucursal_id = str(suc.id)
+        db.commit()
+    finally:
+        db.close()
+
+    def _rem(con_sucursal=True):
+        body = {
+            "cliente_facturacion_id": env["cli"], "almacen_id": almacen_id,
+            "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                        "precio_unitario": 10}]}
+        if con_sucursal:
+            body["sucursal_id"] = sucursal_id
+        r = client.post("/api/v1/remisiones", headers=h, json=body)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    nativa = client.post("/api/v1/facturas/desde-remisiones", headers=h,
+                         json={"remision_ids": [_rem()["id"]],
+                               "permitir_negativos": True})
+    assert nativa.status_code == 201, nativa.text
+    assert nativa.json()["serie"] == "FHGO"
+    assert nativa.json()["folio"] == 1      # serie nueva: arranca en 1
+
+    # La serie espejada sigue vedada aunque el cliente ya facture nativo por
+    # la otra: forzarla (override) es pedir un CFDI que SAE también emitiría.
+    bloqueada = client.post("/api/v1/facturas/desde-remisiones", headers=h,
+                            json={"remision_ids": [_rem()["id"]],
+                                  "serie_id": env["serie_f"],
+                                  "permitir_negativos": True})
+    assert bloqueada.status_code == 409
+    assert "espejo" in bloqueada.json()["detail"]
+
+    # Sin plaza (y sin serie explícita) el candado no adivina: fail-closed.
+    sin_plaza = client.post("/api/v1/facturas/desde-remisiones", headers=h,
+                            json={"remision_ids": [_rem(con_sucursal=False)["id"]],
+                                  "permitir_negativos": True})
+    assert sin_plaza.status_code == 409
+    assert "sucursal" in sin_plaza.json()["detail"]
+
+    # Directa de un cliente espejado: la serie se elige explícitamente…
+    directa_sin_serie = client.post("/api/v1/facturas/directa", headers=h, json={
+        "cliente_id": env["cli"], "almacen_id": almacen_id,
+        "lineas": [{"producto_id": env["prod"], "cantidad": 1,
+                    "precio_unitario": 10}]})
+    assert directa_sin_serie.status_code == 409
+    assert "serie" in directa_sin_serie.json()["detail"]
+    # …y con la serie cortada elegida, pasa.
+    directa_ok = client.post("/api/v1/facturas/directa", headers=h, json={
+        "cliente_id": env["cli"], "almacen_id": almacen_id,
+        "serie_id": f_corte_id,
+        "lineas": [{"producto_id": env["prod"], "cantidad": 1,
+                    "precio_unitario": 10}]})
+    assert directa_ok.status_code == 201, directa_ok.text
+    assert directa_ok.json()["serie"] == "FHGO"
+
+
+def test_espejo_no_siembra_reflejos_en_serie_cortada(client, env, auth_as, sin_sesion):
+    """Un reflejo NUEVO en una serie explícitamente cortada (espejo_sae
+    apagado) se rechaza — sus folios ya los numera el Facturador. Los reflejos
+    de series espejadas siguen entrando igual."""
+    auth_as(env["dueno"])
+    db = SessionLocal()
+    try:
+        db.query(Serie).filter(Serie.id == uuid.UUID(env["serie_f"])).update(
+            {"espejo_sae": False})
+        db.commit()
+    finally:
+        db.close()
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    r = client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=901))
+    assert r.status_code == 409
+    assert "cortada" in r.json()["detail"]
 
 
 def test_la_conexion_sigue_sin_poder_facturar_nativo(client, env, auth_as, sin_sesion):

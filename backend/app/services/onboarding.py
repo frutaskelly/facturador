@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
+from fastapi import HTTPException
+
 from .facturama import csd_public_fields
 
 # RFC: 3-4 letras (3 PM, 4 PF) + 6 dígitos de fecha + 3 de homoclave.
@@ -32,6 +34,24 @@ def _csd_match(csds: list, rfc: str) -> Optional[dict]:
         if str(c.get("Rfc") or c.get("rfc") or "").strip().upper() == rfc_u and rfc_u:
             return c
     return None
+
+
+def exigir_listo_para_facturar(client, tenant, settings) -> None:
+    """Gate de timbrado en multi-emisor, compartido por facturas y REP: si el
+    tenant no está listo (datos fiscales + su CSD en Facturama), 422 accionable
+    en lugar del error críptico del PAC. En single-emisor no exige nada."""
+    if not bool(getattr(settings, "FACTURAMA_MULTIEMISOR", False)):
+        return
+    estado = compute_status(client, tenant, multiemisor=True)
+    if not estado["listo_para_facturar"]:
+        faltan = [p["titulo"] for p in estado["pasos"] if not p["completo"]]
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "La empresa aún no está lista para facturar. Completa en "
+                "Ajustes › Empresa: " + ", ".join(faltan) + "."
+            ),
+        )
 
 
 def compute_status(client, tenant, *, multiemisor: bool) -> dict[str, Any]:

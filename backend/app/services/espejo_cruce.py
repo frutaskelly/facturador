@@ -28,6 +28,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from ..models import Cliente, Factura, Remision
+from .series import resolver_serie
 
 _RE_OC_OBS = re.compile(r"\bOC[\s:]+([A-Z0-9][A-Z0-9\-\/\.]*)")
 # El folio interno de una entrega EHMO/MAFAN: dos letras del proyecto, la
@@ -107,6 +108,16 @@ def ligar_remision_con_espejo(db: Session, rem: Remision) -> Optional[Factura]:
         Cliente.id == rem.cliente_facturacion_id
     ).scalar()
     if not en_espejo:
+        return None
+    # Corte POR SERIE/plaza: si la venta de ESTA remisión resuelve una serie de
+    # factura ya cortada del SAE (espejo_sae apagado — p. ej. EHMO Pachuca tras
+    # el corte), su CFDI nace nativo aquí y ninguna espejo huérfana la ampara;
+    # estamparle factura_sae la dejaría infacturable (409 "amparada por SAE").
+    serie_obj = resolver_serie(
+        db, rem.tenant_id, "FACTURA",
+        sucursal_id=rem.sucursal_id, cliente_id=rem.cliente_facturacion_id,
+    )
+    if serie_obj is not None and not serie_obj.espejo_sae:
         return None
 
     # Huérfanas: timbradas del cliente SIN remisión ligada por factura_id. La

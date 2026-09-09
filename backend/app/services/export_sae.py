@@ -493,6 +493,15 @@ def preparar(
                     f"{rem.folio_interno}: no se resuelve serie de FACTURA para {nombre_cli}"
                 )
                 continue
+            if not serie.espejo_sae:
+                # Serie ya cortada del SAE (corte por plaza): esta venta se
+                # factura NATIVA aquí. Mandarla al masivo emitiría en SAE un
+                # segundo CFDI bajo una serie que SAE ya no numera.
+                res.errores.append(
+                    f"{rem.folio_interno}: su serie de factura ({serie.codigo}) ya está "
+                    "cortada del SAE — esta venta se factura nativa aquí, no va al masivo"
+                )
+                continue
             # Normalizada: la estampa y el espejo comparan en mayúsculas — un
             # código 'Zhgo ' con espacio dejaría marcas que nunca casan.
             doc.serie = (serie.codigo or "").strip().upper()

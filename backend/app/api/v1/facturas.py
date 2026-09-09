@@ -44,6 +44,7 @@ from ...models import (
     ReciboPago,
     ReciboPagoFactura,
     Remision,
+    Serie,
     Tenant,
     TimbradoIntento,
 )
@@ -70,7 +71,7 @@ from ...services.espejo_cruce import extraer_oc as _extraer_oc, norm_oc as _norm
 from ...services.factura_pdf import build_factura_pdf, build_facturas_pdf
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea_producto, totales
-from ...services.onboarding import compute_status
+from ...services.onboarding import exigir_listo_para_facturar
 from ...services.inventario import build_movimiento, presentacion_factor, presentacion_sat, resolve_lote
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import ensure_fk, get_or_404, paginate
@@ -375,7 +376,31 @@ def factura_desde_remisiones(
     clientes = {r.cliente_facturacion_id for r in rems}
     if len(clientes) != 1:
         raise HTTPException(status_code=422, detail="Todas las remisiones deben ser del mismo cliente")
-    _rechazar_cliente_en_espejo(db, next(iter(clientes)))
+    cliente = get_or_404(db, Cliente, next(iter(clientes)))
+    # Candado de espejo con la serie YA resuelta (el corte del SAE es por
+    # serie/plaza, no por cliente completo) y ANTES de mover inventario:
+    # resolver_serie es consulta pura, el folio se consume más abajo.
+    sucursales = {r.sucursal_id for r in rems if r.sucursal_id}
+    sucursal_id = sucursales.pop() if len(sucursales) == 1 else None
+    if cliente.espejo_sae and payload.serie_id is None:
+        # La plaza es lo que dice de qué lado del corte cae la venta. Sin ella
+        # (o con un lote mixto) la cascada caería a la serie del CLIENTE — que
+        # tras el corte es la nativa — y una venta de la plaza espejada saldría
+        # con CFDI doble. Fail-closed: o plaza única, o serie explícita.
+        plazas = {r.sucursal_id for r in rems}
+        if len(plazas) != 1 or None in plazas:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{cliente.legal_name} está en espejo SAE: para facturar "
+                       "nativo, todas las remisiones deben traer la MISMA sucursal "
+                       "(la plaza decide de qué lado del corte cae la venta), o "
+                       "elige la serie explícitamente.",
+            )
+    serie_obj = resolver_serie(
+        db, ctx.tenant_id, "FACTURA",
+        serie_id=payload.serie_id, sucursal_id=sucursal_id, cliente_id=cliente.id,
+    )
+    _rechazar_venta_en_espejo(cliente, serie_obj)
     # Una remisión que llegó de la bandeja sin revisar no se timbra: sus
     # unidades y sus precios no los ha visto nadie, y el CFDI es definitivo.
     sin_revisar = [r for r in rems if r.revision_pendiente]
@@ -425,7 +450,6 @@ def factura_desde_remisiones(
         if r.estado == "BORRADOR":
             reservar_stock_remision(db, ctx, r, permitir_negativos=payload.permitir_negativos)
 
-    cliente = get_or_404(db, Cliente, clientes.pop())
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
 
     prod_ids = {ln.producto_id for r in rems for ln in r.lineas}
@@ -434,17 +458,16 @@ def factura_desde_remisiones(
     esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.id.in_(esq_ids)).all()}
 
     # Serie: override manual → sucursal (si todas las remisiones comparten una) →
-    # cliente → default del inquilino. Folio del contador atómico de la serie.
-    sucursales = {r.sucursal_id for r in rems if r.sucursal_id}
-    sucursal_id = sucursales.pop() if len(sucursales) == 1 else None
-    serie_obj = resolver_serie(
-        db, ctx.tenant_id, "FACTURA",
-        serie_id=payload.serie_id, sucursal_id=sucursal_id, cliente_id=cliente.id,
-    )
+    # cliente → default del inquilino (resuelta arriba, antes del candado de
+    # espejo). Folio del contador atómico de la serie.
     if serie_obj is not None:
         folio = consumir_folio(db, serie_obj.id)
         serie_codigo = serie_obj.codigo
         if folio is None:                       # carrera/desactivada: cae a back-compat
+            if cliente.espejo_sae:
+                # El candado validó serie_obj; el fallback escribiría OTRA serie
+                # sin pasar por él. Para un cliente espejado, mejor reintentar.
+                raise HTTPException(status_code=409, detail="La serie se desactivó a media operación; reintenta")
             serie_codigo = payload.serie or serie_obj.codigo
             folio = _next_folio(db, ctx.tenant_id, serie_codigo)
     else:
@@ -555,7 +578,23 @@ def factura_directa(
     Las líneas referencian productos del catálogo para tomar su clave SAT y su
     desglose fiscal."""
     cliente = get_or_404(db, Cliente, payload.cliente_id)
-    _rechazar_cliente_en_espejo(db, cliente.id, cliente=cliente)
+    # Candado de espejo con la serie ya resuelta: el corte del SAE es por
+    # serie/plaza, no por cliente completo (consulta pura; el folio se consume
+    # al final). La directa no lleva sucursal, así que para un cliente espejado
+    # la serie debe elegirse EXPLÍCITAMENTE: la cascada caería a la serie del
+    # cliente (la nativa tras el corte) aunque la venta fuera de la plaza que
+    # sigue en SAE. Fail-closed.
+    if cliente.espejo_sae and payload.serie_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{cliente.legal_name} está en espejo SAE: en factura directa "
+                   "elige la serie explícitamente (una ya cortada del SAE, p. ej. "
+                   "FEHMOHOS) para confirmar de qué lado del corte cae la venta.",
+        )
+    serie_obj = resolver_serie(
+        db, ctx.tenant_id, "FACTURA", serie_id=payload.serie_id, cliente_id=cliente.id,
+    )
+    _rechazar_venta_en_espejo(cliente, serie_obj)
     ensure_fk(db, Almacen, payload.almacen_id, "almacen_id")   # de dónde sale el stock
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
 
@@ -580,13 +619,14 @@ def factura_directa(
     esq_ids = {p.esquema_impuesto_id for p in productos.values() if p.esquema_impuesto_id}
     esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.id.in_(esq_ids)).all()}
 
-    serie_obj = resolver_serie(
-        db, ctx.tenant_id, "FACTURA", serie_id=payload.serie_id, cliente_id=cliente.id,
-    )
     if serie_obj is not None:
         folio = consumir_folio(db, serie_obj.id)
         serie_codigo = serie_obj.codigo
         if folio is None:
+            if cliente.espejo_sae:
+                # El candado validó serie_obj; el fallback escribiría OTRA serie
+                # sin pasar por él. Para un cliente espejado, mejor reintentar.
+                raise HTTPException(status_code=409, detail="La serie se desactivó a media operación; reintenta")
             serie_codigo = payload.serie or serie_obj.codigo
             folio = _next_folio(db, ctx.tenant_id, serie_codigo)
     else:
@@ -646,18 +686,35 @@ def factura_directa(
 
 # ─── Espejo de SAE (fase espejo de la migración del Master) ──────────────────
 
-def _rechazar_cliente_en_espejo(db: Session, cliente_id: UUID, cliente: Cliente | None = None):
+def _rechazar_venta_en_espejo(cliente: Cliente | None, serie_obj: Serie | None):
     """Candado de la migración: un cliente `espejo_sae` factura EN SAE. Crear
     una factura nativa para él aquí, mientras SAE también emite, son dos CFDI
-    reales por la misma venta ante el SAT. El corte quita este switch cliente
-    por cliente (Etapa 4 del plan)."""
-    cli = cliente or db.query(Cliente).filter(Cliente.id == cliente_id).one_or_none()
-    if cli is not None and cli.espejo_sae:
+    reales por la misma venta ante el SAT.
+
+    El corte del SAE es POR SERIE, no por cliente: EHMO Pachuca timbra nativo
+    (FEHMOHOS, `series.espejo_sae` apagado) mientras EHMO Tabasco sigue
+    espejado (ZEHMOVH) — el mismo cliente en ambos lados. Por eso el candado
+    se evalúa sobre la serie RESUELTA para esta venta: sin serie (caería al
+    fallback "A") o con una serie aún espejada, la venta sigue siendo de SAE."""
+    # Regla global, para CUALQUIER cliente: los folios de una serie espejada
+    # los numera SAE — emitir nativo dentro de ella choca de frente con el
+    # consecutivo del espejo (mismo UNIQUE tenant+serie+folio).
+    if serie_obj is not None and serie_obj.espejo_sae:
         raise HTTPException(
             status_code=409,
-            detail=f"{cli.legal_name} está en espejo SAE: su facturación se emite en SAE "
-                   "y aquí solo se refleja. El candado se quita al cortar ese cliente.",
+            detail=f"La serie {serie_obj.codigo} es espejo del SAE: sus folios los "
+                   "emite SAE y aquí solo se reflejan. Elige una serie ya cortada.",
         )
+    if cliente is None or not cliente.espejo_sae:
+        return
+    if serie_obj is not None:
+        return  # serie ya cortada del SAE: emisión nativa permitida
+    raise HTTPException(
+        status_code=409,
+        detail=f"{cliente.legal_name} está en espejo SAE (sin serie asignada): esa "
+               "venta se emite en SAE y aquí solo se refleja. Nativo solo por una "
+               "serie ya cortada del SAE.",
+    )
 
 
 def _norm_clave_sae(v: str) -> str:
@@ -978,6 +1035,28 @@ def factura_espejo(
             status_code=409,
             detail=f"{serie}{payload.folio} ya existe como factura NATIVA — el espejo no la toca",
         )
+    if factura is None:
+        # Reflejo NUEVO: una serie explícitamente cortada del SAE (espejo_sae
+        # apagado) ya numera sus folios aquí — sembrarle reflejos intercalaría
+        # folios de SAE en el consecutivo nativo. Las series históricas
+        # renombradas (p. ej. ZEHMOHOS→FEHMOHOS) ya no tienen fila con el
+        # código viejo, así que sus reflejos siguen entrando y actualizándose.
+        serie_cortada = (
+            db.query(Serie)
+            .filter(
+                Serie.tenant_id == ctx.tenant_id,
+                func.upper(func.btrim(Serie.codigo)) == serie,
+                Serie.tipo_documento == "FACTURA",
+                Serie.espejo_sae.is_(False),
+            )
+            .first()
+        )
+        if serie_cortada is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"La serie {serie} ya está cortada del SAE: sus CFDI nacen "
+                       "aquí y el espejo no siembra reflejos nuevos en ella",
+            )
     if factura is not None and (factura.espejo_empresa or payload.empresa) != payload.empresa:
         # Los folios de SAE son consecutivos POR EMPRESA: 'A 100' de la 02 y de
         # la 03 son facturas distintas — actualizar una con la otra las mezcla.
@@ -1262,6 +1341,15 @@ def sustituir_factura(
 
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
     serie_obj = resolver_serie(db, ctx.tenant_id, "FACTURA", serie_id=payload.serie_id, cliente_id=vieja.cliente_id)
+    # Una sustituta también es emisión nativa: jamás dentro de una serie
+    # espejada (sus folios los numera SAE). El fallback de abajo es seguro:
+    # copia la serie de la vieja, que ya era nativa.
+    if serie_obj is not None and serie_obj.espejo_sae:
+        raise HTTPException(
+            status_code=409,
+            detail=f"La serie {serie_obj.codigo} es espejo del SAE: la sustituta "
+                   "debe salir por una serie ya cortada",
+        )
     if serie_obj is not None:
         folio = consumir_folio(db, serie_obj.id)
         serie_codigo = serie_obj.codigo
@@ -1391,16 +1479,7 @@ def timbrar_factura(
     # antes de timbrar a su nombre. Mensaje accionable en vez del error críptico del PAC.
     if bool(getattr(settings, "FACTURAMA_MULTIEMISOR", False)):
         tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
-        estado = compute_status(client, tenant, multiemisor=True)
-        if not estado["listo_para_facturar"]:
-            faltan = [p["titulo"] for p in estado["pasos"] if not p["completo"]]
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "La empresa aún no está lista para facturar. Completa en "
-                    "Ajustes › Empresa: " + ", ".join(faltan) + "."
-                ),
-            )
+        exigir_listo_para_facturar(client, tenant, settings)
 
     permitir_negativos = bool(payload_in.permitir_negativos) if payload_in else False
     _validar_stock_directa(db, ctx, factura, permitir_negativos=permitir_negativos)

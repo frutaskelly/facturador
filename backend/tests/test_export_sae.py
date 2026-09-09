@@ -56,7 +56,8 @@ def env(db_engine):
         admin = {"sub": sub, "email": u.email, "tenant_id": t.id}
 
         serie_f = Serie(tenant_id=t.id, codigo="ZHGO", tipo="FISCAL",
-                        tipo_documento="FACTURA", nombre="Balles y Jubran")
+                        tipo_documento="FACTURA", nombre="Balles y Jubran",
+                        espejo_sae=True)   # el export FACTURA exige serie espejada
         serie_r = Serie(tenant_id=t.id, codigo="RZHGO", tipo="NO_FISCAL",
                         tipo_documento="REMISION", nombre="Balles y Jubran")
         db.add_all([serie_f, serie_r]); db.flush()

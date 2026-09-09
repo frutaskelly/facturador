@@ -18,6 +18,9 @@ class SerieBase(BaseModel):
     nombre: Optional[str] = Field(default=None, max_length=120)
     activa: bool = True
     es_default: bool = False
+    # Serie cuyos CFDI se emiten EN SAE y aquí solo se reflejan: no emite
+    # folios nativos. El corte del SAE por plaza la apaga (ver 0070).
+    espejo_sae: bool = False
     vigencia_desde: Optional[date] = None
     vigencia_hasta: Optional[date] = None
     notas: Optional[str] = None
@@ -41,6 +44,7 @@ class SerieUpdate(BaseModel):
     nombre: Optional[str] = Field(default=None, max_length=120)
     activa: Optional[bool] = None
     es_default: Optional[bool] = None
+    espejo_sae: Optional[bool] = None
     vigencia_desde: Optional[date] = None
     vigencia_hasta: Optional[date] = None
     notas: Optional[str] = None

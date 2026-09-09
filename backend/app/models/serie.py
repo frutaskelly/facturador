@@ -27,6 +27,11 @@ class Serie(Base, TimestampMixin):
     activa = Column(Boolean, nullable=False, server_default="true")
     # Serie predeterminada del inquilino para su tipo_documento (una sola, índice parcial).
     es_default = Column(Boolean, nullable=False, server_default="false")
+    # Serie cuyos CFDI se emiten EN SAE y aquí solo se reflejan (espejo). Un
+    # cliente en espejo solo factura nativo por una serie con esto apagado:
+    # el corte del SAE es por serie/plaza, no por cliente (EHMO: Pachuca
+    # nativa, Tabasco espejada).
+    espejo_sae = Column(Boolean, nullable=False, server_default="false")
     vigencia_desde = Column(Date)
     vigencia_hasta = Column(Date)
     notas = Column(Text)
