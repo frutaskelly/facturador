@@ -57,7 +57,9 @@ const RECURSO_LABEL: Record<string, string> = {
 type MatrixRow = { pantalla: string; ver: string[]; editar: string[]; borrar: string[]; borrarTitle?: string };
 const MATRIX: MatrixRow[] = [
   { pantalla: "Dashboard", ver: ["menu:dashboard"], editar: [], borrar: [] },
-  { pantalla: "Bandeja de órdenes", ver: ["menu:oc"], editar: ["remision:gestionar"], borrar: [] },
+  // La bandeja ya no es pantalla propia: `menu:oc` controla la franja de
+  // «órdenes por resolver» dentro de Remisiones (y el acceso del bot).
+  { pantalla: "Órdenes por resolver (en Remisiones)", ver: ["menu:oc"], editar: ["remision:gestionar"], borrar: [] },
   { pantalla: "Remisiones", ver: ["menu:remisiones"], editar: ["remision:gestionar"], borrar: ["remision:eliminar"] },
   {
     pantalla: "Facturas",

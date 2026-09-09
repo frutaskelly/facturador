@@ -86,6 +86,12 @@ class Settings(BaseSettings):
 
     # ─── Signup público (anti-abuso) ────────────────────────────────────────────
     # Kill-switch: false deshabilita el registro autoservicio (POST /registro).
+    # Ingesta directa a Remisiones (ticket «Une los menús»): la OC que resuelve
+    # cliente y destino nace remisión «por revisar» en el mismo request del bot.
+    # Apagarlo regresa al flujo viejo (todo espera en oc_recibidas) sin
+    # redesplegar — es la palanca de emergencia, no una preferencia.
+    OC_INGESTA_DIRECTA: bool = True
+
     SIGNUP_ENABLED: bool = True
     # Máximo de registros por IP por hora (rate limit con Redis; fail-open).
     SIGNUP_RATE_PER_HOUR: int = 5

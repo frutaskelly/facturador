@@ -214,3 +214,10 @@ class CrearRemisionIn(BaseModel):
     fecha_remision: Optional[date] = None
     fecha_entrega: Optional[date] = None
     lineas: list[LineaCrearIn] = Field(min_length=1)
+
+
+class ProcesarPendientesOut(BaseModel):
+    """Resultado de una pasada del proceso en lote del backlog."""
+    creadas: int
+    fallidas: int
+    restantes: int

@@ -1996,6 +1996,11 @@ export interface paths {
          *     Un reintento (timeout de red del bot a media madrugada) actualiza el payload
          *     de la orden que ya existe y devuelve 200 en vez de crear una segunda. Si esa
          *     orden ya generó su remisión, no se toca nada: el documento ya está capturado.
+         *
+         *     La orden que resuelve cliente y destino nace remisión «por revisar» en este
+         *     mismo request; la que no, queda PENDIENTE con su motivo. En ambos casos la
+         *     respuesta es la misma orden (con `remision_id` y estado ASIGNADA cuando la
+         *     remisión ya existe) — el bot no necesita distinguir los caminos.
          */
         post: operations["ingesta_api_v1_oc_recibidas_post"];
         delete?: never;
@@ -2025,6 +2030,45 @@ export interface paths {
         get: operations["grupos_bandeja_api_v1_oc_recibidas_grupos_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oc-recibidas/procesar-pendientes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Procesar Pendientes
+         * @description Pasa a Remisiones, en lote, todo lo pendiente que cruce solo.
+         *
+         *     El mismo intento que hace la ingesta con cada orden al llegar, aplicado al
+         *     backlog: lo acumulado de antes del cambio, y lo que falló y alguien ya
+         *     corrigió (una sucursal asignada, una remisión duplicada que se canceló).
+         *     Procesa hasta `limite` por llamada — cada conversión resuelve catálogo y
+         *     precios contra la BD y un lote grande se saldría del timeout; se repite
+         *     mientras `restantes` no llegue a cero.
+         *
+         *     Cada orden no tocada por un humano se RE-resuelve antes del intento: así el
+         *     hospital que alguien acaba de mapear a su sucursal destraba de una vez todas
+         *     las órdenes acumuladas de ese hospital, sin abrirlas una por una.
+         *
+         *     Se saltan las que un intento previo ya explicó (su motivo trae el prefijo
+         *     del intento automático — se reintentan una por una desde la franja, ya con
+         *     la causa corregida) y las marcadas EN DUDA por un humano: esa duda la puso
+         *     una persona y la resuelve una persona, no un lote.
+         *
+         *     El que llama repite mientras `creadas` avance; cuando llega en cero, lo que
+         *     quede (`restantes`) necesita una mano: asignar destino, resolver una duda.
+         */
+        post: operations["procesar_pendientes_api_v1_oc_recibidas_procesar_pendientes_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8198,6 +8242,18 @@ export interface components {
             /** Tipo */
             tipo: string;
         };
+        /**
+         * ProcesarPendientesOut
+         * @description Resultado de una pasada del proceso en lote del backlog.
+         */
+        ProcesarPendientesOut: {
+            /** Creadas */
+            creadas: number;
+            /** Fallidas */
+            fallidas: number;
+            /** Restantes */
+            restantes: number;
+        };
         /** ProductoClienteOut */
         ProductoClienteOut: {
             /** Codigo Cliente */
@@ -14277,6 +14333,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GrupoBandejaOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    procesar_pendientes_api_v1_oc_recibidas_procesar_pendientes_post: {
+        parameters: {
+            query?: {
+                limite?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcesarPendientesOut"];
                 };
             };
             /** @description Validation Error */

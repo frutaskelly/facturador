@@ -26,6 +26,17 @@ _PURGE = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _flujo_bandeja_clasico(monkeypatch):
+    """Estos tests ejercitan la mecánica MANUAL de la bandeja paso a paso
+    (asignar, evaluar `auto`, crear la remisión con un humano enfrente). La
+    ingesta directa convertiría la orden antes de llegar a esos pasos, así que
+    aquí se apaga — en producción vive encendida y la cubre
+    test_bandeja_oc_api (sección «ingesta directa»)."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "OC_INGESTA_DIRECTA", False)
+
+
 @pytest.fixture
 def env(db_engine):
     suffix = uuid.uuid4().hex[:8]

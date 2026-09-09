@@ -12205,6 +12205,30 @@
     "title": "ProblemaLineaOut",
     "type": "object"
    },
+   "ProcesarPendientesOut": {
+    "description": "Resultado de una pasada del proceso en lote del backlog.",
+    "properties": {
+     "creadas": {
+      "title": "Creadas",
+      "type": "integer"
+     },
+     "fallidas": {
+      "title": "Fallidas",
+      "type": "integer"
+     },
+     "restantes": {
+      "title": "Restantes",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "creadas",
+     "fallidas",
+     "restantes"
+    ],
+    "title": "ProcesarPendientesOut",
+    "type": "object"
+   },
    "ProductoClienteOut": {
     "properties": {
      "codigo_cliente": {
@@ -26409,7 +26433,7 @@
     ]
    },
    "post": {
-    "description": "Recibe una OC ya parseada. IDEMPOTENTE por `origen_externo`.\n\nUn reintento (timeout de red del bot a media madrugada) actualiza el payload\nde la orden que ya existe y devuelve 200 en vez de crear una segunda. Si esa\norden ya generó su remisión, no se toca nada: el documento ya está capturado.",
+    "description": "Recibe una OC ya parseada. IDEMPOTENTE por `origen_externo`.\n\nUn reintento (timeout de red del bot a media madrugada) actualiza el payload\nde la orden que ya existe y devuelve 200 en vez de crear una segunda. Si esa\norden ya generó su remisión, no se toca nada: el documento ya está capturado.\n\nLa orden que resuelve cliente y destino nace remisión «por revisar» en este\nmismo request; la que no, queda PENDIENTE con su motivo. En ambos casos la\nrespuesta es la misma orden (con `remision_id` y estado ASIGNADA cuando la\nremisión ya existe) — el bot no necesita distinguir los caminos.",
     "operationId": "ingesta_api_v1_oc_recibidas_post",
     "parameters": [
      {
@@ -26526,6 +26550,73 @@
      }
     ],
     "summary": "Grupos Bandeja",
+    "tags": [
+     "bandeja de OC"
+    ]
+   }
+  },
+  "/api/v1/oc-recibidas/procesar-pendientes": {
+   "post": {
+    "description": "Pasa a Remisiones, en lote, todo lo pendiente que cruce solo.\n\nEl mismo intento que hace la ingesta con cada orden al llegar, aplicado al\nbacklog: lo acumulado de antes del cambio, y lo que falló y alguien ya\ncorrigió (una sucursal asignada, una remisión duplicada que se canceló).\nProcesa hasta `limite` por llamada — cada conversión resuelve catálogo y\nprecios contra la BD y un lote grande se saldría del timeout; se repite\nmientras `restantes` no llegue a cero.\n\nCada orden no tocada por un humano se RE-resuelve antes del intento: así el\nhospital que alguien acaba de mapear a su sucursal destraba de una vez todas\nlas órdenes acumuladas de ese hospital, sin abrirlas una por una.\n\nSe saltan las que un intento previo ya explicó (su motivo trae el prefijo\ndel intento automático — se reintentan una por una desde la franja, ya con\nla causa corregida) y las marcadas EN DUDA por un humano: esa duda la puso\nuna persona y la resuelve una persona, no un lote.\n\nEl que llama repite mientras `creadas` avance; cuando llega en cero, lo que\nquede (`restantes`) necesita una mano: asignar destino, resolver una duda.",
+    "operationId": "procesar_pendientes_api_v1_oc_recibidas_procesar_pendientes_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limite",
+      "required": false,
+      "schema": {
+       "default": 25,
+       "maximum": 100,
+       "minimum": 1,
+       "title": "Limite",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProcesarPendientesOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Procesar Pendientes",
     "tags": [
      "bandeja de OC"
     ]
