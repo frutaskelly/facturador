@@ -31,6 +31,7 @@ from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
     Almacen,
     Cliente,
+    ClienteSucursal,
     GrupoWhatsapp,
     ListaPrecios,
     OCRecibida,
@@ -202,6 +203,20 @@ def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
             oc.sucursal_id = cliente_match.sucursal_del_grupo(
                 db, oc.tenant_id, str(payload.get("jid") or ""), res.cliente_id
             )
+        # Y el cierre: el cliente con UNA sola plaza vinculada no deja nada
+        # que adivinar — la misma auto-selección que hace el alta manual. Con
+        # esto un pedido del robot de Balles/Jubran nace remisión aunque su
+        # punto de entrega no esté mapeado (ticket 86bbxx6ge); el punto viaja
+        # igual a las observaciones. EHMO (varias plazas) sí espera el mapeo.
+        if oc.sucursal_id is None:
+            vinculos = (
+                db.query(ClienteSucursal.sucursal_id)
+                .filter(ClienteSucursal.cliente_id == res.cliente_id)
+                .limit(2)
+                .all()
+            )
+            if len(vinculos) == 1:
+                oc.sucursal_id = vinculos[0][0]
 
     # El proyecto se cruza AL FINAL a propósito: su regla necesita el cliente y
     # la sucursal ya resueltos (antes se estampaba primero, y una orden de
