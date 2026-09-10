@@ -452,13 +452,14 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
         }
       />
 
-      {config.searchable && (
-        <div className="mb-4">
-          <Input placeholder="Buscar…" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
-        </div>
-      )}
-
-      <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin resultados" storageKey={`crud-${config.basePath}`} renderExpanded={config.renderExpanded} />
+      {/* UN solo buscador (ticket 86bbxx1cf): el de la tabla, cableado al
+          servidor cuando la config es searchable — el doble buscador confundía
+          y el local solo veía la página cargada. */}
+      <DataTableSmart
+        columns={columns} rows={rows} loading={loading} error={error} empty="Sin resultados"
+        storageKey={`crud-${config.basePath}`} renderExpanded={config.renderExpanded}
+        {...(config.searchable ? { searchValue: q, onSearchChange: setQ } : {})}
+      />
 
       <div className="mt-4 flex items-center justify-between text-sm text-muted">
         <span>

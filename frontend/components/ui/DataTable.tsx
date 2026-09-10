@@ -234,6 +234,12 @@ export type DataTableProps<T> = {
    *  normalizado (sin acentos/mayúsculas) y por tokens (cada palabra debe aparecer). */
   searchable?: boolean;
   searchPlaceholder?: string;
+  /** Búsqueda CONTROLADA por el padre (va al servidor): el input de la tabla
+   *  escribe aquí y el filtrado local por texto se apaga — las filas ya
+   *  llegan filtradas. Sin esto, el buscador solo ve la página cargada y un
+   *  folio viejo «no aparece» (ticket 86bbxx1cf). */
+  searchValue?: string;
+  onSearchChange?: (v: string) => void;
   /** Pagina del lado del cliente (sobre lo filtrado) con selector de filas/página. */
   paginated?: boolean;
   pageSizeOptions?: number[];
@@ -288,6 +294,8 @@ export function DataTable<T>({
   storageKey,
   searchable,
   searchPlaceholder,
+  searchValue,
+  onSearchChange,
   paginated,
   pageSizeOptions = [10, 25, 50, 100],
   defaultPageSize = 25,
@@ -491,10 +499,12 @@ export function DataTable<T>({
   // El filtro externo va primero: acota el universo y el buscador afina dentro.
   const rowFilterRef = useRef(rowFilter);
   rowFilterRef.current = rowFilter;
+  // En modo servidor el texto vive en el padre; el de aquí queda sin uso.
+  const searchText = onSearchChange ? (searchValue ?? "") : search;
   const filteredRows = useMemo(() => {
     const fn = rowFilterRef.current;
     const base = fn ? sortedRows.filter((row) => fn(row)) : sortedRows;
-    const q = norm(search.trim());
+    const q = onSearchChange ? "" : norm(search.trim());
     if (!q) return base;
     const tokens = q.split(/\s+/).filter(Boolean);
     return base.filter((row) => {
@@ -504,7 +514,7 @@ export function DataTable<T>({
     // `rowFilter` entra por ref + `rowFilterKey`: como arrow inline cambiaría
     // de identidad en cada render y recalcularía este memo siempre.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedRows, search, cols, rowFilterKey]);
+  }, [sortedRows, search, cols, rowFilterKey, onSearchChange]);
 
   // ── selección: derivados + notificación al padre ──
   // Objetos seleccionados: todas las filas (de `rows`) cuya clave esté marcada.
@@ -587,7 +597,7 @@ export function DataTable<T>({
   // el tamaño de página
   useEffect(() => {
     setPageIndex(0);
-  }, [search, pageSize, rowFilterKey]);
+  }, [search, searchValue, pageSize, rowFilterKey]);
 
   function toggleSort(id: string) {
     setSort((s) => {
@@ -676,8 +686,8 @@ export function DataTable<T>({
         {searchable && (
           <input
             type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={searchText}
+            onChange={(e) => (onSearchChange ? onSearchChange(e.target.value) : setSearch(e.target.value))}
             placeholder={searchPlaceholder ?? "Buscar en la tabla…"}
             className="w-full max-w-xs rounded-lg border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-accent"
           />
@@ -938,7 +948,7 @@ export function DataTable<T>({
             {filteredRows.length === 0 ? (
               <tr>
                 <td colSpan={totalCols} className="px-4 py-8 text-center text-sm text-muted">
-                  Sin coincidencias{search.trim() ? ` para “${search.trim()}”` : ""}
+                  Sin coincidencias{searchText.trim() ? ` para “${searchText.trim()}”` : ""}
                 </td>
               </tr>
             ) : (
