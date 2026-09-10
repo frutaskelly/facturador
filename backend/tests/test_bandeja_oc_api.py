@@ -70,6 +70,11 @@ def env(db_engine):
         # La SUCURSAL es la operación regional; el hospital es un punto DENTRO.
         suc = crear_sucursal(db, tenant_id=tenant_a.id, cliente_id=ehmo.id, codigo="TAB",
                              nombre="Tabasco")
+        # EHMO con DOS plazas, como en la realidad: así "sin sucursal" sigue
+        # existiendo para él (el fallback de plaza única no aplica) y los
+        # tests que arman una orden sin destino conservan su semántica.
+        crear_sucursal(db, tenant_id=tenant_a.id, cliente_id=ehmo.id, codigo="PAC",
+                       nombre="Pachuca")
         # La MISMA plaza Hidalgo surte a Balles y a Jubran (modelo nuevo).
         suc_balles = crear_sucursal(db, tenant_id=tenant_a.id, cliente_id=balles.id, codigo="HGO",
                                     nombre="Hidalgo")
@@ -607,8 +612,11 @@ def test_punto_de_entrega_compartido_no_decide_el_cliente(client, env, auth_as):
     assert oc["ambiguo"] is False                    # el punto no contradice a nadie
     assert oc["cliente_id"] == env["jubran"]         # manda el nombre del documento
     assert oc["punto_entrega"] == "PROCU"
-    # Y no se cuela la sucursal de Balles en una remisión de Jubran.
-    assert oc["sucursal_id"] != env["suc_balles"]
+    # La sucursal le llega por SU PROPIO vínculo (Jubran tiene una sola plaza
+    # — que es la misma que comparte con Balles), no por la equivalencia
+    # UBICACION registrada para Balles. El cliente sigue siendo Jubran, que
+    # es lo que este test protege: la razón social a la que se factura.
+    assert oc["sucursal_id"] == env["suc_jubran"]
 
 
 def test_el_punto_de_entrega_se_puede_corregir_a_mano(client, env, auth_as):
@@ -1222,3 +1230,19 @@ def test_lote_salta_lo_que_necesita_humano_y_no_se_atora(client, env, auth_as):
     sigue = client.get(f"/api/v1/oc-recibidas/{atorada['id']}", headers=h).json()
     assert sigue["estado"] == "PENDIENTE" and sigue["remision_id"] is None
     assert "sucursal" in (sigue["motivo"] or "").lower()
+
+
+def test_robot_con_cliente_de_una_sola_plaza_pasa_directo(client, env, auth_as):
+    """Ticket 86bbxx6ge: el pedido del robot de un cliente con UNA sola plaza
+    vinculada no espera a nadie — la plaza no deja nada que adivinar, aunque
+    su punto de entrega no esté mapeado (va a las observaciones, como
+    siempre). El cliente multi-plaza (EHMO) sí espera el mapeo del punto."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "DAP250922PY2", env["jubran"])
+
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        rfc="DAP250922PY2", folio_externo="7701",
+        ubicacion="PUNTO QUE NADIE HA MAPEADO")).json()
+    assert oc["sucursal_id"] == env["suc_jubran"]
+    assert oc["estado"] == "ASIGNADA" and oc["remision_id"], oc["motivo"]
+    assert oc["punto_entrega"] == "PUNTO QUE NADIE HA MAPEADO"
