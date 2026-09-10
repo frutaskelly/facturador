@@ -261,6 +261,31 @@ def test_scope_editable_por_patch(client, env, auth_as):
     assert r.json()["cliente_scope"] is None
 
 
+def test_admin_edita_su_propio_alcance_pero_no_su_rol(client, env, auth_as):
+    """Ticket 86bbxwrxk: el admin que se limitó a sí mismo debe poder
+    destaparse solo. El candado de «no tocarse a sí mismo» queda para el rol y
+    el estado (anti-lockout/anti-escalada), no para el alcance de clientes."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    propio = env["admin"]["membership_id"]
+
+    # limitarse a un cliente…
+    r = client.patch(f"/api/v1/memberships/{propio}", headers=h,
+                     json={"cliente_scope": [env["cli_a"]]})
+    assert r.status_code == 200, r.text
+    assert r.json()["cliente_scope"] == [env["cli_a"]]
+    # …y volver a «todos los clientes» sin pedirle el favor a otro admin
+    r = client.patch(f"/api/v1/memberships/{propio}", headers=h,
+                     json={"cliente_scope": []})
+    assert r.status_code == 200
+    assert r.json()["cliente_scope"] is None
+
+    # el rol y el estado propios siguen amarrados — incluso colados junto al alcance
+    for body in ({"active": False}, {"cliente_scope": [], "active": False}):
+        r = client.patch(f"/api/v1/memberships/{propio}", headers=h, json=body)
+        assert r.status_code == 409
+        assert "alcance" in r.json()["detail"]
+
+
 def test_descarga_de_listas_del_portal(client, env, auth_as):
     """El usuario del portal baja el PDF/Excel de las listas de SUS clientes;
     una lista no asignada a ellos responde 403."""
