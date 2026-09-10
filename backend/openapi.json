@@ -3530,6 +3530,11 @@
       "title": "Port",
       "type": "integer"
      },
+     "prueba_enviada": {
+      "default": false,
+      "title": "Prueba Enviada",
+      "type": "boolean"
+     },
      "use_ssl": {
       "default": false,
       "title": "Use Ssl",
@@ -3539,6 +3544,17 @@
       "default": "",
       "title": "Username",
       "type": "string"
+     },
+     "verificado_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Verificado At"
      }
     },
     "title": "CorreoConfigOut",
@@ -21236,6 +21252,49 @@
      }
     ],
     "summary": "Probar Correo",
+    "tags": [
+     "correo"
+    ]
+   }
+  },
+  "/api/v1/correo/verificar": {
+   "get": {
+    "description": "La liga del correo de prueba. PÚBLICA a propósito: quien la abre está\nleyendo el buzón configurado, y eso ES la prueba. El token firmado (72 h)\nes lo único que autoriza; no hay sesión de la app en el cliente de correo.",
+    "operationId": "verificar_correo_api_v1_correo_verificar_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "t",
+      "required": true,
+      "schema": {
+       "title": "T",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "text/html": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Verificar Correo",
     "tags": [
      "correo"
     ]

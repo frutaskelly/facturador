@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ExternalLink, Mail, Send, Sparkles } from "lucide-react";
+import { CheckCircle2, ExternalLink, Mail, Send, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Field, Input, PasswordInput, Select } from "@/components/ui/Field";
@@ -21,6 +21,8 @@ type CorreoConfig = {
   use_ssl: boolean;
   configured: boolean;
   has_password: boolean;
+  verificado_at?: string | null;
+  prueba_enviada?: boolean;
   aviso?: string | null;
 };
 
@@ -55,6 +57,15 @@ export default function CorreoPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testTo, setTestTo] = useState("");
+  // Flujo guiado (ticket 86bbxkzz5): sin config previa se pide SOLO el correo
+  // y la pregunta ¿es Gmail?; el modo Gmail esconde los campos técnicos que el
+  // preset ya sabe. «Configuración avanzada» los destapa cuando hagan falta.
+  const [paso, setPaso] = useState<"correo" | "form">("form");
+  const [correoInicial, setCorreoInicial] = useState("");
+  const [modoGmail, setModoGmail] = useState(false);
+  const [avanzado, setAvanzado] = useState(false);
+  const [configured, setConfigured] = useState(false);
+  const [verificadoAt, setVerificadoAt] = useState<string | null>(null);
 
   useEffect(() => {
     apiFetch<CorreoConfig>("/api/v1/correo")
@@ -69,10 +80,14 @@ export default function CorreoPage() {
           use_ssl: cfg.use_ssl ? "SSL" : "TLS",
         });
         setHasPassword(cfg.has_password);
+        setConfigured(cfg.configured);
+        setVerificadoAt(cfg.verificado_at ?? null);
+        if (!cfg.host) setPaso("correo");
+        else if ((cfg.host || "").includes("gmail")) setModoGmail(true);
         if (!testTo && cfg.username) setTestTo(cfg.username);
       })
       .catch(() => {
-        /* sin config previa: deja el formulario vacío */
+        setPaso("correo"); /* sin config previa: arranca el flujo guiado */
       })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -84,6 +99,26 @@ export default function CorreoPage() {
 
   function presetGmail() {
     set({ host: "smtp.gmail.com", port: "465", use_ssl: "SSL" });
+  }
+
+  /** Paso 1 → 2: aplica lo que el sistema ya sabe y deja solo lo que depende
+   *  del usuario (nombre del remitente y contraseña de aplicación). */
+  function elegirGmail(esGmail: boolean) {
+    const correo = correoInicial.trim();
+    if (!correo || !correo.includes("@")) {
+      toast.error("Escribe primero tu correo electrónico");
+      return;
+    }
+    if (esGmail) {
+      set({ host: "smtp.gmail.com", port: "465", use_ssl: "SSL", username: correo, from_email: correo });
+      setModoGmail(true);
+      setAvanzado(false);
+    } else {
+      set({ username: correo, from_email: correo });
+      setModoGmail(false);
+      setAvanzado(true);
+    }
+    setPaso("form");
   }
 
   function buildBody() {
@@ -112,8 +147,14 @@ export default function CorreoPage() {
         body: JSON.stringify(buildBody()),
       });
       setHasPassword(cfg.has_password);
+      setConfigured(cfg.configured);
+      setVerificadoAt(cfg.verificado_at ?? null);
       set({ password: "" });
-      toast.success("Configuración guardada y verificada ✓");
+      toast.success(
+        cfg.prueba_enviada
+          ? `Guardada ✓ — te enviamos un correo a ${form.from_email.trim() || form.username.trim()}: pulsa «Verificar correo» para terminar`
+          : "Configuración guardada (el login SMTP se comprobó) ✓",
+      );
       if (cfg.aviso) toast.info(cfg.aviso);
     } catch (e) {
       toast.error(
@@ -163,6 +204,50 @@ export default function CorreoPage() {
         }
       />
 
+      {configured && (
+        <div className="mb-3">
+          {verificadoAt ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1 text-sm text-success">
+              <CheckCircle2 size={15} /> Correo verificado
+              <span className="text-muted">· {new Date(verificadoAt).toLocaleString("es-MX")}</span>
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-warning/40 bg-surface-2 px-3 py-1 text-sm text-warning">
+              Guardada, SIN verificar — abre el correo «Verifica tu configuración» que te
+              enviamos y pulsa su botón (o guarda de nuevo para reenviarlo)
+            </span>
+          )}
+        </div>
+      )}
+
+      {paso === "correo" ? (
+        <div className="max-w-2xl space-y-4 rounded-xl border border-border p-4">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Mail size={16} /> Conecta la cuenta desde la que se enviarán tus facturas y remisiones
+          </div>
+          <Field label="Tu correo electrónico" required>
+            <Input
+              placeholder="ventas@empresa.com"
+              value={correoInicial}
+              onChange={(e) => setCorreoInicial(e.target.value)}
+              disabled={!canWrite}
+            />
+          </Field>
+          <div className="text-sm">¿Es un correo Gmail?</div>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => elegirGmail(true)} disabled={!canWrite}>
+              <Sparkles size={16} /> Sí — configurar automáticamente
+            </Button>
+            <Button variant="secondary" onClick={() => elegirGmail(false)} disabled={!canWrite}>
+              No — configurar manualmente
+            </Button>
+          </div>
+          <p className="text-xs text-muted">
+            Con Gmail solo te pediremos el nombre del remitente y una contraseña de
+            aplicación; el resto lo llenamos nosotros.
+          </p>
+        </div>
+      ) : (
       <div className="max-w-2xl space-y-4 rounded-xl border border-border p-4">
         <div className="rounded-lg bg-surface-2 p-3 text-sm">
           <div className="mb-2 flex items-center gap-2 font-medium">
@@ -203,7 +288,18 @@ export default function CorreoPage() {
           </ol>
         </div>
 
+        {modoGmail && !avanzado && (
+          <div className="flex items-center justify-between rounded-lg border border-border p-3 text-sm">
+            <span className="text-muted">
+              Gmail configurado: <b>{form.username || "—"}</b> · smtp.gmail.com · 465 · SSL
+            </span>
+            <button type="button" className="text-accent hover:underline" onClick={() => setAvanzado(true)}>
+              Configuración avanzada
+            </button>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {(!modoGmail || avanzado) && (<>
           <Field label="Servidor (host)" required>
             <Input
               placeholder="smtp.gmail.com"
@@ -220,6 +316,8 @@ export default function CorreoPage() {
               disabled={!canWrite || loading}
             />
           </Field>
+          </>)}
+          {(!modoGmail || avanzado) && (
           <Field label="Usuario" required hint="Tu correo completo (con el que te autenticas)">
             <Input
               placeholder="ventas@empresa.com"
@@ -228,6 +326,7 @@ export default function CorreoPage() {
               disabled={!canWrite || loading}
             />
           </Field>
+          )}
           <Field label="Contraseña" hint={hasPassword ? "Deja en blanco para conservar la actual" : undefined}>
             <PasswordInput
               placeholder={hasPassword ? "•••• (sin cambios)" : ""}
@@ -244,6 +343,7 @@ export default function CorreoPage() {
               disabled={!canWrite || loading}
             />
           </Field>
+          {(!modoGmail || avanzado) && (
           <Field
             label="Remitente (email)"
             required
@@ -272,6 +372,8 @@ export default function CorreoPage() {
               )}
             </div>
           </Field>
+          )}
+          {(!modoGmail || avanzado) && (
           <Field label="Conexión segura">
             <Select
               value={form.use_ssl}
@@ -282,6 +384,7 @@ export default function CorreoPage() {
               <option value="TLS">TLS / STARTTLS (puerto 587)</option>
             </Select>
           </Field>
+          )}
         </div>
 
         {canWrite && (
@@ -305,6 +408,7 @@ export default function CorreoPage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
