@@ -19,7 +19,6 @@ import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { LoadingDots } from "@/components/ui/LoadingDots";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { SearchBox } from "@/components/ui/SearchBox";
 import { SincronizarSae } from "@/components/SincronizarSae";
 import { useOrdenesPorResolver } from "./useOrdenesPorResolver";
 import { Spinner } from "@/components/ui/Spinner";
@@ -2685,14 +2684,6 @@ export default function RemisionesPage() {
 
       {/* Filtros */}
       <div className="mb-3 flex flex-wrap items-end gap-3">
-        <Field label="Buscar">
-          <SearchBox
-            value={busca}
-            onChange={setBusca}
-            placeholder="Folio, su pedido o factura SAE"
-            className="w-72"
-          />
-        </Field>
         <Field label="Desde">
           <Input type="date" value={fDesde} onChange={(e) => setFDesde(e.target.value)} />
         </Field>
@@ -2793,6 +2784,12 @@ export default function RemisionesPage() {
         rows={filteredRows}
         loading={loading}
         error={error}
+        // UN solo buscador (ticket 86bbxx1cf): el de la tabla, pero cableado
+        // al SERVIDOR — antes solo veía las 200 filas cargadas y un folio
+        // viejo «no aparecía» sin acotar por cliente.
+        searchValue={busca}
+        onSearchChange={setBusca}
+        searchPlaceholder="Folio, su pedido o factura SAE…"
         empty="Sin remisiones"
         rowKey={(f) => f.id}
         actions={rowActions}

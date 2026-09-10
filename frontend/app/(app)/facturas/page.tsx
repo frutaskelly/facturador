@@ -16,7 +16,6 @@ import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/Field"
 import { LoadingDots } from "@/components/ui/LoadingDots";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { SearchBox } from "@/components/ui/SearchBox";
 import { useOnboarding } from "@/components/OnboardingChecklist";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
@@ -726,14 +725,6 @@ export default function FacturasPage() {
 
       {/* Filtros */}
       <div className="mb-3 flex flex-wrap items-end gap-3">
-        <Field label="Buscar">
-          <SearchBox
-            value={busca}
-            onChange={setBusca}
-            placeholder="Folio, UUID u orden (p. ej. SN-33NER-JUE)"
-            className="w-72"
-          />
-        </Field>
         <Field label="Desde">
           <Input type="date" value={fDesde} onChange={(e) => setFDesde(e.target.value)} />
         </Field>
@@ -810,6 +801,11 @@ export default function FacturasPage() {
         rows={rows}
         loading={loading}
         error={error}
+        // UN solo buscador (ticket 86bbxx1cf), cableado al SERVIDOR: el local
+        // solo veía la página cargada y un folio viejo «no aparecía».
+        searchValue={busca}
+        onSearchChange={setBusca}
+        searchPlaceholder="Folio, UUID u orden (p. ej. SN-33NER-JUE)…"
         empty="Sin facturas"
         rowKey={(f) => f.id}
         actions={rowActions}
