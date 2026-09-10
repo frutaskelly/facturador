@@ -34,7 +34,7 @@ import {
   nuevaLinea, pegarLocalFallback, unidadBaseDesde,
   type FiscalPreview, type LineaForm,
 } from "@/lib/lineas";
-import type { Almacen, Cliente, ContextoPrecios, LineaPegada, LineaRemision, MatchResult, OCRecibida, Producto, Proyecto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
+import type { Almacen, Cliente, ContextoPrecios, Factura, LineaPegada, LineaRemision, MatchResult, OCRecibida, Producto, Proyecto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "remision:gestionar";
 
@@ -46,6 +46,10 @@ const NUEVA_PRESENTACION = "__nueva_pres__";
 // dispara un loop infinito de render en la tabla con selección (ver DataTable
 // selectedRows/onSelectionChange).
 const EMPTY_REMISIONES: Remision[] = [];
+
+// Una factura recién timbrada desde esta pantalla: lo mínimo para ofrecer
+// [Ver factura] [Enviar factura] sin mandar al usuario a buscarla a /facturas.
+type TimbradaInfo = { id: string; folio: string; clienteId: string };
 
 // Una fila de la lista: o es una remisión, o es una orden que llegó por
 // WhatsApp/correo y no pudo volverse remisión sola. Las dos viven en la misma
@@ -1472,6 +1476,16 @@ export default function RemisionesPage() {
   // ── enviar por correo ──
   const [toSend, setToSend] = useState<Remision | null>(null);
   const [sendTo, setSendTo] = useState("");
+  // Enviar la FACTURA ligada (timbrada) por correo — desde la fila de la
+  // remisión o desde el aviso post-timbrado, sin cambiar de módulo. El envío
+  // va por /facturas/enviar-lote con UNA factura: sin destinatario tecleado
+  // usa los correos guardados del cliente (mismo default que /facturas).
+  const [facturaEnviar, setFacturaEnviar] = useState<{ id: string; etiqueta: string; clienteId: string } | null>(null);
+  const [facSendTo, setFacSendTo] = useState("");
+  const [facSendMensaje, setFacSendMensaje] = useState("");
+  const [facSending, setFacSending] = useState(false);
+  // Facturas timbradas por el último "Facturar": alimenta el aviso con acciones.
+  const [timbradasAviso, setTimbradasAviso] = useState<TimbradaInfo[] | null>(null);
   const [sendMensaje, setSendMensaje] = useState("");
   const [sending, setSending] = useState(false);
   // Envío masivo desglosado por cliente.
@@ -1486,6 +1500,33 @@ export default function RemisionesPage() {
     setSendTo(cliEmail[r.cliente_facturacion_id] ?? "");
     setSendMensaje("");
     setToSend(r);
+  }
+
+  function abrirEnviarFactura(id: string, clienteId: string, etiqueta: string) {
+    setFacSendTo(cliEmail[clienteId] ?? "");
+    setFacSendMensaje("");
+    setFacturaEnviar({ id, etiqueta, clienteId });
+  }
+
+  async function confirmarEnvioFactura() {
+    if (!facturaEnviar) return;
+    setFacSending(true);
+    try {
+      await apiFetch("/api/v1/facturas/enviar-lote", {
+        method: "POST",
+        body: JSON.stringify({
+          ids: [facturaEnviar.id],
+          to: facSendTo.trim() || undefined,
+          mensaje: facSendMensaje.trim() || undefined,
+        }),
+      });
+      toast.success(`Factura ${facturaEnviar.etiqueta} enviada por correo`.replace("  ", " "));
+      setFacturaEnviar(null);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo enviar la factura");
+    } finally {
+      setFacSending(false);
+    }
   }
 
   async function confirmarEnvio() {
@@ -1520,7 +1561,7 @@ export default function RemisionesPage() {
   const [facturarDups, setFacturarDups] = useState(false);
   // Facturas que fallaron por existencia y esperan decisión de sobregiro.
   const [facturarSobregiro, setFacturarSobregiro] = useState<
-    { grupos: string[][]; agrupar: boolean; timbradas: number; borrador: number; omitidas: number; otras: number } | null
+    { grupos: string[][]; agrupar: boolean; timbradas: number; borrador: number; omitidas: number; otras: number; facturas: TimbradaInfo[] } | null
   >(null);
   const [confirmarBulkOpen, setConfirmarBulkOpen] = useState(false);
   // Remisiones del lote sin existencia que esperan decisión de sobregiro.
@@ -1780,48 +1821,57 @@ export default function RemisionesPage() {
     grupos: string[][],
     agrupar_productos: boolean,
     permitir_negativos: boolean,
-  ): Promise<{ timbradas: number; sinStock: string[][]; borrador: number; otras: number }> {
+  ): Promise<{ timbradas: number; sinStock: string[][]; borrador: number; otras: number; facturas: TimbradaInfo[] }> {
     // Facturar directo: por cada grupo se crea la factura y SE TIMBRA de inmediato.
     // Si el PAC rechaza (o Facturama no está listo), la factura queda en BORRADOR
     // y se puede reintentar/descartar desde Facturas — no se pierde el trabajo.
     const resultados = await Promise.all(
-      grupos.map(async (remision_ids): Promise<"timbrada" | "borrador" | "sinStock" | "otra"> => {
-        let fac: { id: string };
+      grupos.map(async (remision_ids): Promise<{ r: "timbrada" | "borrador" | "sinStock" | "otra"; fac?: Factura }> => {
+        let fac: Factura;
         try {
-          fac = await post<{ id: string }>(
+          fac = await post<Factura>(
             "/api/v1/facturas/desde-remisiones",
             { remision_ids, agrupar_productos, permitir_negativos },
           );
         } catch (e) {
-          if (e instanceof ApiError && /existencia insuficiente/i.test(e.message)) return "sinStock";
-          return "otra";
+          if (e instanceof ApiError && /existencia insuficiente/i.test(e.message)) return { r: "sinStock" };
+          return { r: "otra" };
         }
         try {
           await post(`/api/v1/facturas/${fac.id}/timbrar`);
-          return "timbrada";
+          // La factura completa viaja de regreso: el aviso post-timbrado
+          // ofrece [Ver] [Enviar] sin mandar a nadie a buscarla a /facturas.
+          return { r: "timbrada", fac };
         } catch {
-          return "borrador"; // creada pero el timbrado falló
+          return { r: "borrador" }; // creada pero el timbrado falló
         }
       }),
     );
     invalidarDetalles(grupos.flat());
     const sinStock: string[][] = [];
+    const facturas: TimbradaInfo[] = [];
     let timbradas = 0, borrador = 0, otras = 0;
-    resultados.forEach((r, i) => {
-      if (r === "timbrada") timbradas += 1;
+    resultados.forEach(({ r, fac }, i) => {
+      if (r === "timbrada") {
+        timbradas += 1;
+        if (fac) facturas.push({ id: fac.id, folio: `${fac.serie ?? ""}${fac.folio ?? ""}`, clienteId: fac.cliente_id });
+      }
       else if (r === "borrador") borrador += 1;
       else if (r === "sinStock") sinStock.push(grupos[i]);
       else otras += 1;
     });
-    return { timbradas, sinStock, borrador, otras };
+    return { timbradas, sinStock, borrador, otras, facturas };
   }
 
-  function reportarFacturar(timbradas: number, borrador: number, fallidas: number, omitidas: number) {
+  function reportarFacturar(timbradas: number, borrador: number, fallidas: number, omitidas: number, facturas: TimbradaInfo[] = []) {
     const partes = [`Facturas timbradas: ${timbradas}`];
     if (borrador) partes.push(`${borrador} sin timbrar (quedaron en borrador, revisa en Facturas)`);
     if (fallidas) partes.push(`${fallidas} fallidas`);
     if (omitidas) partes.push(`${omitidas} omitidas`);
     toast[borrador === 0 && fallidas === 0 ? "success" : "error"](partes.join(" · "));
+    // El documento nuevo YA es una factura: el aviso lo dice y ofrece verla o
+    // enviarla aquí mismo (ticket 86bby3tx9) — sin ir a buscarla a /facturas.
+    if (facturas.length > 0) setTimbradasAviso(facturas);
     clearSelection();
     setFacturarSolo(null);
     reload();
@@ -1865,14 +1915,14 @@ export default function RemisionesPage() {
     const agrupar_productos = modo === "sumar";
     setBulkBusy(true);
     try {
-      const { timbradas, sinStock, borrador, otras } = await enviarFacturas(grupos, agrupar_productos, false);
+      const { timbradas, sinStock, borrador, otras, facturas } = await enviarFacturas(grupos, agrupar_productos, false);
       setFacturarOpen(false);
       if (sinStock.length > 0) {
         // Hay remisiones sin existencia: ofrece facturar con sobregiro.
-        setFacturarSobregiro({ grupos: sinStock, agrupar: agrupar_productos, timbradas, borrador, omitidas, otras });
+        setFacturarSobregiro({ grupos: sinStock, agrupar: agrupar_productos, timbradas, borrador, omitidas, otras, facturas });
         return;
       }
-      reportarFacturar(timbradas, borrador, otras, omitidas);
+      reportarFacturar(timbradas, borrador, otras, omitidas, facturas);
     } finally {
       setBulkBusy(false);
     }
@@ -1909,12 +1959,12 @@ export default function RemisionesPage() {
   // falta de existencia al auto-confirmar un borrador.
   async function confirmarFacturarSobregiro() {
     if (!facturarSobregiro) return;
-    const { grupos, agrupar, timbradas, borrador, omitidas, otras } = facturarSobregiro;
+    const { grupos, agrupar, timbradas, borrador, omitidas, otras, facturas } = facturarSobregiro;
     setBulkBusy(true);
     try {
       const r = await enviarFacturas(grupos, agrupar, true);
       setFacturarSobregiro(null);
-      reportarFacturar(timbradas + r.timbradas, borrador + r.borrador, otras + r.otras, omitidas);
+      reportarFacturar(timbradas + r.timbradas, borrador + r.borrador, otras + r.otras, omitidas, [...facturas, ...r.facturas]);
     } finally {
       setBulkBusy(false);
     }
@@ -1922,10 +1972,10 @@ export default function RemisionesPage() {
 
   function declinarFacturarSobregiro() {
     if (!facturarSobregiro) return;
-    const { grupos, timbradas, borrador, omitidas, otras } = facturarSobregiro;
+    const { grupos, timbradas, borrador, omitidas, otras, facturas } = facturarSobregiro;
     setFacturarSobregiro(null);
     // Las que no se facturaron por falta de existencia cuentan como fallidas.
-    reportarFacturar(timbradas, borrador, otras + grupos.length, omitidas);
+    reportarFacturar(timbradas, borrador, otras + grupos.length, omitidas, facturas);
   }
 
   // Columnas agrupadas: los campos que se leen juntos van en la MISMA celda, en
@@ -2131,7 +2181,13 @@ export default function RemisionesPage() {
       onClick: (r) => { window.open(r.oc_archivo_url!, "_blank", "noopener"); },
       hidden: (r) => !r.oc_archivo_url },
     { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => { void imprimirRemision(r); } },
-    { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />, onClick: enviarRemision,
+    { id: "enviar-factura", label: "Enviar factura", icon: <Mail size={15} />,
+      // La remisión ya facturada tiene DOS documentos: esta acción manda la
+      // FACTURA timbrada (ticket 86bby3tx9); la de abajo sigue mandando la
+      // remisión, con el nombre explícito para que nadie confunda cuál va.
+      onClick: (r) => abrirEnviarFactura(r.factura_id!, r.cliente_facturacion_id, r.factura_folio ?? ""),
+      hidden: (r) => !(canWrite && r.factura_id && r.factura_estado === "TIMBRADA") },
+    { id: "enviar", label: "Enviar remisión por correo", icon: <Mail size={15} />, onClick: enviarRemision,
       hidden: () => !canWrite },
   ];
 
@@ -3107,6 +3163,70 @@ export default function RemisionesPage() {
           </Field>
           <p className="text-sm text-muted">
             Se adjunta el <strong>PDF</strong> de la remisión, usando la cuenta de correo configurada en Ajustes › Correo.
+          </p>
+        </div>
+      </Modal>
+
+      {/* El aviso post-timbrado (ticket 86bby3tx9): el documento nuevo YA es
+          una factura fiscal y sus acciones están aquí, no en otro módulo. */}
+      <Modal
+        open={timbradasAviso !== null}
+        onClose={() => setTimbradasAviso(null)}
+        title="Factura(s) timbrada(s) correctamente"
+        footer={<Button variant="secondary" onClick={() => setTimbradasAviso(null)}>Cerrar</Button>}
+      >
+        <p className="mb-3 text-sm text-muted">
+          El documento generado ya es una <strong>factura fiscal</strong>: puedes verla o
+          enviarla desde aquí, sin ir a buscarla al módulo de Facturas.
+        </p>
+        <ul className="space-y-2">
+          {(timbradasAviso ?? []).map((f) => (
+            <li key={f.id} className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="font-medium tabular-nums">{f.folio}</span>
+              <span className="min-w-0 flex-1 truncate text-muted">{cliName[f.clienteId] ?? ""}</span>
+              <Button
+                variant="secondary"
+                onClick={() => { setTimbradasAviso(null); router.push(`/facturas?ver=${f.id}`); }}
+              >
+                Ver factura
+              </Button>
+              <Button onClick={() => abrirEnviarFactura(f.id, f.clienteId, f.folio)}>
+                <Mail size={14} /> Enviar factura
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </Modal>
+
+      {/* Enviar la factura por correo — mismo formato que el envío de remisión;
+          va al final para pintarse ENCIMA del aviso cuando se abren juntos. */}
+      <Modal
+        open={facturaEnviar !== null}
+        onClose={() => setFacturaEnviar(null)}
+        title={`Enviar factura ${facturaEnviar?.etiqueta ?? ""}`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setFacturaEnviar(null)} disabled={facSending}>Cancelar</Button>
+            <Button onClick={() => void confirmarEnvioFactura()} disabled={facSending}>
+              <Mail size={16} /> {facSending ? "Enviando…" : "Enviar"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Field label="Destinatario(s)" hint="Vacío = los correos guardados del cliente. Separa varios con coma o espacio">
+            <Input
+              placeholder="cliente@ejemplo.com"
+              value={facSendTo}
+              onChange={(e) => setFacSendTo(e.target.value)}
+            />
+          </Field>
+          <Field label="Mensaje (opcional)" hint="Se incluirá arriba del cuerpo del correo">
+            <Textarea rows={3} value={facSendMensaje} onChange={(e) => setFacSendMensaje(e.target.value)} />
+          </Field>
+          <p className="text-sm text-muted">
+            Se adjuntan el <strong>PDF y el XML</strong> de la factura timbrada, usando la cuenta
+            de correo configurada en Ajustes › Correo.
           </p>
         </div>
       </Modal>
