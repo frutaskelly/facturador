@@ -636,3 +636,63 @@ def test_vinculo_es_default_unico_por_cliente(client, env, auth_as):
     defaults = {s["id"]: s["es_default"] for s in listado}
     assert defaults[env["qro"]] is True
     assert defaults[env["slp"]] is False
+
+
+# ── el Excel de ida y vuelta de la lista (ticket 86bby3van) ──
+
+
+def test_importar_excel_actualiza_sin_duplicar(client, env, auth_as):
+    """El MISMO Excel del export, con precios editados, actualiza renglones EN
+    SU LUGAR: ni duplicados ni rehacer la lista. Y las dos trampas del archivo
+    hecho a mano: la fila repetida no inserta dos veces (gana la última) y el
+    «0» tecleado como TEXTO quita el renglón igual que el cero numérico."""
+    import io
+
+    from openpyxl import load_workbook
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    lista = env["menudeo"]
+
+    exp = client.get(f"/api/v1/listas-precios/{lista}/export", headers=h)
+    assert exp.status_code == 200, exp.text
+    wb = load_workbook(io.BytesIO(exp.content))
+    ws = wb.active
+    filas = list(ws.iter_rows(min_row=2, values_only=True))
+    assert filas, "el export vino vacío"
+    sku, nombre, pres, cant, _ = filas[0]
+
+    def total():
+        return client.get(f"/api/v1/listas-precios/{lista}/precios", headers=h,
+                          params={"limit": 500}).json()["total"]
+
+    antes = total()
+
+    # Precio editado + LA MISMA fila repetida al final (el copy-paste clásico).
+    ws.cell(row=2, column=5, value=77.5)
+    ws.append([sku, nombre, pres, cant, 88.25])
+    buf = io.BytesIO(); wb.save(buf)
+    r = client.post(f"/api/v1/listas-precios/{lista}/importar", headers=h,
+                    files={"archivo": ("lista.xlsx", buf.getvalue(),
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["errores"] == []
+    assert out["agregados"] == 0          # nada nuevo: todo existía
+    assert total() == antes               # ni un renglón duplicado
+    precios = client.get(f"/api/v1/listas-precios/{lista}/precios", headers=h,
+                         params={"limit": 500}).json()["items"]
+    assert any(float(x["precio_unitario"]) == 88.25 for x in precios)  # la repetida GANA
+    assert not any(float(x["precio_unitario"]) == 77.5 for x in precios)
+
+    # «0» como texto = quitar el renglón (no un precio de $0).
+    from openpyxl import Workbook
+    wb2 = Workbook(); ws2 = wb2.active
+    ws2.append(["SKU", "PRODUCTO", "PRESENTACION", "DESDE CANTIDAD", "PRECIO"])
+    ws2.append([sku, nombre, pres, cant, "0"])
+    buf2 = io.BytesIO(); wb2.save(buf2)
+    r = client.post(f"/api/v1/listas-precios/{lista}/importar", headers=h,
+                    files={"archivo": ("lista.xlsx", buf2.getvalue(),
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert r.status_code == 200, r.text
+    assert r.json()["eliminados"] == 1
+    assert total() == antes - 1
