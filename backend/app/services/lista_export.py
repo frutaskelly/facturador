@@ -130,22 +130,33 @@ def importar_xlsx(db: Session, tenant_id: UUID, lista: ListaPrecios, data: bytes
             continue
         llave = (pid, pres, cant)
         actual = existentes.get(llave)
-        if crudo in (None, "") or (isinstance(crudo, (int, float, Decimal)) and Decimal(str(crudo)) == 0):
+        # El precio se interpreta UNA sola vez: «0» tecleado como texto es el
+        # mismo cero que el numérico (quitar el renglón), no un precio de $0
+        # — el archivo viene editado a mano y Excel guarda texto sin avisar.
+        if crudo in (None, ""):
+            precio = None
+        else:
+            try:
+                precio = Decimal(str(crudo)).quantize(Decimal("0.0001"))
+                if precio < 0:
+                    raise InvalidOperation
+            except InvalidOperation:
+                res["errores"].append(f"fila {i}: PRECIO ilegible ({crudo!r})"); continue
+        if precio is None or precio == 0:
             if actual is not None:
                 db.delete(actual)
+                del existentes[llave]
                 res["eliminados"] += 1
             continue
-        try:
-            precio = Decimal(str(crudo)).quantize(Decimal("0.0001"))
-            if precio < 0:
-                raise InvalidOperation
-        except InvalidOperation:
-            res["errores"].append(f"fila {i}: PRECIO ilegible ({crudo!r})"); continue
         if actual is None:
-            db.add(Precio(id=_uuid.uuid4(), tenant_id=tenant_id, lista_id=lista.id,
-                          producto_id=pid, presentacion=pres,
-                          precio_unitario=precio, cantidad_minima=cant))
-            existentes[llave] = None   # evita duplicar si el archivo repite la fila
+            nuevo = Precio(id=_uuid.uuid4(), tenant_id=tenant_id, lista_id=lista.id,
+                           producto_id=pid, presentacion=pres,
+                           precio_unitario=precio, cantidad_minima=cant)
+            db.add(nuevo)
+            # El OBJETO, no un centinela: si el archivo repite la fila, la
+            # segunda pasada debe encontrarlo y actualizar — guardar None aquí
+            # hacía que la repetida insertara un renglón DUPLICADO.
+            existentes[llave] = nuevo
             res["agregados"] += 1
         elif Decimal(actual.precio_unitario) != precio:
             actual.precio_unitario = precio
