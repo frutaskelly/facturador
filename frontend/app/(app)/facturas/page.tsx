@@ -98,14 +98,16 @@ export default function FacturasPage() {
   const [fDesde, setFDesde] = useState("");
   const [fHasta, setFHasta] = useState("");
   const [fCliente, setFCliente] = useState("");
+  const [fEstado, setFEstado] = useState("");
   const listPath = useMemo(() => {
     const p = new URLSearchParams({ limit: "200" });
     if (fDesde) p.set("fecha_desde", fDesde);
     if (fHasta) p.set("fecha_hasta", fHasta);
     if (fCliente) p.set("cliente_id", fCliente);
+    if (fEstado) p.set("estado", fEstado);
     if (buscaAplicada) p.set("q", buscaAplicada);
     return `/api/v1/facturas?${p.toString()}`;
-  }, [fDesde, fHasta, fCliente, buscaAplicada]);
+  }, [fDesde, fHasta, fCliente, fEstado, buscaAplicada]);
   const { data, loading, error, reload } = useResource<Page<Factura>>(listPath);
   const rows = data?.items ?? [];
 
@@ -739,10 +741,18 @@ export default function FacturasPage() {
             ))}
           </Select>
         </Field>
-        {(busca || fDesde || fHasta || fCliente) && (
+        <Field label="Estado">
+          <Select value={fEstado} onChange={(e) => setFEstado(e.target.value)} aria-label="Filtrar por estado">
+            <option value="">Todos</option>
+            {["BORRADOR", "TIMBRADA", "CANCELADA"].map((x) => (
+              <option key={x} value={x}>{x}</option>
+            ))}
+          </Select>
+        </Field>
+        {(busca || fDesde || fHasta || fCliente || fEstado) && (
           <Button
             variant="secondary"
-            onClick={() => { setBusca(""); setFDesde(""); setFHasta(""); setFCliente(""); }}
+            onClick={() => { setBusca(""); setFDesde(""); setFHasta(""); setFCliente(""); setFEstado(""); }}
           >
             Limpiar filtros
           </Button>

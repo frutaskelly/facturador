@@ -32037,6 +32037,23 @@
      },
      {
       "in": "query",
+      "name": "sucursal_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Sucursal Id"
+      }
+     },
+     {
+      "in": "query",
       "name": "fecha_desde",
       "required": false,
       "schema": {

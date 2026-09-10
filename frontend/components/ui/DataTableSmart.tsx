@@ -23,6 +23,7 @@ export type { Column, DataTableProps, RowAction };
  */
 export function DataTableSmart<T>({
   searchable = true,
+  headerFilters = true,
   columnsMenu = true,
   resizable = true,
   exportable = true,
@@ -33,6 +34,7 @@ export function DataTableSmart<T>({
   return (
     <DataTable
       searchable={searchable}
+      headerFilters={headerFilters}
       columnsMenu={columnsMenu}
       resizable={resizable}
       exportable={exportable}

@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ChevronRight, ChevronsUpDown, Columns3, Download, Eye, EyeOff, GripVertical, MoreVertical } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight, ChevronsUpDown, Columns3, Download, Eye, EyeOff, GripVertical, MoreVertical, Filter } from "lucide-react";
 
 import { Alert } from "./Alert";
 import { EmptyState } from "./EmptyState";
@@ -240,6 +240,11 @@ export type DataTableProps<T> = {
    *  folio viejo «no aparece» (ticket 86bbxx1cf). */
   searchValue?: string;
   onSearchChange?: (v: string) => void;
+  /** Filtros de valores por columna, estilo Excel (ticket 86bby31f9): un
+   *  embudo en cada encabezado abre la lista de valores presentes y se
+   *  combinan entre columnas (Y). Filtran las filas CARGADAS: refinan lo que
+   *  los filtros de servidor (fecha, cliente, estado…) ya trajeron. */
+  headerFilters?: boolean;
   /** Pagina del lado del cliente (sobre lo filtrado) con selector de filas/página. */
   paginated?: boolean;
   pageSizeOptions?: number[];
@@ -296,6 +301,7 @@ export function DataTable<T>({
   searchPlaceholder,
   searchValue,
   onSearchChange,
+  headerFilters,
   paginated,
   pageSizeOptions = [10, 25, 50, 100],
   defaultPageSize = 25,
@@ -501,9 +507,26 @@ export function DataTable<T>({
   rowFilterRef.current = rowFilter;
   // En modo servidor el texto vive en el padre; el de aquí queda sin uso.
   const searchText = onSearchChange ? (searchValue ?? "") : search;
+
+  // ── filtros de valores por columna (estilo Excel) ──
+  // {idColumna: valores marcados}; sin entrada = columna sin filtro.
+  const [colFilters, setColFilters] = useState<Record<string, string[]>>({});
+  const [filterOpen, setFilterOpen] = useState<string | null>(null);
+  const hayColFilters = Object.values(colFilters).some((v) => v.length > 0);
   const filteredRows = useMemo(() => {
     const fn = rowFilterRef.current;
-    const base = fn ? sortedRows.filter((row) => fn(row)) : sortedRows;
+    let base = fn ? sortedRows.filter((row) => fn(row)) : sortedRows;
+    // Filtros por columna: Y entre columnas, O entre los valores de una misma.
+    const activos = Object.entries(colFilters).filter(([, v]) => v.length > 0);
+    if (activos.length > 0) {
+      const porId = new Map(cols.map((c) => [c.id, c.col]));
+      base = base.filter((row) =>
+        activos.every(([id, vals]) => {
+          const col = porId.get(id);
+          return col ? vals.includes(exportText(col, row)) : true;
+        }),
+      );
+    }
     const q = onSearchChange ? "" : norm(search.trim());
     if (!q) return base;
     const tokens = q.split(/\s+/).filter(Boolean);
@@ -514,7 +537,7 @@ export function DataTable<T>({
     // `rowFilter` entra por ref + `rowFilterKey`: como arrow inline cambiaría
     // de identidad en cada render y recalcularía este memo siempre.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedRows, search, cols, rowFilterKey, onSearchChange]);
+  }, [sortedRows, search, cols, rowFilterKey, onSearchChange, colFilters]);
 
   // ── selección: derivados + notificación al padre ──
   // Objetos seleccionados: todas las filas (de `rows`) cuya clave esté marcada.
@@ -597,7 +620,7 @@ export function DataTable<T>({
   // el tamaño de página
   useEffect(() => {
     setPageIndex(0);
-  }, [search, searchValue, pageSize, rowFilterKey]);
+  }, [search, searchValue, pageSize, rowFilterKey, colFilters]);
 
   function toggleSort(id: string) {
     setSort((s) => {
@@ -679,6 +702,33 @@ export function DataTable<T>({
 
   const customized = order.length > 0 || hidden.length > 0 || Object.keys(widths).length > 0 || actionOrder.length > 0 || actionHidden.length > 0;
   const hasToolbar = searchable || columnsMenu || exportable;
+
+  // Chips de los filtros por columna activos + «Limpiar todos» (86bby31f9.7)
+  const chipsFiltros = hayColFilters ? (
+    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+      {Object.entries(colFilters)
+        .filter(([, v]) => v.length > 0)
+        .map(([id, vals]) => {
+          const col = cols.find((c) => c.id === id)?.col;
+          return (
+            <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1">
+              <b>{col?.header ?? id}:</b> {vals.slice(0, 3).join(", ")}{vals.length > 3 ? ` +${vals.length - 3}` : ""}
+              <button
+                type="button"
+                aria-label={`Quitar filtro de ${col?.header ?? id}`}
+                className="text-muted hover:text-danger"
+                onClick={() => setColFilters((f) => ({ ...f, [id]: [] }))}
+              >
+                ×
+              </button>
+            </span>
+          );
+        })}
+      <button type="button" className="text-accent hover:underline" onClick={() => setColFilters({})}>
+        Limpiar todos los filtros
+      </button>
+    </div>
+  ) : null;
 
   const toolbar = hasToolbar ? (
     <div className="mb-2 flex items-center justify-between gap-2">
@@ -844,6 +894,8 @@ export function DataTable<T>({
               {renderCols.map(({ col, id }, ci) => {
                 const active = sort?.id === id;
                 const Icon = active ? (sort!.dir === "asc" ? ArrowUp : ArrowDown) : ChevronsUpDown;
+                const fVals = colFilters[id] ?? [];
+                const fActivo = fVals.length > 0;
                 // En modo Excel (con anchos) todas las columnas se pueden
                 // redimensionar, incluida la última (la tabla hace scroll). Sin
                 // anchos aún, no tiene sentido en la última (comprimiría).
@@ -866,6 +918,80 @@ export function DataTable<T>({
                       </button>
                     ) : (
                       <span className="block truncate">{col.header}</span>
+                    )}
+                    {headerFilters && col.header.trim() !== "" && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterOpen((f) => (f === id ? null : id))}
+                        className={`ml-1 rounded p-0.5 align-middle transition hover:text-foreground ${fActivo ? "text-accent" : "opacity-40 hover:opacity-100"}`}
+                        title={fActivo ? `Filtrado: ${fVals.join(", ")}` : "Filtrar por valores"}
+                        aria-label={`Filtrar ${col.header}`}
+                      >
+                        <Filter size={12} fill={fActivo ? "currentColor" : "none"} />
+                      </button>
+                    )}
+                    {filterOpen === id && (
+                      <>
+                        {/* clic fuera = cerrar; va ANTES para quedar debajo */}
+                        <div className="fixed inset-0 z-20" onMouseDown={() => setFilterOpen(null)} />
+                        <div className="absolute left-0 top-full z-30 mt-1 max-h-72 w-56 overflow-auto rounded-lg border border-border bg-background p-2 text-left shadow-lg normal-case tracking-normal">
+                          {(() => {
+                            // Valores presentes en lo CARGADO (con el filtro
+                            // externo aplicado), como el autofiltro de Excel.
+                            const fn = rowFilterRef.current;
+                            const base = fn ? sortedRows.filter((r) => fn(r)) : sortedRows;
+                            const vistos = new Map<string, number>();
+                            for (const r of base) {
+                              const v = exportText(col, r);
+                              vistos.set(v, (vistos.get(v) ?? 0) + 1);
+                            }
+                            const valores = [...vistos.entries()].sort((a, b) => a[0].localeCompare(b[0], "es"));
+                            return (
+                              <>
+                                <div className="mb-1 flex items-center justify-between gap-2 px-1">
+                                  <span className="text-[11px] font-semibold uppercase text-muted">{col.header}</span>
+                                  {fActivo && (
+                                    <button
+                                      type="button"
+                                      className="text-xs text-accent hover:underline"
+                                      onClick={() => setColFilters((f) => ({ ...f, [id]: [] }))}
+                                    >
+                                      Limpiar
+                                    </button>
+                                  )}
+                                </div>
+                                {valores.length === 0 && (
+                                  <div className="px-1 py-1 text-xs text-muted">Sin valores</div>
+                                )}
+                                {valores.slice(0, 80).map(([v, n]) => (
+                                  <label key={v} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs font-normal text-foreground hover:bg-surface-2">
+                                    <input
+                                      type="checkbox"
+                                      className="h-3.5 w-3.5 rounded border-border"
+                                      checked={fVals.includes(v)}
+                                      onChange={(e) =>
+                                        setColFilters((f) => ({
+                                          ...f,
+                                          [id]: e.target.checked
+                                            ? [...(f[id] ?? []), v]
+                                            : (f[id] ?? []).filter((x) => x !== v),
+                                        }))
+                                      }
+                                    />
+                                    <span className="min-w-0 flex-1 truncate">{v || "(vacío)"}</span>
+                                    <span className="tabular-nums text-muted">{n}</span>
+                                  </label>
+                                ))}
+                                {valores.length > 80 && (
+                                  <div className="px-1 py-1 text-[11px] text-muted">
+                                    …{valores.length - 80} valores más: usa el buscador para acotar
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </>
                     )}
                     {canResize && (
                       <span
@@ -1090,6 +1216,7 @@ export function DataTable<T>({
   return (
     <div>
       {toolbar}
+      {chipsFiltros}
       {body}
       {footer}
     </div>

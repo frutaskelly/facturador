@@ -140,6 +140,16 @@ export default function RemisionesPage() {
   const proyectosRes = useResource<Page<Proyecto>>(
     can(me, "menu:clientes") ? "/api/v1/proyectos?activo=true&limit=500" : null,
   );
+  // Todas las plazas del negocio (son pocas): la columna y el filtro de
+  // Sucursal las nombran sin cargar nada por fila.
+  const sucursalesTodasRes = useResource<Page<Sucursal>>(
+    can(me, "menu:clientes") ? "/api/v1/sucursales?limit=200" : null,
+  );
+  const sucursalesTodas = sucursalesTodasRes.data?.items ?? [];
+  const sucNombre = useMemo(
+    () => Object.fromEntries(sucursalesTodas.map((x) => [x.id, x.nombre])),
+    [sucursalesTodas],
+  );
   // Un usuario de portal (solo sus clientes) no tiene estos menús: pedir los
   // catálogos daría 403 seguro; null = no pedir y trabajar con listas vacías.
   const almacenesRes = useResource<Page<Almacen>>(
@@ -173,6 +183,10 @@ export default function RemisionesPage() {
   // Las que llegaron de la bandeja sin revisar: es la cola de trabajo del
   // revisor, y sin filtro se pierden entre el histórico.
   const [fPorRevisar, setFPorRevisar] = useState(false);
+  // Filtros combinables del ticket 86bby31f9: estado y plaza van al SERVIDOR
+  // (la tabla solo ve lo cargado; filtrar ahí miente con históricos largos).
+  const [fEstado, setFEstado] = useState("");
+  const [fSucursal, setFSucursal] = useState("");
   // Búsqueda de folio/pedido/factura SAE en el servidor: el buscador de la
   // tabla solo ve las 200 filas cargadas y las remisiones viejas se le escapan.
   const [busca, setBusca] = useState("");
@@ -193,9 +207,11 @@ export default function RemisionesPage() {
     if (fHasta) p.set("fecha_hasta", fHasta);
     if (fCliente) p.set("cliente_id", fCliente);
     if (fPorRevisar) p.set("revision_pendiente", "true");
+    if (fEstado) p.set("estado", fEstado);
+    if (fSucursal) p.set("sucursal_id", fSucursal);
     if (buscaAplicada) p.set("q", buscaAplicada);
     return `/api/v1/remisiones?${p.toString()}`;
-  }, [fDesde, fHasta, fCliente, fPorRevisar, buscaAplicada]);
+  }, [fDesde, fHasta, fCliente, fPorRevisar, fEstado, fSucursal, buscaAplicada]);
 
   // lista
   const { data, loading, error, reload } = useResource<Page<Remision>>(listPath);
@@ -2085,6 +2101,20 @@ export default function RemisionesPage() {
       cell: (f) => <span title={nombreCliente(f)}>{nombreCliente(f) || "—"}</span>,
     },
     {
+      // La plaza del documento (ticket 86bby31f9): con clientes multi-plaza,
+      // «solo lo de Pachuca» es la consulta diaria. Se filtra con su embudo o
+      // con el filtro de arriba (este va al servidor).
+      header: "Sucursal",
+      sortable: true,
+      truncate: true,
+      sortValue: (f) => (f.rem ? sucNombre[f.rem.sucursal_id ?? ""] ?? "" : f.oc.sucursal_nombre ?? ""),
+      exportValue: (f) => (f.rem ? sucNombre[f.rem.sucursal_id ?? ""] ?? "" : f.oc.sucursal_nombre ?? ""),
+      cell: (f) => {
+        const n = f.rem ? sucNombre[f.rem.sucursal_id ?? ""] : f.oc.sucursal_nombre;
+        return <span title={n ?? ""}>{n || "—"}</span>;
+      },
+    },
+    {
       header: "Fecha",
       sortable: true,
       // La de la orden es la de RECEPCIÓN: es la única que tiene, y es la que
@@ -2698,6 +2728,22 @@ export default function RemisionesPage() {
             ))}
           </Select>
         </Field>
+        <Field label="Sucursal">
+          <Select value={fSucursal} onChange={(e) => setFSucursal(e.target.value)} aria-label="Filtrar por sucursal">
+            <option value="">Todas</option>
+            {sucursalesTodas.map((x) => (
+              <option key={x.id} value={x.id}>{x.nombre}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Estado">
+          <Select value={fEstado} onChange={(e) => setFEstado(e.target.value)} aria-label="Filtrar por estado">
+            <option value="">Todos</option>
+            {["BORRADOR", "RESERVADO", "CONFIRMADA", "FACTURADA", "CANCELADA"].map((x) => (
+              <option key={x} value={x}>{x}</option>
+            ))}
+          </Select>
+        </Field>
         <label className="flex h-9 cursor-pointer items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -2707,10 +2753,10 @@ export default function RemisionesPage() {
           />
           Solo por revisar
         </label>
-        {(busca || fDesde || fHasta || fCliente || fPorRevisar) && (
+        {(busca || fDesde || fHasta || fCliente || fPorRevisar || fEstado || fSucursal) && (
           <Button
             variant="secondary"
-            onClick={() => { setBusca(""); setFDesde(""); setFHasta(""); setFCliente(""); setFPorRevisar(false); }}
+            onClick={() => { setBusca(""); setFDesde(""); setFHasta(""); setFCliente(""); setFPorRevisar(false); setFEstado(""); setFSucursal(""); }}
           >
             Limpiar filtros
           </Button>
