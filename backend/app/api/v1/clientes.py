@@ -23,7 +23,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.config import settings
-from ...core.rbac import AuthContext, get_tenant_db, require_permission
+from ...core.rbac import AuthContext, get_tenant_db, invalidate_auth_cache, require_permission
 from ...models import Cliente, ClienteExterno, Producto, ProductoCliente, Sucursal
 from ...schemas.cliente import ClienteCreate, ClienteOut, ClienteUpdate
 from ...schemas.cliente_externo import (
@@ -223,6 +223,23 @@ def create_cliente(
     db.add(obj)
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)
+    # El candado por cliente ata también a quien CREA: sin esto, el cliente
+    # nuevo no entraba al alcance de su creador y desaparecía de su lista al
+    # guardar — se ve idéntico a "no funcionó" y produce recapturas (los 4
+    # GERARDO del 8-sep; ticket 86bbxfb48). El alta fue suya, así que su
+    # alcance lo incluye desde ya. El alcance vacío ("todos") no se toca.
+    if ctx.cliente_scope and ctx.user_id is not None:
+        from ...models import Membership
+
+        memb = (
+            db.query(Membership)
+            .filter(Membership.tenant_id == ctx.tenant_id, Membership.user_id == ctx.user_id)
+            .one_or_none()
+        )
+        if memb is not None and memb.cliente_scope:
+            memb.cliente_scope = [*memb.cliente_scope, obj.id]
+            db.flush()
+            invalidate_auth_cache()  # su candado cacheado ya no incluye al nuevo
     return obj
 
 

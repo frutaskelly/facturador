@@ -286,6 +286,30 @@ def test_admin_edita_su_propio_alcance_pero_no_su_rol(client, env, auth_as):
         assert "alcance" in r.json()["detail"]
 
 
+def test_cliente_nuevo_entra_al_alcance_de_su_creador(client, env, auth_as):
+    """El arreglo de fondo del ticket 86bbxfb48: un usuario con alcance
+    limitado que da de alta un cliente DEBE seguir viéndolo. Antes el cliente
+    nuevo no entraba a su candado y desaparecía de la lista al guardar — se
+    veía igual que «no funcionó» y produjo 4 capturas del mismo cliente."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    propio = env["admin"]["membership_id"]
+    r = client.patch(f"/api/v1/memberships/{propio}", headers=h,
+                     json={"cliente_scope": [env["cli_a"]]})
+    assert r.status_code == 200, r.text
+
+    alta = client.post("/api/v1/clientes", headers=h,
+                       json={"legal_name": "Cliente Nuevo Del Limitado", "rfc": "XAXX010101000"})
+    assert alta.status_code == 201, alta.text
+    nuevo = alta.json()["id"]
+
+    # sigue viéndolo en su lista…
+    ids = {c["id"] for c in client.get("/api/v1/clientes", headers=h).json()["items"]}
+    assert nuevo in ids
+    # …porque entró a su candado (sin volverse «todos»: el límite sigue)
+    m = client.get(f"/api/v1/memberships/{propio}", headers=h).json()
+    assert set(m["cliente_scope"]) == {env["cli_a"], nuevo}
+
+
 def test_descarga_de_listas_del_portal(client, env, auth_as):
     """El usuario del portal baja el PDF/Excel de las listas de SUS clientes;
     una lista no asignada a ellos responde 403."""
