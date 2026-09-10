@@ -1195,3 +1195,30 @@ def test_procesar_pendientes_destraba_el_backlog_al_mapear_el_hospital(client, e
     quieta = client.get(f"/api/v1/oc-recibidas/{dudosa['id']}", headers=h).json()
     assert quieta["estado"] == "PENDIENTE" and quieta["remision_id"] is None
     assert quieta["motivo"].startswith("EN DUDA")
+
+
+def test_lote_salta_lo_que_necesita_humano_y_no_se_atora(client, env, auth_as):
+    """La cabeza de la fila puede ser una orden que el lote NO puede procesar
+    (hospital sin mapear). El drenado del 10-sep se congelaba ahí: el limit
+    del query tomaba a las mismas una y otra vez con creadas=0. El lote las
+    salta —se quedan para un humano— y las convertibles de atrás sí pasan."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+
+    atorada = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        ubicacion="HOSPITAL QUE NADIE HA MAPEADO")).json()
+    convertible = client.post("/api/v1/oc-recibidas", headers=h,
+                              json=_oc(folio_externo="1189")).json()
+    assert atorada["estado"] == convertible["estado"] == "PENDIENTE"
+
+    # Se mapea SOLO el punto de la convertible; la atorada sigue sin destino.
+    _externo(client, h, "UBICACION", "villahermosa:JUAN GRAHAM", env["ehmo"],
+             sucursal_id=env["suc"])
+
+    r = client.post("/api/v1/oc-recibidas/procesar-pendientes?limite=1", headers=h).json()
+    assert r["creadas"] == 1          # la convertible pasó AUNQUE la atorada va primero
+    hecha = client.get(f"/api/v1/oc-recibidas/{convertible['id']}", headers=h).json()
+    assert hecha["estado"] == "ASIGNADA" and hecha["remision_id"]
+    sigue = client.get(f"/api/v1/oc-recibidas/{atorada['id']}", headers=h).json()
+    assert sigue["estado"] == "PENDIENTE" and sigue["remision_id"] is None
+    assert "sucursal" in (sigue["motivo"] or "").lower()

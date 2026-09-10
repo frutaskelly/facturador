@@ -1543,14 +1543,25 @@ def procesar_pendientes(
             q = q.filter(OCRecibida.cliente_id.in_(ctx.cliente_scope))
         return q
 
-    candidatas = _query().order_by(OCRecibida.recibida_at).limit(limite).all()
+    # Se camina la fila COMPLETA y se intenta hasta `limite`: si la cabeza son
+    # órdenes que el intento no puede procesar (hospital sin sucursal), un
+    # limit en el query las tomaba una y otra vez con creadas=0 sin llegar
+    # jamás a las convertibles de atrás (el drenado del 10-sep se congeló
+    # así). Lo no-intentable se SALTA sin contarlo — se queda para un humano —
+    # pero solo después de re-resolver: mapear un hospital debe destrabar sus
+    # órdenes en esta misma pasada.
+    candidatas = _query().order_by(OCRecibida.recibida_at).all()
     creadas = fallidas = 0
     for fila in candidatas:
+        if creadas + fallidas >= limite:
+            break
         # El candado por fila (no al armar la lista): otro request pudo
         # convertirla o descartarla mientras el lote avanzaba.
         oc = get_or_404(db, OCRecibida, fila.id, soft=False, for_update=True)
         if oc.resuelto_via != "MANUAL":
             _resolver_y_aplicar(db, oc)
+        if not _puede_intentarse(oc):
+            continue
         if _intentar_remision_auto(db, ctx, oc):
             creadas += 1
         else:
