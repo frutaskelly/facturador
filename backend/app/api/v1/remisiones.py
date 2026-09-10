@@ -259,6 +259,9 @@ def _adjuntar_oc(db: Session, rems: list) -> None:
 def list_remisiones(
     estado: Optional[str] = Query(default=None, max_length=20),
     cliente_id: Optional[UUID] = Query(default=None),
+    # Filtro por plaza (ticket 86bby31f9): «todas las remisiones de Pachuca»
+    # es una consulta diaria con clientes multi-plaza.
+    sucursal_id: Optional[UUID] = Query(default=None),
     fecha_desde: Optional[date] = Query(default=None),
     fecha_hasta: Optional[date] = Query(default=None),
     # Solo las que llegaron sin revisar: es la bandeja de trabajo del revisor.
@@ -287,6 +290,8 @@ def list_remisiones(
         query = query.filter(Remision.revision_pendiente.is_(revision_pendiente))
     if cliente_id is not None:
         query = query.filter(Remision.cliente_facturacion_id == cliente_id)
+    if sucursal_id is not None:
+        query = query.filter(Remision.sucursal_id == sucursal_id)
     if fecha_desde:
         query = query.filter(Remision.fecha_remision >= fecha_desde)
     if fecha_hasta:
