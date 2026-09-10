@@ -2750,19 +2750,22 @@ export default function RemisionesPage() {
                 <Mail size={16} /> Enviar por correo ({selected.length})
               </Button>
             )}
+            {/* Homologados al estilo neutro (ticket 86bby2txr): el color no
+                debe insinuar prioridad ni peligro — para lo delicado están
+                los diálogos de confirmación, que conservan sus tonos. */}
             {canWrite && borradoresSel.length > 0 && (
-              <Button variant="success" onClick={() => setConfirmarBulkOpen(true)} disabled={bulkBusy}>
+              <Button variant="secondary" onClick={() => setConfirmarBulkOpen(true)} disabled={bulkBusy}>
                 <Check size={16} /> Confirmar ({borradoresSel.length})
               </Button>
             )}
             {canWrite && facturarElegibles.length > 0 && (
-              <Button onClick={() => { void abrirFacturarLista(); }} disabled={bulkBusy}>
+              <Button variant="secondary" onClick={() => { void abrirFacturarLista(); }} disabled={bulkBusy}>
                 <FileText size={16} /> Facturar ({facturarElegibles.length})
               </Button>
             )}
             {canWrite && cancelablesSel.length > 0 && (
-              <Button variant="danger" onClick={() => setCancelBulkStep(1)} disabled={bulkBusy}>
-                <X size={16} /> Cancelar ({cancelablesSel.length})
+              <Button variant="secondary" onClick={() => setCancelBulkStep(1)} disabled={bulkBusy}>
+                <X size={16} /> Cancelar remisiones ({cancelablesSel.length})
               </Button>
             )}
             {canWrite && (
