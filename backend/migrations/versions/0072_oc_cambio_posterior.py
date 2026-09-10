@@ -12,8 +12,8 @@ significado). La versión posterior vive aparte, con el diff calculado y su
 propio ciclo abierto/cerrado — no leído/no leído: esto se RESUELVE, y queda
 quién y qué decidió. Un aviso leído y no atendido se ve igual que uno atendido.
 
-Revision ID: 0069_oc_cambio_posterior
-Revises: 0068_indices_fk_calientes
+Revision ID: 0072_oc_cambio_posterior
+Revises: 0071_factura_su_pedido
 """
 from typing import Sequence, Union
 
@@ -21,8 +21,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0069_oc_cambio_posterior"
-down_revision: Union[str, None] = "0068_indices_fk_calientes"
+revision: str = "0072_oc_cambio_posterior"
+down_revision: Union[str, None] = "0071_factura_su_pedido"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
