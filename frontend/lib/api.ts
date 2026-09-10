@@ -316,8 +316,23 @@ export async function apiOpenInTab(path: string, win: Window | null): Promise<vo
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
+  // La URL vive mientras viva la app (ticket 86bby3hnp): el botón Descargar
+  // del visor de PDF vuelve a PEDIR la URL blob:, y revocada a los 60 s la
+  // descarga fallaba con «error de red» aunque el documento se viera en
+  // pantalla. El costo es retener el PDF en memoria durante la sesión; el
+  // navegador libera todo al cerrar o recargar la app, y `pagehide` recoge
+  // lo acumulado antes de eso.
+  _urlsAbiertas.push(url);
   win.location.href = url;
-  // Libera el blob cuando la pestaña ya tuvo tiempo de sobra para cargarlo
-  // (revocarlo de inmediato rompería la carga del PDF).
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+// Registro de los blobs abiertos en pestañas: se liberan cuando la APP se va
+// (recarga o cierre), nunca por temporizador — el visor puede pedirlos de
+// vuelta en cualquier momento (su botón de descarga, un F5 en la pestaña).
+const _urlsAbiertas: string[] = [];
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    for (const u of _urlsAbiertas) URL.revokeObjectURL(u);
+    _urlsAbiertas.length = 0;
+  });
 }
