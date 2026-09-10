@@ -145,6 +145,10 @@ class RemisionOut(ORMModel):
     oc_id: Optional[uuid.UUID] = None
     oc_archivo_url: Optional[str] = None
     oc_archivo_nombre: Optional[str] = None
+    # La OC de esta remisión recibió una versión POSTERIOR que nadie ha
+    # atendido; el resumen es la línea corta del diff.
+    oc_cambio_abierto: bool = False
+    oc_cambio_resumen: Optional[str] = None
     # Preflight del export a SAE: cuántas partidas vivas NO tienen clave del
     # cliente (el mismo conteo que detiene el lote en el modal de exportar).
     # None = todas la tienen, o la remisión ya está amparada/cancelada.

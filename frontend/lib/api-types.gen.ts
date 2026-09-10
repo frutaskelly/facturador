@@ -2130,6 +2130,32 @@ export interface paths {
         patch: operations["asignar_api_v1_oc_recibidas__oc_id__patch"];
         trace?: never;
     };
+    "/api/v1/oc-recibidas/{oc_id}/cambio/resolver": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolver Cambio
+         * @description Cierra el aviso de "esta orden cambió después de remisionarse".
+         *
+         *     No corrige la remisión: la corrección depende de en qué estado está
+         *     (BORRADOR se edita, CONFIRMADA ya salió de almacén, FACTURADA necesita
+         *     sustitución) y ninguna de las tres es un botón. Esto registra QUIÉN lo miró
+         *     y QUÉ decidió, que es lo que faltaba para poder cerrarlo de verdad en vez de
+         *     marcarlo como leído.
+         */
+        post: operations["resolver_cambio_api_v1_oc_recibidas__oc_id__cambio_resolver_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/oc-recibidas/{oc_id}/crear-remision": {
         parameters: {
             query?: never;
@@ -7352,6 +7378,23 @@ export interface components {
             /** Archivo Url */
             archivo_url?: string | null;
             auto?: components["schemas"]["AutoRemisionOut"] | null;
+            /**
+             * Cambio Abierto
+             * @default false
+             */
+            cambio_abierto: boolean;
+            /** Cambio Detalle */
+            cambio_detalle?: Record<string, never> | null;
+            /** Cambio Detectado At */
+            cambio_detectado_at?: string | null;
+            /** Cambio Resuelto At */
+            cambio_resuelto_at?: string | null;
+            /** Cambio Resuelto Nota */
+            cambio_resuelto_nota?: string | null;
+            /** Cambio Resuelto Por */
+            cambio_resuelto_por?: string | null;
+            /** Cambio Resumen */
+            cambio_resumen?: string | null;
             /** Canal */
             canal: string;
             /** Candidatos */
@@ -7384,6 +7427,8 @@ export interface components {
             origen_externo: string;
             /** Payload */
             payload?: Record<string, never>;
+            /** Payload Nuevo */
+            payload_nuevo?: Record<string, never> | null;
             /** Proyecto Id */
             proyecto_id?: string | null;
             /** Proyecto Nombre */
@@ -7473,6 +7518,15 @@ export interface components {
             archivo_nombre?: string | null;
             /** Archivo Url */
             archivo_url?: string | null;
+            /**
+             * Cambio Abierto
+             * @default false
+             */
+            cambio_abierto: boolean;
+            /** Cambio Detectado At */
+            cambio_detectado_at?: string | null;
+            /** Cambio Resumen */
+            cambio_resumen?: string | null;
             /** Canal */
             canal: string;
             /** Candidatos */
@@ -9005,6 +9059,13 @@ export interface components {
             oc_archivo_nombre?: string | null;
             /** Oc Archivo Url */
             oc_archivo_url?: string | null;
+            /**
+             * Oc Cambio Abierto
+             * @default false
+             */
+            oc_cambio_abierto: boolean;
+            /** Oc Cambio Resumen */
+            oc_cambio_resumen?: string | null;
             /** Oc Id */
             oc_id?: string | null;
             /**
@@ -9105,6 +9166,13 @@ export interface components {
             oc_archivo_nombre?: string | null;
             /** Oc Archivo Url */
             oc_archivo_url?: string | null;
+            /**
+             * Oc Cambio Abierto
+             * @default false
+             */
+            oc_cambio_abierto: boolean;
+            /** Oc Cambio Resumen */
+            oc_cambio_resumen?: string | null;
             /** Oc Id */
             oc_id?: string | null;
             /**
@@ -9203,6 +9271,19 @@ export interface components {
             sucursal_nombre?: string | null;
             /** Via */
             via?: string | null;
+        };
+        /**
+         * ResolverCambioIn
+         * @description Cerrar la incidencia de una orden que cambió después de remisionarse.
+         *
+         *     La nota es obligatoria a propósito: la acción correcta depende del estado de
+         *     la remisión (corregirla si es BORRADOR, decidir si ya está CONFIRMADA,
+         *     sustituir el CFDI si ya se facturó) y ninguna de las tres la puede hacer el
+         *     sistema solo. Lo que queda registrado es qué decidió la persona.
+         */
+        ResolverCambioIn: {
+            /** Nota */
+            nota: string;
         };
         /**
          * ResolverIn
@@ -14406,6 +14487,7 @@ export interface operations {
                 jid?: string | null;
                 remitente?: string | null;
                 sin_cliente?: boolean;
+                cambio_abierto?: boolean;
                 q?: string | null;
                 fecha_desde?: string | null;
                 fecha_hasta?: string | null;
@@ -14589,6 +14671,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["OCRecibidaUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OCRecibidaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolver_cambio_api_v1_oc_recibidas__oc_id__cambio_resolver_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                oc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolverCambioIn"];
             };
         };
         responses: {

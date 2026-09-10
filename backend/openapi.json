@@ -9570,6 +9570,80 @@
        }
       ]
      },
+     "cambio_abierto": {
+      "default": false,
+      "title": "Cambio Abierto",
+      "type": "boolean"
+     },
+     "cambio_detalle": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cambio Detalle"
+     },
+     "cambio_detectado_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cambio Detectado At"
+     },
+     "cambio_resuelto_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cambio Resuelto At"
+     },
+     "cambio_resuelto_nota": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cambio Resuelto Nota"
+     },
+     "cambio_resuelto_por": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cambio Resuelto Por"
+     },
+     "cambio_resumen": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cambio Resumen"
+     },
      "canal": {
       "title": "Canal",
       "type": "string"
@@ -9666,6 +9740,17 @@
      "payload": {
       "title": "Payload",
       "type": "object"
+     },
+     "payload_nuevo": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Payload Nuevo"
      },
      "proyecto_id": {
       "anyOf": [
@@ -10032,6 +10117,34 @@
        }
       ],
       "title": "Archivo Url"
+     },
+     "cambio_abierto": {
+      "default": false,
+      "title": "Cambio Abierto",
+      "type": "boolean"
+     },
+     "cambio_detectado_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cambio Detectado At"
+     },
+     "cambio_resumen": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cambio Resumen"
      },
      "canal": {
       "title": "Canal",
@@ -14655,6 +14768,22 @@
       ],
       "title": "Oc Archivo Url"
      },
+     "oc_cambio_abierto": {
+      "default": false,
+      "title": "Oc Cambio Abierto",
+      "type": "boolean"
+     },
+     "oc_cambio_resumen": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oc Cambio Resumen"
+     },
      "oc_id": {
       "anyOf": [
        {
@@ -14962,6 +15091,22 @@
        }
       ],
       "title": "Oc Archivo Url"
+     },
+     "oc_cambio_abierto": {
+      "default": false,
+      "title": "Oc Cambio Abierto",
+      "type": "boolean"
+     },
+     "oc_cambio_resumen": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oc Cambio Resumen"
      },
      "oc_id": {
       "anyOf": [
@@ -15371,6 +15516,22 @@
      }
     },
     "title": "ResolucionOut",
+    "type": "object"
+   },
+   "ResolverCambioIn": {
+    "description": "Cerrar la incidencia de una orden que cambió después de remisionarse.\n\nLa nota es obligatoria a propósito: la acción correcta depende del estado de\nla remisión (corregirla si es BORRADOR, decidir si ya está CONFIRMADA,\nsustituir el CFDI si ya se facturó) y ninguna de las tres la puede hacer el\nsistema solo. Lo que queda registrado es qué decidió la persona.",
+    "properties": {
+     "nota": {
+      "maxLength": 500,
+      "minLength": 3,
+      "title": "Nota",
+      "type": "string"
+     }
+    },
+    "required": [
+     "nota"
+    ],
+    "title": "ResolverCambioIn",
     "type": "object"
    },
    "ResolverIn": {
@@ -26642,6 +26803,16 @@
      },
      {
       "in": "query",
+      "name": "cambio_abierto",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Cambio Abierto",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
       "name": "q",
       "required": false,
       "schema": {
@@ -27097,6 +27268,81 @@
      }
     ],
     "summary": "Asignar",
+    "tags": [
+     "bandeja de OC"
+    ]
+   }
+  },
+  "/api/v1/oc-recibidas/{oc_id}/cambio/resolver": {
+   "post": {
+    "description": "Cierra el aviso de \"esta orden cambió después de remisionarse\".\n\nNo corrige la remisión: la corrección depende de en qué estado está\n(BORRADOR se edita, CONFIRMADA ya salió de almacén, FACTURADA necesita\nsustitución) y ninguna de las tres es un botón. Esto registra QUIÉN lo miró\ny QUÉ decidió, que es lo que faltaba para poder cerrarlo de verdad en vez de\nmarcarlo como leído.",
+    "operationId": "resolver_cambio_api_v1_oc_recibidas__oc_id__cambio_resolver_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "oc_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Oc Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ResolverCambioIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OCRecibidaDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Resolver Cambio",
     "tags": [
      "bandeja de OC"
     ]

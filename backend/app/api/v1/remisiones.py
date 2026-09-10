@@ -253,6 +253,8 @@ def _adjuntar_oc(db: Session, rems: list) -> None:
         r.oc_id = oc.id
         r.oc_archivo_url = oc.archivo_url
         r.oc_archivo_nombre = oc.archivo_nombre
+        r.oc_cambio_abierto = oc.cambio_abierto
+        r.oc_cambio_resumen = oc.cambio_resumen
 
 
 @router.get("", response_model=Page[RemisionOut])

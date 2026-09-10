@@ -338,6 +338,9 @@ export type Remision = {
   sin_clave_sae?: number | null;
   factura_estado?: "BORRADOR" | "TIMBRADA" | "CANCELADA" | null;
   factura_id?: string | null;
+  /** La OC de esta remisión recibió una versión posterior sin atender. */
+  oc_cambio_abierto?: boolean;
+  oc_cambio_resumen?: string | null;
   subtotal: string;
   descuento: string;
   iva: string;
@@ -859,14 +862,45 @@ export type OCRecibida = {
   ambiguo: boolean;
   remision_id?: string | null;
   remision_folio?: string | null;
+  /** El cliente reenvió el mismo folio con otra cosa DESPUÉS de que la orden
+   *  ya tenía remisión. No se pisa nada (una remisión capturada no se corrige
+   *  sola); queda abierto hasta que alguien lo atienda y diga qué decidió. */
+  cambio_abierto: boolean;
+  cambio_detectado_at?: string | null;
+  cambio_resumen?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+/** El diff entre la versión que generó la remisión y la que llegó después. */
+export type CambioLinea = {
+  clave?: string | null;
+  descripcion?: string | null;
+  cantidad?: string | null;
+  unidad?: string | null;
+  precio?: string | null;
+};
+
+export type CambioOC = {
+  lineas: {
+    nuevas: CambioLinea[];
+    quitadas: CambioLinea[];
+    cambiadas: { clave?: string | null; descripcion?: string | null;
+                 antes: CambioLinea[]; ahora: CambioLinea[] }[];
+  };
+  cabecera: Record<string, { antes?: string | null; ahora?: string | null }>;
+  resumen: string;
 };
 
 export type OCRecibidaDetalle = OCRecibida & {
   payload: Record<string, unknown>;
   lineas: LineaOC[];
   auto?: AutoRemision | null;
+  payload_nuevo?: Record<string, unknown> | null;
+  cambio_detalle?: CambioOC | null;
+  cambio_resuelto_at?: string | null;
+  cambio_resuelto_por?: string | null;
+  cambio_resuelto_nota?: string | null;
   /** La serie con la que se foliaria la remisión: la cotización de precios va
    *  con ella (una asignación por serie pesa más que sucursal+cliente). */
   serie_prevista_id?: string | null;
