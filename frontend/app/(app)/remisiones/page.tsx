@@ -1552,6 +1552,8 @@ export default function RemisionesPage() {
 
   // ── acciones en lote sobre las remisiones seleccionadas ──
   const [bulkBusy, setBulkBusy] = useState(false);
+  // La impresión del lote en curso: el botón lo dice con puntitos (86bby39j1).
+  const [bulkImprimiendo, setBulkImprimiendo] = useState(false);
   const [facturarOpen, setFacturarOpen] = useState(false);
   // Cuando se factura UNA remisión puntual (p. ej. "Timbrar" desde el alta) en
   // vez de la selección de la lista. null = usar la selección.
@@ -1574,13 +1576,18 @@ export default function RemisionesPage() {
   // Imprimir todas las seleccionadas en una sola ventana.
   // Abre un solo PDF con todas las remisiones seleccionadas (una por página),
   // con el mismo diseño que el PDF individual.
-  function bulkImprimir() {
+  async function bulkImprimir() {
     const ids = selected.map((r) => r.id);
     if (ids.length === 0) return;
     const win = window.open("", "_blank");
-    apiOpenInTab(`/api/v1/remisiones/pdf?ids=${ids.join(",")}`, win).catch((e) => {
+    setBulkBusy(true); setBulkImprimiendo(true);
+    try {
+      await apiOpenInTab(`/api/v1/remisiones/pdf?ids=${ids.join(",")}`, win);
+    } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo abrir el PDF");
-    });
+    } finally {
+      setBulkBusy(false); setBulkImprimiendo(false);
+    }
   }
 
   // ── Export masivo para SAE (fase espejo de la migración) ──
@@ -2735,7 +2742,8 @@ export default function RemisionesPage() {
           <span className="text-sm text-muted">·</span>
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => { void bulkImprimir(); }} disabled={bulkBusy}>
-              <Printer size={16} /> Imprimir ({selected.length})
+              <Printer size={16} />{" "}
+              {bulkImprimiendo ? <>Generando impresión<LoadingDots /></> : <>Imprimir ({selected.length})</>}
             </Button>
             {canWrite && (
               <Button variant="secondary" onClick={() => { void bulkEnviar(); }} disabled={bulkBusy}>
@@ -3302,6 +3310,11 @@ export default function RemisionesPage() {
               {" "}(una factura por remisión).
             </Alert>
           </div>
+        )}
+        {bulkBusy && (
+          <p className="mb-2 flex items-center gap-1 text-sm font-medium text-accent">
+            Facturando y timbrando ante el PAC<LoadingDots />
+          </p>
         )}
         <div className="flex flex-col gap-2">
           {facturarDups ? (
