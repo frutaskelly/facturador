@@ -125,15 +125,20 @@ def update_membership(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     m = get_or_404(db, Membership, membership_id)
-    if m.user_id == ctx.user_id:
+    data = payload.model_dump(exclude_unset=True)
+    if m.user_id == ctx.user_id and set(data) - {"cliente_scope"}:
+        # El candado anti-lockout/anti-escalada sigue para rol y estado
+        # propios. El ALCANCE de clientes propio SÍ se puede (ticket ClickUp
+        # 86bbxwrxk): quien administra los alcances de todo el equipo no gana
+        # nada con el rodeo de pedirle a otro admin que le destape un cliente
+        # — y sin esto, un admin auto-limitado quedaba atorado.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="No puedes modificar tu propia membresía",
+            detail="De tu propia membresía solo puedes cambiar el alcance de clientes",
         )
     # Anti-escalada: un admin con membership:gestionar no puede degradar/tocar
     # a un OWNER ni otorgar el rol OWNER — eso es transferir el control.
     _guard_owner(db, ctx, m, "modificar")
-    data = payload.model_dump(exclude_unset=True)
     if "cliente_scope" in data:
         data["cliente_scope"] = _validar_scope(db, ctx.tenant_id, data["cliente_scope"])
     if "role_id" in data:

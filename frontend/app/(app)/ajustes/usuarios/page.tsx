@@ -299,7 +299,10 @@ export default function UsuariosPage() {
               {n} cliente{n === 1 ? "" : "s"}
             </Badge>
           );
-        return canWrite && !isSelf(m) && !rowLocked(m) ? (
+        // El alcance PROPIO sí se edita (ticket 86bbxwrxk): un admin que se
+        // limitó a sí mismo debe poder destaparse sin pedirle el favor a otro.
+        // Rol y estado propios siguen bloqueados (anti-lockout).
+        return canWrite && !rowLocked(m) ? (
           <button onClick={() => openScope(m)} title="Limitar a clientes" className="cursor-pointer">
             {badge}
           </button>
