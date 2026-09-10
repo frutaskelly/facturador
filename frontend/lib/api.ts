@@ -277,6 +277,23 @@ export async function apiOpenInTab(path: string, win: Window | null): Promise<vo
       "El navegador bloqueó la ventana emergente. Permite las ventanas emergentes para este sitio e intenta de nuevo."
     );
   }
+  // La pestaña abre EN BLANCO mientras el servidor genera el documento (una
+  // impresión de varias facturas tarda varios segundos) y parecía que la
+  // acción no funcionó (ticket 86bby39j1): la propia pestaña dice qué pasa.
+  // El fetch de abajo la reemplaza con el archivo cuando llega.
+  try {
+    win.document.write(
+      '<!doctype html><title>Generando…</title>' +
+      '<body style="margin:0;height:100vh;display:grid;place-items:center;' +
+      'font-family:system-ui,sans-serif;color:#555;background:#fafafa">' +
+      '<div style="text-align:center"><div style="font-size:15px">Generando el documento…</div>' +
+      '<div style="font-size:26px;letter-spacing:6px;animation:pulso 1.1s ease-in-out infinite">•••</div>' +
+      "<style>@keyframes pulso{0%,100%{opacity:.25}50%{opacity:1}}</style></div>",
+    );
+    win.document.close();
+  } catch {
+    /* pestaña de otra procedencia o ya navegada: el aviso es cortesía, no requisito */
+  }
   const supabase = getSupabase();
   const {
     data: { session },

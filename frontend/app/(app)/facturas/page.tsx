@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column, type RowAction } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/Field";
+import { LoadingDots } from "@/components/ui/LoadingDots";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SearchBox } from "@/components/ui/SearchBox";
@@ -457,6 +458,9 @@ export default function FacturasPage() {
   const [selectionResetKey, setSelectionResetKey] = useState(0);
   const clearSelection = () => { setSelected([]); setSelectionResetKey((k) => k + 1); };
   const [bulkBusy, setBulkBusy] = useState(false);
+  // Qué acción del lote corre AHORA: la etiqueta del botón lo dice (ticket
+  // 86bby39j1) — "deshabilitado" a secas se leía como "no funcionó".
+  const [bulkAccion, setBulkAccion] = useState<"imprimir" | "xmlpdf" | null>(null);
   const borradoresSel = selected.filter((f) => f.estado === "BORRADOR");
   const timbradasSel = selected.filter((f) => f.estado === "TIMBRADA");
 
@@ -533,18 +537,24 @@ export default function FacturasPage() {
   }
 
   // Imprimir N: un solo PDF (una factura por página), pestaña síncrona anti-popup.
-  function bulkPdf() {
+  async function bulkPdf() {
     if (selected.length === 0) return;
     const win = window.open("", "_blank");
-    apiOpenInTab(`/api/v1/facturas/pdf?ids=${selected.map((f) => f.id).join(",")}`, win)
-      .catch((e) => toast.error(e instanceof ApiError ? e.message : "No se pudo abrir el PDF"));
+    setBulkBusy(true); setBulkAccion("imprimir");
+    try {
+      await apiOpenInTab(`/api/v1/facturas/pdf?ids=${selected.map((f) => f.id).join(",")}`, win);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo abrir el PDF");
+    } finally {
+      setBulkBusy(false); setBulkAccion(null);
+    }
   }
 
   // XML y PDF de N: los dos archivos de cada factura, descargas individuales
   // secuenciales (solo timbradas tienen XML). El navegador puede pedir permiso
   // para bajar varios archivos seguidos.
   async function bulkXmlPdf() {
-    setBulkBusy(true);
+    setBulkBusy(true); setBulkAccion("xmlpdf");
     try {
       let fail = 0;
       for (const f of timbradasSel) {
@@ -554,7 +564,7 @@ export default function FacturasPage() {
         }
       }
       if (fail) toast.error(`${fail} archivo(s) no se pudieron descargar`);
-    } finally { setBulkBusy(false); }
+    } finally { setBulkBusy(false); setBulkAccion(null); }
   }
 
   // Enviar N: un correo POR CLIENTE con todas sus facturas (PDF+XML adjuntos),
@@ -729,12 +739,14 @@ export default function FacturasPage() {
           <span className="text-sm font-medium">{selected.length} seleccionada(s)</span>
           <span className="text-sm text-muted">·</span>
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={bulkPdf} disabled={bulkBusy}>
-              <FileText size={16} /> Imprimir ({selected.length})
+            <Button variant="secondary" onClick={() => { void bulkPdf(); }} disabled={bulkBusy}>
+              <FileText size={16} />{" "}
+              {bulkAccion === "imprimir" ? <>Generando impresión<LoadingDots /></> : <>Imprimir ({selected.length})</>}
             </Button>
             {timbradasSel.length > 0 && (
               <Button variant="secondary" onClick={() => { void bulkXmlPdf(); }} disabled={bulkBusy}>
-                <FileCode2 size={16} /> XML y PDF ({timbradasSel.length})
+                <FileCode2 size={16} />{" "}
+                {bulkAccion === "xmlpdf" ? <>Descargando<LoadingDots /></> : <>XML y PDF ({timbradasSel.length})</>}
               </Button>
             )}
             {canWrite && timbradasSel.length > 0 && (
