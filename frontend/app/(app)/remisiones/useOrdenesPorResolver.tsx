@@ -186,7 +186,13 @@ export function useOrdenesPorResolver(
     try {
       for (let i = 0; i < 20; i++) {
         const r = await apiFetch<{ creadas: number; fallidas: number; restantes: number }>(
-          "/api/v1/oc-recibidas/procesar-pendientes", { method: "POST" },
+          // Lotes CHICOS y timeout holgado: un lote grande tardaba más que el
+          // timeout del fetch, el cliente se iba, y la transacción del server
+          // quedaba abierta reteniendo candados (los zombis del 10-sep). Con 5
+          // por pasada cada request termina en segundos y el bucle avanza igual.
+          "/api/v1/oc-recibidas/procesar-pendientes?limite=5",
+          { method: "POST" },
+          { timeoutMs: 120_000 },
         );
         creadas += r.creadas;
         if (r.creadas === 0) break; // sin avance: lo que queda necesita una mano
