@@ -1556,11 +1556,17 @@ def procesar_pendientes(
         else:
             fallidas += 1
     db.flush()
-    return ProcesarPendientesOut(
-        creadas=creadas,
-        fallidas=fallidas,
-        restantes=_query().count(),
-    )
+    restantes = _query().count()
+    # Commit AQUÍ, no en el teardown: la respuesta de un lote puede no llegar
+    # jamás a su cliente (timeout del proxy, pestaña cerrada) y el teardown
+    # corre DESPUÉS de enviarla — con el envío atascado, la transacción se
+    # quedaba abierta reteniendo los candados de las OCs y bloqueando al
+    # siguiente lote (visto en prod el 10-sep: dos zombis «idle in
+    # transaction» encadenados). Lo convertido queda firme pase lo que pase
+    # con la entrega; después del commit ya no se consulta nada (el SET LOCAL
+    # del tenant expira con la transacción).
+    db.commit()
+    return ProcesarPendientesOut(creadas=creadas, fallidas=fallidas, restantes=restantes)
 
 
 @router.post("/{oc_id}/descartar", response_model=OCRecibidaOut)
