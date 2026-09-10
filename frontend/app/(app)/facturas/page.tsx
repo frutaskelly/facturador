@@ -120,6 +120,11 @@ export default function FacturasPage() {
   const [genOpen, setGenOpen] = useState(false);
   const [genCliente, setGenCliente] = useState("");
   const [genSerie, setGenSerie] = useState("");
+  // Rango de folios Desde/Hasta (ticket 86bbxxaen): con cientos de remisiones
+  // pendientes, encontrar «de la RZEHMOVH64 a la 67» a ojo era lento y
+  // propenso a errores. Solo «Desde» = esa remisión exacta.
+  const [genDesde, setGenDesde] = useState("");
+  const [genHasta, setGenHasta] = useState("");
   const [remisiones, setRemisiones] = useState<Remision[]>([]);
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
@@ -143,14 +148,39 @@ export default function FacturasPage() {
         toast.error(e instanceof ApiError ? e.message : "No se pudieron cargar las remisiones del cliente");
       });
     setSel({});
+    setGenDesde(""); setGenHasta("");
     return () => { active = false; };
   }, [genCliente]);
 
   const selIds = Object.entries(sel).filter(([, v]) => v).map(([k]) => k);
   const selTotal = remisiones.filter((r) => sel[r.id]).reduce((s, r) => s + Number(r.total), 0);
 
+  // «RZEHMOVH64» → (serie, número): el rango compara el número DENTRO de la
+  // misma serie; series distintas no se ordenan entre sí.
+  function parseFolio(f: string): { pre: string; num: number } | null {
+    const m = /^([^0-9]*)(\d+)$/.exec(f.trim());
+    return m ? { pre: m[1].toUpperCase(), num: Number(m[2]) } : null;
+  }
+  const genVisibles = useMemo(() => {
+    const d = genDesde.trim();
+    if (!d) return remisiones;
+    const pd = parseFolio(d);
+    const ph = parseFolio(genHasta.trim() || d);
+    if (pd && ph && pd.pre === ph.pre) {
+      const [min, max] = [Math.min(pd.num, ph.num), Math.max(pd.num, ph.num)];
+      return remisiones.filter((r) => {
+        const pr = parseFolio(r.folio_interno ?? "");
+        return pr !== null && pr.pre === pd.pre && pr.num >= min && pr.num <= max;
+      });
+    }
+    // Texto a medias («RZEHMOVH6», o series distintas): coincidencia parcial,
+    // que es lo que uno espera al teclear un folio incompleto.
+    return remisiones.filter((r) => (r.folio_interno ?? "").toUpperCase().includes(d.toUpperCase()));
+  }, [remisiones, genDesde, genHasta]);
+
   function openGen() {
-    setGenCliente(""); setGenSerie(""); setRemisiones([]); setSel({}); setGenOpen(true);
+    setGenCliente(""); setGenSerie(""); setGenDesde(""); setGenHasta("");
+    setRemisiones([]); setSel({}); setGenOpen(true);
   }
 
   async function generar() {
@@ -812,9 +842,36 @@ export default function FacturasPage() {
         </div>
         <div className="mt-4">
           <div className="mb-2 text-sm font-medium">Remisiones sin facturar (borrador o confirmadas)</div>
+          {genCliente && remisiones.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-end gap-3">
+              <Field label="Desde (folio)">
+                <Input value={genDesde} onChange={(e) => setGenDesde(e.target.value)} placeholder="RZEHMOVH64" className="w-40" />
+              </Field>
+              <Field label="Hasta" hint="Vacío = solo el folio de «Desde»">
+                <Input value={genHasta} onChange={(e) => setGenHasta(e.target.value)} placeholder="RZEHMOVH67" className="w-40" />
+              </Field>
+              {genDesde.trim() && (
+                <Button variant="secondary" onClick={() => { setGenDesde(""); setGenHasta(""); }}>Limpiar</Button>
+              )}
+              <label className="mb-2 ml-auto flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={genVisibles.length > 0 && genVisibles.every((r) => sel[r.id])}
+                  onChange={(e) => setSel((s) => {
+                    const n = { ...s };
+                    for (const r of genVisibles) n[r.id] = e.target.checked;
+                    return n;
+                  })}
+                />
+                Seleccionar {genDesde.trim() ? "las filtradas" : "todas"} ({genVisibles.length})
+              </label>
+            </div>
+          )}
           {genCliente && remisiones.length === 0 && <div className="text-sm text-muted">Este cliente no tiene remisiones confirmadas pendientes.</div>}
+          {genCliente && remisiones.length > 0 && genVisibles.length === 0 && (
+            <div className="text-sm text-muted">Ningún folio del cliente cae en ese rango.</div>
+          )}
           <div className="max-h-64 space-y-1 overflow-auto">
-            {remisiones.map((r) => (
+            {genVisibles.map((r) => (
               <label key={r.id} className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm">
                 <span className="flex items-center gap-2">
                   <Checkbox checked={!!sel[r.id]} onChange={(e) => setSel((s) => ({ ...s, [r.id]: e.target.checked }))} />
