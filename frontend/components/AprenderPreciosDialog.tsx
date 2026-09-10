@@ -104,6 +104,10 @@ export function AprenderPreciosDialog({
 }) {
   const toast = useToast();
   const [destino, setDestino] = useState<Record<string, string>>({});
+  // El destino del bloque masivo (ticket 86bby2gn2): con 30 líneas divergentes,
+  // decidir renglón por renglón eran 30 clics de lo mismo. Se elige UNA vez,
+  // se aplica a todas, y las excepciones se corrigen abajo, línea por línea.
+  const [masivo, setMasivo] = useState<string>(SOLO_DOCUMENTO);
   const [listas, setListas] = useState<ListaCandidata[]>([]);
   const [guardando, setGuardando] = useState(false);
 
@@ -114,6 +118,7 @@ export function AprenderPreciosDialog({
     if (!open || !clienteId) return;
     let vivo = true;
     setDestino({});
+    setMasivo(SOLO_DOCUMENTO);
     (async () => {
       try {
         const r = await apiFetch<{ listas: { lista_id: string; nombre: string; alcance: string }[] }>(
@@ -144,6 +149,28 @@ export function AprenderPreciosDialog({
       vivo = false;
     };
   }, [open, clienteId]);
+
+  // Las MISMAS opciones en el bloque masivo y en cada línea: el alcance del
+  // cambio (solo este cliente vs toda la lista compartida) es la decisión que
+  // este diálogo existe para hacer visible, se tome una vez o treinta.
+  const opcionesDestino = (
+    <>
+      <option value={SOLO_DOCUMENTO}>Solo en esta remisión</option>
+      {/* Nombra el destino REAL: con sucursal el precio especial es
+          de esa plaza, no del cliente entero. */}
+      <option value={OVERRIDE}>
+        {sucursalId
+          ? `Precio especial de ${clienteNombre || "este cliente"} en ${sucursalNombre || "esta plaza"}`
+          : `Precio especial de ${clienteNombre || "este cliente"} (todas las plazas)`}
+      </option>
+      {listas.map((li) => (
+        <option key={li.lista_id} value={li.lista_id}>
+          Toda la lista «{li.nombre}»
+          {li.clientes > 1 ? ` — toca a ${li.clientes} clientes` : ""}
+        </option>
+      ))}
+    </>
+  );
 
   const hayAlgo = useMemo(
     () => Object.values(destino).some((d) => d && d !== SOLO_DOCUMENTO),
@@ -235,6 +262,38 @@ export function AprenderPreciosDialog({
           precios desde esta pantalla, y por eso no se hace solo.
         </p>
 
+        {lineas.length > 1 && (
+          <div className="rounded-lg border border-border bg-surface-2 p-3">
+            <div className="mb-2 text-sm font-medium">
+              Mismo destino para las {lineas.length} líneas
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-64 flex-1">
+                <Select value={masivo} onChange={(e) => setMasivo(e.target.value)}>
+                  {opcionesDestino}
+                </Select>
+              </div>
+              <Button
+                variant="secondary"
+                onClick={() => setDestino(Object.fromEntries(lineas.map((l) => [l.key, masivo])))}
+              >
+                Aplicar a todas
+              </Button>
+            </div>
+            {masivo !== SOLO_DOCUMENTO && masivo !== OVERRIDE &&
+              (listas.find((x) => x.lista_id === masivo)?.clientes ?? 0) > 1 && (
+                <p className="mt-2 flex items-start gap-1.5 text-xs text-warning">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                  Esa lista la comparten varios clientes: a todos les cambian estos{" "}
+                  {lineas.length} precios.
+                </p>
+              )}
+            <p className="mt-2 text-xs text-muted">
+              Después de aplicar puedes corregir cualquier línea individualmente aquí abajo.
+            </p>
+          </div>
+        )}
+
         <div className="space-y-3">
           {lineas.map((l) => (
             <div key={l.key} className="rounded-lg border border-border p-3">
@@ -257,20 +316,7 @@ export function AprenderPreciosDialog({
                   value={destino[l.key] ?? SOLO_DOCUMENTO}
                   onChange={(e) => setDestino({ ...destino, [l.key]: e.target.value })}
                 >
-                  <option value={SOLO_DOCUMENTO}>Solo en esta remisión</option>
-                  {/* Nombra el destino REAL: con sucursal el precio especial es
-                      de esa plaza, no del cliente entero. */}
-                  <option value={OVERRIDE}>
-                    {sucursalId
-                      ? `Precio especial de ${clienteNombre || "este cliente"} en ${sucursalNombre || "esta plaza"}`
-                      : `Precio especial de ${clienteNombre || "este cliente"} (todas las plazas)`}
-                  </option>
-                  {listas.map((li) => (
-                    <option key={li.lista_id} value={li.lista_id}>
-                      Toda la lista «{li.nombre}»
-                      {li.clientes > 1 ? ` — toca a ${li.clientes} clientes` : ""}
-                    </option>
-                  ))}
+                  {opcionesDestino}
                 </Select>
               </div>
               {destino[l.key] &&
