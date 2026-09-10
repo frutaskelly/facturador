@@ -25,6 +25,11 @@ class CorreoConfigOut(BaseModel):
     use_ssl: bool = False
     configured: bool = False
     has_password: bool = False
+    # Verificación por liga (ticket 86bbxkzz5): fecha ISO en que alguien pulsó
+    # «Verificar correo» desde el buzón; None = sin verificar (o config nueva).
+    verificado_at: Optional[str] = None
+    # El guardado envió la prueba automática con la liga de verificación.
+    prueba_enviada: bool = False
     # Aviso no bloqueante (p. ej. remitente distinto del usuario en Gmail).
     aviso: Optional[str] = None
 

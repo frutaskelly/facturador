@@ -813,6 +813,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/correo/verificar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Verificar Correo
+         * @description La liga del correo de prueba. PÚBLICA a propósito: quien la abre está
+         *     leyendo el buzón configurado, y eso ES la prueba. El token firmado (72 h)
+         *     es lo único que autoriza; no hay sesión de la app en el cliente de correo.
+         */
+        get: operations["verificar_correo_api_v1_correo_verificar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/empresa": {
         parameters: {
             query?: never;
@@ -5123,6 +5145,11 @@ export interface components {
              */
             port: number;
             /**
+             * Prueba Enviada
+             * @default false
+             */
+            prueba_enviada: boolean;
+            /**
              * Use Ssl
              * @default false
              */
@@ -5132,6 +5159,8 @@ export interface components {
              * @default
              */
             username: string;
+            /** Verificado At */
+            verificado_at?: string | null;
         };
         /** CorreoProbarIn */
         CorreoProbarIn: {
@@ -11774,6 +11803,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verificar_correo_api_v1_correo_verificar_get: {
+        parameters: {
+            query: {
+                t: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
                 };
             };
             /** @description Validation Error */
