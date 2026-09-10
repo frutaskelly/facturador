@@ -59,6 +59,17 @@ class OCRecibida(Base, TimestampMixin):
     ambiguo = Column(Boolean, nullable=False, server_default=text("false"))
     remision_id = Column(UUID(as_uuid=True), ForeignKey("remisiones.id", ondelete="SET NULL"), index=True)
     payload = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    # --- La orden cambió DESPUÉS de volverse remisión (0067) ---------------
+    # `payload` queda congelado con la versión que generó la remisión. Si el
+    # cliente reenvía el mismo folio con otra cosa, esa versión NO pisa nada:
+    # se guarda aquí con su diff y se abre una incidencia que alguien tiene que
+    # cerrar. Abierta = `cambio_detectado_at` con `cambio_resuelto_at` en NULL.
+    payload_nuevo = Column(JSONB)
+    cambio_detectado_at = Column(DateTime(timezone=True))
+    cambio_detalle = Column(JSONB)
+    cambio_resuelto_at = Column(DateTime(timezone=True))
+    cambio_resuelto_por = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    cambio_resuelto_nota = Column(Text)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
 
@@ -82,6 +93,17 @@ class OCRecibida(Base, TimestampMixin):
     @property
     def remision_folio(self):
         return self.remision.folio_interno if self.remision else None
+
+    @property
+    def cambio_resumen(self):
+        """La línea corta del diff ("2 partidas cambiadas · entrega 03 → 05").
+        Se calcula al guardar el diff para que la lista no tenga que abrirlo."""
+        return ((self.cambio_detalle or {}).get("resumen") or None) if self.cambio_detalle else None
+
+    @property
+    def cambio_abierto(self) -> bool:
+        """Hay una versión posterior del documento que nadie ha atendido."""
+        return self.cambio_detectado_at is not None and self.cambio_resuelto_at is None
 
     @property
     def observaciones(self):

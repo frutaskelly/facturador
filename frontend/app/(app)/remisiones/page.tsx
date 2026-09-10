@@ -7,6 +7,7 @@ import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, RefreshCw
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
 import { CrearProductoModal, type ProductoCreado } from "@/components/CrearProductoModal";
+import { CambioOCPanel } from "./CambioOCPanel";
 import { AprenderPreciosDialog, divergentes, type PrecioDivergente } from "@/components/AprenderPreciosDialog";
 import { NuevaPresentacionDialog } from "@/components/NuevaPresentacionDialog";
 import { Alert } from "@/components/ui/Alert";
@@ -1144,6 +1145,9 @@ export default function RemisionesPage() {
     const total = Number(d.total);
     return (
       <div className="rounded-xl border border-border bg-background p-4">
+        {r.oc_id && r.oc_cambio_abierto ? (
+          <CambioOCPanel ocId={r.oc_id} canWrite={canWrite} onResuelto={reload} />
+        ) : null}
         <div className="mb-3 flex flex-wrap gap-4 text-sm">
           <div><span className="text-muted">Cliente:</span> {cliName[d.cliente_facturacion_id] ?? "—"}</div>
           <div><span className="text-muted">Fecha:</span> {fmtDate(d.fecha_remision)}</div>
@@ -2136,6 +2140,16 @@ export default function RemisionesPage() {
           <Badge tone={ESTADO_TONE[f.rem.estado] ?? "muted"}>{f.rem.estado}</Badge>
           {f.rem.revision_pendiente ? (
             <div className="mt-0.5 text-xs font-medium text-amber-700">POR REVISAR</div>
+          ) : null}
+          {f.rem.oc_cambio_abierto ? (
+            // La OC recibió una versión posterior sin atender: el diff y el
+            // cierre viven en el detalle expandido de esta misma fila.
+            <div
+              className="mt-0.5 text-xs font-medium text-danger"
+              title={f.rem.oc_cambio_resumen ?? "El cliente mandó otra versión de la orden"}
+            >
+              OC CAMBIÓ
+            </div>
           ) : null}
           {(f.rem.sin_clave_sae ?? 0) > 0 ? (
             // El preflight del export: el mismo conteo que detendrá el lote en

@@ -139,6 +139,10 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     oc_id = None
     oc_archivo_url = None
     oc_archivo_nombre = None
+    # …y la bandera de «la OC cambió después de remisionarse» (PR #114): la
+    # lista la pinta como badge y el detalle abre el diff completo de la OC.
+    oc_cambio_abierto = False
+    oc_cambio_resumen = None
 
     @property
     def factura_folio(self) -> Optional[str]:
