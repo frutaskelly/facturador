@@ -24,7 +24,7 @@ import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtDateTime, fmtMoney } from "@/lib/format";
 import { useResource, type Page } from "@/lib/hooks";
 import { FORMA_PAGO_OPTS, METODO_PAGO_OPTS, USO_CFDI_OPTS } from "@/lib/sat";
-import type { Cliente, Factura, FacturaDetail, Remision, Serie } from "@/lib/types";
+import type { Cliente, Factura, FacturaDetail, Remision, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "factura:gestionar";
 
@@ -127,11 +127,15 @@ export default function FacturasPage() {
   const [genDesde, setGenDesde] = useState("");
   const [genHasta, setGenHasta] = useState("");
   const [remisiones, setRemisiones] = useState<Remision[]>([]);
+  // Las plazas del cliente CON la serie de su vínculo: es el puente serie→
+  // remisiones (la remisión no guarda serie de factura; guarda su plaza, y la
+  // plaza decide la serie). Ticket 86bbyv6xd.
+  const [genSucursales, setGenSucursales] = useState<Sucursal[]>([]);
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!genCliente) { setRemisiones([]); setSel({}); return; }
+    if (!genCliente) { setRemisiones([]); setGenSucursales([]); setSel({}); return; }
     // Al cambiar rápido de cliente, la respuesta del anterior no debe pisar la
     // lista (se facturaría al cliente equivocado).
     let active = true;
@@ -148,6 +152,9 @@ export default function FacturasPage() {
         setRemisiones([]);
         toast.error(e instanceof ApiError ? e.message : "No se pudieron cargar las remisiones del cliente");
       });
+    apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${genCliente}&limit=200`)
+      .then((p) => { if (active) setGenSucursales(p.items); })
+      .catch(() => { if (active) setGenSucursales([]); });
     setSel({});
     setGenDesde(""); setGenHasta("");
     return () => { active = false; };
@@ -162,22 +169,44 @@ export default function FacturasPage() {
     const m = /^([^0-9]*)(\d+)$/.exec(f.trim());
     return m ? { pre: m[1].toUpperCase(), num: Number(m[2]) } : null;
   }
+  // Plazas del cliente cuyo vínculo lleva la serie elegida. null = la serie
+  // no está anclada a ninguna plaza (o no hay serie): no se puede discriminar
+  // y el listado no se filtra por serie.
+  const sucDeSerie = useMemo(() => {
+    if (!genSerie) return null;
+    const ids = genSucursales
+      .filter((x) => {
+        const series = (x.series_factura_ids?.length
+          ? x.series_factura_ids
+          : [x.serie_factura_id]).filter(Boolean) as string[];
+        return series.includes(genSerie);
+      })
+      .map((x) => x.id);
+    return ids.length ? new Set(ids) : null;
+  }, [genSerie, genSucursales]);
+
   const genVisibles = useMemo(() => {
+    // Primero la serie (ticket 86bbyv6xd): con FEHMOHOS elegida no pueden
+    // aparecer remisiones de Villahermosa — facturarlas con esa serie es
+    // justo el accidente que este filtro evita.
+    const base = sucDeSerie
+      ? remisiones.filter((r) => r.sucursal_id != null && sucDeSerie.has(r.sucursal_id))
+      : remisiones;
     const d = genDesde.trim();
-    if (!d) return remisiones;
+    if (!d) return base;
     const pd = parseFolio(d);
     const ph = parseFolio(genHasta.trim() || d);
     if (pd && ph && pd.pre === ph.pre) {
       const [min, max] = [Math.min(pd.num, ph.num), Math.max(pd.num, ph.num)];
-      return remisiones.filter((r) => {
+      return base.filter((r) => {
         const pr = parseFolio(r.folio_interno ?? "");
         return pr !== null && pr.pre === pd.pre && pr.num >= min && pr.num <= max;
       });
     }
     // Texto a medias («RZEHMOVH6», o series distintas): coincidencia parcial,
     // que es lo que uno espera al teclear un folio incompleto.
-    return remisiones.filter((r) => (r.folio_interno ?? "").toUpperCase().includes(d.toUpperCase()));
-  }, [remisiones, genDesde, genHasta]);
+    return base.filter((r) => (r.folio_interno ?? "").toUpperCase().includes(d.toUpperCase()));
+  }, [remisiones, genDesde, genHasta, sucDeSerie]);
 
   function openGen() {
     setGenCliente(""); setGenSerie(""); setGenDesde(""); setGenHasta("");
@@ -186,6 +215,22 @@ export default function FacturasPage() {
 
   async function generar() {
     if (selIds.length === 0) { toast.error("Selecciona al menos una remisión"); return; }
+    // El objetivo del ticket 86bbyv6xd: que NO se pueda facturar con una serie
+    // que no corresponde. La selección sobrevive a los cambios de filtro (a
+    // propósito), así que el candado va aquí, al momento de generar.
+    if (sucDeSerie) {
+      const fuera = remisiones.filter(
+        (r) => sel[r.id] && !(r.sucursal_id != null && sucDeSerie.has(r.sucursal_id)),
+      );
+      if (fuera.length > 0) {
+        toast.error(
+          `Hay ${fuera.length} remisión(es) seleccionadas que no son de la serie elegida ` +
+          `(${fuera.slice(0, 3).map((r) => r.folio_interno).join(", ")}${fuera.length > 3 ? "…" : ""}). ` +
+          "Quítalas de la selección o cambia la serie.",
+        );
+        return;
+      }
+    }
     setBusy(true);
     try {
       const f = await apiFetch<FacturaDetail>("/api/v1/facturas/desde-remisiones", {
@@ -839,7 +884,19 @@ export default function FacturasPage() {
               {clientes.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
             </Select>
           </Field>
-          <Field label="Serie" hint="En blanco usa la del cliente / predeterminada">
+          <Field
+            label="Serie"
+            hint={
+              sucDeSerie
+                ? `Mostrando solo remisiones de: ${genSucursales
+                    .filter((x) => sucDeSerie.has(x.id))
+                    .map((x) => x.nombre)
+                    .join(", ")}`
+                : genSerie
+                  ? "Esta serie no está anclada a una plaza: se muestran todas las remisiones"
+                  : "En blanco usa la del cliente / predeterminada"
+            }
+          >
             <Select value={genSerie} onChange={(e) => setGenSerie(e.target.value)}>
               <option value="">(automática)</option>
               {seriesFac.map((s) => <option key={s.id} value={s.id}>{s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}</option>)}
@@ -874,7 +931,11 @@ export default function FacturasPage() {
           )}
           {genCliente && remisiones.length === 0 && <div className="text-sm text-muted">Este cliente no tiene remisiones confirmadas pendientes.</div>}
           {genCliente && remisiones.length > 0 && genVisibles.length === 0 && (
-            <div className="text-sm text-muted">Ningún folio del cliente cae en ese rango.</div>
+            <div className="text-sm text-muted">
+              {sucDeSerie && !genDesde.trim()
+                ? "El cliente no tiene remisiones pendientes en la(s) plaza(s) de esa serie."
+                : "Ningún folio del cliente cae en esos filtros."}
+            </div>
           )}
           <div className="max-h-64 space-y-1 overflow-auto">
             {genVisibles.map((r) => (
