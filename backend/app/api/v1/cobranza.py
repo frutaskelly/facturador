@@ -14,6 +14,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+import sqlalchemy as sa
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -109,6 +110,79 @@ def _armar_estado_cuenta(
         "antiguedad": antiguedad,
         "facturas": docs,
     }
+
+
+@router.get("/facturas-pendientes")
+def facturas_pendientes(
+    cliente_id: UUID | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=60),
+    fecha_desde: date | None = Query(default=None),
+    fecha_hasta: date | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """TODAS las facturas PPD timbradas con saldo, de todos los clientes.
+
+    Es la tabla principal del rediseño de Cobranza (ticket 86bbyw5u2): antes
+    las pendientes solo se veían DENTRO del popup de registrar pago, cliente
+    por cliente — con muchos folios era buscar a ciegas. El vencimiento sale
+    de los días de crédito del cliente, igual que el estado de cuenta.
+    """
+    hoy = datetime.now(timezone.utc).date()
+    query = (
+        db.query(Factura)
+        .filter(
+            Factura.deleted_at.is_(None),
+            Factura.estado == "TIMBRADA",
+            Factura.metodo_pago == "PPD",
+            Factura.saldo_insoluto > 0,
+        )
+    )
+    if ctx.cliente_scope:
+        query = query.filter(Factura.cliente_id.in_(ctx.cliente_scope))
+    if cliente_id is not None:
+        if not ctx.cliente_permitido(cliente_id):
+            raise HTTPException(status_code=404, detail="Cliente no encontrado")
+        query = query.filter(Factura.cliente_id == cliente_id)
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        query = query.filter((Factura.serie + func.cast(Factura.folio, sa.String)).ilike(like))
+    if fecha_desde:
+        query = query.filter(Factura.fecha >= fecha_desde)
+    if fecha_hasta:
+        query = query.filter(Factura.fecha < fecha_hasta + timedelta(days=1))
+    total = query.count()
+    filas = query.order_by(Factura.fecha.asc()).offset(offset).limit(limit).all()
+
+    # Días de crédito por cliente, una consulta para toda la página.
+    dias_por_cliente = {
+        c.id: int(c.dias_credito or 0)
+        for c in db.query(Cliente).filter(
+            Cliente.id.in_({f.cliente_id for f in filas})
+        ).all()
+    } if filas else {}
+
+    items = []
+    for f in filas:
+        f_fecha = f.fecha.date() if isinstance(f.fecha, datetime) else f.fecha
+        vencimiento = f_fecha + timedelta(days=dias_por_cliente.get(f.cliente_id, 0))
+        saldo = Decimal(f.saldo_insoluto)
+        items.append({
+            "factura_id": str(f.id),
+            "serie": f.serie,
+            "folio": f.folio,
+            "cliente_id": str(f.cliente_id),
+            "fecha": f_fecha,
+            "vencimiento": vencimiento,
+            "dias_vencida": (hoy - vencimiento).days,
+            "total": f.total,
+            "saldo_insoluto": saldo,
+            # PARCIAL = ya tiene abonos; PENDIENTE = nadie le ha pagado nada.
+            "estado_pago": "PARCIAL" if saldo < Decimal(f.total) else "PENDIENTE",
+        })
+    return {"items": items, "total": total}
 
 
 @router.get("/estado-cuenta/{cliente_id}")

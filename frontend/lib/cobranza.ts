@@ -5,6 +5,14 @@ export type FacturaSaldo = {
   total: string; saldo_insoluto: string;
 };
 
+/** Fila de la tabla global de pendientes (rediseño 86bbyw5u2). */
+export type FacturaPendiente = {
+  factura_id: string; serie: string; folio: number; cliente_id: string;
+  fecha: string; vencimiento: string; dias_vencida: number;
+  total: string; saldo_insoluto: string;
+  estado_pago: "PENDIENTE" | "PARCIAL";
+};
+
 export type ReciboFactura = {
   factura_id: string; serie: string | null; folio: number | null;
   importe_pagado: string; num_parcialidad: number;

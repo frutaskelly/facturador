@@ -19650,6 +19650,150 @@
     ]
    }
   },
+  "/api/v1/cobranza/facturas-pendientes": {
+   "get": {
+    "description": "TODAS las facturas PPD timbradas con saldo, de todos los clientes.\n\nEs la tabla principal del rediseño de Cobranza (ticket 86bbyw5u2): antes\nlas pendientes solo se veían DENTRO del popup de registrar pago, cliente\npor cliente — con muchos folios era buscar a ciegas. El vencimiento sale\nde los días de crédito del cliente, igual que el estado de cuenta.",
+    "operationId": "facturas_pendientes_api_v1_cobranza_facturas_pendientes_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 60,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Q"
+      }
+     },
+     {
+      "in": "query",
+      "name": "fecha_desde",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Fecha Desde"
+      }
+     },
+     {
+      "in": "query",
+      "name": "fecha_hasta",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Fecha Hasta"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 200,
+       "maximum": 500,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Facturas Pendientes",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
   "/api/v1/cobranza/recibos-pago": {
    "get": {
     "operationId": "list_recibos_api_v1_cobranza_recibos_pago_get",

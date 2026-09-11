@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column, type RowAction } from "@/components/ui/DataTable";
+import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { KeyboardCombobox } from "@/components/KeyboardCombobox";
 import { Modal } from "@/components/ui/Modal";
@@ -22,7 +23,7 @@ import { can, useAuth } from "@/lib/auth";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { useResource, type Page } from "@/lib/hooks";
-import { FORMA_PAGO_SAT, type FacturaSaldo, type Recibo } from "@/lib/cobranza";
+import { FORMA_PAGO_SAT, type FacturaPendiente, type FacturaSaldo, type Recibo } from "@/lib/cobranza";
 import type { Cliente } from "@/lib/types";
 
 const TONE: Record<Recibo["estado"], "success" | "muted" | "danger"> = {
@@ -48,6 +49,28 @@ export default function Page() {
   })), [clientes]);
 
   const [nuevo, setNuevo] = useState(false);
+  // Rediseño 86bbyw5u2: la tabla grande de PENDIENTES es la protagonista —
+  // antes las facturas por cobrar solo se veían DENTRO del popup, cliente por
+  // cliente. Buscador contra el servidor + filtro de cliente; los embudos de
+  // encabezado (serie, estado de pago) vienen con la tabla.
+  const [pBusca, setPBusca] = useState("");
+  const [pBuscaAplicada, setPBuscaAplicada] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setPBuscaAplicada(pBusca.trim()), 300);
+    return () => clearTimeout(t);
+  }, [pBusca]);
+  const [pCliente, setPCliente] = useState("");
+  const pendPath = useMemo(() => {
+    const p = new URLSearchParams({ limit: "200" });
+    if (pCliente) p.set("cliente_id", pCliente);
+    if (pBuscaAplicada) p.set("q", pBuscaAplicada);
+    return `/api/v1/cobranza/facturas-pendientes?${p.toString()}`;
+  }, [pCliente, pBuscaAplicada]);
+  const pendientes = useResource<{ items: FacturaPendiente[]; total: number }>(pendPath);
+  const [pendSel, setPendSel] = useState<FacturaPendiente[]>([]);
+  // Un pago = un cliente (regla del REP): con selección mixta se avisa.
+  const pendClientes = useMemo(() => [...new Set(pendSel.map((f) => f.cliente_id))], [pendSel]);
+  const [pagoPre, setPagoPre] = useState<{ clienteId: string; facturaIds: string[] } | null>(null);
   const [timbrando, setTimbrando] = useState<string | null>(null);
   const [aTimbrar, setATimbrar] = useState<Recibo | null>(null);
   const emisor = (() => {
@@ -108,13 +131,89 @@ export default function Page() {
       onClick: (r) => setCancelar(r), hidden: (r) => !(canWrite && r.estado === "TIMBRADO") },
   ];
 
+  const pendCols: Column<FacturaPendiente>[] = [
+    { header: "Folio", sortable: true, exportValue: (f) => `${f.serie}${f.folio}`,
+      sortValue: (f) => `${f.serie}${f.folio}`,
+      cell: (f) => <span className="font-medium">{f.serie}{f.folio}</span> },
+    { header: "Cliente", truncate: true, sortable: true,
+      exportValue: (f) => cliName[f.cliente_id] ?? "",
+      sortValue: (f) => cliName[f.cliente_id] ?? "",
+      cell: (f) => <span title={cliName[f.cliente_id] ?? ""}>{cliName[f.cliente_id] ?? "—"}</span> },
+    { header: "Serie", sortable: true, exportValue: (f) => f.serie, sortValue: (f) => f.serie,
+      cell: (f) => f.serie },
+    { header: "Fecha", className: "whitespace-nowrap", sortable: true,
+      sortValue: (f) => f.fecha, exportValue: (f) => fmtDate(f.fecha), cell: (f) => fmtDate(f.fecha) },
+    { header: "Vencimiento", className: "whitespace-nowrap", sortable: true,
+      sortValue: (f) => f.vencimiento, exportValue: (f) => fmtDate(f.vencimiento),
+      cell: (f) => (
+        <span className={f.dias_vencida > 0 ? "font-medium text-danger" : undefined}
+          title={f.dias_vencida > 0 ? `Vencida hace ${f.dias_vencida} día(s)` : undefined}>
+          {fmtDate(f.vencimiento)}
+        </span>
+      ) },
+    { header: "Total", className: "text-right tabular-nums", sortable: true,
+      sortValue: (f) => Number(f.total), exportValue: (f) => f.total, cell: (f) => fmtMoney(f.total) },
+    { header: "Saldo pendiente", className: "text-right tabular-nums", sortable: true,
+      sortValue: (f) => Number(f.saldo_insoluto), exportValue: (f) => f.saldo_insoluto,
+      cell: (f) => <span className="font-medium">{fmtMoney(f.saldo_insoluto)}</span> },
+    { header: "Estado de pago", sortable: true, exportValue: (f) => f.estado_pago,
+      sortValue: (f) => f.estado_pago,
+      cell: (f) => <Badge tone={f.estado_pago === "PARCIAL" ? "warning" : "muted"}>{f.estado_pago}</Badge> },
+  ];
+  const pendTotalSel = pendSel.reduce((s, f) => s + Number(f.saldo_insoluto), 0);
+
   return (
     <div>
       <PageHeader
-        title="Cobranza — Recibos de pago"
-        subtitle="Complementos de pago (REP) de facturas PPD"
+        title="Cobranza"
+        subtitle="Facturas PPD por cobrar y sus complementos de pago (REP)"
         actions={canWrite ? <Button onClick={() => setNuevo(true)}><Plus size={16} /> Registrar pago</Button> : undefined}
       />
+
+      {/* ── 1. Facturas pendientes de pago (la mesa de trabajo) ── */}
+      <div className="mb-3 flex flex-wrap items-end gap-3">
+        <Field label="Cliente">
+          <Select className="min-w-64" value={pCliente} onChange={(e) => setPCliente(e.target.value)} aria-label="Filtrar por cliente">
+            <option value="">Todos</option>
+            {clientes.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
+          </Select>
+        </Field>
+        {pendSel.length > 0 && (
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-3 rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm">
+            <span>
+              {pendSel.length} factura{pendSel.length === 1 ? "" : "s"} · saldo{" "}
+              <b className="tabular-nums">{fmtMoney(pendTotalSel)}</b>
+            </span>
+            {pendClientes.length > 1 ? (
+              <span className="text-warning">Un pago cubre facturas de UN solo cliente — la selección tiene {pendClientes.length}.</span>
+            ) : canWrite ? (
+              <Button onClick={() => setPagoPre({ clienteId: pendClientes[0], facturaIds: pendSel.map((f) => f.factura_id) })}>
+                Registrar pago ({pendSel.length})
+              </Button>
+            ) : null}
+          </div>
+        )}
+      </div>
+      {pendientes.error ? (
+        <Alert tone="danger">No se pudieron cargar las facturas pendientes.</Alert>
+      ) : (
+        <DataTableSmart
+          rows={pendientes.data?.items ?? []}
+          rowKey={(f) => f.factura_id}
+          columns={pendCols}
+          loading={pendientes.loading}
+          empty="Sin facturas PPD con saldo pendiente."
+          storageKey="cobranza-pendientes"
+          selectable
+          onSelectionChange={setPendSel}
+          searchValue={pBusca}
+          onSearchChange={setPBusca}
+          searchPlaceholder="Folio (p. ej. FEHMOHOS12)…"
+        />
+      )}
+
+      {/* ── 2. Recibos de pago emitidos ── */}
+      <h2 className="mb-2 mt-8 text-sm font-semibold">Recibos de pago (REP)</h2>
       {recibos.error ? (
         <Alert tone="danger">No se pudieron cargar los recibos.</Alert>
       ) : (
@@ -126,7 +225,14 @@ export default function Page() {
       {nuevo && (
         <RegistrarPago clientes={clientes}
           onClose={() => setNuevo(false)}
-          onDone={() => { setNuevo(false); recibos.reload(); }} />
+          onDone={() => { setNuevo(false); recibos.reload(); pendientes.reload(); }} />
+      )}
+      {pagoPre && (
+        <RegistrarPago clientes={clientes}
+          preClienteId={pagoPre.clienteId}
+          preFacturaIds={pagoPre.facturaIds}
+          onClose={() => setPagoPre(null)}
+          onDone={() => { setPagoPre(null); setPendSel([]); recibos.reload(); pendientes.reload(); }} />
       )}
       {enviar && (
         <EnviarRecibo recibo={enviar} defaultTo={cliCorreos[enviar.cliente_id] ?? ""}
@@ -247,11 +353,16 @@ function CancelarRecibo({ recibo, onClose, onDone }: {
   );
 }
 
-function RegistrarPago({ clientes, onClose, onDone }: {
-  clientes: Cliente[]; onClose: () => void; onDone: () => void;
+function RegistrarPago({ clientes, preClienteId, preFacturaIds, onClose, onDone }: {
+  clientes: Cliente[];
+  /** Rediseño 86bbyw5u2: la tabla de pendientes llega aquí con el cliente y
+   *  las facturas ya elegidas; el popup solo captura los datos del pago. */
+  preClienteId?: string;
+  preFacturaIds?: string[];
+  onClose: () => void; onDone: () => void;
 }) {
   const toast = useToast();
-  const [clienteId, setClienteId] = useState("");
+  const [clienteId, setClienteId] = useState(preClienteId ?? "");
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
   const [forma, setForma] = useState("03");
   const [referencia, setReferencia] = useState("");
@@ -267,7 +378,19 @@ function RegistrarPago({ clientes, onClose, onDone }: {
     if (!clienteId) { setSaldos([]); return; }
     let active = true;
     apiFetch<{ facturas: FacturaSaldo[] }>(`/api/v1/cobranza/estado-cuenta/${clienteId}`)
-      .then((d) => { if (active) { setSaldos(d.facturas); setAplicar({}); } })
+      .then((d) => {
+        if (!active) return;
+        setSaldos(d.facturas);
+        // Las facturas elegidas en la tabla entran con TODO su saldo aplicado
+        // (editable): el caso común es el pago completo de lo seleccionado.
+        setAplicar(preFacturaIds?.length
+          ? Object.fromEntries(
+              d.facturas
+                .filter((f) => preFacturaIds.includes(f.factura_id))
+                .map((f) => [f.factura_id, Number(f.saldo_insoluto).toFixed(2)]),
+            )
+          : {});
+      })
       .catch(() => { if (active) setSaldos([]); });
     return () => { active = false; };
   }, [clienteId]);
