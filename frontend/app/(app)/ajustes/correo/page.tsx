@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { CheckCircle2, ExternalLink, Mail, Send, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Field, Input, PasswordInput, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
@@ -66,6 +67,8 @@ export default function CorreoPage() {
   const [avanzado, setAvanzado] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [verificadoAt, setVerificadoAt] = useState<string | null>(null);
+  const [quitarOpen, setQuitarOpen] = useState(false);
+  const [quitando, setQuitando] = useState(false);
 
   useEffect(() => {
     apiFetch<CorreoConfig>("/api/v1/correo")
@@ -164,6 +167,29 @@ export default function CorreoPage() {
       );
     } finally {
       setSaving(false);
+    }
+  }
+
+  /** Empezar de cero (feedback 86bbxkzz5): borra la config y regresa al
+   *  paso 1 del flujo guiado. Antes no había forma de resetear. */
+  async function quitarConfiguracion() {
+    setQuitando(true);
+    try {
+      await apiFetch("/api/v1/correo", { method: "DELETE" });
+      setForm(emptyForm());
+      setHasPassword(false);
+      setConfigured(false);
+      setVerificadoAt(null);
+      setModoGmail(false);
+      setAvanzado(false);
+      setCorreoInicial("");
+      setQuitarOpen(false);
+      setPaso("correo");
+      toast.success("Configuración eliminada: puedes empezar de cero");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo quitar la configuración");
+    } finally {
+      setQuitando(false);
     }
   }
 
@@ -392,6 +418,11 @@ export default function CorreoPage() {
             <Button onClick={guardar} disabled={saving || loading}>
               {saving ? "Guardando…" : "Guardar"}
             </Button>
+            {configured && (
+              <Button variant="secondary" onClick={() => setQuitarOpen(true)} disabled={saving || loading}>
+                Quitar configuración
+              </Button>
+            )}
             <div className="flex items-end gap-2">
               <Field label="Enviar prueba a">
                 <Input
@@ -409,6 +440,16 @@ export default function CorreoPage() {
         )}
       </div>
       )}
+
+      <ConfirmDialog
+        open={quitarOpen}
+        title="Quitar la configuración de correo"
+        message="Se borra la cuenta configurada (servidor, usuario, contraseña y verificación) y la pantalla regresa al inicio para configurar desde cero. Mientras no haya otra cuenta guardada, no se podrán enviar facturas ni remisiones por correo."
+        confirmLabel="Quitar configuración"
+        onConfirm={() => void quitarConfiguracion()}
+        onClose={() => setQuitarOpen(false)}
+        loading={quitando}
+      />
     </div>
   );
 }

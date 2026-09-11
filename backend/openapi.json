@@ -21241,6 +21241,52 @@
    }
   },
   "/api/v1/correo": {
+   "delete": {
+    "description": "Borra la configuración de correo del tenant y regresa la pantalla al\npaso 1 del flujo guiado. Sin esto no había manera de «empezar de cero»\n(feedback del ticket 86bbxkzz5): la config guardada no se podía quitar,\nsolo sobreescribir campo por campo.",
+    "operationId": "quitar_correo_api_v1_correo_delete",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Quitar Correo",
+    "tags": [
+     "correo"
+    ]
+   },
    "get": {
     "operationId": "get_correo_api_v1_correo_get",
     "parameters": [
