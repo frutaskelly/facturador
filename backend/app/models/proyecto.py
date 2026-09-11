@@ -15,7 +15,7 @@ filas). NULL = sin restricción de plaza, aplica donde sea; sustituye al alcance
 multi-sucursal de la migración 0058.
 """
 from sqlalchemy import Boolean, Column, ForeignKey, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from ..core.db import Base
@@ -41,6 +41,10 @@ class Proyecto(Base, TimestampMixin, SoftDeleteMixin):
         UUID(as_uuid=True), ForeignKey("sucursales.id", ondelete="SET NULL"), index=True
     )
     activo = Column(Boolean, nullable=False, server_default="true")
+    # Destinatarios PREDETERMINADOS de las facturas de este proyecto (ticket
+    # 86bbyveu1): el envío los sugiere prellenados (proyecto > cliente) y el
+    # usuario los puede corregir antes de mandar. Lista de correos.
+    correos_facturas = Column(JSONB, nullable=False, server_default="[]")
     notas = Column(Text)
 
     cliente = relationship("Cliente")

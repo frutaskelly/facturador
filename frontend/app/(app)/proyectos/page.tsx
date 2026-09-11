@@ -30,6 +30,11 @@ const config: CrudConfig<Proyecto> = {
       filterBy: "cliente_id", colSpan: 2,
       hint: "Un proyecto por plaza: HOSPITALES de Pachuca y de Tabasco son dos proyectos. Vacío = aplica en cualquier plaza." },
     { name: "activo", label: "Activo", type: "switch" },
+    // Ticket 86bbyveu1: las facturas del proyecto casi siempre van a las
+    // mismas personas — el envío las prellena con esto (editable al enviar).
+    { name: "correos_facturas", label: "Correos para envío de facturas", colSpan: 2,
+      placeholder: "pagos@hospital.mx, cxc@hospital.mx",
+      hint: "Separa varios con coma o espacio. Al enviar una factura de este proyecto, llegan prellenados (se pueden cambiar antes de enviar)." },
     { name: "notas", label: "Notas", type: "textarea", colSpan: 2 },
   ],
   lookups: {
@@ -46,13 +51,14 @@ const config: CrudConfig<Proyecto> = {
       tag: (r) => ((r.clientes_ids as string[]) ?? []).join(","),
     },
   },
-  newValues: () => ({ codigo: "", nombre: "", cliente_id: "", sucursal_id: "", activo: true, notas: "" }),
+  newValues: () => ({ codigo: "", nombre: "", cliente_id: "", sucursal_id: "", activo: true, correos_facturas: "", notas: "" }),
   toForm: (p) => ({
     codigo: p.codigo,
     nombre: p.nombre,
     cliente_id: p.cliente_id ?? "",
     sucursal_id: p.sucursal_id ?? "",
     activo: p.activo,
+    correos_facturas: (p.correos_facturas ?? []).join(", "),
     notas: p.notas ?? "",
   }),
   toPayload: (v) => ({
@@ -61,6 +67,8 @@ const config: CrudConfig<Proyecto> = {
     cliente_id: (v.cliente_id as string) || null,
     sucursal_id: (v.sucursal_id as string) || null,
     activo: v.activo,
+    // Texto libre → lista: el backend valida y normaliza cada correo.
+    correos_facturas: String(v.correos_facturas ?? "").split(/[\s,;]+/).filter(Boolean),
     notas: (v.notas as string) || null,
   }),
   rowLabel: (p) => p.nombre,

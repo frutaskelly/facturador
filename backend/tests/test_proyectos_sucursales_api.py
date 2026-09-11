@@ -197,3 +197,32 @@ def test_cambiar_dueno_valida_la_plaza(client, env, auth_as):
                      json={"cliente_id": env["cli2"], "sucursal_id": env["s2a"]})
     assert r.status_code == 200, r.text
     assert r.json()["sucursal_nombre"] == "Actopan"
+
+
+def test_correos_facturas_se_guardan_normalizados_y_validados(client, env, auth_as):
+    """Ticket 86bbyveu1: los correos destinatarios del proyecto se validan al
+    guardar (un typo aquí viaja a todos los envíos), se normalizan, y un PATCH
+    que no los menciona no los toca."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/proyectos", headers=h, json={
+        "nombre": "Correos Hospitales", "cliente_id": env["cli1"],
+        "correos_facturas": ["  Pagos@Hospital.MX ", "cxc@hospital.mx", ""],
+    })
+    assert r.status_code == 201, r.text
+    body = r.json()
+    # normalizados (dominio en minúsculas, sin espacios) y sin vacíos
+    assert body["correos_facturas"] == ["Pagos@hospital.mx", "cxc@hospital.mx"]
+
+    # un correo inválido se rechaza con 422
+    bad = client.patch(f"/api/v1/proyectos/{body['id']}", headers=h,
+                       json={"correos_facturas": ["esto-no-es-correo"]})
+    assert bad.status_code == 422
+
+    # PATCH de otra cosa no toca los correos
+    p = client.patch(f"/api/v1/proyectos/{body['id']}", headers=h, json={"notas": "x"})
+    assert p.status_code == 200, p.text
+    assert p.json()["correos_facturas"] == ["Pagos@hospital.mx", "cxc@hospital.mx"]
+
+    # y se pueden vaciar explícitamente
+    v = client.patch(f"/api/v1/proyectos/{body['id']}", headers=h, json={"correos_facturas": []})
+    assert v.status_code == 200 and v.json()["correos_facturas"] == []
