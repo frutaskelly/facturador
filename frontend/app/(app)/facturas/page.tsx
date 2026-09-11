@@ -691,10 +691,21 @@ export default function FacturasPage() {
   }
 
   const columns: Column<Factura>[] = [
-    { header: "Folio", cell: (f) => <span className="font-medium">{f.serie}{f.folio}</span> },
-    { header: "Cliente", truncate: true, cell: (f) => <span title={cliName[f.cliente_id] ?? ""}>{cliName[f.cliente_id] ?? "—"}</span> },
-    { header: "Fecha", className: "whitespace-nowrap", cell: (f) => fmtDate(f.fecha) },
-    { header: "Estado", cell: (f) => (
+    // `exportValue` explícito en las celdas JSX: es de donde leen el filtro
+    // de valores del encabezado y el CSV (ticket 86bbyeny7 — sin él, el
+    // embudo de Folio/Cliente/Estado listaba «(vacío)» para las 200 filas).
+    { header: "Folio", sortable: true, exportValue: (f) => `${f.serie}${f.folio}`,
+      sortValue: (f) => `${f.serie}${f.folio}`,
+      cell: (f) => <span className="font-medium">{f.serie}{f.folio}</span> },
+    { header: "Cliente", truncate: true, sortable: true,
+      exportValue: (f) => cliName[f.cliente_id] ?? "",
+      sortValue: (f) => cliName[f.cliente_id] ?? "",
+      cell: (f) => <span title={cliName[f.cliente_id] ?? ""}>{cliName[f.cliente_id] ?? "—"}</span> },
+    { header: "Fecha", className: "whitespace-nowrap", sortable: true,
+      sortValue: (f) => f.fecha, exportValue: (f) => fmtDate(f.fecha),
+      cell: (f) => fmtDate(f.fecha) },
+    { header: "Estado", sortable: true, exportValue: (f) => f.estado, sortValue: (f) => f.estado,
+      cell: (f) => (
       <div className="flex items-center gap-1.5 whitespace-nowrap">
         <Badge tone={ESTADO_TONE[f.estado] ?? "muted"}>{f.estado}</Badge>
         {f.origen === "ESPEJO_SAE" ? <Badge tone="muted">Espejo SAE</Badge> : null}
