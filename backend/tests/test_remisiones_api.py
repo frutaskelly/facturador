@@ -13,6 +13,7 @@ from app.models import Almacen, Cliente, Membership, Producto, Role, Tenant, Use
 
 _PURGE = (
     "movimientos_inventario", "mermas", "lineas_remision", "remisiones",
+    "cliente_sucursales", "sucursales",
     "lotes_inventario", "precios", "listas_precios", "productos", "almacenes", "clientes",
 )
 
@@ -155,6 +156,53 @@ def test_confirm_descuenta_then_cancel_restituye(client, env, auth_as):
     row2 = _disp(client, h, env)
     assert float(row2["disponible"]) == 100.0
     assert float(row2["reservada"]) == 0.0
+
+
+def test_confirmar_conserva_sucursal_y_patch_la_asigna(client, env, auth_as):
+    """Ticket 86bbykyu2: confirmar NO toca la sucursal de la remisión, y un
+    PATCH de solo `sucursal_id` (la acción rápida de la celda) la quita o la
+    asigna sin tocar nada más — también en una CONFIRMADA. Una plaza sin
+    vínculo con el cliente se rechaza."""
+    from app.models import ClienteSucursal, Sucursal
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    tid = env["admin_a"]["tenant_id"]
+    db = SessionLocal()
+    try:
+        suc = Sucursal(tenant_id=tid, nombre="Plaza Conserva")
+        ajena = Sucursal(tenant_id=tid, nombre="Plaza Sin Vínculo")
+        db.add_all([suc, ajena]); db.flush()
+        db.add(ClienteSucursal(tenant_id=tid, cliente_id=env["cli_a"], sucursal_id=suc.id))
+        db.commit()
+        suc_id, ajena_id = str(suc.id), str(ajena.id)
+    finally:
+        db.close()
+
+    _load_stock(client, h, env, "50", "4")
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+        "sucursal_id": suc_id,
+        "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "5", "precio_unitario": "10"}],
+    }).json()
+    assert rem["sucursal_id"] == suc_id
+
+    c = client.post(f"/api/v1/remisiones/{rem['id']}/confirmar", headers=h)
+    assert c.status_code == 200, c.text
+    assert c.json()["estado"] == "CONFIRMADA"
+    assert c.json()["sucursal_id"] == suc_id      # confirmar la conserva
+
+    # Solo-sucursal en una CONFIRMADA: quitar, rechazar la ajena, reasignar.
+    p = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"sucursal_id": None})
+    assert p.status_code == 200, p.text
+    assert p.json()["sucursal_id"] is None
+    bad = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"sucursal_id": ajena_id})
+    assert bad.status_code == 422
+    p2 = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"sucursal_id": suc_id})
+    assert p2.status_code == 200, p2.text
+    assert p2.json()["sucursal_id"] == suc_id
+    # El inventario reservado no se movió por los PATCH de sucursal.
+    row = _disp(client, h, env)
+    assert float(row["disponible"]) == 45.0
 
 
 def test_confirm_with_presentation_descuenta_base_units(client, env, auth_as):
