@@ -405,3 +405,53 @@ def test_estado_cuenta_respeta_el_candado_por_cliente(client, env, auth_atado):
                         json={"to": ["quien@sea.mx"]})
     # 404 aunque el correo del tenant ni siquiera esté configurado: el candado va primero.
     assert ajeno.status_code == 404
+
+
+# ── la tabla global de pendientes (rediseño de Cobranza, ticket 86bbyw5u2) ──
+
+
+def test_facturas_pendientes_global_con_filtros(client, env, auth, fake_pac):
+    """La tabla principal del rediseño: TODAS las PPD con saldo, filtrables
+    por folio, y con el estado de pago derivado (PARCIAL cuando ya hay
+    abonos). Las PUE y las saldadas no aparecen."""
+    from decimal import Decimal as D
+
+    h = _h(env)
+    fid = _factura_ppd_timbrada(env, total=1000, dias_atras=5, folio=9001)
+    _factura_ppd_timbrada(env, total=500, dias_atras=2, folio=9002)
+    _factura_ppd_timbrada(env, total=300, dias_atras=1, metodo="PUE", folio=9003)
+
+    r = client.get("/api/v1/cobranza/facturas-pendientes", headers=h)
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    folios = {x["folio"] for x in items}
+    assert {9001, 9002} <= folios and 9003 not in folios     # PUE fuera
+    f1 = next(x for x in items if x["folio"] == 9001)
+    assert f1["estado_pago"] == "PENDIENTE"
+    assert x_ok(f1)
+
+    # abono parcial → PARCIAL con el saldo actualizado
+    rec = client.post("/api/v1/cobranza/recibos-pago", headers=h, json={
+        "cliente_id": env["cli"], "fecha_pago": "2026-09-11T12:00:00Z",
+        "forma_pago": "03", "monto": "400.00",
+        "facturas": [{"factura_id": fid, "importe": "400.00"}],
+    })
+    assert rec.status_code == 201, rec.text
+    # El saldo baja al TIMBRAR el REP (no al registrarlo): regla del módulo.
+    rid = rec.json()["id"]
+    t = client.post(f"/api/v1/cobranza/recibos-pago/{rid}/timbrar", headers=h)
+    assert t.status_code == 200, t.text
+    items = client.get("/api/v1/cobranza/facturas-pendientes", headers=h).json()["items"]
+    f1 = next(x for x in items if x["folio"] == 9001)
+    assert f1["estado_pago"] == "PARCIAL"
+    assert D(str(f1["saldo_insoluto"])) == D("600")
+
+    # filtro por folio (q)
+    items = client.get("/api/v1/cobranza/facturas-pendientes?q=9002", headers=h).json()["items"]
+    assert {x["folio"] for x in items} == {9002}
+
+
+def x_ok(f):
+    """Campos que la tabla necesita sí o sí."""
+    return all(k in f for k in ("serie", "folio", "cliente_id", "fecha",
+                                "vencimiento", "total", "saldo_insoluto", "estado_pago"))

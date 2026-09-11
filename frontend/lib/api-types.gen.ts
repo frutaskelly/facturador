@@ -408,6 +408,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cobranza/facturas-pendientes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Facturas Pendientes
+         * @description TODAS las facturas PPD timbradas con saldo, de todos los clientes.
+         *
+         *     Es la tabla principal del rediseño de Cobranza (ticket 86bbyw5u2): antes
+         *     las pendientes solo se veían DENTRO del popup de registrar pago, cliente
+         *     por cliente — con muchos folios era buscar a ciegas. El vencimiento sale
+         *     de los días de crédito del cliente, igual que el estado de cuenta.
+         */
+        get: operations["facturas_pendientes_api_v1_cobranza_facturas_pendientes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cobranza/recibos-pago": {
         parameters: {
             query?: never;
@@ -10950,6 +10975,44 @@ export interface operations {
             path: {
                 cliente_id: string;
             };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    facturas_pendientes_api_v1_cobranza_facturas_pendientes_get: {
+        parameters: {
+            query?: {
+                cliente_id?: string | null;
+                q?: string | null;
+                fecha_desde?: string | null;
+                fecha_hasta?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
