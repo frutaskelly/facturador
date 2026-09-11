@@ -11,6 +11,14 @@ que NO se resuelve solo (cliente ambiguo, punto de entrega sin sucursal, un
 posible duplicado) NO se adivina ni se descarta: queda PENDIENTE con su motivo
 y se cierra desde la franja «órdenes por resolver» de /remisiones — crear una
 remisión de un cliente adivinado quema un folio de la serie que no se recupera.
+
+Poda tras el retiro de la pantalla /oc (ticket 86bbxfh3t): `GET /grupos` (el
+filtro encadenado de la lista vieja) se fue con ella. Lo que queda aquí tiene
+consumidor: el bot (POST ingesta), la fila de /remisiones (listar, detalle,
+PATCH, sin-revisar, descartar, reabrir, cambio/resolver, procesar-pendientes)
+y `crear-remision`/`crear-remision-auto`, que son la maquinaria interna de la
+conversión (los usa `sin-revisar` y los cubren los tests de las reglas de
+cruce y precio).
 """
 from __future__ import annotations
 
@@ -43,7 +51,6 @@ from ...models import (
 from ...schemas.common import Page
 from ...schemas.oc_recibida import (
     CrearRemisionIn,
-    GrupoBandejaOut,
     OCRecibidaDetailOut,
     OCRecibidaIn,
     OCRecibidaOut,
@@ -880,70 +887,6 @@ def _fuente_precio(db: Session, res: dict) -> str:
         if lp is not None:
             return f"la lista «{lp.nombre}»"
     return "la lista de precios"
-
-
-@router.get("/grupos", response_model=list[GrupoBandejaOut])
-def grupos_bandeja(
-    db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_READ)),
-):
-    """Los grupos de origen para el filtro de la lista, con SUS clientes.
-
-    Versión ligera del directorio de Conexiones (aquel exige el permiso de
-    administrar conexiones y recorre todas las órdenes): esto es solo lo que la
-    bandeja necesita para encadenar filtros — elegir el grupo acota el filtro
-    de cliente a los registrados en él, y el de proyecto a los de esos
-    clientes. Declarado antes de GET /{oc_id} para que "grupos" no intente
-    parsearse como UUID."""
-    from ...models import ClienteExterno
-
-    from sqlalchemy import func
-
-    grupos = (
-        db.query(GrupoWhatsapp)
-        .order_by(GrupoWhatsapp.activo.desc(), GrupoWhatsapp.nombre)
-        .all()
-    )
-    por_jid: dict[str, list] = {}
-    for e in db.query(ClienteExterno).filter(ClienteExterno.sistema == "WHATSAPP"):
-        por_jid.setdefault(e.clave_normalizada, []).append(e.cliente_id)
-    salida = [
-        GrupoBandejaOut(
-            tipo="grupo",
-            clave=g.jid,
-            nombre=g.nombre,
-            activo=g.activo,
-            cliente_ids=por_jid.get(
-                cliente_match.normalizar_clave("WHATSAPP", g.jid), []
-            ),
-        )
-        for g in grupos
-    ]
-    # Lo que entró SIN jid (la conexión de Smart Supply): su origen es el
-    # remitente. Los clientes del bucket salen de las órdenes mismas — es lo
-    # que de verdad ha entrado por ahí, que es lo que el filtro encadena.
-    remitentes = (
-        db.query(
-            OCRecibida.remitente,
-            func.array_agg(func.distinct(OCRecibida.cliente_id)),
-        )
-        .filter(
-            OCRecibida.payload["jid"].astext.is_(None),
-            OCRecibida.remitente.isnot(None),
-        )
-        .group_by(OCRecibida.remitente)
-        .order_by(OCRecibida.remitente)
-        .all()
-    )
-    for nombre, cliente_ids in remitentes:
-        salida.append(GrupoBandejaOut(
-            tipo="remitente",
-            clave=nombre,
-            nombre=nombre,
-            activo=True,
-            cliente_ids=[c for c in (cliente_ids or []) if c is not None],
-        ))
-    return salida
 
 
 @router.get("/{oc_id}", response_model=OCRecibidaDetailOut)
