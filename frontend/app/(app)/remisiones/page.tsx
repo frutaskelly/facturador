@@ -1604,6 +1604,17 @@ export default function RemisionesPage() {
   const [facSending, setFacSending] = useState(false);
   // Facturas timbradas por el último "Facturar": alimenta el aviso con acciones.
   const [timbradasAviso, setTimbradasAviso] = useState<TimbradaInfo[] | null>(null);
+  // Selección dentro del aviso (ticket 86bbynqp7): enviar varias de un golpe.
+  // Arranca con TODAS marcadas — el caso típico es «enviar todas».
+  const [timbradasSel, setTimbradasSel] = useState<Set<string>>(new Set());
+  // Envío masivo de facturas desglosado POR CLIENTE (enviar-lote exige un solo
+  // cliente por correo): un renglón por cliente con sus correos editables.
+  const [facBulkOpen, setFacBulkOpen] = useState(false);
+  const [facBulkRows, setFacBulkRows] = useState<
+    { clienteId: string; nombre: string; facIds: string[]; folios: string[]; correos: string }[]
+  >([]);
+  const [facBulkMensaje, setFacBulkMensaje] = useState("");
+  const [facBulkBusy, setFacBulkBusy] = useState(false);
   const [sendMensaje, setSendMensaje] = useState("");
   const [sending, setSending] = useState(false);
   // Envío masivo desglosado por cliente.
@@ -1644,6 +1655,61 @@ export default function RemisionesPage() {
       toast.error(e instanceof ApiError ? e.message : "No se pudo enviar la factura");
     } finally {
       setFacSending(false);
+    }
+  }
+
+  // «Enviar seleccionadas» del aviso post-timbrado (ticket 86bbynqp7): agrupa
+  // las facturas marcadas por cliente y abre el popup de correos por cliente.
+  function abrirEnviarFacturasLote() {
+    const marcadas = (timbradasAviso ?? []).filter((f) => timbradasSel.has(f.id));
+    if (marcadas.length === 0) return;
+    const byCliente = new Map<string, TimbradaInfo[]>();
+    for (const f of marcadas) {
+      const arr = byCliente.get(f.clienteId) ?? [];
+      arr.push(f);
+      byCliente.set(f.clienteId, arr);
+    }
+    setFacBulkRows([...byCliente.entries()].map(([clienteId, fs]) => ({
+      clienteId,
+      nombre: cliName[clienteId] ?? "—",
+      facIds: fs.map((f) => f.id),
+      folios: fs.map((f) => f.folio),
+      correos: cliEmail[clienteId] ?? "",
+    })));
+    setFacBulkMensaje("");
+    setFacBulkOpen(true);
+  }
+
+  // Un correo por cliente con TODAS sus facturas adjuntas (PDF + XML cada una).
+  // Correos vacíos usan los guardados del cliente (mismo default que el envío
+  // individual); si el cliente no tiene, ese correo falla y se reporta.
+  async function confirmarEnvioFacturasLote() {
+    const mensaje = facBulkMensaje.trim() || undefined;
+    setFacBulkBusy(true);
+    let ok = 0;
+    const fallidos: string[] = [];
+    try {
+      for (const row of facBulkRows) {
+        try {
+          await apiFetch("/api/v1/facturas/enviar-lote", {
+            method: "POST",
+            body: JSON.stringify({
+              ids: row.facIds,
+              to: row.correos.trim() || undefined,
+              mensaje,
+            }),
+          });
+          ok += 1;
+        } catch {
+          fallidos.push(row.nombre);
+        }
+      }
+      const partes = [`Correos enviados: ${ok}`];
+      if (fallidos.length) partes.push(`fallidos: ${fallidos.join(", ")}`);
+      toast[fallidos.length === 0 ? "success" : "error"](partes.join(" · "));
+      if (fallidos.length === 0) setFacBulkOpen(false);
+    } finally {
+      setFacBulkBusy(false);
     }
   }
 
@@ -1996,7 +2062,10 @@ export default function RemisionesPage() {
     toast[borrador === 0 && fallidas === 0 ? "success" : "error"](partes.join(" · "));
     // El documento nuevo YA es una factura: el aviso lo dice y ofrece verla o
     // enviarla aquí mismo (ticket 86bby3tx9) — sin ir a buscarla a /facturas.
-    if (facturas.length > 0) setTimbradasAviso(facturas);
+    if (facturas.length > 0) {
+      setTimbradasAviso(facturas);
+      setTimbradasSel(new Set(facturas.map((f) => f.id)));
+    }
     clearSelection();
     setFacturarSolo(null);
     reload();
@@ -3418,15 +3487,53 @@ export default function RemisionesPage() {
         open={timbradasAviso !== null}
         onClose={() => setTimbradasAviso(null)}
         title="Factura(s) timbrada(s) correctamente"
-        footer={<Button variant="secondary" onClick={() => setTimbradasAviso(null)}>Cerrar</Button>}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setTimbradasAviso(null)}>Cerrar</Button>
+            {/* Envío masivo (ticket 86bbynqp7): con todas marcadas el botón lo
+                dice; el envío agrupa por cliente y confirma correos antes. */}
+            {(timbradasAviso?.length ?? 0) > 0 && (
+              <Button onClick={abrirEnviarFacturasLote} disabled={timbradasSel.size === 0}>
+                <Mail size={16} />
+                {timbradasSel.size === (timbradasAviso?.length ?? 0)
+                  ? "Enviar todas las facturas"
+                  : `Enviar seleccionadas (${timbradasSel.size})`}
+              </Button>
+            )}
+          </>
+        }
       >
         <p className="mb-3 text-sm text-muted">
           El documento generado ya es una <strong>factura fiscal</strong>: puedes verla o
           enviarla desde aquí, sin ir a buscarla al módulo de Facturas.
         </p>
+        {(timbradasAviso?.length ?? 0) > 1 && (
+          <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-border"
+              checked={timbradasSel.size === (timbradasAviso?.length ?? 0)}
+              onChange={(e) => setTimbradasSel(
+                e.target.checked ? new Set((timbradasAviso ?? []).map((f) => f.id)) : new Set(),
+              )}
+            />
+            Seleccionar todas
+          </label>
+        )}
         <ul className="space-y-2">
           {(timbradasAviso ?? []).map((f) => (
             <li key={f.id} className="flex flex-wrap items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                aria-label={`Incluir ${f.folio} en el envío`}
+                className="h-4 w-4 rounded border-border"
+                checked={timbradasSel.has(f.id)}
+                onChange={(e) => setTimbradasSel((s) => {
+                  const n = new Set(s);
+                  if (e.target.checked) n.add(f.id); else n.delete(f.id);
+                  return n;
+                })}
+              />
               <span className="font-medium tabular-nums">{f.folio}</span>
               <span className="min-w-0 flex-1 truncate text-muted">{cliName[f.clienteId] ?? ""}</span>
               <Button
@@ -3441,6 +3548,47 @@ export default function RemisionesPage() {
             </li>
           ))}
         </ul>
+      </Modal>
+
+      {/* Correos por cliente del envío masivo de facturas (ticket 86bbynqp7):
+          cada cliente recibe UN correo con todas sus facturas adjuntas. Va
+          después del aviso para pintarse encima cuando se abren juntos. */}
+      <Modal
+        open={facBulkOpen}
+        onClose={() => { if (!facBulkBusy) setFacBulkOpen(false); }}
+        title="Enviar facturas por correo"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setFacBulkOpen(false)} disabled={facBulkBusy}>Cancelar</Button>
+            <Button onClick={() => { void confirmarEnvioFacturasLote(); }} disabled={facBulkBusy}>
+              <Mail size={16} /> {facBulkBusy ? "Enviando…" : "Enviar"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted">
+            Un correo por cliente, con el <strong>PDF y el XML</strong> de cada una de sus facturas adjuntos.
+            Con el correo vacío se usan los guardados del cliente.
+          </p>
+          {facBulkRows.map((row, i) => (
+            <div key={row.clienteId} className="rounded-lg border border-border p-3">
+              <div className="mb-1 flex items-center justify-between gap-2 text-sm">
+                <span className="min-w-0 truncate font-medium">{row.nombre}</span>
+                <span className="shrink-0 text-muted">{row.folios.join(", ")}</span>
+              </div>
+              <Input
+                aria-label={`Correos de ${row.nombre}`}
+                placeholder="cliente@ejemplo.com — separa varios con coma o espacio"
+                value={row.correos}
+                onChange={(e) => setFacBulkRows((rows) => rows.map((r, j) => (j === i ? { ...r, correos: e.target.value } : r)))}
+              />
+            </div>
+          ))}
+          <Field label="Mensaje (opcional)" hint="Se incluirá arriba del cuerpo de todos los correos">
+            <Textarea rows={2} value={facBulkMensaje} onChange={(e) => setFacBulkMensaje(e.target.value)} />
+          </Field>
+        </div>
       </Modal>
 
       {/* Enviar la factura por correo — mismo formato que el envío de remisión;
