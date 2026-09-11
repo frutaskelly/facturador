@@ -12,7 +12,7 @@ import { ArrowLeft, FileSpreadsheet } from "lucide-react";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
@@ -86,20 +86,37 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
 
   const cols: Column<Doc>[] = [
     { header: "Sem", className: "text-muted",
+      sortValue: (d) => d.semana ?? -1,
+      exportValue: (d) => (d.semana != null ? `SEM ${d.semana}` : ""),
       cell: (d) => d.semana != null ? `SEM ${d.semana}` : "—" },
-    { header: "Factura", cell: (d) => <span className="font-medium">{d.serie}{d.folio}</span> },
-    { header: "Proyecto", className: "text-muted", cell: (d) => d.proyecto ?? "—" },
-    { header: "Fecha", cell: (d) => fmtDate(d.fecha) },
-    { header: "Vence", cell: (d) => fmtDate(d.vencimiento) },
+    { header: "Factura",
+      sortValue: (d) => `${d.serie}${String(d.folio).padStart(10, "0")}`,
+      exportValue: (d) => `${d.serie}${d.folio}`,
+      cell: (d) => <span className="font-medium">{d.serie}{d.folio}</span> },
+    { header: "Proyecto", className: "text-muted",
+      sortValue: (d) => d.proyecto ?? "",
+      exportValue: (d) => d.proyecto ?? "",
+      cell: (d) => d.proyecto ?? "—" },
+    { header: "Fecha", sortValue: (d) => d.fecha, exportValue: (d) => d.fecha,
+      cell: (d) => fmtDate(d.fecha) },
+    { header: "Vence", sortValue: (d) => d.vencimiento, exportValue: (d) => d.vencimiento,
+      cell: (d) => fmtDate(d.vencimiento) },
     { header: "Días vencida", className: "text-right tabular-nums",
+      sortValue: (d) => d.dias_vencida, exportValue: (d) => d.dias_vencida,
       cell: (d) => d.dias_vencida > 0
         ? <span className="text-danger">{d.dias_vencida}</span>
         : <span className="text-muted">Por vencer</span> },
-    { header: "Total", className: "text-right tabular-nums", cell: (d) => fmtMoney(d.total) },
+    { header: "Total", className: "text-right tabular-nums",
+      sortValue: (d) => Number(d.total), exportValue: (d) => Number(d.total),
+      cell: (d) => fmtMoney(d.total) },
     { header: "Abonos", className: "text-right tabular-nums",
+      sortValue: (d) => Number(d.total) - Number(d.saldo_insoluto),
+      exportValue: (d) => Number(d.total) - Number(d.saldo_insoluto),
       cell: (d) => Number(d.total) > Number(d.saldo_insoluto)
         ? fmtMoney(Number(d.total) - Number(d.saldo_insoluto)) : "—" },
-    { header: "Saldo", className: "text-right tabular-nums font-medium", cell: (d) => fmtMoney(d.saldo_insoluto) },
+    { header: "Saldo", className: "text-right tabular-nums font-medium",
+      sortValue: (d) => Number(d.saldo_insoluto), exportValue: (d) => Number(d.saldo_insoluto),
+      cell: (d) => fmtMoney(d.saldo_insoluto) },
   ];
 
   return (
@@ -146,19 +163,19 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
         ))}
       </div>
 
-      <Card>
-        <div className="mb-3 flex items-center justify-between">
-          <div className="text-sm font-medium">
-            Facturas PPD con saldo{serie ? ` · serie ${serie}` : ""}
-          </div>
-          <div className="text-sm">Saldo total: <span className="font-semibold tabular-nums">{fmtMoney(data.saldo_total)}</span></div>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-sm font-medium">
+          Facturas PPD con saldo{serie ? ` · serie ${serie}` : ""}
         </div>
-        {data.facturas.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted">El cliente no tiene saldos pendientes.</div>
-        ) : (
-          <DataTable rows={data.facturas} rowKey={(d) => d.factura_id} columns={cols} empty="Sin saldos" />
-        )}
-      </Card>
+        <div className="text-sm">Saldo total: <span className="font-semibold tabular-nums">{fmtMoney(data.saldo_total)}</span></div>
+      </div>
+      <DataTableSmart
+        rows={data.facturas}
+        rowKey={(d) => d.factura_id}
+        columns={cols}
+        storageKey="estado-cuenta-facturas"
+        empty="El cliente no tiene saldos pendientes."
+      />
     </div>
   );
 }
