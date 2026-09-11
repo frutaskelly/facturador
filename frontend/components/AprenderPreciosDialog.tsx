@@ -155,7 +155,7 @@ export function AprenderPreciosDialog({
   // este diálogo existe para hacer visible, se tome una vez o treinta.
   const opcionesDestino = (
     <>
-      <option value={SOLO_DOCUMENTO}>Solo en esta remisión</option>
+      <option value={SOLO_DOCUMENTO}>Solo en esta remisión (respetar precio de la OC)</option>
       {/* Nombra el destino REAL: con sucursal el precio especial es
           de esa plaza, no del cliente entero. */}
       <option value={OVERRIDE}>
@@ -249,8 +249,20 @@ export function AprenderPreciosDialog({
           <Button variant="secondary" onClick={onCancel} disabled={guardando}>
             Volver a la captura
           </Button>
-          <Button onClick={() => void aplicar()} disabled={guardando}>
-            {guardando ? "Guardando…" : hayAlgo ? "Guardar precios y continuar" : "Continuar sin guardar"}
+          {/* El camino explícito del ticket 86bbyw35w: los precios vienen
+              negociados SOLO para esta orden — se usan en la remisión y no se
+              escribe nada en listas ni precios especiales, aunque abajo se
+              hubiera elegido algún destino. */}
+          <Button
+            variant="secondary"
+            onClick={() => { setDestino({}); onDone(); }}
+            disabled={guardando}
+            title="Usa estos precios SOLO en esta remisión: no crea ni actualiza listas ni precios especiales"
+          >
+            Respetar precios de la OC
+          </Button>
+          <Button onClick={() => void aplicar()} disabled={guardando || !hayAlgo}>
+            {guardando ? "Guardando…" : "Guardar precios y continuar"}
           </Button>
         </>
       }
@@ -260,6 +272,11 @@ export function AprenderPreciosDialog({
           La remisión se va a cobrar con lo que capturaste, elijas lo que elijas. Lo que se
           pregunta aquí es si además <b>se queda guardado</b> — eso cambia el catálogo de
           precios desde esta pantalla, y por eso no se hace solo.
+        </p>
+        <p className="text-sm text-muted">
+          ¿Los precios vienen negociados <b>solo para esta orden de compra</b>?{" "}
+          <b>«Respetar precios de la OC»</b> los usa en la remisión y no toca ninguna lista
+          ni precio especial.
         </p>
 
         {lineas.length > 1 && (
