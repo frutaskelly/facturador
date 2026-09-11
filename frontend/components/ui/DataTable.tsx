@@ -151,6 +151,23 @@ function comparable<T>(col: Column<T>, row: T): string | number | null {
 
 /** Valor textual para exportar: `exportValue` → `sortValue` → `cell` (si es
  *  texto/número). JSX sin un accessor explícito sale vacío. */
+/** Texto plano de un nodo React: lo que el usuario VE en la celda.
+
+    Es el último recurso de `exportText` para columnas sin `exportValue` ni
+    `sortValue` cuya celda es JSX (un Badge, un span con title). Sin esto, el
+    filtro de valores del encabezado listaba «(vacío)» para toda la columna y
+    el CSV exportaba vacío (ticket 86bbyeny7: Folio/Cliente/Estado en
+    Facturas). */
+function nodeText(n: unknown): string {
+  if (n == null || typeof n === "boolean") return "";
+  if (typeof n === "string" || typeof n === "number") return String(n);
+  if (Array.isArray(n)) return n.map(nodeText).filter(Boolean).join(" ");
+  if (typeof n === "object" && "props" in (n as { props?: { children?: unknown } })) {
+    return nodeText((n as { props?: { children?: unknown } }).props?.children);
+  }
+  return "";
+}
+
 function exportText<T>(col: Column<T>, row: T): string {
   const raw = col.exportValue
     ? col.exportValue(row)
@@ -158,7 +175,8 @@ function exportText<T>(col: Column<T>, row: T): string {
       ? col.sortValue(row)
       : col.cell(row);
   if (raw == null) return "";
-  return typeof raw === "number" || typeof raw === "string" ? String(raw) : "";
+  if (typeof raw === "number" || typeof raw === "string") return String(raw);
+  return nodeText(raw).replace(/\s+/g, " ").trim();
 }
 
 /** Escapa un campo CSV (comillas dobles, comas, saltos de línea). */
