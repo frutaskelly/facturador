@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from ...core.config import settings
 from ...core.rbac import AuthContext, get_tenant_db, invalidate_auth_cache, require_permission
-from ...models import Cliente, ClienteExterno, Producto, ProductoCliente, Sucursal
+from ...models import Cliente, ClienteExterno, Producto, ProductoCliente, Proyecto, Serie, Sucursal
 from ...schemas.cliente import ClienteCreate, ClienteOut, ClienteUpdate
 from ...schemas.cliente_externo import (
     ClienteExternoCreate,
@@ -328,6 +328,14 @@ def crear_externo(
             raise HTTPException(
                 status_code=422, detail="El cliente de la equivalencia no se surte de esa sucursal"
             )
+    # La serie del grupo y el proyecto de la fila también son FKs capturadas
+    # desde la pantalla: se validan igual que la sucursal.
+    if payload.serie_factura_id is not None:
+        get_or_404(db, Serie, payload.serie_factura_id)
+    if payload.serie_remision_id is not None:
+        get_or_404(db, Serie, payload.serie_remision_id)
+    if payload.proyecto_id is not None:
+        get_or_404(db, Proyecto, payload.proyecto_id)
     # Una SUGERIDA no puede tocar una CONFIRMADA que ya puso una persona. Si se
     # intenta, la respuesta tiene que decirlo: devolver 201 con el cliente ANTERIOR
     # haría creer que quedó registrada una equivalencia que no se registró.
@@ -351,6 +359,7 @@ def crear_externo(
         sucursal_id=payload.sucursal_id,
         serie_factura_id=payload.serie_factura_id,
         serie_remision_id=payload.serie_remision_id,
+        proyecto_id=payload.proyecto_id,
         origen=payload.origen,
         confianza=payload.confianza,
         user_id=ctx.user_id,

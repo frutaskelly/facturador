@@ -381,6 +381,7 @@ def aprender(
     sucursal_id=_SIN_TOCAR,
     serie_factura_id=_SIN_TOCAR,
     serie_remision_id=_SIN_TOCAR,
+    proyecto_id=_SIN_TOCAR,
     origen: str = "MANUAL",
     confianza: str = "CONFIRMADA",
     user_id=None,
@@ -425,6 +426,8 @@ def aprender(
             existing.serie_factura_id = serie_factura_id
         if serie_remision_id is not _SIN_TOCAR:
             existing.serie_remision_id = serie_remision_id
+        if proyecto_id is not _SIN_TOCAR:
+            existing.proyecto_id = proyecto_id
         existing.origen = origen
         existing.confianza = confianza
         db.flush()
@@ -439,6 +442,7 @@ def aprender(
         sucursal_id=None if sucursal_id is _SIN_TOCAR else sucursal_id,
         serie_factura_id=None if serie_factura_id is _SIN_TOCAR else serie_factura_id,
         serie_remision_id=None if serie_remision_id is _SIN_TOCAR else serie_remision_id,
+        proyecto_id=None if proyecto_id is _SIN_TOCAR else proyecto_id,
         origen=origen,
         confianza=confianza,
         created_by=user_id,
@@ -460,6 +464,8 @@ def aprender(
                 existing.serie_factura_id = serie_factura_id
             if serie_remision_id is not _SIN_TOCAR:
                 existing.serie_remision_id = serie_remision_id
+            if proyecto_id is not _SIN_TOCAR:
+                existing.proyecto_id = proyecto_id
             existing.origen = origen
             existing.confianza = confianza
             db.flush()

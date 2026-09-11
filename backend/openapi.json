@@ -1867,6 +1867,18 @@
       "title": "Origen",
       "type": "string"
      },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
+     },
      "serie_factura_id": {
       "anyOf": [
        {
@@ -1967,6 +1979,18 @@
      "origen": {
       "title": "Origen",
       "type": "string"
+     },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
      },
      "serie_factura_id": {
       "anyOf": [
