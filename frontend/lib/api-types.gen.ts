@@ -4638,6 +4638,8 @@ export interface components {
              * @enum {string}
              */
             origen: "MANUAL" | "BOT" | "IMPORT" | "IA";
+            /** Proyecto Id */
+            proyecto_id?: string | null;
             /** Serie Factura Id */
             serie_factura_id?: string | null;
             /** Serie Remision Id */
@@ -4677,6 +4679,8 @@ export interface components {
             notas?: string | null;
             /** Origen */
             origen: string;
+            /** Proyecto Id */
+            proyecto_id?: string | null;
             /** Serie Factura Id */
             serie_factura_id?: string | null;
             /** Serie Remision Id */

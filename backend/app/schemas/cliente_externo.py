@@ -21,6 +21,9 @@ class ClienteExternoCreate(BaseModel):
     # usa ESE grupo para ESE cliente. Vacío = hereda la del cliente.
     serie_factura_id: Optional[uuid.UUID] = None
     serie_remision_id: Optional[uuid.UUID] = None
+    # Solo en filas PROYECTO: el proyecto del catálogo con el que se etiqueta
+    # el documento (y con él, sus listas de precios negociadas).
+    proyecto_id: Optional[uuid.UUID] = None
     origen: Origen = "MANUAL"
     confianza: Confianza = "CONFIRMADA"
     notas: Optional[str] = None
@@ -35,6 +38,7 @@ class ClienteExternoOut(ORMModel):
     sucursal_id: Optional[uuid.UUID] = None
     serie_factura_id: Optional[uuid.UUID] = None
     serie_remision_id: Optional[uuid.UUID] = None
+    proyecto_id: Optional[uuid.UUID] = None
     origen: str
     confianza: str
     notas: Optional[str] = None

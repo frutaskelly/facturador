@@ -24,7 +24,7 @@ import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { Page } from "@/lib/hooks";
-import type { Cliente, ClienteExterno, SistemaExterno, Sucursal } from "@/lib/types";
+import type { Cliente, ClienteExterno, Proyecto, Serie, SistemaExterno, Sucursal } from "@/lib/types";
 
 const WRITE = "cliente:gestionar";
 
@@ -46,11 +46,18 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [rows, setRows] = useState<ClienteExterno[] | null>(null);
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+  // Para las filas de grupo (WHATSAPP) y de proyecto: la serie que usa ese
+  // grupo y el proyecto con el que se etiqueta el documento (ticket 86bbyw55x).
+  const [series, setSeries] = useState<Serie[]>([]);
+  const [proyectos, setProyectos] = useState<Proyecto[]>([]);
   const [error, setError] = useState(false);
   const [abierto, setAbierto] = useState(false);
   const [sistema, setSistema] = useState<SistemaExterno>("RFC");
   const [clave, setClave] = useState("");
   const [sucursalId, setSucursalId] = useState("");
+  const [serieRemId, setSerieRemId] = useState("");
+  const [serieFacId, setSerieFacId] = useState("");
+  const [proyectoId, setProyectoId] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [aBorrar, setABorrar] = useState<ClienteExterno | null>(null);
 
@@ -65,8 +72,27 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
     apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${id}&limit=500`)
       .then((p) => setSucursales(p.items))
       .catch(() => undefined);
+    // Sin permiso de series/proyectos los selects simplemente no se llenan;
+    // la equivalencia se guarda igual sin esos campos.
+    apiFetch<Page<Serie>>(`/api/v1/series?activa=true&limit=200`)
+      .then((p) => setSeries(p.items))
+      .catch(() => undefined);
+    apiFetch<Page<Proyecto>>(`/api/v1/proyectos?activo=true&limit=500`)
+      .then((p) => setProyectos(p.items))
+      .catch(() => undefined);
     reload();
   }, [id, reload]);
+
+  const seriesRem = series.filter((s) => s.tipo_documento === "REMISION");
+  const seriesFac = series.filter((s) => s.tipo_documento === "FACTURA");
+  // Los proyectos de ESTE cliente primero (los genéricos después): es lo que
+  // casi siempre se busca al etiquetar por proyecto.
+  const proyectosOrden = [...proyectos].sort((a, b) =>
+    Number(b.cliente_id === id) - Number(a.cliente_id === id) || a.nombre.localeCompare(b.nombre));
+  const serieNombre = (sid?: string | null) => {
+    const s = series.find((x) => x.id === sid);
+    return s ? `${s.codigo}${s.nombre ? ` · ${s.nombre}` : ""}` : null;
+  };
 
   const meta = SISTEMAS.find((s) => s.valor === sistema)!;
 
@@ -83,7 +109,15 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
           sistema,
           clave: clave.trim(),
           cliente_id: id,
-          sucursal_id: sistema === "UBICACION" && sucursalId ? sucursalId : null,
+          // UBICACION: la plaza del punto de entrega. WHATSAPP: la plaza POR
+          // DEFECTO del grupo (la que toman sus pedidos si el documento no
+          // dice otra cosa).
+          sucursal_id: (sistema === "UBICACION" || sistema === "WHATSAPP") && sucursalId ? sucursalId : null,
+          // Solo en grupos: la serie de folios que usa ESE grupo.
+          serie_remision_id: sistema === "WHATSAPP" && serieRemId ? serieRemId : null,
+          serie_factura_id: sistema === "WHATSAPP" && serieFacId ? serieFacId : null,
+          // Solo en filas de proyecto: con qué proyecto se etiqueta el documento.
+          proyecto_id: sistema === "PROYECTO" && proyectoId ? proyectoId : null,
           confianza: "CONFIRMADA",
         }),
       });
@@ -91,6 +125,9 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
       setAbierto(false);
       setClave("");
       setSucursalId("");
+      setSerieRemId("");
+      setSerieFacId("");
+      setProyectoId("");
       reload();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo guardar");
@@ -123,6 +160,26 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
         r.sucursal_id
           ? sucursales.find((s) => s.id === r.sucursal_id)?.nombre ?? "—"
           : <span className="text-muted">—</span>,
+    },
+    {
+      // Lo demás que la fila decide: la serie del grupo (WHATSAPP) y el
+      // proyecto de la etiqueta (PROYECTO). Es la parte que antes solo se
+      // podía capturar por API (ticket 86bbyw55x).
+      header: "Serie / proyecto",
+      cell: (r) => {
+        const partes: string[] = [];
+        const sr = serieNombre(r.serie_remision_id);
+        const sf = serieNombre(r.serie_factura_id);
+        if (sr) partes.push(`Rem: ${sr}`);
+        if (sf) partes.push(`Fac: ${sf}`);
+        if (r.proyecto_id) {
+          const p = proyectos.find((x) => x.id === r.proyecto_id);
+          if (p) partes.push(`Proyecto: ${p.nombre}`);
+        }
+        return partes.length
+          ? <span className="text-xs">{partes.join(" · ")}</span>
+          : <span className="text-muted">—</span>;
+      },
     },
     {
       header: "Confianza",
@@ -217,6 +274,51 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
                 {sucursales.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.codigo ? `${s.codigo} · ${s.nombre}` : s.nombre}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
+          {/* Un grupo puede decidir más que el cliente (ticket 86bbyw55x): su
+              plaza por defecto y su serie de folios. Vacío = hereda lo del
+              cliente/vínculo, como siempre. */}
+          {sistema === "WHATSAPP" ? (
+            <>
+              <Field label="Sucursal por defecto del grupo" hint="La plaza que toman sus pedidos cuando el documento no dice otra cosa. Vacío = se resuelve como siempre">
+                <Select value={sucursalId} onChange={(e) => setSucursalId(e.target.value)}>
+                  <option value="">— Sin sucursal por defecto —</option>
+                  {sucursales.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.codigo ? `${s.codigo} · ${s.nombre}` : s.nombre}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Serie de remisión del grupo" hint="Los folios de los pedidos de este grupo. Vacío = la serie del cliente/vínculo">
+                <Select value={serieRemId} onChange={(e) => setSerieRemId(e.target.value)}>
+                  <option value="">— Heredar la del cliente —</option>
+                  {seriesRem.map((s) => (
+                    <option key={s.id} value={s.id}>{s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Serie de factura del grupo" hint="Con qué serie se facturan sus pedidos. Vacío = la serie del cliente/vínculo">
+                <Select value={serieFacId} onChange={(e) => setSerieFacId(e.target.value)}>
+                  <option value="">— Heredar la del cliente —</option>
+                  {seriesFac.map((s) => (
+                    <option key={s.id} value={s.id}>{s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}</option>
+                  ))}
+                </Select>
+              </Field>
+            </>
+          ) : null}
+          {sistema === "PROYECTO" ? (
+            <Field label="Proyecto del catálogo" hint="El documento se etiqueta con él (y con sus listas de precios negociadas)">
+              <Select value={proyectoId} onChange={(e) => setProyectoId(e.target.value)}>
+                <option value="">— Solo identificar al cliente —</option>
+                {proyectosOrden.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombre}{p.cliente_id === id ? "" : p.cliente_nombre ? ` (${p.cliente_nombre})` : ""}
                   </option>
                 ))}
               </Select>

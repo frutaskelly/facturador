@@ -766,6 +766,7 @@ export type ClienteExterno = {
   sucursal_id?: string | null;
   serie_factura_id?: string | null;
   serie_remision_id?: string | null;
+  proyecto_id?: string | null;
   origen: "MANUAL" | "BOT" | "IMPORT" | "IA";
   confianza: "CONFIRMADA" | "SUGERIDA";
   notas?: string | null;
