@@ -221,6 +221,52 @@ function norm(s: string): string {
   return s.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
+// ── filtro por condición (estilo Excel: «Contiene», «Mayor que»…) ──
+type CondOp = "contiene" | "no_contiene" | "igual" | "distinto" | "empieza" | "termina" | "mayor" | "menor";
+type ColCond = { op: CondOp; val: string };
+const COND_OPS: { op: CondOp; label: string }[] = [
+  { op: "contiene", label: "Contiene" },
+  { op: "no_contiene", label: "No contiene" },
+  { op: "igual", label: "Es igual a" },
+  { op: "distinto", label: "Es distinto de" },
+  { op: "empieza", label: "Empieza con" },
+  { op: "termina", label: "Termina con" },
+  { op: "mayor", label: "Mayor que" },
+  { op: "menor", label: "Menor que" },
+];
+
+/** Número dentro de un texto de celda («$1,234.50» → 1234.5) o null si no hay. */
+function parseNum(s: string): number | null {
+  const limpio = s.replace(/[^0-9.,-]/g, "").replace(/,/g, "");
+  if (!/[0-9]/.test(limpio)) return null;
+  const n = Number(limpio);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** ¿El texto de la celda cumple la condición? Compara normalizado (sin
+ *  acentos/mayúsculas); «mayor/menor» intenta numérico primero (para importes
+ *  con `$` y comas) y cae a orden alfabético si no hay número. */
+function cumpleCond(texto: string, c: ColCond): boolean {
+  const t = norm(texto);
+  const v = norm(c.val.trim());
+  switch (c.op) {
+    case "contiene": return t.includes(v);
+    case "no_contiene": return !t.includes(v);
+    case "igual": return t === v;
+    case "distinto": return t !== v;
+    case "empieza": return t.startsWith(v);
+    case "termina": return t.endsWith(v);
+    case "mayor":
+    case "menor": {
+      const a = parseNum(texto);
+      const b = parseNum(c.val);
+      if (a != null && b != null) return c.op === "mayor" ? a > b : a < b;
+      const cmp = texto.localeCompare(c.val, "es", { numeric: true, sensitivity: "base" });
+      return c.op === "mayor" ? cmp > 0 : cmp < 0;
+    }
+  }
+}
+
 export type DataTableProps<T> = {
   columns: Column<T>[];
   rows: T[];
@@ -275,10 +321,11 @@ export type DataTableProps<T> = {
    *  folio viejo «no aparece» (ticket 86bbxx1cf). */
   searchValue?: string;
   onSearchChange?: (v: string) => void;
-  /** Filtros de valores por columna, estilo Excel (ticket 86bby31f9): un
-   *  embudo en cada encabezado abre la lista de valores presentes y se
-   *  combinan entre columnas (Y). Filtran las filas CARGADAS: refinan lo que
-   *  los filtros de servidor (fecha, cliente, estado…) ya trajeron. */
+  /** Filtros por columna, estilo Excel (ticket 86bby31f9): un embudo en cada
+   *  encabezado abre el diálogo de autofiltro — ordenar asc/desc, condición
+   *  («Contiene», «Mayor que»…), buscador y la lista de valores con
+   *  «(Seleccionar todo)». Se combinan entre columnas (Y). Filtran las filas
+   *  CARGADAS: refinan lo que los filtros de servidor ya trajeron. */
   headerFilters?: boolean;
   /** Pagina del lado del cliente (sobre lo filtrado) con selector de filas/página. */
   paginated?: boolean;
@@ -523,11 +570,20 @@ export function DataTable<T>({
   const sortedRows = useMemo(() => {
     if (!sort) return rows;
     const entry = byId[sort.id];
-    if (!entry?.col.sortable) return rows;
+    if (!entry) return rows;
     const factor = sort.dir === "asc" ? 1 : -1;
+    // El popup de filtro permite ordenar CUALQUIER columna (no solo las
+    // `sortable`): si la celda es JSX sin `sortValue`, compara por el texto
+    // visible (el mismo que exporta/filtra).
+    const valorDe = (row: T): string | number | null => {
+      const v = comparable(entry.col, row);
+      if (v != null) return v;
+      const t = exportText(entry.col, row);
+      return t === "" ? null : t;
+    };
     return [...rows].sort((a, b) => {
-      const va = comparable(entry.col, a);
-      const vb = comparable(entry.col, b);
+      const va = valorDe(a);
+      const vb = valorDe(b);
       if (va == null && vb == null) return 0;
       if (va == null) return 1;
       if (vb == null) return -1;
@@ -543,22 +599,53 @@ export function DataTable<T>({
   // En modo servidor el texto vive en el padre; el de aquí queda sin uso.
   const searchText = onSearchChange ? (searchValue ?? "") : search;
 
-  // ── filtros de valores por columna (estilo Excel) ──
-  // {idColumna: valores marcados}; sin entrada = columna sin filtro.
+  // ── filtros por columna (autofiltro estilo Excel) ──
+  // Valores marcados por columna. SIN entrada = columna sin filtro (todo se
+  // ve); presente = solo esos valores ([] = ninguno, como des-marcar
+  // «(Seleccionar todo)» en Excel). Aparte, una condición opcional por
+  // columna («Contiene x», «Mayor que n»…). Ambos se combinan con Y.
   const [colFilters, setColFilters] = useState<Record<string, string[]>>({});
+  const [colConds, setColConds] = useState<Record<string, ColCond>>({});
   const [filterOpen, setFilterOpen] = useState<string | null>(null);
-  const hayColFilters = Object.values(colFilters).some((v) => v.length > 0);
+  // El popup va en `position: fixed` (como RowOverflowMenu): el contenedor de
+  // la tabla tiene overflow y lo recortaría — p. ej. al filtrar a cero filas,
+  // la tabla se encoge y cortaba la lista justo cuando hay que re-marcar.
+  const [filterPos, setFilterPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const filterPopRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!filterOpen) return;
+    // Cierra al hacer scroll FUERA del popup (la lista interna sí scrollea);
+    // perdona el primer instante, igual que el menú ⋮ (ver nota ahí).
+    const abiertoEn = Date.now();
+    const alScroll = (e: Event) => {
+      if (filterPopRef.current?.contains(e.target as Node)) return;
+      if (Date.now() - abiertoEn > 250) setFilterOpen(null);
+    };
+    const alResize = () => setFilterOpen(null);
+    window.addEventListener("scroll", alScroll, true);
+    window.addEventListener("resize", alResize);
+    return () => {
+      window.removeEventListener("scroll", alScroll, true);
+      window.removeEventListener("resize", alResize);
+    };
+  }, [filterOpen]);
+  const hayColFilters = Object.keys(colFilters).length > 0 || Object.keys(colConds).length > 0;
   const filteredRows = useMemo(() => {
     const fn = rowFilterRef.current;
     let base = fn ? sortedRows.filter((row) => fn(row)) : sortedRows;
     // Filtros por columna: Y entre columnas, O entre los valores de una misma.
-    const activos = Object.entries(colFilters).filter(([, v]) => v.length > 0);
-    if (activos.length > 0) {
+    const activos = Object.entries(colFilters);
+    const conds = Object.entries(colConds);
+    if (activos.length > 0 || conds.length > 0) {
       const porId = new Map(cols.map((c) => [c.id, c.col]));
       base = base.filter((row) =>
         activos.every(([id, vals]) => {
           const col = porId.get(id);
           return col ? vals.includes(exportText(col, row)) : true;
+        }) &&
+        conds.every(([id, c]) => {
+          const col = porId.get(id);
+          return col ? cumpleCond(exportText(col, row), c) : true;
         }),
       );
     }
@@ -572,7 +659,28 @@ export function DataTable<T>({
     // `rowFilter` entra por ref + `rowFilterKey`: como arrow inline cambiaría
     // de identidad en cada render y recalcularía este memo siempre.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedRows, search, cols, rowFilterKey, onSearchChange, colFilters]);
+  }, [sortedRows, search, cols, rowFilterKey, onSearchChange, colFilters, colConds]);
+
+  // Filas de referencia para la LISTA de valores del popup: lo cargado, con el
+  // filtro externo y los filtros de las DEMÁS columnas aplicados (como Excel:
+  // cada autofiltro lista lo que queda visible bajo los otros).
+  function baseParaFiltro(excludeId: string): T[] {
+    const fn = rowFilterRef.current;
+    const base = fn ? sortedRows.filter((r) => fn(r)) : sortedRows;
+    const porId = new Map(cols.map((c) => [c.id, c.col]));
+    return base.filter((row) =>
+      Object.entries(colFilters).every(([cid, vals]) => {
+        if (cid === excludeId) return true;
+        const col = porId.get(cid);
+        return col ? vals.includes(exportText(col, row)) : true;
+      }) &&
+      Object.entries(colConds).every(([cid, c]) => {
+        if (cid === excludeId) return true;
+        const col = porId.get(cid);
+        return col ? cumpleCond(exportText(col, row), c) : true;
+      }),
+    );
+  }
 
   // ── selección: derivados + notificación al padre ──
   // Objetos seleccionados: todas las filas (de `rows`) cuya clave esté marcada.
@@ -655,7 +763,7 @@ export function DataTable<T>({
   // el tamaño de página
   useEffect(() => {
     setPageIndex(0);
-  }, [search, searchValue, pageSize, rowFilterKey, colFilters]);
+  }, [search, searchValue, pageSize, rowFilterKey, colFilters, colConds]);
 
   function toggleSort(id: string) {
     setSort((s) => {
@@ -738,28 +846,52 @@ export function DataTable<T>({
   const customized = order.length > 0 || hidden.length > 0 || Object.keys(widths).length > 0 || actionOrder.length > 0 || actionHidden.length > 0;
   const hasToolbar = searchable || columnsMenu || exportable;
 
+  // Quita una entrada de un record de filtros (dejar la clave con [] ya no es
+  // «sin filtro»: significa «ningún valor», como en Excel).
+  function sinClave<V>(f: Record<string, V>, id: string): Record<string, V> {
+    const rest = { ...f };
+    delete rest[id];
+    return rest;
+  }
+
   // Chips de los filtros por columna activos + «Limpiar todos» (86bby31f9.7)
   const chipsFiltros = hayColFilters ? (
     <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-      {Object.entries(colFilters)
-        .filter(([, v]) => v.length > 0)
-        .map(([id, vals]) => {
-          const col = cols.find((c) => c.id === id)?.col;
-          return (
-            <span key={id} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1">
-              <b>{col?.header ?? id}:</b> {vals.slice(0, 3).join(", ")}{vals.length > 3 ? ` +${vals.length - 3}` : ""}
-              <button
-                type="button"
-                aria-label={`Quitar filtro de ${col?.header ?? id}`}
-                className="text-muted hover:text-danger"
-                onClick={() => setColFilters((f) => ({ ...f, [id]: [] }))}
-              >
-                ×
-              </button>
-            </span>
-          );
-        })}
-      <button type="button" className="text-accent hover:underline" onClick={() => setColFilters({})}>
+      {Object.entries(colFilters).map(([id, vals]) => {
+        const col = cols.find((c) => c.id === id)?.col;
+        return (
+          <span key={`v-${id}`} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1">
+            <b>{col?.header ?? id}:</b>{" "}
+            {vals.length === 0 ? "(ninguno)" : <>{vals.slice(0, 3).join(", ")}{vals.length > 3 ? ` +${vals.length - 3}` : ""}</>}
+            <button
+              type="button"
+              aria-label={`Quitar filtro de ${col?.header ?? id}`}
+              className="text-muted hover:text-danger"
+              onClick={() => setColFilters((f) => sinClave(f, id))}
+            >
+              ×
+            </button>
+          </span>
+        );
+      })}
+      {Object.entries(colConds).map(([id, c]) => {
+        const col = cols.find((cc) => cc.id === id)?.col;
+        const label = COND_OPS.find((o) => o.op === c.op)?.label ?? c.op;
+        return (
+          <span key={`c-${id}`} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1">
+            <b>{col?.header ?? id}:</b> {label.toLowerCase()} «{c.val}»
+            <button
+              type="button"
+              aria-label={`Quitar condición de ${col?.header ?? id}`}
+              className="text-muted hover:text-danger"
+              onClick={() => setColConds((f) => sinClave(f, id))}
+            >
+              ×
+            </button>
+          </span>
+        );
+      })}
+      <button type="button" className="text-accent hover:underline" onClick={() => { setColFilters({}); setColConds({}); }}>
         Limpiar todos los filtros
       </button>
     </div>
@@ -934,8 +1066,9 @@ export function DataTable<T>({
               {renderCols.map(({ col, id }, ci) => {
                 const active = sort?.id === id;
                 const Icon = active ? (sort!.dir === "asc" ? ArrowUp : ArrowDown) : ChevronsUpDown;
-                const fVals = colFilters[id] ?? [];
-                const fActivo = fVals.length > 0;
+                const fVals = colFilters[id];
+                const fCond = colConds[id];
+                const fActivo = fVals != null || fCond != null;
                 // En modo Excel (con anchos) todas las columnas se pueden
                 // redimensionar, incluida la última (la tabla hace scroll). Sin
                 // anchos aún, no tiene sentido en la última (comprimiría).
@@ -957,14 +1090,27 @@ export function DataTable<T>({
                         <Icon size={13} className={active ? "shrink-0" : "shrink-0 opacity-40"} />
                       </button>
                     ) : (
-                      <span className="block truncate">{col.header}</span>
+                      <span className="inline-flex max-w-full items-center gap-1">
+                        <span className="truncate">{col.header}</span>
+                        {/* Orden aplicado desde el popup en una columna sin
+                            `sortable`: sin este ícono no habría ninguna seña. */}
+                        {active && <Icon size={13} className="shrink-0" />}
+                      </span>
                     )}
                     {headerFilters && col.header.trim() !== "" && (
                       <button
                         type="button"
-                        onClick={() => setFilterOpen((f) => (f === id ? null : id))}
+                        onClick={(e) => {
+                          const r = e.currentTarget.getBoundingClientRect();
+                          const POP_W = 288; // w-72
+                          setFilterPos({
+                            top: r.bottom + 4,
+                            left: Math.max(8, Math.min(r.left, window.innerWidth - POP_W - 8)),
+                          });
+                          setFilterOpen((f) => (f === id ? null : id));
+                        }}
                         className={`ml-1 rounded p-0.5 align-middle transition hover:text-foreground ${fActivo ? "text-accent" : "opacity-40 hover:opacity-100"}`}
-                        title={fActivo ? `Filtrado: ${fVals.join(", ")}` : "Filtrar por valores"}
+                        title={fActivo ? `Filtrado${fVals?.length ? `: ${fVals.slice(0, 5).join(", ")}` : ""}` : "Filtrar y ordenar"}
                         aria-label={`Filtrar ${col.header}`}
                       >
                         <Filter size={12} fill={fActivo ? "currentColor" : "none"} />
@@ -974,62 +1120,26 @@ export function DataTable<T>({
                       <>
                         {/* clic fuera = cerrar; va ANTES para quedar debajo */}
                         <div className="fixed inset-0 z-20" onMouseDown={() => setFilterOpen(null)} />
-                        <div className="absolute left-0 top-full z-30 mt-1 max-h-72 w-56 overflow-auto rounded-lg border border-border bg-background p-2 text-left shadow-lg normal-case tracking-normal">
-                          {(() => {
-                            // Valores presentes en lo CARGADO (con el filtro
-                            // externo aplicado), como el autofiltro de Excel.
-                            const fn = rowFilterRef.current;
-                            const base = fn ? sortedRows.filter((r) => fn(r)) : sortedRows;
-                            const vistos = new Map<string, number>();
-                            for (const r of base) {
-                              const v = exportText(col, r);
-                              vistos.set(v, (vistos.get(v) ?? 0) + 1);
+                        <div
+                          ref={filterPopRef}
+                          style={{ top: filterPos.top, left: filterPos.left, maxHeight: `calc(100vh - ${filterPos.top + 8}px)` }}
+                          className="fixed z-30 w-72 overflow-auto rounded-lg border border-border bg-background p-2 text-left shadow-lg normal-case tracking-normal"
+                        >
+                          <HeaderFilterPopup
+                            col={col}
+                            rows={baseParaFiltro(id)}
+                            filtro={fVals}
+                            cond={fCond}
+                            sortDir={active ? sort!.dir : null}
+                            onFiltro={(vals) =>
+                              setColFilters((f) => (vals == null ? sinClave(f, id) : { ...f, [id]: vals }))
                             }
-                            const valores = [...vistos.entries()].sort((a, b) => a[0].localeCompare(b[0], "es"));
-                            return (
-                              <>
-                                <div className="mb-1 flex items-center justify-between gap-2 px-1">
-                                  <span className="text-[11px] font-semibold uppercase text-muted">{col.header}</span>
-                                  {fActivo && (
-                                    <button
-                                      type="button"
-                                      className="text-xs text-accent hover:underline"
-                                      onClick={() => setColFilters((f) => ({ ...f, [id]: [] }))}
-                                    >
-                                      Limpiar
-                                    </button>
-                                  )}
-                                </div>
-                                {valores.length === 0 && (
-                                  <div className="px-1 py-1 text-xs text-muted">Sin valores</div>
-                                )}
-                                {valores.slice(0, 80).map(([v, n]) => (
-                                  <label key={v} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs font-normal text-foreground hover:bg-surface-2">
-                                    <input
-                                      type="checkbox"
-                                      className="h-3.5 w-3.5 rounded border-border"
-                                      checked={fVals.includes(v)}
-                                      onChange={(e) =>
-                                        setColFilters((f) => ({
-                                          ...f,
-                                          [id]: e.target.checked
-                                            ? [...(f[id] ?? []), v]
-                                            : (f[id] ?? []).filter((x) => x !== v),
-                                        }))
-                                      }
-                                    />
-                                    <span className="min-w-0 flex-1 truncate">{v || "(vacío)"}</span>
-                                    <span className="tabular-nums text-muted">{n}</span>
-                                  </label>
-                                ))}
-                                {valores.length > 80 && (
-                                  <div className="px-1 py-1 text-[11px] text-muted">
-                                    …{valores.length - 80} valores más: usa el buscador para acotar
-                                  </div>
-                                )}
-                              </>
-                            );
-                          })()}
+                            onCond={(c) =>
+                              setColConds((f) => (c == null ? sinClave(f, id) : { ...f, [id]: c }))
+                            }
+                            onSort={(dir) => setSort(dir ? { id, dir } : null)}
+                            onClose={() => setFilterOpen(null)}
+                          />
                         </div>
                       </>
                     )}
@@ -1261,6 +1371,207 @@ export function DataTable<T>({
       {!loading && !error && rows.length > 0 && <FloatingHScroll contRef={scrollerRef} />}
       {footer}
     </div>
+  );
+}
+
+/** Diálogo de autofiltro por columna, estilo Excel (sin filtros por color:
+ *  en el Facturador no manejamos colores). Secciones: ordenar asc/desc,
+ *  condición («Contiene», «Mayor que»…), buscador de valores y la lista con
+ *  «(Seleccionar todo)». Todo aplica en vivo (como el Auto Apply de Excel).
+ *
+ *  Semántica de la selección: sin filtro = todo marcado. Desmarcar guarda
+ *  «solo estos valores»; si la selección vuelve a cubrir todo, el filtro se
+ *  quita solo. `[]` = ningún valor (des-marcar «Seleccionar todo» y elegir
+ *  de cero, el gesto clásico de Excel). */
+function HeaderFilterPopup<T>({
+  col,
+  rows,
+  filtro,
+  cond,
+  sortDir,
+  onFiltro,
+  onCond,
+  onSort,
+  onClose,
+}: {
+  col: Column<T>;
+  /** Filas visibles bajo los filtros de las DEMÁS columnas: de aquí sale la lista. */
+  rows: T[];
+  /** Valores marcados; `undefined` = sin filtro (todo marcado). */
+  filtro: string[] | undefined;
+  cond: ColCond | undefined;
+  sortDir: "asc" | "desc" | null;
+  /** `null` = quitar el filtro de valores. */
+  onFiltro: (vals: string[] | null) => void;
+  onCond: (c: ColCond | null) => void;
+  onSort: (dir: "asc" | "desc" | null) => void;
+  onClose: () => void;
+}) {
+  const [busca, setBusca] = useState("");
+  // Borradores de la condición: el operador elegido no se pierde mientras el
+  // valor está vacío (solo las condiciones CON valor viven en el padre).
+  const [opDraft, setOpDraft] = useState<CondOp>(cond?.op ?? "contiene");
+  const [valDraft, setValDraft] = useState(cond?.val ?? "");
+  const todosRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const valores = useMemo(() => {
+    const vistos = new Map<string, number>();
+    for (const r of rows) {
+      const v = exportText(col, r);
+      vistos.set(v, (vistos.get(v) ?? 0) + 1);
+    }
+    return [...vistos.entries()].sort((a, b) => a[0].localeCompare(b[0], "es", { numeric: true }));
+  }, [rows, col]);
+
+  const q = norm(busca.trim());
+  const listados = q ? valores.filter(([v]) => norm(v || "(vacío)").includes(q)) : valores;
+
+  const marcado = (v: string) => (filtro ? filtro.includes(v) : true);
+  const todosListadosMarcados = listados.length > 0 && listados.every(([v]) => marcado(v));
+  const algunoListadoMarcado = listados.some(([v]) => marcado(v));
+  useEffect(() => {
+    if (todosRef.current) todosRef.current.indeterminate = algunoListadoMarcado && !todosListadosMarcados;
+  }, [algunoListadoMarcado, todosListadosMarcados]);
+
+  // Si la selección cubre todos los valores, el filtro sobra: se quita.
+  function aplicar(sel: Set<string>) {
+    onFiltro(valores.every(([v]) => sel.has(v)) ? null : [...sel]);
+  }
+  function toggleValor(v: string) {
+    const sel = new Set(filtro ?? valores.map(([x]) => x));
+    if (sel.has(v)) sel.delete(v);
+    else sel.add(v);
+    aplicar(sel);
+  }
+  // «(Seleccionar todo)» opera sobre lo LISTADO (respeta el buscador):
+  // buscar «lech» y marcar todo agrega solo las lechugas, como en Excel.
+  function toggleTodos() {
+    const sel = new Set(filtro ?? valores.map(([x]) => x));
+    if (todosListadosMarcados) listados.forEach(([v]) => sel.delete(v));
+    else listados.forEach(([v]) => sel.add(v));
+    aplicar(sel);
+  }
+
+  function emitirCond(op: CondOp, val: string) {
+    setOpDraft(op);
+    setValDraft(val);
+    onCond(val.trim() === "" ? null : { op, val });
+  }
+
+  const inputCls =
+    "rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none focus:border-accent";
+
+  return (
+    <>
+      <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
+        <span className="truncate text-[11px] font-semibold uppercase text-muted">{col.header}</span>
+        {(filtro != null || cond != null) && (
+          <button
+            type="button"
+            className="shrink-0 text-xs text-accent hover:underline"
+            onClick={() => { onFiltro(null); emitirCond("contiene", ""); }}
+          >
+            Limpiar filtro
+          </button>
+        )}
+      </div>
+
+      {/* Ordenar (clic en el orden activo lo quita) */}
+      <div className="mb-2 grid grid-cols-2 gap-1 px-1">
+        <button
+          type="button"
+          onClick={() => onSort(sortDir === "asc" ? null : "asc")}
+          className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-xs ${
+            sortDir === "asc" ? "border-accent text-accent" : "border-border text-foreground hover:bg-surface-2"
+          }`}
+        >
+          <ArrowUp size={12} /> Ascendente
+        </button>
+        <button
+          type="button"
+          onClick={() => onSort(sortDir === "desc" ? null : "desc")}
+          className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-xs ${
+            sortDir === "desc" ? "border-accent text-accent" : "border-border text-foreground hover:bg-surface-2"
+          }`}
+        >
+          <ArrowDown size={12} /> Descendente
+        </button>
+      </div>
+
+      {/* Condición */}
+      <div className="mb-2 flex items-center gap-1 px-1">
+        <select
+          value={opDraft}
+          onChange={(e) => emitirCond(e.target.value as CondOp, valDraft)}
+          aria-label="Condición"
+          className={`${inputCls} shrink-0`}
+        >
+          {COND_OPS.map((o) => (
+            <option key={o.op} value={o.op}>{o.label}</option>
+          ))}
+        </select>
+        <input
+          type="text"
+          value={valDraft}
+          onChange={(e) => emitirCond(opDraft, e.target.value)}
+          placeholder="Valor…"
+          aria-label="Valor de la condición"
+          className={`${inputCls} w-full min-w-0 flex-1`}
+        />
+      </div>
+
+      {/* Buscador de valores */}
+      <div className="mb-1 px-1">
+        <input
+          type="search"
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+          placeholder="Buscar valores…"
+          aria-label="Buscar valores"
+          className={`${inputCls} w-full`}
+        />
+      </div>
+
+      {/* Lista de valores */}
+      <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs font-semibold text-foreground hover:bg-surface-2">
+        <input
+          ref={todosRef}
+          type="checkbox"
+          className="h-3.5 w-3.5 rounded border-border"
+          checked={todosListadosMarcados}
+          onChange={toggleTodos}
+          disabled={listados.length === 0}
+        />
+        <span className="min-w-0 flex-1 truncate">(Seleccionar todo)</span>
+        <span className="tabular-nums font-normal text-muted">{listados.reduce((n, [, c]) => n + c, 0)}</span>
+      </label>
+      <div className="max-h-44 overflow-auto">
+        {listados.length === 0 && <div className="px-1 py-1 text-xs text-muted">Sin valores</div>}
+        {listados.slice(0, 150).map(([v, n]) => (
+          <label key={v} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs font-normal text-foreground hover:bg-surface-2">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 rounded border-border"
+              checked={marcado(v)}
+              onChange={() => toggleValor(v)}
+            />
+            <span className="min-w-0 flex-1 truncate">{v || "(vacío)"}</span>
+            <span className="tabular-nums text-muted">{n}</span>
+          </label>
+        ))}
+        {listados.length > 150 && (
+          <div className="px-1 py-1 text-[11px] text-muted">
+            …{listados.length - 150} valores más: usa el buscador para acotar
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
