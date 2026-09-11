@@ -877,6 +877,11 @@ export function DataTable<T>({
   // Ancho total de la tabla en modo Excel = suma de las columnas (las que aún no
   // tienen ancho explícito cuentan con el mínimo) + las columnas fijas (chevron y
   // acciones). La tabla se ensancha y el contenedor hace scroll; agrandar una
+  // El contenedor con scroll horizontal: la barra flotante (abajo) se
+  // sincroniza contra él para que moverse a los lados no exija bajar al
+  // fondo de una tabla larga (ticket 86bbyvxqw).
+  const scrollerRef = useRef<HTMLDivElement>(null);
+
   // columna NO comprime a las demás.
   const totalWidth = hasWidths
     ? renderCols.reduce((sum, { id }) => sum + (widths[id] ?? MIN_W), 0) +
@@ -894,7 +899,7 @@ export function DataTable<T>({
     body = <EmptyState title={empty ?? "Sin resultados"} />;
   } else {
     body = (
-      <div className="overflow-x-auto rounded-xl border border-border">
+      <div ref={scrollerRef} className="overflow-x-auto rounded-xl border border-border">
         {/* Con anchos definidos (modo Excel): table-fixed + ancho explícito = la
             tabla se ensancha y el contenedor hace scroll, sin comprimir columnas.
             Sin anchos: w-full normal (la tabla se ajusta al contenedor). */}
@@ -1253,7 +1258,78 @@ export function DataTable<T>({
       {toolbar}
       {chipsFiltros}
       {body}
+      {!loading && !error && rows.length > 0 && <FloatingHScroll contRef={scrollerRef} />}
       {footer}
+    </div>
+  );
+}
+
+/** Barra de scroll horizontal SIEMPRE a la vista (ticket 86bbyvxqw).
+ *
+ *  La barra real vive en el borde inferior del contenedor: con una tabla
+ *  larga hay que bajar hasta el fondo para poder moverse a los lados. Esta
+ *  flota pegada al borde inferior de la VENTANA mientras (a) la tabla sí
+ *  desborda a lo ancho y (b) su final queda fuera de pantalla; en cuanto la
+ *  barra real entra a la vista, esta se esconde. Sincronizada en ambos
+ *  sentidos (arrastrarla mueve la tabla y viceversa). */
+function FloatingHScroll({ contRef }: { contRef: React.RefObject<HTMLDivElement | null> }) {
+  const barRef = useRef<HTMLDivElement>(null);
+  const [geo, setGeo] = useState<{ visible: boolean; left: number; width: number; inner: number }>(
+    { visible: false, left: 0, width: 0, inner: 0 },
+  );
+
+  useEffect(() => {
+    const cont = contRef.current;
+    if (!cont) return;
+    const medir = () => {
+      const r = cont.getBoundingClientRect();
+      const desborda = cont.scrollWidth > cont.clientWidth + 1;
+      // La barra real (el fondo del contenedor) está fuera de pantalla y la
+      // tabla sigue a la vista: es exactamente cuando la flotante ayuda.
+      const visible = desborda && r.bottom > window.innerHeight && r.top < window.innerHeight - 60;
+      setGeo({ visible, left: r.left, width: cont.clientWidth, inner: cont.scrollWidth });
+      if (visible && barRef.current && Math.abs(barRef.current.scrollLeft - cont.scrollLeft) > 1) {
+        barRef.current.scrollLeft = cont.scrollLeft;
+      }
+    };
+    medir();
+    // La igualdad corta el eco: asignar el mismo scrollLeft no dispara evento.
+    const desdeCont = () => {
+      if (barRef.current && Math.abs(barRef.current.scrollLeft - cont.scrollLeft) > 1) {
+        barRef.current.scrollLeft = cont.scrollLeft;
+      }
+    };
+    cont.addEventListener("scroll", desdeCont, { passive: true });
+    window.addEventListener("scroll", medir, { passive: true, capture: true });
+    window.addEventListener("resize", medir);
+    const ro = new ResizeObserver(medir);
+    ro.observe(cont);
+    if (cont.firstElementChild) ro.observe(cont.firstElementChild);
+    return () => {
+      cont.removeEventListener("scroll", desdeCont);
+      window.removeEventListener("scroll", medir, { capture: true } as EventListenerOptions);
+      window.removeEventListener("resize", medir);
+      ro.disconnect();
+    };
+  }, [contRef]);
+
+  if (!geo.visible) return null;
+  return (
+    <div
+      ref={barRef}
+      aria-hidden
+      className="fixed bottom-0 z-40 overflow-x-auto overflow-y-hidden"
+      style={{ left: geo.left, width: geo.width }}
+      onScroll={() => {
+        const cont = contRef.current;
+        if (cont && barRef.current && Math.abs(cont.scrollLeft - barRef.current.scrollLeft) > 1) {
+          cont.scrollLeft = barRef.current.scrollLeft;
+        }
+      }}
+    >
+      {/* El «contenido» es un espaciador del ancho real de la tabla: es lo que
+          da a la barra su proporción correcta. */}
+      <div style={{ width: geo.inner, height: 1 }} />
     </div>
   );
 }

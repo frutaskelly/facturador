@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ...core.ratelimit import enforce
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
+from ...models.sat_catalogo import SatClaveProdServ, SatClaveUnidad
 from ...schemas.sat import SatSugerenciaIn, SatSugerenciaOut
 from ...services.sat_ai import SatAIUnavailable, sugerir_sat
 from ...services.sat_catalogo import buscar_claves, buscar_unidades, validar_clave
@@ -62,3 +63,28 @@ def buscar_unidades_sat(
 ):
     """Búsqueda en el catálogo SAT de unidades (c_ClaveUnidad)."""
     return buscar_unidades(db, q, limit=limit)
+
+
+@router.get("/describir")
+def describir_sat(
+    claves: str = Query(default="", max_length=4000),
+    unidades: str = Query(default="", max_length=1000),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("menu:productos")),
+):
+    """Descripción oficial de claves ProdServ y unidades CONCRETAS (separadas
+    por coma), en un solo viaje. Es lo que pone «50401700 — Chiles frescos» al
+    lado del puro número en la vinculación/importación de productos (ticket
+    86bbyvyaj): una clave que no aparece en la respuesta no existe en el
+    catálogo oficial."""
+    pedidas_c = list({c.strip() for c in claves.split(",") if c.strip()})[:300]
+    pedidas_u = list({u.strip().upper() for u in unidades.split(",") if u.strip()})[:100]
+    out_claves: dict[str, str] = {}
+    if pedidas_c:
+        rows = db.query(SatClaveProdServ).filter(SatClaveProdServ.clave.in_(pedidas_c)).all()
+        out_claves = {r.clave: r.descripcion for r in rows}
+    out_unidades: dict[str, str] = {}
+    if pedidas_u:
+        rows = db.query(SatClaveUnidad).filter(SatClaveUnidad.clave.in_(pedidas_u)).all()
+        out_unidades = {r.clave: r.nombre for r in rows}
+    return {"claves": out_claves, "unidades": out_unidades}

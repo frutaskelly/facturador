@@ -3679,6 +3679,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sat/describir": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Describir Sat
+         * @description Descripción oficial de claves ProdServ y unidades CONCRETAS (separadas
+         *     por coma), en un solo viaje. Es lo que pone «50401700 — Chiles frescos» al
+         *     lado del puro número en la vinculación/importación de productos (ticket
+         *     86bbyvyaj): una clave que no aparece en la respuesta no existe en el
+         *     catálogo oficial.
+         */
+        get: operations["describir_sat_api_v1_sat_describir_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sat/sugerir": {
         parameters: {
             query?: never;
@@ -17848,6 +17872,40 @@ export interface operations {
             query: {
                 q: string;
                 limit?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    describir_sat_api_v1_sat_describir_get: {
+        parameters: {
+            query?: {
+                claves?: string;
+                unidades?: string;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
