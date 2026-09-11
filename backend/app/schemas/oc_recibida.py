@@ -118,20 +118,6 @@ class LineaAutoOut(BaseModel):
     clave: Optional[str] = None
     cruzo_por: str
 
-
-class GrupoBandejaOut(BaseModel):
-    """Un ORIGEN para el filtro de la bandeja, con sus clientes para encadenar
-    los demás filtros. Dos mundos conviven: los grupos de WhatsApp (tipo
-    "grupo", se filtra por su jid) y lo que entra por la conexión de Smart
-    Supply, que no trae jid — ahí el origen es el REMITENTE (tipo "remitente",
-    se filtra por el texto exacto, p. ej. «EHMO villahermosa»)."""
-    tipo: str                       # "grupo" | "remitente"
-    clave: str                      # el jid, o el texto del remitente
-    nombre: Optional[str] = None
-    activo: bool = True
-    cliente_ids: list[uuid.UUID] = Field(default_factory=list)
-
-
 class ProblemaLineaOut(BaseModel):
     """Lo que le impide a UNA partida entrar sola, con su número para poder
     señalarla en la tabla en vez de dejar el aviso suelto arriba."""

@@ -906,17 +906,6 @@ export type OCRecibidaDetalle = OCRecibida & {
   serie_prevista_id?: string | null;
 };
 
-/** Un grupo de origen para el filtro de la bandeja: su nombre y qué clientes
- *  entran por él. Elegir el grupo acota los filtros de cliente y proyecto. */
-export type GrupoBandeja = {
-  /** "grupo" (WhatsApp, filtra por jid) o "remitente" (filtra por el texto). */
-  tipo: "grupo" | "remitente";
-  clave: string;
-  nombre?: string | null;
-  activo: boolean;
-  cliente_ids: string[];
-};
-
 // ─── Conexiones ──────────────────────────────────────────────────────────────
 // Una clave con la que un sistema externo (Smart Supply) deja órdenes en la
 // bandeja, sin que nadie tenga que repartir la contraseña de una persona.
