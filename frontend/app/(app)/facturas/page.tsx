@@ -24,7 +24,7 @@ import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtDateTime, fmtMoney } from "@/lib/format";
 import { useResource, type Page } from "@/lib/hooks";
 import { FORMA_PAGO_OPTS, METODO_PAGO_OPTS, USO_CFDI_OPTS } from "@/lib/sat";
-import type { Cliente, Factura, FacturaDetail, Remision, Serie, Sucursal } from "@/lib/types";
+import type { Cliente, Factura, FacturaDetail, Proyecto, Remision, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "factura:gestionar";
 
@@ -75,6 +75,16 @@ export default function FacturasPage() {
       : (dom.email ? [String(dom.email)] : []);
     return [c.id, arr.join(", ")];
   })), [clientes]);
+  // Correos por PROYECTO (ticket 86bbyveu1): las facturas de un proyecto casi
+  // siempre van a las mismas personas — el envío prellena proyecto > cliente.
+  const proyectosRes = useResource<Page<Proyecto>>(
+    can(me, "menu:clientes") ? "/api/v1/proyectos?limit=500" : null,
+  );
+  const proyCorreos = useMemo(() => Object.fromEntries(
+    (proyectosRes.data?.items ?? [])
+      .filter((p) => (p.correos_facturas ?? []).length > 0)
+      .map((p) => [p.id, (p.correos_facturas ?? []).join(", ")]),
+  ), [proyectosRes.data]);
 
   // Un usuario de portal (sin menu:series) no puede listar series: pedirlas
   // sería un 403 seguro; null = no pedir y trabajar con lista vacía.
@@ -430,7 +440,8 @@ export default function FacturasPage() {
     });
   }
   function abrirEnviar(f: Factura) {
-    setEnviarTo(cliCorreos[f.cliente_id] ?? ""); setEnviarMensaje(""); setToEnviar(f);
+    setEnviarTo(proyCorreos[f.proyecto_id ?? ""] || cliCorreos[f.cliente_id] || "");
+    setEnviarMensaje(""); setToEnviar(f);
   }
   async function enviarCorreo() {
     if (!toEnviar) return;
@@ -657,9 +668,16 @@ export default function FacturasPage() {
       arr.push(f.id);
       byCliente.set(f.cliente_id, arr);
     }
-    setBulkSendRows([...byCliente.entries()].map(([clienteId, facIds]) => ({
-      clienteId, nombre: cliName[clienteId] ?? "—", facIds, correos: cliCorreos[clienteId] ?? "",
-    })));
+    setBulkSendRows([...byCliente.entries()].map(([clienteId, facIds]) => {
+      // Si TODAS las facturas del cliente en este lote comparten un proyecto
+      // con correos configurados, esos van primero; si no, los del cliente.
+      const proys = new Set(timbradasSel.filter((f) => f.cliente_id === clienteId).map((f) => f.proyecto_id ?? ""));
+      const proyId = proys.size === 1 ? [...proys][0] : "";
+      return {
+        clienteId, nombre: cliName[clienteId] ?? "—", facIds,
+        correos: proyCorreos[proyId] || cliCorreos[clienteId] || "",
+      };
+    }));
     setBulkSendMensaje("");
     setBulkSendOpen(true);
   }

@@ -49,7 +49,7 @@ const EMPTY_REMISIONES: Remision[] = [];
 
 // Una factura recién timbrada desde esta pantalla: lo mínimo para ofrecer
 // [Ver factura] [Enviar factura] sin mandar al usuario a buscarla a /facturas.
-type TimbradaInfo = { id: string; folio: string; clienteId: string };
+type TimbradaInfo = { id: string; folio: string; clienteId: string; proyectoId?: string | null };
 
 // Una fila de la lista: o es una remisión, o es una orden que llegó por
 // WhatsApp/correo y no pudo volverse remisión sola. Las dos viven en la misma
@@ -205,6 +205,14 @@ export default function RemisionesPage() {
   const prodById = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p])), [productos]);
   const cliName = useMemo(() => Object.fromEntries(clientes.map((c) => [c.id, c.legal_name])), [clientes]);
   // Correos por cliente (array `correos` o el `email` legado), unidos por coma.
+  // Correos por PROYECTO (ticket 86bbyveu1): el envío de la factura prellena
+  // proyecto > cliente — las facturas de un proyecto van casi siempre a las
+  // mismas personas.
+  const proyCorreos = useMemo(() => Object.fromEntries(
+    (proyectosRes.data?.items ?? [])
+      .filter((py) => (py.correos_facturas ?? []).length > 0)
+      .map((py) => [py.id, (py.correos_facturas ?? []).join(", ")]),
+  ), [proyectosRes.data]);
   const cliEmail = useMemo(
     () => Object.fromEntries(clientes.map((c) => {
       const dom = (c.domicilio_fiscal ?? {}) as Record<string, unknown>;
@@ -1631,8 +1639,8 @@ export default function RemisionesPage() {
     setToSend(r);
   }
 
-  function abrirEnviarFactura(id: string, clienteId: string, etiqueta: string) {
-    setFacSendTo(cliEmail[clienteId] ?? "");
+  function abrirEnviarFactura(id: string, clienteId: string, etiqueta: string, proyectoId?: string | null) {
+    setFacSendTo(proyCorreos[proyectoId ?? ""] || cliEmail[clienteId] || "");
     setFacSendMensaje("");
     setFacturaEnviar({ id, etiqueta, clienteId });
   }
@@ -1669,13 +1677,19 @@ export default function RemisionesPage() {
       arr.push(f);
       byCliente.set(f.clienteId, arr);
     }
-    setFacBulkRows([...byCliente.entries()].map(([clienteId, fs]) => ({
-      clienteId,
-      nombre: cliName[clienteId] ?? "—",
-      facIds: fs.map((f) => f.id),
-      folios: fs.map((f) => f.folio),
-      correos: cliEmail[clienteId] ?? "",
-    })));
+    setFacBulkRows([...byCliente.entries()].map(([clienteId, fs]) => {
+      // Si TODAS las facturas del cliente comparten un proyecto con correos
+      // configurados, esos se sugieren; si no, los del cliente (86bbyveu1).
+      const proys = new Set(fs.map((f) => f.proyectoId ?? ""));
+      const proyId = proys.size === 1 ? [...proys][0] : "";
+      return {
+        clienteId,
+        nombre: cliName[clienteId] ?? "—",
+        facIds: fs.map((f) => f.id),
+        folios: fs.map((f) => f.folio),
+        correos: proyCorreos[proyId] || cliEmail[clienteId] || "",
+      };
+    }));
     setFacBulkMensaje("");
     setFacBulkOpen(true);
   }
@@ -2045,7 +2059,7 @@ export default function RemisionesPage() {
     resultados.forEach(({ r, fac }, i) => {
       if (r === "timbrada") {
         timbradas += 1;
-        if (fac) facturas.push({ id: fac.id, folio: `${fac.serie ?? ""}${fac.folio ?? ""}`, clienteId: fac.cliente_id });
+        if (fac) facturas.push({ id: fac.id, folio: `${fac.serie ?? ""}${fac.folio ?? ""}`, clienteId: fac.cliente_id, proyectoId: fac.proyecto_id });
       }
       else if (r === "borrador") borrador += 1;
       else if (r === "sinStock") sinStock.push(grupos[i]);
@@ -2439,7 +2453,7 @@ export default function RemisionesPage() {
       // La remisión ya facturada tiene DOS documentos: esta acción manda la
       // FACTURA timbrada (ticket 86bby3tx9); la de abajo sigue mandando la
       // remisión, con el nombre explícito para que nadie confunda cuál va.
-      onClick: (r) => abrirEnviarFactura(r.factura_id!, r.cliente_facturacion_id, r.factura_folio ?? ""),
+      onClick: (r) => abrirEnviarFactura(r.factura_id!, r.cliente_facturacion_id, r.factura_folio ?? "", r.proyecto_id),
       hidden: (r) => !(canWrite && r.factura_id && r.factura_estado === "TIMBRADA") },
     { id: "enviar", label: "Enviar remisión por correo", icon: <Mail size={15} />, onClick: enviarRemision,
       hidden: () => !canWrite },
@@ -3542,7 +3556,7 @@ export default function RemisionesPage() {
               >
                 Ver factura
               </Button>
-              <Button onClick={() => abrirEnviarFactura(f.id, f.clienteId, f.folio)}>
+              <Button onClick={() => abrirEnviarFactura(f.id, f.clienteId, f.folio, f.proyectoId)}>
                 <Mail size={14} /> Enviar factura
               </Button>
             </li>

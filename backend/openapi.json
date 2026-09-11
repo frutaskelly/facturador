@@ -5534,6 +5534,18 @@
       ],
       "title": "Pdf Url"
      },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
+     },
      "ret_isr": {
       "title": "Ret Isr",
       "type": "string"
@@ -6062,6 +6074,18 @@
        }
       ],
       "title": "Pdf Url"
+     },
+     "proyecto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Id"
      },
      "ret_isr": {
       "title": "Ret Isr",
@@ -13840,6 +13864,14 @@
       ],
       "title": "Cliente Id"
      },
+     "correos_facturas": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Correos Facturas",
+      "type": "array"
+     },
      "nombre": {
       "maxLength": 254,
       "title": "Nombre",
@@ -13907,6 +13939,14 @@
      "codigo": {
       "title": "Codigo",
       "type": "string"
+     },
+     "correos_facturas": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Correos Facturas",
+      "type": "array"
      },
      "created_at": {
       "format": "date-time",
@@ -14003,6 +14043,21 @@
        }
       ],
       "title": "Cliente Id"
+     },
+     "correos_facturas": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 20,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Correos Facturas"
      },
      "nombre": {
       "anyOf": [
@@ -19453,6 +19508,25 @@
       }
      },
      {
+      "description": "Acotar a una serie",
+      "in": "query",
+      "name": "serie",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 10,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Acotar a una serie",
+       "title": "Serie"
+      }
+     },
+     {
       "in": "header",
       "name": "X-Tenant-Id",
       "required": false,
@@ -19532,6 +19606,25 @@
        ],
        "description": "Fecha de corte (default hoy)",
        "title": "Corte"
+      }
+     },
+     {
+      "description": "Acotar a una serie",
+      "in": "query",
+      "name": "serie",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 10,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Acotar a una serie",
+       "title": "Serie"
       }
      },
      {
@@ -19627,6 +19720,25 @@
       }
      },
      {
+      "description": "Acotar a una serie",
+      "in": "query",
+      "name": "serie",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 10,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Acotar a una serie",
+       "title": "Serie"
+      }
+     },
+     {
       "in": "header",
       "name": "X-Tenant-Id",
       "required": false,
@@ -19669,6 +19781,107 @@
      }
     ],
     "summary": "Estado Cuenta Pdf",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/estado-cuenta/{cliente_id}/xlsx": {
+   "get": {
+    "description": "El estado de cuenta en Excel con el layout del que SAE le manda a los\nclientes (encabezado con crédito, columnas SEM/PROYECTO/VENCIDO y total),\npara que el corte a facturación nativa no les cambie el formato.",
+    "operationId": "estado_cuenta_xlsx_api_v1_cobranza_estado_cuenta__cliente_id__xlsx_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Fecha de corte (default hoy)",
+      "in": "query",
+      "name": "corte",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Fecha de corte (default hoy)",
+       "title": "Corte"
+      }
+     },
+     {
+      "description": "Acotar a una serie",
+      "in": "query",
+      "name": "serie",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 10,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Acotar a una serie",
+       "title": "Serie"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Estado Cuenta Xlsx",
     "tags": [
      "cobranza"
     ]

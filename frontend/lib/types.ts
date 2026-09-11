@@ -114,6 +114,8 @@ export type Proyecto = {
   /** LA plaza del proyecto (un proyecto por plaza). null = aplica en todas. */
   sucursal_id?: string | null;
   sucursal_nombre?: string | null;
+  /** Destinatarios predeterminados de las facturas del proyecto (86bbyveu1). */
+  correos_facturas?: string[];
   created_at: string;
   updated_at: string;
 };
@@ -418,6 +420,9 @@ export type Factura = {
   serie: string;
   folio: number;
   cliente_id: string;
+  /** El proyecto heredado de las remisiones: el envío por correo prellena
+      los destinatarios configurados en él (ticket 86bbyveu1). */
+  proyecto_id?: string | null;
   // Solo directas: almacén del que descuenta al timbrar. La UI lo usa además
   // para distinguir el borrador DIRECTO (líneas editables) del resto.
   almacen_id?: string | null;

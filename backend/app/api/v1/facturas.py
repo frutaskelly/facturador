@@ -41,6 +41,7 @@ from ...models import (
     Merma,
     Producto,
     ProductoCliente,
+    Proyecto,
     ReciboPago,
     ReciboPagoFactura,
     Remision,
@@ -1965,10 +1966,18 @@ def enviar_facturas_lote(
         raise HTTPException(status_code=422, detail="Las facturas deben ser del mismo cliente")
     cliente = db.query(Cliente).filter(Cliente.id == next(iter(cli_ids))).one_or_none()
 
-    # Destinatarios: payload (coma/espacio) o los correos del cliente.
+    # Destinatarios: payload (coma/espacio) > los del PROYECTO (cuando todas
+    # las facturas del lote comparten uno con correos configurados, ticket
+    # 86bbyveu1) > los correos del cliente.
     destinatarios: list[str] = []
     if payload.to:
         destinatarios = [c for c in payload.to.replace(",", " ").split() if c]
+    if not destinatarios:
+        proy_ids = {f.proyecto_id for f in facturas}
+        if len(proy_ids) == 1 and next(iter(proy_ids)) is not None:
+            proy = db.query(Proyecto).filter(Proyecto.id == next(iter(proy_ids))).one_or_none()
+            if proy is not None and isinstance(proy.correos_facturas, list):
+                destinatarios = [str(c).strip() for c in proy.correos_facturas if str(c).strip()]
     if not destinatarios and cliente is not None:
         dom = cliente.domicilio_fiscal or {}
         correos = dom.get("correos")
