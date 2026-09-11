@@ -180,6 +180,24 @@ def put_correo(
     return out
 
 
+@router.delete("", status_code=204)
+def quitar_correo(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Borra la configuración de correo del tenant y regresa la pantalla al
+    paso 1 del flujo guiado. Sin esto no había manera de «empezar de cero»
+    (feedback del ticket 86bbxkzz5): la config guardada no se podía quitar,
+    solo sobreescribir campo por campo."""
+    tenant = _load_tenant(db, ctx.tenant_id)
+    cfg = dict(tenant.config or {})
+    cfg.pop("email", None)
+    tenant.config = cfg
+    flag_modified(tenant, "config")
+    db.flush()
+    return None
+
+
 @router.post("/probar")
 def probar_correo(
     payload: CorreoProbarIn,
