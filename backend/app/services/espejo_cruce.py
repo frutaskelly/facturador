@@ -34,6 +34,28 @@ _RE_OC_OBS = re.compile(r"\bOC[\s:]+([A-Z0-9][A-Z0-9\-\/\.]*)")
 # El folio interno de una entrega EHMO/MAFAN: dos letras del proyecto, la
 # semana, el punto y el día — HO-33PAC-LUN, SN-33NER-JUE, VH-35SAL-VIE.
 _RE_FOLIO_INTERNO = re.compile(r"\b([A-Z]{2}-\d{1,2}[A-Z]{2,4}(?:-[A-Z]{3})?)\b")
+# La semana de entrega, para el estado de cuenta: o viene dicha con todas sus
+# letras en la observación de SAE ("SEMANA 33 SECRETARIO NERI …") o embebida en
+# el folio interno (HO-34VIL-MIE, CEN-35HUA-EMB — ahí el número ES la semana).
+_RE_SEMANA_OBS = re.compile(r"\bSEM(?:ANA)?\.?\s*(\d{1,2})\b")
+_RE_SEMANA_FOLIO = re.compile(r"\b[A-Z]{2,3}-(\d{1,2})[A-Z]{2,4}(?:-[A-Z]{3})?\b")
+
+
+def extraer_semana(*textos: Optional[str]) -> Optional[int]:
+    """La semana de entrega del primer texto que la traiga, o None.
+
+    Se prueba en orden (observaciones de la factura, `su_pedido` de la
+    remisión…): la semana escrita gana sobre la del folio interno dentro del
+    mismo texto porque es la que el proveedor declaró.
+    """
+    for texto in textos:
+        t = (texto or "").upper()
+        if not t:
+            continue
+        m = _RE_SEMANA_OBS.search(t) or _RE_SEMANA_FOLIO.search(t)
+        if m:
+            return int(m.group(1))
+    return None
 
 
 def norm_oc(v: Optional[str]) -> Optional[str]:

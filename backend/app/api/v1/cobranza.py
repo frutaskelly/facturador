@@ -22,8 +22,12 @@ from ...core.config import settings
 from ...core.db import set_role_tenant
 from ...core.ratelimit import enforce
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Cliente, Factura, ReciboPago, ReciboPagoFactura, Tenant, TimbradoIntento
+from ...models import (
+    Cliente, Factura, Proyecto, ReciboPago, ReciboPagoFactura, Remision, Tenant,
+    TimbradoIntento,
+)
 from ...services.cfdi import emisor_rfc_esperado
+from ...services.espejo_cruce import extraer_semana
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.onboarding import exigir_listo_para_facturar
 from ...services.rep import build_payload_rep
@@ -51,12 +55,19 @@ def _bucket(dias_vencida: int) -> str:
 
 
 def _armar_estado_cuenta(
-    db: Session, ctx: AuthContext, cliente_id: UUID, corte: date | None
+    db: Session, ctx: AuthContext, cliente_id: UUID, corte: date | None,
+    serie: str | None = None,
 ) -> dict:
-    """El cálculo del estado de cuenta, uno solo para el JSON, el PDF y el correo.
+    """El cálculo del estado de cuenta, uno solo para el JSON, el PDF, el Excel
+    y el correo.
 
-    Incluye el candado por cliente: el 404 tiene que salir igual por las tres
+    Incluye el candado por cliente: el 404 tiene que salir igual por todas las
     puertas, o el portal se lleva por PDF lo que no puede ver por JSON.
+
+    `serie` acota el estado de cuenta a una serie (en EHMO cada plaza factura
+    con la suya: ZEHMOHOS ≠ ZEHMOVH, y mezclarlas haría un solo reporte de dos
+    proyectos). El resumen `series` sale SIEMPRE de todas las facturas con
+    saldo, para que la pantalla pueda ofrecer el filtro completo.
     """
     if not ctx.cliente_permitido(cliente_id):
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
@@ -73,9 +84,33 @@ def _armar_estado_cuenta(
             Factura.metodo_pago == "PPD",
             Factura.saldo_insoluto > 0,
         )
-        .order_by(Factura.fecha.asc())
+        .order_by(Factura.fecha.asc(), Factura.folio.asc())
         .all()
     )
+
+    series: dict[str, dict] = {}
+    for f in facturas:
+        s = series.setdefault(f.serie or "", {"serie": f.serie or "", "facturas": 0, "saldo": Decimal("0")})
+        s["facturas"] += 1
+        s["saldo"] += Decimal(f.saldo_insoluto)
+    if serie:
+        facturas = [f for f in facturas if (f.serie or "") == serie]
+
+    # La semana y el proyecto viven en la remisión ligada (`su_pedido`,
+    # `proyecto_id`) o en las observaciones que el espejo trae de SAE
+    # (`facturas.notas`): una sola consulta para todo el estado de cuenta.
+    datos_remision: dict = {}
+    ids = [f.id for f in facturas]
+    if ids:
+        filas = (
+            db.query(Remision.factura_id, Remision.su_pedido, Proyecto.nombre)
+            .outerjoin(Proyecto, Proyecto.id == Remision.proyecto_id)
+            .filter(Remision.factura_id.in_(ids), Remision.deleted_at.is_(None))
+            .all()
+        )
+        for factura_id, su_pedido, proyecto in filas:
+            previo = datos_remision.get(factura_id, (None, None))
+            datos_remision[factura_id] = (previo[0] or su_pedido, previo[1] or proyecto)
 
     antiguedad = {"por_vencer": Decimal("0"), "d1_30": Decimal("0"),
                   "d31_60": Decimal("0"), "d61_90": Decimal("0"), "d90_mas": Decimal("0")}
@@ -88,6 +123,7 @@ def _armar_estado_cuenta(
         saldo = Decimal(f.saldo_insoluto)
         saldo_total += saldo
         antiguedad[_bucket(dias_vencida)] += saldo
+        su_pedido, proyecto = datos_remision.get(f.id, (None, None))
         docs.append({
             "factura_id": str(f.id),
             "serie": f.serie,
@@ -98,7 +134,22 @@ def _armar_estado_cuenta(
             "dias_vencida": dias_vencida,
             "total": f.total,
             "saldo_insoluto": saldo,
+            "semana": extraer_semana(f.notas, su_pedido),
+            "proyecto": proyecto,
         })
+
+    # Solo ~1 de cada 5 facturas espejo tiene remisión ligada, pero dentro de
+    # un cliente la serie ES la plaza: si todas las ligadas de una serie caen
+    # en el mismo proyecto, las sueltas de esa serie también son de él. Con
+    # proyectos mezclados (ZMAFAN) no se adivina y quedan en blanco.
+    proyectos_por_serie: dict[str, set] = {}
+    for d in docs:
+        if d["proyecto"]:
+            proyectos_por_serie.setdefault(d["serie"] or "", set()).add(d["proyecto"])
+    for d in docs:
+        unicos = proyectos_por_serie.get(d["serie"] or "", set())
+        if d["proyecto"] is None and len(unicos) == 1:
+            d["proyecto"] = next(iter(unicos))
 
     return {
         "cliente_id": str(cliente.id),
@@ -106,6 +157,8 @@ def _armar_estado_cuenta(
         "dias_credito": dias_credito,
         "limite_credito": cliente.limite_credito,
         "corte": hoy,
+        "serie": serie,
+        "series": sorted(series.values(), key=lambda s: s["serie"]),
         "saldo_total": saldo_total,
         "antiguedad": antiguedad,
         "facturas": docs,
@@ -189,12 +242,13 @@ def facturas_pendientes(
 def estado_cuenta(
     cliente_id: UUID,
     corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
+    serie: str | None = Query(default=None, max_length=10, description="Acotar a una serie"),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     """Estado de cuenta de un cliente: sus facturas PPD timbradas con saldo
     pendiente + antigüedad de saldos por fecha de vencimiento."""
-    return _armar_estado_cuenta(db, ctx, cliente_id, corte)
+    return _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie)
 
 
 _ANTIGUEDAD_ETIQUETAS = (
@@ -247,25 +301,53 @@ def _nombre_estado_cuenta(datos: dict) -> str:
     """Nombra el archivo por la fecha de corte y no por el cliente: el nombre
     viaja en el header Content-Disposition, y un acento ahí (media razón social
     mexicana los trae) lo rompe en el navegador."""
-    return f"estado-cuenta-{datos['corte']:%Y%m%d}"
+    serie = f"-{datos['serie']}" if datos.get("serie") else ""
+    return f"estado-cuenta{serie}-{datos['corte']:%Y%m%d}"
 
 
 @router.get("/estado-cuenta/{cliente_id}/pdf")
 def estado_cuenta_pdf(
     cliente_id: UUID,
     corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
+    serie: str | None = Query(default=None, max_length=10, description="Acotar a una serie"),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     """El estado de cuenta en PDF, listo para mandárselo al cliente."""
     from fastapi import Response
 
-    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte)
+    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie)
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
     pdf = _estado_cuenta_pdf(tenant, datos)
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{_nombre_estado_cuenta(datos)}.pdf"'},
+    )
+
+
+@router.get("/estado-cuenta/{cliente_id}/xlsx")
+def estado_cuenta_xlsx(
+    cliente_id: UUID,
+    corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
+    serie: str | None = Query(default=None, max_length=10, description="Acotar a una serie"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """El estado de cuenta en Excel con el layout del que SAE le manda a los
+    clientes (encabezado con crédito, columnas SEM/PROYECTO/VENCIDO y total),
+    para que el corte a facturación nativa no les cambie el formato."""
+    from fastapi import Response
+
+    from ...services.estado_cuenta_xlsx import generar as generar_xlsx
+
+    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie)
+    cliente = get_or_404(db, Cliente, cliente_id)
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    contenido = generar_xlsx(tenant, cliente, datos)
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{_nombre_estado_cuenta(datos)}.xlsx"'},
     )
 
 
@@ -280,6 +362,7 @@ def enviar_estado_cuenta(
     cliente_id: UUID,
     payload: EnviarEstadoCuentaIn,
     corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
+    serie: str | None = Query(default=None, max_length=10, description="Acotar a una serie"),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
@@ -295,7 +378,7 @@ def enviar_estado_cuenta(
     from ...services import email as email_service
     from .remisiones import _validar_destinatarios
 
-    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte)
+    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie)
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
     if not email_service.configured(tenant):
         raise HTTPException(status_code=503, detail="Configura una cuenta de correo en Ajustes › Correo")

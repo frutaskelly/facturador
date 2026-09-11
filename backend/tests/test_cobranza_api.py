@@ -95,15 +95,15 @@ def _h(env):
     return {"X-Tenant-Id": str(env["tenant_id"])}
 
 
-def _factura_ppd_timbrada(env, *, total, dias_atras, metodo="PPD", folio):
+def _factura_ppd_timbrada(env, *, total, dias_atras, metodo="PPD", folio, serie="F", notas=None):
     """Inserta una factura TIMBRADA directamente (sin PAC) con fecha dada."""
     db = SessionLocal()
     try:
         f = Factura(
-            tenant_id=uuid.UUID(str(env["tenant_id"])), serie="F", folio=folio,
+            tenant_id=uuid.UUID(str(env["tenant_id"])), serie=serie, folio=folio,
             cliente_id=uuid.UUID(env["cli"]), metodo_pago=metodo, forma_pago="99",
             total=Decimal(str(total)), subtotal=Decimal(str(total)),
-            estado="TIMBRADA", uuid=str(uuid.uuid4()),
+            estado="TIMBRADA", uuid=str(uuid.uuid4()), notas=notas,
             fecha=datetime.now(timezone.utc) - timedelta(days=dias_atras),
             saldo_insoluto=Decimal(str(total)) if metodo == "PPD" else Decimal("0"),
         )
@@ -142,6 +142,69 @@ def test_estado_cuenta_vacio(client, env, auth):
     assert r.status_code == 200, r.text
     assert float(r.json()["saldo_total"]) == 0.0
     assert r.json()["facturas"] == []
+
+
+def test_extraer_semana():
+    """La semana de entrega: dicha con letras en la observación de SAE o
+    embebida en el folio interno (ahí el número ES la semana)."""
+    from app.services.espejo_cruce import extraer_semana
+
+    assert extraer_semana("SEMANA 26 HUASTECA LUNES 29 /JUNIO/2026") == 26
+    assert extraer_semana("SEMANA 33 SECRETARIO NERI REQ 20/08/2026 SN-33NER-JUE") == 33
+    assert extraer_semana("entrega HO-34VIL-MIE pactada") == 34
+    assert extraer_semana("CEN-35HUA-EMB") == 35          # proyecto de 3 letras
+    assert extraer_semana(None, "HO-34VIL-MIE") == 34     # fallback al su_pedido
+    assert extraer_semana("OC 0000024736 ENTREGA CEDIS") is None
+    assert extraer_semana(None, "") is None
+
+
+def test_estado_cuenta_filtra_por_serie_y_deriva_semana(client, env, auth):
+    """`serie` acota facturas y totales; `series` SIEMPRE trae el resumen
+    completo (para el filtro de la pantalla); la semana sale de las notas."""
+    _factura_ppd_timbrada(env, total=1000, dias_atras=5, folio=1, serie="ZEH",
+                          notas="SEMANA 26 HUASTECA LUNES 29 /JUNIO/2026")
+    _factura_ppd_timbrada(env, total=2000, dias_atras=5, folio=2, serie="FEH",
+                          notas="ENTREGA HO-34VIL-MIE")
+
+    r = client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli']}?serie=ZEH", headers=_h(env))
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert [f["folio"] for f in d["facturas"]] == [1]
+    assert float(d["saldo_total"]) == 1000.0
+    assert d["facturas"][0]["semana"] == 26
+    assert {s["serie"]: s["facturas"] for s in d["series"]} == {"ZEH": 1, "FEH": 1}
+
+    todas = client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli']}", headers=_h(env)).json()
+    assert float(todas["saldo_total"]) == 3000.0
+    assert {f["folio"]: f["semana"] for f in todas["facturas"]} == {1: 26, 2: 34}
+
+
+def test_estado_cuenta_xlsx(client, env, auth):
+    """El Excel estilo SAE: encabezado con crédito, la tabla con SEM/FACTURA/
+    SALDOS y el renglón TOTAL con fórmulas =SUM."""
+    import io
+
+    from openpyxl import load_workbook
+
+    _factura_ppd_timbrada(env, total=1500, dias_atras=40, folio=7, serie="ZEH",
+                          notas="SEMANA 26 HUASTECA LUNES 29 /JUNIO/2026")
+    _factura_ppd_timbrada(env, total=500, dias_atras=1, folio=8, serie="ZEH")
+
+    r = client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli']}/xlsx?serie=ZEH", headers=_h(env))
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("application/vnd.openxmlformats")
+    assert "estado-cuenta-ZEH-" in r.headers["content-disposition"]
+
+    ws = load_workbook(io.BytesIO(r.content)).active
+    celdas = {c.value for row in ws.iter_rows() for c in row if c.value is not None}
+    assert "Cliente Cobranza" in celdas          # membrete
+    assert "Días de crédito:" in celdas
+    assert {"SEM", "CLIENTE", "PROYECTO", "FACTURA", "FECHA APLIC",
+            "SUBTOTAL", "ABONOS", "SALDOS", "ESTATUS"} <= celdas
+    assert {"ZEH 7", "ZEH 8", "SEM 26", "VENCIDO"} <= celdas  # 40 días > 30 de crédito
+    # El renglón TOTAL suma con fórmula, no con un número pegado.
+    ultima = [c.value for c in ws[ws.max_row]]
+    assert any(isinstance(v, str) and v.startswith("=SUM(") for v in ultima)
 
 
 # ── Recibos de Pago (REP) F2 ─────────────────────────────────────────────────
