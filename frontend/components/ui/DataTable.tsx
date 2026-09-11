@@ -66,17 +66,33 @@ function RowOverflowMenu<T>({ actions, row }: { actions: RowAction<T>[]; row: T 
   // la pantalla se ancla al revés para no quedar cortado.
   const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number }>({ top: 0, right: 0 });
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    // El cierre por clic-fuera decide por CONTAINS, no por stopPropagation:
+    // el listener nativo del document recibía el mousedown de los propios
+    // items ANTES de que React frenara la propagación, desmontaba el menú y
+    // el click ya no encontraba botón — «Dar por revisada» y compañía
+    // literalmente no hacían nada (tickets 86bbyp2rw/86bbyuxgt/86bbyw70p).
+    const clicFuera = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    // Y el cierre por scroll perdona el primer instante: enfocar el botón
+    // (pegado al borde del contenedor con overflow) provoca un micro-scroll
+    // que cerraba el menú antes de verse — el «no abre» de pantallas chicas.
+    const abiertoEn = Date.now();
+    const scrollLejos = () => { if (Date.now() - abiertoEn > 250) setOpen(false); };
     const close = () => setOpen(false);
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("scroll", scrollLejos, true);
     window.addEventListener("resize", close);
-    document.addEventListener("mousedown", close);
+    document.addEventListener("mousedown", clicFuera);
     return () => {
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", scrollLejos, true);
       window.removeEventListener("resize", close);
-      document.removeEventListener("mousedown", close);
+      document.removeEventListener("mousedown", clicFuera);
     };
   }, [open]);
 
@@ -109,6 +125,7 @@ function RowOverflowMenu<T>({ actions, row }: { actions: RowAction<T>[]; row: T 
       </button>
       {open && (
         <div
+          ref={menuRef}
           role="menu"
           style={{ top: pos.top, bottom: pos.bottom, right: pos.right }}
           onMouseDown={(e) => e.stopPropagation()}
