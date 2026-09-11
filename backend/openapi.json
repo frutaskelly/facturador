@@ -34040,6 +34040,81 @@
     ]
    }
   },
+  "/api/v1/sat/describir": {
+   "get": {
+    "description": "Descripción oficial de claves ProdServ y unidades CONCRETAS (separadas\npor coma), en un solo viaje. Es lo que pone «50401700 — Chiles frescos» al\nlado del puro número en la vinculación/importación de productos (ticket\n86bbyvyaj): una clave que no aparece en la respuesta no existe en el\ncatálogo oficial.",
+    "operationId": "describir_sat_api_v1_sat_describir_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "claves",
+      "required": false,
+      "schema": {
+       "default": "",
+       "maxLength": 4000,
+       "title": "Claves",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "unidades",
+      "required": false,
+      "schema": {
+       "default": "",
+       "maxLength": 1000,
+       "title": "Unidades",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Describir Sat",
+    "tags": [
+     "sat"
+    ]
+   }
+  },
   "/api/v1/sat/sugerir": {
    "post": {
     "operationId": "sugerir_api_v1_sat_sugerir_post",

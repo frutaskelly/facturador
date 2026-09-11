@@ -157,6 +157,44 @@ export default function ImportarProductosPage() {
   const [campos, setCampos] = useState<{ valor: string; etiqueta: string }[]>([]);
   const [filas, setFilas] = useState<Fila[]>([]);
   const [resultado, setResultado] = useState<ImportResult | null>(null);
+  // Nombres oficiales del catálogo SAT (ticket 86bbyvyaj): «50401700» solo no
+  // le dice nada a nadie; junto al número va su descripción oficial y el
+  // nombre de la unidad. Se resuelven por lote conforme aparecen claves
+  // nuevas (las tecleadas a medias no se piden: 8 dígitos o nada).
+  const [satNombres, setSatNombres] = useState<{ claves: Record<string, string>; unidades: Record<string, string> }>(
+    { claves: {}, unidades: {} },
+  );
+  const satPedidas = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const claves = new Set<string>();
+    const unidades = new Set<string>();
+    for (const f of filas) {
+      if (f.clave_sat) claves.add(f.clave_sat);
+      if (f.unidad_sat) unidades.add(f.unidad_sat.toUpperCase());
+      for (const c of [...f.candidatos, ...(f.elegido ? [f.elegido] : [])]) {
+        if (c.clave_sat) claves.add(c.clave_sat);
+        if (c.unidad_sat) unidades.add(c.unidad_sat.toUpperCase());
+      }
+    }
+    const nc = [...claves].filter((c) => /^\d{8}$/.test(c) && !satPedidas.current.has(`c:${c}`));
+    const nu = [...unidades].filter((u) => !satPedidas.current.has(`u:${u}`));
+    if (nc.length === 0 && nu.length === 0) return;
+    nc.forEach((c) => satPedidas.current.add(`c:${c}`));
+    nu.forEach((u) => satPedidas.current.add(`u:${u}`));
+    (async () => {
+      try {
+        const r = await apiFetch<{ claves: Record<string, string>; unidades: Record<string, string> }>(
+          `/api/v1/sat/describir?claves=${nc.join(",")}&unidades=${nu.join(",")}`,
+        );
+        setSatNombres((s) => ({
+          claves: { ...s.claves, ...r.claves },
+          unidades: { ...s.unidades, ...r.unidades },
+        }));
+      } catch {
+        /* sin descripciones no se detiene nada: la columna queda como antes */
+      }
+    })();
+  }, [filas]);
   // La casilla de cada fila significa "se importa". Desmarcarla la omite: es
   // el gesto natural para excluir unas cuantas de un lote grande.
   const [incluidas, setIncluidas] = useState<Set<number>>(new Set());
@@ -1024,35 +1062,48 @@ export default function ImportarProductosPage() {
         // inexistente, que hablaba de un dato que no se va a usar.
         if (seImporta(f) && f.accion === "vincular") {
           const cand = candidatosDe(f).find((c) => c.producto_id === f.producto_sel);
+          const desc = satNombres.claves[cand?.clave_sat ?? ""];
+          const uni = satNombres.unidades[(cand?.unidad_sat ?? "").toUpperCase()];
           return (
             <div className="text-sm">
               <span className="tabular-nums">{cand?.clave_sat || "—"}</span>
-              <span className="text-muted"> · {cand?.unidad_sat || "—"}</span>
+              <span className="text-muted"> · {cand?.unidad_sat || "—"}{uni ? ` (${uni})` : ""}</span>
+              {/* La descripción oficial del catálogo SAT: es lo que permite
+                  validar de un vistazo que la clasificación corresponde. */}
+              {desc && <div className="text-xs text-muted">{desc}</div>}
               <div className="text-xs text-muted">del producto existente</div>
             </div>
           );
         }
-        return seImporta(f) ? (
-          <div className="flex gap-1">
-            <div className="w-[7rem]">
-              <Input
-                value={f.clave_sat}
-                onChange={(e) => setFila(f.fila, { clave_sat: e.target.value })}
-                placeholder="01010101"
-                aria-label={`Clave SAT de ${f.nombre}`}
-              />
+        if (!seImporta(f)) return <span className="text-muted">—</span>;
+        const descF = satNombres.claves[f.clave_sat ?? ""];
+        const uniF = satNombres.unidades[(f.unidad_sat ?? "").toUpperCase()];
+        return (
+          <div>
+            <div className="flex gap-1">
+              <div className="w-[7rem]">
+                <Input
+                  value={f.clave_sat}
+                  onChange={(e) => setFila(f.fila, { clave_sat: e.target.value })}
+                  placeholder="01010101"
+                  aria-label={`Clave SAT de ${f.nombre}`}
+                />
+              </div>
+              <div className="w-[4.5rem]">
+                <Input
+                  value={f.unidad_sat}
+                  onChange={(e) => setFila(f.fila, { unidad_sat: e.target.value.toUpperCase() })}
+                  placeholder="KGM"
+                  aria-label={`Unidad SAT de ${f.nombre}`}
+                />
+              </div>
             </div>
-            <div className="w-[4.5rem]">
-              <Input
-                value={f.unidad_sat}
-                onChange={(e) => setFila(f.fila, { unidad_sat: e.target.value.toUpperCase() })}
-                placeholder="KGM"
-                aria-label={`Unidad SAT de ${f.nombre}`}
-              />
-            </div>
+            {(descF || uniF) && (
+              <div className="mt-1 text-xs text-muted">
+                {descF}{descF && uniF ? " · " : ""}{uniF}
+              </div>
+            )}
           </div>
-        ) : (
-          <span className="text-muted">—</span>
         );
       },
     },
