@@ -2,27 +2,35 @@
 
 // Estado de cuenta del cliente (Cobranza F1) — sus facturas PPD timbradas con
 // saldo pendiente + antigüedad de saldos por fecha de vencimiento (estilo SAE).
-// Solo lectura; los abonos (REP) llegan en F2.
+// Filtrable por serie (en EHMO cada plaza factura con la suya) y fecha de
+// corte, y descargable como el Excel que SAE le manda al cliente (con la
+// semana de entrega derivada de las observaciones, ya sin capturarla a mano).
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, FileSpreadsheet } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
+import { Field, Input, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
-import { apiFetch } from "@/lib/api";
+import { useToast } from "@/components/ui/Toast";
+import { ApiError, apiDownload, apiFetch } from "@/lib/api";
 import { fmtDate, fmtMoney } from "@/lib/format";
 
 type Doc = {
   factura_id: string; serie: string; folio: number; uuid: string | null;
   fecha: string; vencimiento: string; dias_vencida: number;
   total: string; saldo_insoluto: string;
+  semana: number | null; proyecto: string | null;
 };
 type EstadoCuenta = {
   cliente_nombre: string; dias_credito: number; limite_credito: string;
   corte: string; saldo_total: string;
+  serie: string | null;
+  series: { serie: string; facturas: number; saldo: string }[];
   antiguedad: { por_vencer: string; d1_30: string; d31_60: string; d61_90: string; d90_mas: string };
   facturas: Doc[];
 };
@@ -35,22 +43,52 @@ const BUCKETS: { key: keyof EstadoCuenta["antiguedad"]; label: string }[] = [
   { key: "d90_mas", label: "90+ días" },
 ];
 
+function query(serie: string, corte: string): string {
+  const p = new URLSearchParams();
+  if (serie) p.set("serie", serie);
+  if (corte) p.set("corte", corte);
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
 export default function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const toast = useToast();
   const [data, setData] = useState<EstadoCuenta | null>(null);
   const [error, setError] = useState(false);
+  const [serie, setSerie] = useState("");
+  const [corte, setCorte] = useState("");
+  const [bajando, setBajando] = useState(false);
 
   useEffect(() => {
-    apiFetch<EstadoCuenta>(`/api/v1/cobranza/estado-cuenta/${id}`)
-      .then(setData)
-      .catch(() => setError(true));
-  }, [id]);
+    let vivo = true;
+    apiFetch<EstadoCuenta>(`/api/v1/cobranza/estado-cuenta/${id}${query(serie, corte)}`)
+      .then((d) => { if (vivo) { setData(d); setError(false); } })
+      .catch(() => { if (vivo) setError(true); });
+    return () => { vivo = false; };
+  }, [id, serie, corte]);
+
+  const bajarExcel = async () => {
+    if (!data || bajando) return;
+    setBajando(true);
+    try {
+      const nombre = `estado-cuenta${serie ? `-${serie}` : ""}-${data.corte.replaceAll("-", "")}.xlsx`;
+      await apiDownload(`/api/v1/cobranza/estado-cuenta/${id}/xlsx${query(serie, corte)}`, nombre);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo generar el Excel.");
+    } finally {
+      setBajando(false);
+    }
+  };
 
   if (error) return <Alert tone="danger">No se pudo cargar el estado de cuenta.</Alert>;
   if (!data) return <div className="flex justify-center py-16"><Spinner /></div>;
 
   const cols: Column<Doc>[] = [
+    { header: "Sem", className: "text-muted",
+      cell: (d) => d.semana != null ? `SEM ${d.semana}` : "—" },
     { header: "Factura", cell: (d) => <span className="font-medium">{d.serie}{d.folio}</span> },
+    { header: "Proyecto", className: "text-muted", cell: (d) => d.proyecto ?? "—" },
     { header: "Fecha", cell: (d) => fmtDate(d.fecha) },
     { header: "Vence", cell: (d) => fmtDate(d.vencimiento) },
     { header: "Días vencida", className: "text-right tabular-nums",
@@ -58,6 +96,9 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
         ? <span className="text-danger">{d.dias_vencida}</span>
         : <span className="text-muted">Por vencer</span> },
     { header: "Total", className: "text-right tabular-nums", cell: (d) => fmtMoney(d.total) },
+    { header: "Abonos", className: "text-right tabular-nums",
+      cell: (d) => Number(d.total) > Number(d.saldo_insoluto)
+        ? fmtMoney(Number(d.total) - Number(d.saldo_insoluto)) : "—" },
     { header: "Saldo", className: "text-right tabular-nums font-medium", cell: (d) => fmtMoney(d.saldo_insoluto) },
   ];
 
@@ -67,11 +108,33 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
         title={`Estado de cuenta — ${data.cliente_nombre}`}
         subtitle={`Crédito: ${fmtMoney(data.limite_credito)} · ${data.dias_credito} días · corte ${fmtDate(data.corte)}`}
         actions={
-          <Link href="/clientes" className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-surface-2">
-            <ArrowLeft size={16} /> Clientes
-          </Link>
+          <div className="flex items-center gap-2">
+            <Button onClick={bajarExcel} disabled={bajando}>
+              <FileSpreadsheet size={16} /> {bajando ? "Generando…" : "Excel"}
+            </Button>
+            <Link href="/clientes" className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-surface-2">
+              <ArrowLeft size={16} /> Clientes
+            </Link>
+          </div>
         }
       />
+
+      {/* Filtros: serie (plaza) y fecha de corte */}
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <Field label="Serie">
+          <Select className="min-w-52" value={serie} onChange={(e) => setSerie(e.target.value)} aria-label="Filtrar por serie">
+            <option value="">Todas</option>
+            {data.series.map((s) => (
+              <option key={s.serie} value={s.serie}>
+                {s.serie} · {s.facturas} fact. · {fmtMoney(s.saldo)}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Corte">
+          <Input type="date" value={corte} onChange={(e) => setCorte(e.target.value)} aria-label="Fecha de corte" />
+        </Field>
+      </div>
 
       {/* Antigüedad de saldos */}
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -85,7 +148,9 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
 
       <Card>
         <div className="mb-3 flex items-center justify-between">
-          <div className="text-sm font-medium">Facturas PPD con saldo</div>
+          <div className="text-sm font-medium">
+            Facturas PPD con saldo{serie ? ` · serie ${serie}` : ""}
+          </div>
           <div className="text-sm">Saldo total: <span className="font-semibold tabular-nums">{fmtMoney(data.saldo_total)}</span></div>
         </div>
         {data.facturas.length === 0 ? (
