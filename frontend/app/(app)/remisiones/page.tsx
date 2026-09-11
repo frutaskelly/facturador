@@ -87,6 +87,46 @@ function puedeFacturar(r: Remision): boolean {
   );
 }
 
+// Selector de sucursal DENTRO de la celda (ticket 86bbykyu2): asignar la plaza
+// de una remisión sin abrir la edición — el caso típico es el pedido del robot
+// que llegó sin destino. Las opciones (vínculos del cliente) se cargan al
+// pasar el mouse, para que al abrir el select ya estén.
+function SucursalQuick({
+  nombre, sucursalId, cargar, onAsignar,
+}: {
+  nombre: string;
+  sucursalId: string;
+  cargar: () => Promise<ComboOption[]>;
+  onAsignar: (v: string) => void;
+}) {
+  const [opts, setOpts] = useState<ComboOption[] | null>(null);
+  const busy = useRef(false);
+  const precargar = () => {
+    if (opts || busy.current) return;
+    busy.current = true;
+    cargar().then(setOpts).catch(() => setOpts([]));
+  };
+  return (
+    <select
+      aria-label="Asignar sucursal"
+      className="w-full max-w-[160px] cursor-pointer truncate rounded border-0 bg-transparent p-0 text-sm text-inherit outline-none hover:underline"
+      value={sucursalId}
+      onMouseEnter={precargar}
+      onFocus={precargar}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => onAsignar(e.target.value)}
+      title={nombre ? `${nombre} — clic para cambiar la sucursal` : "Asignar sucursal"}
+    >
+      <option value="">—</option>
+      {/* La actual siempre está, aunque las opciones no hayan cargado. */}
+      {sucursalId && !(opts ?? []).some((o) => o.value === sucursalId) && (
+        <option value={sucursalId}>{nombre || "(plaza asignada)"}</option>
+      )}
+      {opts?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
 // Cómo se le llama en pantalla al origen que reporta el resolutor de precios
 // (mismas etiquetas que /cotizador).
 const ORIGEN_LABEL: Record<string, string> = {
@@ -447,6 +487,14 @@ export default function RemisionesPage() {
         sucs = (await apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${det.cliente_facturacion_id}&limit=200`)).items;
       } catch {
         sucs = [];
+        toast.error("No se pudieron cargar las plazas del cliente; la sucursal actual se conserva");
+      }
+      // La plaza YA asignada entra al combo aunque el vínculo no exista o la
+      // carga haya fallado: si no, el campo se veía VACÍO con la sucursal
+      // puesta y parecía que se había perdido (ticket 86bbykyu2).
+      if (det.sucursal_id && !sucs.some((s) => s.id === det.sucursal_id)) {
+        const propia = sucursalesTodas.find((s) => s.id === det.sucursal_id);
+        sucs = [...sucs, propia ?? ({ id: det.sucursal_id, nombre: "(plaza asignada)" } as Sucursal)];
       }
       setSucursales(sucs);
       setClienteId(det.cliente_facturacion_id);
@@ -904,8 +952,21 @@ export default function RemisionesPage() {
     // Cobrar otro precio siempre se puede; que se QUEDE es la pregunta, y va
     // antes de tocar el documento para que "cancelar" regrese a la captura.
     const div = puedePrecios ? divergentes(lineas) : [];
+    trasAprender.current = "guardar";
     if (div.length > 0) { setAprender(div); return; }
     continuarGuardar();
+  }
+
+  // «Confirmar pedido» dentro de la edición (ticket 86bbynjte): guarda los
+  // cambios y confirma en un solo paso, sin salir a buscar la remisión a la
+  // tabla. Pasa por el mismo aviso de precios divergentes que Guardar.
+  function abrirConfirmarEdicion() {
+    if (saving) return;
+    if (!construirPayload()) return;
+    const div = puedePrecios ? divergentes(lineas) : [];
+    trasAprender.current = "confirmar";
+    if (div.length > 0) { setAprender(div); return; }
+    void guardarYConfirmar();
   }
 
   function continuarGuardar() {
@@ -923,6 +984,9 @@ export default function RemisionesPage() {
   const puedePrecios = can(me, "lista_precios:gestionar");
   const puedeProductos = can(me, "producto:gestionar");
   const [aprender, setAprender] = useState<PrecioDivergente[] | null>(null);
+  // Qué sigue después del diálogo de precios divergentes: el flujo normal de
+  // Guardar, o guardar+confirmar (botón «Confirmar pedido» de la edición).
+  const trasAprender = useRef<"guardar" | "confirmar">("guardar");
   // Líneas capturadas que se quedaron en $0 — porque el producto no está en la
   // lista del cliente y ya no se inventa un precio base. El borrador se guarda
   // (el hueco se ve), pero confirmar y facturar quedan cerrados.
@@ -1001,7 +1065,7 @@ export default function RemisionesPage() {
     try {
       const rem = await persistirRemision(payload);
       invalidarDetalles([rem.id]);
-      await confirmarRemision(rem.id, rem.folio_interno);
+      await confirmarRemision(rem);
       setEditId(null);
       resetForm();
       setMode("list");
@@ -1054,7 +1118,11 @@ export default function RemisionesPage() {
   const [guardarChoiceOpen, setGuardarChoiceOpen] = useState(false);
   // Sobregiro: cuando confirmar falla por existencia insuficiente, ofrecemos
   // confirmar de todas formas dejando el inventario en negativo.
-  const [negStock, setNegStock] = useState<{ remId: string; folio: string } | null>(null);
+  const [negStock, setNegStock] = useState<Remision | null>(null);
+  // Recién confirmada: el aviso «¿Deseas facturarla?» (tickets 86bbykyu2 y
+  // 86bbynjte) — facturar el documento que se acaba de confirmar sin volver a
+  // buscarlo en la tabla.
+  const [postConfirm, setPostConfirm] = useState<Remision | null>(null);
 
   // Saca del caché el detalle de las remisiones que acaban de mutar (editar,
   // confirmar, cancelar, facturar): el slide-down y getDetalle vuelven a pedir
@@ -1273,17 +1341,20 @@ export default function RemisionesPage() {
   // abre el popup de sobregiro (inventario en negativo). Lógica ÚNICA que
   // comparten el ícono Confirmar de la tabla y el botón Confirmar del alta.
   // La navegación al listado la maneja quien llama (el alta hace setMode).
-  async function confirmarRemision(remId: string, folio: string): Promise<boolean> {
+  // Al lograrlo, ofrece facturar ahí mismo (tickets 86bbykyu2/86bbynjte): el
+  // documento recién confirmado es justo el que se factura a continuación, y
+  // sin el aviso había que volver a buscarlo en la tabla.
+  async function confirmarRemision(rem: Remision): Promise<boolean> {
     try {
-      await post(`/api/v1/remisiones/${remId}/confirmar`, {});
-      invalidarDetalles([remId]);
-      toast.success(`Remisión ${folio} confirmada (inventario reservado)`);
+      await post(`/api/v1/remisiones/${rem.id}/confirmar`, {});
+      invalidarDetalles([rem.id]);
       reload();
+      setPostConfirm(rem);
       return true;
     } catch (e) {
       // Sin existencia: la remisión queda en BORRADOR; ofrecemos sobregiro.
       if (e instanceof ApiError && /existencia insuficiente/i.test(e.message)) {
-        setNegStock({ remId, folio });
+        setNegStock(rem);
         return false;
       }
       toast.error(e instanceof ApiError ? e.message : "No se pudo confirmar");
@@ -1306,6 +1377,34 @@ export default function RemisionesPage() {
     }
   }
 
+  // ── sucursal desde la tabla (ticket 86bbykyu2) ──
+  // Vínculos cliente↔plaza por cliente, cacheados: la tabla puede tener muchas
+  // filas del mismo cliente y con una consulta alcanza.
+  const vinculosCache = useRef<Map<string, ComboOption[]>>(new Map());
+  async function vinculosDe(clienteId: string): Promise<ComboOption[]> {
+    const hit = vinculosCache.current.get(clienteId);
+    if (hit) return hit;
+    const items = (await apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${clienteId}&limit=200`)).items;
+    const opts = items.map((s) => ({ value: s.id, label: s.nombre }));
+    vinculosCache.current.set(clienteId, opts);
+    return opts;
+  }
+
+  // Asigna (o quita) la plaza de una remisión directo desde la celda. El
+  // backend valida el vínculo cliente↔plaza igual que en la edición.
+  async function asignarSucursal(r: Remision, sucursalId: string) {
+    try {
+      await patch(`/api/v1/remisiones/${r.id}`, { sucursal_id: sucursalId || null });
+      invalidarDetalles([r.id]);
+      toast.success(sucursalId
+        ? `Sucursal de ${r.folio_interno}: ${sucNombre[sucursalId] ?? "asignada"}`
+        : `Sucursal quitada de ${r.folio_interno}`);
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo cambiar la sucursal");
+    }
+  }
+
   /** Da por revisada una remisión que llegó de la bandeja tal como venía: es lo
    *  que le quita el freno para confirmarse, facturarse y salir a SAE. El
    *  backend la rechaza mientras queden partidas de la orden sin cruzar. */
@@ -1323,15 +1422,15 @@ export default function RemisionesPage() {
     if (!toConfirm) return;
     const r = toConfirm;
     setToConfirm(null);
-    await confirmarRemision(r.id, r.folio_interno);
+    await confirmarRemision(r);
   }
   // Reintenta la confirmación autorizando el sobregiro (inventario negativo).
   async function confirmarNegativo() {
     if (!negStock) return;
     try {
-      await post(`/api/v1/remisiones/${negStock.remId}/confirmar`, { permitir_negativos: true });
-      invalidarDetalles([negStock.remId]);
-      toast.success(`Remisión ${negStock.folio} confirmada (inventario en negativo)`);
+      await post(`/api/v1/remisiones/${negStock.id}/confirmar`, { permitir_negativos: true });
+      invalidarDetalles([negStock.id]);
+      setPostConfirm(negStock);
       setNegStock(null);
       setMode("list");
       reload();
@@ -1960,6 +2059,20 @@ export default function RemisionesPage() {
     await facturarRems(facturarSolo ? [facturarSolo] : selected, modo);
   }
 
+  // Factura UNA remisión (acción de fila y aviso post-confirmación). Igual que
+  // la lista: directo si no hay productos repetidos; con repetidos abre el
+  // popup para elegir sumatoria o no.
+  async function facturarUna(r: Remision) {
+    const det = await getDetalle(r);
+    if (det && hayProductosRepetidos(det.lineas)) {
+      setFacturarSolo(r);
+      setFacturarDups(true);
+      setFacturarOpen(true);
+      return;
+    }
+    await facturarRems([r], "sin_sumar");
+  }
+
   // "Facturar" desde la lista. Salta el popup SOLO si es inequívoco: seleccionaste
   // exactamente 1 remisión, es elegible y sin productos repetidos → timbra directo.
   // Si seleccionaste varias (aunque solo 1 sea elegible), abre el popup para que
@@ -2115,7 +2228,22 @@ export default function RemisionesPage() {
       exportValue: (f) => (f.rem ? sucNombre[f.rem.sucursal_id ?? ""] ?? "" : f.oc.sucursal_nombre ?? ""),
       cell: (f) => {
         const n = f.rem ? sucNombre[f.rem.sucursal_id ?? ""] : f.oc.sucursal_nombre;
-        return <span title={n ?? ""}>{n || "—"}</span>;
+        const r = f.rem;
+        // Editable en la celda mientras el documento se pueda tocar (mismo
+        // criterio que la acción Editar): el caso típico es el pedido del
+        // robot que llegó sin plaza y sin ella no se puede facturar.
+        const editable = r != null && canWrite
+          && (r.estado === "BORRADOR" || r.estado === "RESERVADO" || r.estado === "CONFIRMADA")
+          && (!r.factura_id || r.factura_estado === "CANCELADA");
+        if (!editable || !r) return <span title={n ?? ""}>{n || "—"}</span>;
+        return (
+          <SucursalQuick
+            nombre={n ?? ""}
+            sucursalId={r.sucursal_id ?? ""}
+            cargar={() => vinculosDe(r.cliente_facturacion_id)}
+            onAsignar={(v) => { void asignarSucursal(r, v); }}
+          />
+        );
       },
     },
     {
@@ -2217,6 +2345,13 @@ export default function RemisionesPage() {
     { id: "confirmar", label: "Confirmar", icon: <Check size={15} />, tone: "success",
       onClick: (r) => setToConfirm(r),
       hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "RESERVADO")) },
+    // Facturar UNA remisión desde su fila (ticket 86bbynx5f): solo cuando de
+    // verdad puede facturarse — sin factura vigente y ya revisada (el freno de
+    // «por revisar» tiene su propia acción aquí mismo). Un BORRADOR se
+    // auto-confirma al facturar (mismo criterio que el botón del lote).
+    { id: "facturar", label: "Facturar", icon: <FileText size={15} />, tone: "success",
+      onClick: (r) => { void facturarUna(r); },
+      hidden: (r) => !(canWrite && puedeFacturar(r) && !r.revision_pendiente) },
     { id: "revisada", label: "Dar por revisada", icon: <Check size={15} />, tone: "success",
       onClick: (r) => { void darPorRevisada(r); },
       hidden: (r) => !(canWrite && r.revision_pendiente) },
@@ -2595,6 +2730,19 @@ export default function RemisionesPage() {
               </div>
               <div className="flex gap-2">
                 <Button variant="secondary" onClick={resetForm} disabled={saving}>Borrar</Button>
+                {/* Editando un borrador: guardar y confirmar en un solo paso
+                    (ticket 86bbynjte) — sin salir a buscar la remisión. Con
+                    líneas sin precio se bloquea igual que en el diálogo. */}
+                {editId != null && editEstado !== "CONFIRMADA" && (
+                  <Button
+                    variant="secondary"
+                    onClick={abrirConfirmarEdicion}
+                    disabled={saving || sinPrecio.length > 0}
+                    title={sinPrecio.length > 0 ? "Hay líneas sin precio: captúralas antes de confirmar" : "Guarda los cambios y confirma el pedido (reserva inventario)"}
+                  >
+                    <Check size={16} /> Confirmar pedido
+                  </Button>
+                )}
                 <Button onClick={abrirGuardar} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</Button>
               </div>
             </div>
@@ -2645,7 +2793,11 @@ export default function RemisionesPage() {
           sucursalId={sucursalId || undefined}
           sucursalNombre={sucursales.find((x) => x.id === sucursalId)?.nombre}
           onCancel={() => setAprender(null)}
-          onDone={() => { setAprender(null); continuarGuardar(); }}
+          onDone={() => {
+            setAprender(null);
+            if (trasAprender.current === "confirmar") void guardarYConfirmar();
+            else continuarGuardar();
+          }}
         />
 
         <Modal open={guardarChoiceOpen} onClose={() => setGuardarChoiceOpen(false)} title="Guardar remisión"
@@ -2880,9 +3032,34 @@ export default function RemisionesPage() {
         confirmLabel="Facturar con sobregiro" confirmVariant="danger"
         onConfirm={confirmarFacturarSobregiro} onClose={declinarFacturarSobregiro} loading={bulkBusy} />
       <ConfirmDialog open={negStock !== null} title="Existencia insuficiente"
-        message={`No hay existencia suficiente para confirmar ${negStock?.folio}. ¿Deseas remisionar de todas formas? El inventario quedará en negativo (sobregiro).`}
+        message={`No hay existencia suficiente para confirmar ${negStock?.folio_interno}. ¿Deseas remisionar de todas formas? El inventario quedará en negativo (sobregiro).`}
         confirmLabel="Remisionar sin existencias" confirmVariant="primary"
         onConfirm={confirmarNegativo} onClose={() => setNegStock(null)} loading={saving} />
+
+      {/* Pedido confirmado → ofrecer facturar ahí mismo (tickets 86bbykyu2 y
+          86bbynjte): el que confirma casi siempre factura a continuación, y
+          sin este aviso tenía que volver a buscar la remisión en la tabla. */}
+      <Modal open={postConfirm !== null} onClose={() => setPostConfirm(null)} title="Pedido confirmado correctamente"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setPostConfirm(null)}>Continuar</Button>
+            <Button
+              onClick={() => {
+                const r = postConfirm;
+                setPostConfirm(null);
+                if (r) void facturarUna(r);
+              }}
+              disabled={bulkBusy}
+            >
+              Facturar remisión
+            </Button>
+          </>
+        }>
+        <p className="text-sm text-muted">
+          La remisión <strong className="text-foreground">{postConfirm?.folio_interno}</strong> quedó confirmada y el inventario reservado.
+        </p>
+        <p className="mt-2 text-sm text-muted">¿Deseas facturar esta remisión?</p>
+      </Modal>
 
       {/* ── Export masivo para SAE (remisiones → Aspel) ── */}
       <Modal
