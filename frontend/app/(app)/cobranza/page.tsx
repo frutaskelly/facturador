@@ -4,7 +4,7 @@
 // pago, se le anexan las facturas PPD que cubre (parcial = abono con saldo), y
 // se timbra el REP ante el SAT. Estilo SAE. Un REP timbrado se puede descargar
 // (PDF/XML), enviar por correo y cancelar (revierte el saldo de las facturas).
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ban, Download, FileText, Mail, Plus, Stamp } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
@@ -94,7 +94,8 @@ export default function Page() {
     }
   }
 
-  function descargar(r: Recibo, tipo: "pdf" | "xml") {
+  // Estable entre renders: es dependencia de las acciones memoizadas de la tabla.
+  const descargar = useCallback((r: Recibo, tipo: "pdf" | "xml") => {
     const nombre = `REP-${r.serie}${r.folio}`;
     if (tipo === "xml") {
       apiDownload(`/api/v1/cobranza/recibos-pago/${r.id}/xml`, `${nombre}.xml`)
@@ -104,9 +105,9 @@ export default function Page() {
     const win = window.open("", "_blank");
     apiOpenInTab(`/api/v1/cobranza/recibos-pago/${r.id}/pdf`, win)
       .catch((e) => toast.error(e instanceof ApiError ? e.message : "No se pudo abrir el PDF"));
-  }
+  }, [toast]);
 
-  const cols: Column<Recibo>[] = [
+  const cols: Column<Recibo>[] = useMemo(() => [
     { header: "Recibo", cell: (r) => <span className="font-medium">{r.serie}{r.folio}</span> },
     { header: "Cliente", cell: (r) => cliName[r.cliente_id] ?? "—" },
     { header: "Fecha pago", cell: (r) => fmtDate(r.fecha_pago) },
@@ -115,9 +116,9 @@ export default function Page() {
     { header: "Estado", cell: (r) => <Badge tone={TONE[r.estado]}>{r.estado}</Badge> },
     { header: "UUID", cell: (r) => r.uuid
       ? <span className="font-mono text-xs text-muted">{r.uuid.slice(0, 8)}…</span> : <span className="text-muted">—</span> },
-  ];
+  ], [cliName]);
 
-  const rowActions: RowAction<Recibo>[] = [
+  const rowActions: RowAction<Recibo>[] = useMemo(() => [
     { id: "timbrar", label: timbrando ? "Timbrando…" : "Timbrar", icon: <Stamp size={15} />,
       onClick: (r) => setATimbrar(r),
       hidden: (r) => !(canWrite && r.estado === "BORRADOR") },
@@ -129,9 +130,9 @@ export default function Page() {
       onClick: (r) => setEnviar(r), hidden: (r) => !(canWrite && r.estado === "TIMBRADO") },
     { id: "cancelar", label: "Cancelar REP", icon: <Ban size={15} />, tone: "danger",
       onClick: (r) => setCancelar(r), hidden: (r) => !(canWrite && r.estado === "TIMBRADO") },
-  ];
+  ], [timbrando, canWrite, descargar]);
 
-  const pendCols: Column<FacturaPendiente>[] = [
+  const pendCols: Column<FacturaPendiente>[] = useMemo(() => [
     { header: "Folio", sortable: true, exportValue: (f) => `${f.serie}${f.folio}`,
       sortValue: (f) => `${f.serie}${f.folio}`,
       cell: (f) => <span className="font-medium">{f.serie}{f.folio}</span> },
@@ -159,7 +160,7 @@ export default function Page() {
     { header: "Estado de pago", sortable: true, exportValue: (f) => f.estado_pago,
       sortValue: (f) => f.estado_pago,
       cell: (f) => <Badge tone={f.estado_pago === "PARCIAL" ? "warning" : "muted"}>{f.estado_pago}</Badge> },
-  ];
+  ], [cliName]);
   const pendTotalSel = pendSel.reduce((s, f) => s + Number(f.saldo_insoluto), 0);
 
   return (
@@ -219,7 +220,8 @@ export default function Page() {
       ) : (
         <Card>
           <DataTable rows={recibos.data?.items ?? []} rowKey={(r) => r.id} columns={cols}
-            actions={rowActions} loading={recibos.loading} empty="No hay recibos de pago aún." />
+            actions={rowActions} loading={recibos.loading} empty="No hay recibos de pago aún."
+            paginated defaultPageSize={50} />
         </Card>
       )}
       {nuevo && (

@@ -15,6 +15,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -66,11 +67,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     });
   }
 
-  const api: ToastApi = {
-    success: (m, a) => push("success", m, a),
-    error: (m, a) => push("error", m, a),
-    info: (m, a) => push("info", m, a),
-  };
+  // Estable entre renders: cada aviso re-renderizaba TODA la app (todas las
+  // páginas consumen useToast) porque el value del Provider era un objeto nuevo.
+  const api: ToastApi = useMemo(
+    () => ({
+      success: (m, a) => push("success", m, a),
+      error: (m, a) => push("error", m, a),
+      info: (m, a) => push("info", m, a),
+    }),
+    []
+  );
 
   function cerrar() {
     setCola((q) => q.slice(1));

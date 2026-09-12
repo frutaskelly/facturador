@@ -5,7 +5,7 @@
 // producto interno, sin duplicados. Se alimenta desde aquí o importando su
 // lista de precios en Productos → Importar.
 import Link from "next/link";
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
@@ -113,7 +113,7 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
     }
   }
 
-  const columns: Column<ProductoClienteRow>[] = [
+  const columns = useMemo<Column<ProductoClienteRow>[]>(() => [
     { header: "Producto interno", cell: (r) => (
       <div>
         <div className="font-medium">{r.producto_nombre}</div>
@@ -150,7 +150,7 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
           </button>
         ) : null,
     },
-  ];
+  ], [canWrite]);
 
   if (error) return <Alert tone="danger">No se pudo cargar el catálogo del cliente.</Alert>;
   if (!cliente || rows === null)
@@ -192,6 +192,8 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
       <DataTable
         columns={columns}
         rows={rows}
+        paginated
+        defaultPageSize={50}
         empty="Este cliente aún no tiene códigos ni nombres propios — sus facturas usan el nombre y SKU internos. Impórtalos desde Productos → Importar con su lista de precios."
         onRowClick={
           canWrite

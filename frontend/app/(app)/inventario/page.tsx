@@ -61,8 +61,8 @@ export default function InventarioPage() {
 
   const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=500");
   const almacenesRes = useResource<Page<Almacen>>("/api/v1/almacenes?limit=200");
-  const productos = productosRes.data?.items ?? [];
-  const almacenes = almacenesRes.data?.items ?? [];
+  const productos = useMemo(() => productosRes.data?.items ?? [], [productosRes.data]);
+  const almacenes = useMemo(() => almacenesRes.data?.items ?? [], [almacenesRes.data]);
 
   const prodName = useMemo(
     () => Object.fromEntries(productos.map((p) => [p.id, p.nombre])),
@@ -113,7 +113,7 @@ export default function InventarioPage() {
     }
   }
 
-  const columns: Column<ExistenciaRow>[] = [
+  const columns = useMemo<Column<ExistenciaRow>[]>(() => [
     {
       header: "Producto",
       truncate: true,
@@ -129,7 +129,7 @@ export default function InventarioPage() {
     // 2026-07-29 #2); la cubeta quedó siempre en 0.
     { header: "Costo prom.", cell: (r) => fmtMoney(r.costo_promedio), className: "text-right" },
     { header: "Valor", cell: (r) => fmtMoney(r.valor), className: "text-right" },
-  ];
+  ], [prodName, almName]);
 
   const totalValor = rows.reduce((s, r) => s + Number(r.valor), 0);
 

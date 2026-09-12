@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -128,7 +128,7 @@ export default function SeriesPage() {
     setFolioSae(null);
     setForm(emptyForm());
   }
-  function openEdit(s: Serie) {
+  const openEdit = useCallback((s: Serie) => {
     setFolioSae(null);
     setForm({
       ...emptyForm(),
@@ -150,7 +150,7 @@ export default function SeriesPage() {
         setFolioSae(r.sugerido === null ? null : { sugerido: r.sugerido, guardado: r.folio_actual });
       })
       .catch(() => {});
-  }
+  }, []);
 
   function changeKind(kind: Kind) {
     setForm((f) => {
@@ -232,37 +232,40 @@ export default function SeriesPage() {
     }
   }
 
-  const columns: Column<Serie>[] = [
-    { header: "Código", cell: (s) => <span className="font-medium">{s.codigo}</span>, sortable: true, sortValue: (s) => s.codigo },
-    { header: "Documento", cell: (s) => DOC_LABEL[s.tipo_documento] ?? s.tipo_documento, sortable: true, sortValue: (s) => DOC_LABEL[s.tipo_documento] ?? s.tipo_documento },
-    { header: "Tipo", cell: (s) => (s.tipo === "FISCAL" ? "Fiscal" : "No fiscal"), sortable: true, sortValue: (s) => s.tipo },
-    { header: "Próximo folio", cell: (s) => <span className="tabular-nums">{`${s.codigo}${s.folio_actual + 1}`}</span> },
-    {
-      header: "Predeterminada",
-      cell: (s) => (s.es_default ? <Badge tone="success">★ Default</Badge> : <span className="text-muted">—</span>),
-    },
-    { header: "Estado", cell: (s) => <Badge tone={s.activa ? "success" : "muted"}>{s.activa ? "Activa" : "Inactiva"}</Badge>, sortable: true, sortValue: (s) => (s.activa ? "Activa" : "Inactiva") },
-  ];
-  if (canWrite || canDelete) {
-    columns.push({
-      header: "",
-      className: "text-right w-1",
-      cell: (s) => (
-        <div className="flex justify-end gap-1">
-          {canWrite && (
-            <button onClick={() => openEdit(s)} aria-label="Editar" className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground">
-              <Pencil size={16} />
-            </button>
-          )}
-          {canDelete && (
-            <button onClick={() => setToDelete(s)} aria-label="Eliminar" className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger">
-              <Trash2 size={16} />
-            </button>
-          )}
-        </div>
-      ),
-    });
-  }
+  const columns = useMemo<Column<Serie>[]>(() => {
+    const cols: Column<Serie>[] = [
+      { header: "Código", cell: (s) => <span className="font-medium">{s.codigo}</span>, sortable: true, sortValue: (s) => s.codigo },
+      { header: "Documento", cell: (s) => DOC_LABEL[s.tipo_documento] ?? s.tipo_documento, sortable: true, sortValue: (s) => DOC_LABEL[s.tipo_documento] ?? s.tipo_documento },
+      { header: "Tipo", cell: (s) => (s.tipo === "FISCAL" ? "Fiscal" : "No fiscal"), sortable: true, sortValue: (s) => s.tipo },
+      { header: "Próximo folio", cell: (s) => <span className="tabular-nums">{`${s.codigo}${s.folio_actual + 1}`}</span> },
+      {
+        header: "Predeterminada",
+        cell: (s) => (s.es_default ? <Badge tone="success">★ Default</Badge> : <span className="text-muted">—</span>),
+      },
+      { header: "Estado", cell: (s) => <Badge tone={s.activa ? "success" : "muted"}>{s.activa ? "Activa" : "Inactiva"}</Badge>, sortable: true, sortValue: (s) => (s.activa ? "Activa" : "Inactiva") },
+    ];
+    if (canWrite || canDelete) {
+      cols.push({
+        header: "",
+        className: "text-right w-1",
+        cell: (s) => (
+          <div className="flex justify-end gap-1">
+            {canWrite && (
+              <button onClick={() => openEdit(s)} aria-label="Editar" className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground">
+                <Pencil size={16} />
+              </button>
+            )}
+            {canDelete && (
+              <button onClick={() => setToDelete(s)} aria-label="Eliminar" className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger">
+                <Trash2 size={16} />
+              </button>
+            )}
+          </div>
+        ),
+      });
+    }
+    return cols;
+  }, [canWrite, canDelete, openEdit]);
 
   return (
     <div>

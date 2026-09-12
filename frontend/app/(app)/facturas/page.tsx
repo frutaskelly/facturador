@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Eye, FileCode2, FileText, FileX, Mail, Pencil, Plus, Replace, Stamp, Trash2, X } from "lucide-react";
 
 import { FacturaDirectaForm } from "@/components/FacturaDirectaForm";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column, type RowAction } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { LoadingDots } from "@/components/ui/LoadingDots";
 import { Modal } from "@/components/ui/Modal";
@@ -109,6 +110,32 @@ export default function FacturasPage() {
   const [fHasta, setFHasta] = useState("");
   const [fCliente, setFCliente] = useState("");
   const [fEstado, setFEstado] = useState("");
+  // Los filtros viven en la URL: sobreviven F5, volver de un detalle y abrir
+  // en otra pestaña. Se hidratan al montar (client-only, como ?ver=) y cada
+  // cambio se refleja con history.replaceState — sin navegación ni scroll.
+  const filtrosHidratados = useRef(false);
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const q = p.get("q");
+    if (q) { setBusca(q); setBuscaAplicada(q.trim()); }
+    if (p.get("desde")) setFDesde(p.get("desde")!);
+    if (p.get("hasta")) setFHasta(p.get("hasta")!);
+    if (p.get("cliente")) setFCliente(p.get("cliente")!);
+    if (p.get("estado")) setFEstado(p.get("estado")!);
+    filtrosHidratados.current = true;
+  }, []);
+  useEffect(() => {
+    if (!filtrosHidratados.current) return;
+    const p = new URLSearchParams(window.location.search);
+    const setOrDel = (k: string, v: string) => { if (v) p.set(k, v); else p.delete(k); };
+    setOrDel("q", buscaAplicada);
+    setOrDel("desde", fDesde);
+    setOrDel("hasta", fHasta);
+    setOrDel("cliente", fCliente);
+    setOrDel("estado", fEstado);
+    const qs = p.toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+  }, [buscaAplicada, fDesde, fHasta, fCliente, fEstado]);
   const listPath = useMemo(() => {
     const p = new URLSearchParams({ limit: "200" });
     if (fDesde) p.set("fecha_desde", fDesde);
@@ -118,6 +145,13 @@ export default function FacturasPage() {
     if (buscaAplicada) p.set("q", buscaAplicada);
     return `/api/v1/facturas?${p.toString()}`;
   }, [fDesde, fHasta, fCliente, fEstado, buscaAplicada]);
+  // UNA sola regla para «hay filtros»: antes el conteo de resultados y el
+  // botón Limpiar usaban listas distintas (el conteo olvidaba fEstado).
+  const hayFiltros = Boolean(busca || buscaAplicada || fDesde || fHasta || fCliente || fEstado);
+  const limpiarFiltros = () => {
+    setBusca(""); setBuscaAplicada("");
+    setFDesde(""); setFHasta(""); setFCliente(""); setFEstado("");
+  };
   const { data, loading, error, reload } = useResource<Page<Factura>>(listPath);
   const rows = data?.items ?? [];
 
@@ -708,7 +742,10 @@ export default function FacturasPage() {
     } finally { setBulkBusy(false); }
   }
 
-  const columns: Column<Factura>[] = [
+  // Memoizado: un array nuevo en cada render invalida la cadena de memos del
+  // DataTable (re-orden + re-filtro del dataset completo con cada setState de
+  // la página). Las celdas solo cierran sobre cliName, que ya es useMemo.
+  const columns: Column<Factura>[] = useMemo(() => [
     // `exportValue` explícito en las celdas JSX: es de donde leen el filtro
     // de valores del encabezado y el CSV (ticket 86bbyeny7 — sin él, el
     // embudo de Folio/Cliente/Estado listaba «(vacío)» para las 200 filas).
@@ -735,39 +772,44 @@ export default function FacturasPage() {
     { header: "Su pedido", truncate: true, exportValue: (f) => f.su_pedido ?? "",
       cell: (f) => <span title={f.su_pedido ?? ""}>{f.su_pedido ?? "—"}</span> },
     { header: "Nota", truncate: true, exportValue: (f) => f.notas ?? "", cell: (f) => <span title={f.notas ?? ""}>{f.notas ?? "—"}</span> },
-  ];
+  ], [cliName]);
 
-  const rowActions: RowAction<Factura>[] = [
+  // Los handlers viven en un ref: así rowActions puede memoizarse (identidad
+  // estable para el DataTable) sin congelar closures viejos — el clic siempre
+  // llama la versión del último render.
+  const accionesRef = useRef({ abrirEditar, previsualizar, descargar, abrirEnviar, abrirSustituir, abrirCancelar });
+  accionesRef.current = { abrirEditar, previsualizar, descargar, abrirEnviar, abrirSustituir, abrirCancelar };
+  const rowActions: RowAction<Factura>[] = useMemo(() => [
     { id: "timbrar", label: "Timbrar", icon: <Stamp size={15} />, tone: "success",
       onClick: (f) => setToTimbrar(f), hidden: (f) => !(canWrite && f.estado === "BORRADOR") },
     // Solo borradores nativos: una espejo se corrige en SAE y una timbrada ya
     // es un CFDI emitido (se sustituye o se cancela, no se edita).
     { id: "editar", label: "Editar", icon: <Pencil size={15} />,
-      onClick: (f) => { void abrirEditar(f); },
+      onClick: (f) => { void accionesRef.current.abrirEditar(f); },
       hidden: (f) => !(canWrite && f.estado === "BORRADOR" && f.origen !== "ESPEJO_SAE") },
     { id: "preview", label: "Ver factura", icon: <Eye size={15} />,
-      onClick: (f) => previsualizar(f), hidden: (f) => f.estado !== "TIMBRADA" },
+      onClick: (f) => accionesRef.current.previsualizar(f), hidden: (f) => f.estado !== "TIMBRADA" },
     { id: "pdf", label: "Descargar PDF", icon: <Download size={15} />,
-      onClick: (f) => { void descargar(f, "pdf"); }, hidden: (f) => f.estado !== "TIMBRADA" },
+      onClick: (f) => { void accionesRef.current.descargar(f, "pdf"); }, hidden: (f) => f.estado !== "TIMBRADA" },
     // El XML nativo se pide a Facturama; una espejo no tiene facturama_id (su
     // XML vive en SAE — sincronizarlo es v2 del conector).
     { id: "xml", label: "Descargar XML", icon: <FileCode2 size={15} />,
-      onClick: (f) => { void descargar(f, "xml"); },
+      onClick: (f) => { void accionesRef.current.descargar(f, "xml"); },
       hidden: (f) => f.estado !== "TIMBRADA" || f.origen === "ESPEJO_SAE" },
     { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />,
-      onClick: (f) => abrirEnviar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
+      onClick: (f) => accionesRef.current.abrirEnviar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
     // Las ESPEJO_SAE se cancelan/refacturan EN SAE (el backend lo rechaza con
     // 409); esconder los botones evita ofrecer algo que va a rebotar.
     // Sustituir implica cancelar la original ante el SAT: mismo permiso.
     { id: "sustituir", label: "Sustituir (refacturar)", icon: <Replace size={15} />,
-      onClick: (f) => abrirSustituir(f),
+      onClick: (f) => accionesRef.current.abrirSustituir(f),
       hidden: (f) => !(canCancelar && f.estado === "TIMBRADA" && f.origen !== "ESPEJO_SAE") },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
-      onClick: (f) => abrirCancelar(f),
+      onClick: (f) => accionesRef.current.abrirCancelar(f),
       hidden: (f) => !(canCancelar && f.estado === "TIMBRADA" && f.origen !== "ESPEJO_SAE") },
     { id: "descartar", label: "Descartar borrador", icon: <Trash2 size={15} />, tone: "danger",
       onClick: (f) => setToDescartar(f), hidden: (f) => !(canEliminar && f.estado === "BORRADOR") },
-  ];
+  ], [canWrite, canCancelar, canEliminar]);
 
   // ───────────────────────── render ─────────────────────────
   if (mode === "create" || editando) {
@@ -823,15 +865,12 @@ export default function FacturasPage() {
             ))}
           </Select>
         </Field>
-        {(busca || fDesde || fHasta || fCliente || fEstado) && (
-          <Button
-            variant="secondary"
-            onClick={() => { setBusca(""); setFDesde(""); setFHasta(""); setFCliente(""); setFEstado(""); }}
-          >
+        {hayFiltros && (
+          <Button variant="secondary" onClick={limpiarFiltros}>
             Limpiar filtros
           </Button>
         )}
-        {(buscaAplicada || fDesde || fHasta || fCliente) && !loading && (
+        {hayFiltros && !loading && (
           <span className="pb-2 text-sm text-muted">
             {data?.total ?? 0} resultado{(data?.total ?? 0) === 1 ? "" : "s"}
           </span>
@@ -860,7 +899,10 @@ export default function FacturasPage() {
               </Button>
             )}
             {canWrite && borradoresSel.length > 0 && (
-              <Button variant="success" onClick={() => setTimbrarBulkOpen(true)} disabled={bulkBusy}>
+              // Estilo neutro, como la barra gemela de Remisiones (ticket
+              // 86bby2txr): el color no insinúa prioridad — para lo delicado
+              // está el diálogo de confirmación.
+              <Button variant="secondary" onClick={() => setTimbrarBulkOpen(true)} disabled={bulkBusy}>
                 <Stamp size={16} /> Timbrar ({borradoresSel.length})
               </Button>
             )}
@@ -890,7 +932,16 @@ export default function FacturasPage() {
         searchValue={busca}
         onSearchChange={setBusca}
         searchPlaceholder="Folio, UUID u orden (p. ej. SN-33NER-JUE)…"
-        empty="Sin facturas"
+        empty={
+          hayFiltros ? (
+            <EmptyState
+              title="Ninguna factura coincide con los filtros"
+              action={<Button variant="secondary" onClick={limpiarFiltros}>Limpiar filtros</Button>}
+            />
+          ) : (
+            "Sin facturas"
+          )
+        }
         rowKey={(f) => f.id}
         actions={rowActions}
         onRowExpand={verDetalle}

@@ -6,7 +6,7 @@
 // corte, y descargable como el Excel que SAE le manda al cliente (con la
 // semana de entrega derivada de las observaciones, ya sin capturarla a mano).
 import Link from "next/link";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, FileSpreadsheet } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
@@ -81,10 +81,8 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
     }
   };
 
-  if (error) return <Alert tone="danger">No se pudo cargar el estado de cuenta.</Alert>;
-  if (!data) return <div className="flex justify-center py-16"><Spinner /></div>;
-
-  const cols: Column<Doc>[] = [
+  // Antes de los returns tempranos: es un hook, y no depende de `data`.
+  const cols = useMemo<Column<Doc>[]>(() => [
     { header: "Sem", className: "text-muted",
       sortValue: (d) => d.semana ?? -1,
       exportValue: (d) => (d.semana != null ? `SEM ${d.semana}` : ""),
@@ -117,7 +115,10 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
     { header: "Saldo", className: "text-right tabular-nums font-medium",
       sortValue: (d) => Number(d.saldo_insoluto), exportValue: (d) => Number(d.saldo_insoluto),
       cell: (d) => fmtMoney(d.saldo_insoluto) },
-  ];
+  ], []);
+
+  if (error) return <Alert tone="danger">No se pudo cargar el estado de cuenta.</Alert>;
+  if (!data) return <div className="flex justify-center py-16"><Spinner /></div>;
 
   return (
     <div>

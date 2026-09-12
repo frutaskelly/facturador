@@ -13,6 +13,7 @@ import { NuevaPresentacionDialog } from "@/components/NuevaPresentacionDialog";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column, type RowAction } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
@@ -100,11 +101,15 @@ function SucursalQuick({
   onAsignar: (v: string) => void;
 }) {
   const [opts, setOpts] = useState<ComboOption[] | null>(null);
+  // `null` = sin cargar; `[]` real = cargado y vacío; `error` aparte: un fallo
+  // de red se veía como «este cliente no tiene plazas», que es mentira.
+  const [fallo, setFallo] = useState(false);
   const busy = useRef(false);
   const precargar = () => {
     if (opts || busy.current) return;
     busy.current = true;
-    cargar().then(setOpts).catch(() => setOpts([]));
+    setFallo(false);
+    cargar().then(setOpts).catch(() => { setOpts([]); setFallo(true); busy.current = false; });
   };
   return (
     <select
@@ -122,6 +127,7 @@ function SucursalQuick({
       {sucursalId && !(opts ?? []).some((o) => o.value === sucursalId) && (
         <option value={sucursalId}>{nombre || "(plaza asignada)"}</option>
       )}
+      {fallo && <option value="" disabled>No se pudieron cargar las plazas — reintenta</option>}
       {opts?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   );
@@ -244,12 +250,37 @@ export default function RemisionesPage() {
     const t = setTimeout(() => setBuscaAplicada(busca.trim()), 300);
     return () => clearTimeout(t);
   }, [busca]);
-  // Deep-link desde la bandeja de OC (?q=<folio de la remisión recién creada>):
-  // el atajo del aviso cae aquí ya filtrado, sin buscar el folio a mano.
+  // Los filtros viven en la URL: sobreviven F5, volver de un detalle y abrir
+  // en otra pestaña (el ?q= además es el deep-link de la bandeja de OC). Se
+  // hidratan al montar (client-only) y cada cambio se refleja con
+  // history.replaceState — sin navegación ni pérdida de scroll.
+  const filtrosHidratados = useRef(false);
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get("q");
-    if (q) { setBusca(q); setBuscaAplicada(q); }
+    const p = new URLSearchParams(window.location.search);
+    const q = p.get("q");
+    if (q) { setBusca(q); setBuscaAplicada(q.trim()); }
+    if (p.get("desde")) setFDesde(p.get("desde")!);
+    if (p.get("hasta")) setFHasta(p.get("hasta")!);
+    if (p.get("cliente")) setFCliente(p.get("cliente")!);
+    if (p.get("revisar") === "1") setFPorRevisar(true);
+    if (p.get("estado")) setFEstado(p.get("estado")!);
+    if (p.get("sucursal")) setFSucursal(p.get("sucursal")!);
+    filtrosHidratados.current = true;
   }, []);
+  useEffect(() => {
+    if (!filtrosHidratados.current) return;
+    const p = new URLSearchParams(window.location.search);
+    const setOrDel = (k: string, v: string) => { if (v) p.set(k, v); else p.delete(k); };
+    setOrDel("q", buscaAplicada);
+    setOrDel("desde", fDesde);
+    setOrDel("hasta", fHasta);
+    setOrDel("cliente", fCliente);
+    setOrDel("revisar", fPorRevisar ? "1" : "");
+    setOrDel("estado", fEstado);
+    setOrDel("sucursal", fSucursal);
+    const qs = p.toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+  }, [buscaAplicada, fDesde, fHasta, fCliente, fPorRevisar, fEstado, fSucursal]);
   const listPath = useMemo(() => {
     const p = new URLSearchParams({ limit: "200" });
     if (fDesde) p.set("fecha_desde", fDesde);
@@ -261,6 +292,14 @@ export default function RemisionesPage() {
     if (buscaAplicada) p.set("q", buscaAplicada);
     return `/api/v1/remisiones?${p.toString()}`;
   }, [fDesde, fHasta, fCliente, fPorRevisar, fEstado, fSucursal, buscaAplicada]);
+  // UNA sola regla para «hay filtros»: el conteo, el botón Limpiar y el
+  // estado vacío la comparten (antes cada uno tenía su propia lista).
+  const hayFiltros = Boolean(busca || buscaAplicada || fDesde || fHasta || fCliente || fPorRevisar || fEstado || fSucursal);
+  const limpiarFiltros = () => {
+    setBusca(""); setBuscaAplicada("");
+    setFDesde(""); setFHasta(""); setFCliente("");
+    setFPorRevisar(false); setFEstado(""); setFSucursal("");
+  };
 
   // lista
   const { data, loading, error, reload } = useResource<Page<Remision>>(listPath);
@@ -361,13 +400,17 @@ export default function RemisionesPage() {
   // Totales del alta calculados por el SERVIDOR (regla "el backend calcula
   // todo"): debounce por tecleo + secuencia contra respuestas fuera de orden.
   const [fiscalPreview, setFiscalPreview] = useState<FiscalPreview | null>(null);
+  // Un fallo del preview NO es «sin líneas»: con null a secas el panel pintaba
+  // IVA $0.00 y Total=Subtotal — números plausibles y equivocados justo antes
+  // de Guardar. Con error se pinta «—» y un aviso.
+  const [fiscalFallo, setFiscalFallo] = useState(false);
   const fiscalSeq = useRef(0);
   useEffect(() => {
     const seq = ++fiscalSeq.current;
     const t = setTimeout(() => {
       fetchFiscalPreview(lineas)
-        .then((p) => { if (seq === fiscalSeq.current) setFiscalPreview(p); })
-        .catch(() => { if (seq === fiscalSeq.current) setFiscalPreview(null); });
+        .then((p) => { if (seq === fiscalSeq.current) { setFiscalPreview(p); setFiscalFallo(false); } })
+        .catch(() => { if (seq === fiscalSeq.current) { setFiscalPreview(null); setFiscalFallo(true); } });
     }, 300);
     return () => clearTimeout(t);
   }, [lineas]);
@@ -656,6 +699,17 @@ export default function RemisionesPage() {
       // el renglón lo diga distinto y "Actualizar precios" sirva de reintento.
       if (cotizaSeq.current[key] === seq) setLinea(key, { cotizaFallo: true });
     }
+  }
+
+  // Cantidad tecleada → cotizar con debounce: cada pulsación disparaba su
+  // propio GET /precios/cotizar (la guarda de secuencia evita respuestas
+  // cruzadas, pero los requests igual salían). 350 ms por línea.
+  const cotizaTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  function cotizarDebounced(key: string, producto_id: string, presentacion: string, cantidad: string) {
+    clearTimeout(cotizaTimers.current[key]);
+    cotizaTimers.current[key] = setTimeout(() => {
+      void cotizar(key, producto_id, presentacion, cantidad);
+    }, 350);
   }
 
   // Cotiza un conjunto de líneas a través del pool. Si mientras esperaba turno
@@ -2206,6 +2260,22 @@ export default function RemisionesPage() {
   // barra de scroll horizontal que obligaba a irse a la derecha para ver las
   // opciones. El detalle fiscal (subtotal, IEPS, IVA) y la nota siguen ahí,
   // ocultos de arranque y a un clic en el menú «Columnas».
+  // Handlers de celdas y acciones en un ref: columns/rowActions se memoizan
+  // (un array nuevo por render invalidaba la cadena de memos del DataTable y
+  // re-ordenaba/filtraba TODO el dataset con cada tecla en la página) sin
+  // congelar closures — el clic siempre corre la versión del último render.
+  const filaRef = useRef({
+    vinculosDe, asignarSucursal, openEdit, facturarUna, darPorRevisada,
+    abrirDevolucion, imprimirRemision, abrirEnviarFactura, enviarRemision,
+    porResolver,
+  });
+  filaRef.current = {
+    vinculosDe, asignarSucursal, openEdit, facturarUna, darPorRevisada,
+    abrirDevolucion, imprimirRemision, abrirEnviarFactura, enviarRemision,
+    porResolver,
+  };
+
+  const columns: Column<Fila>[] = useMemo(() => {
   // El cliente de una orden puede no estar resuelto todavía: entonces se enseña
   // de quién llegó, que es lo único que se sabe de ella (y suele bastar para
   // reconocerla).
@@ -2222,7 +2292,7 @@ export default function RemisionesPage() {
   // factura, ni total hasta que sea remisión— y dice «—» sin disimulo.
   const sinDato = <span className="text-muted">—</span>;
 
-  const columns: Column<Fila>[] = [
+  return [
     {
       header: "Folio / Pedido",
       sortable: true,
@@ -2323,8 +2393,8 @@ export default function RemisionesPage() {
           <SucursalQuick
             nombre={n ?? ""}
             sucursalId={r.sucursal_id ?? ""}
-            cargar={() => vinculosDe(r.cliente_facturacion_id)}
-            onAsignar={(v) => { void asignarSucursal(r, v); }}
+            cargar={() => filaRef.current.vinculosDe(r.cliente_facturacion_id)}
+            onAsignar={(v) => { void filaRef.current.asignarSucursal(r, v); }}
           />
         );
       },
@@ -2407,6 +2477,8 @@ export default function RemisionesPage() {
     { header: "IVA", hiddenByDefault: true, className: "text-right tabular-nums", sortable: true, sortValue: (f) => f.rem?.iva ?? "", cell: (f) => (f.rem ? fmtMoney(f.rem.iva) : sinDato) },
     { header: "Nota", hiddenByDefault: true, truncate: true, exportValue: (f) => (f.rem ? f.rem.notas ?? "" : f.oc.observaciones ?? ""), cell: (f) => { const t = f.rem ? f.rem.notas : f.oc.observaciones; return <span title={t ?? ""}>{t ?? "—"}</span>; } },
   ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- filaRef es ref; router es estable
+  }, [cliName, sucNombre, canWrite, router]);
 
   // Las acciones de remisión no aplican a una orden por resolver: se esconden
   // solas en esas filas, que tienen las suyas (resolver, ver el documento,
@@ -2421,8 +2493,9 @@ export default function RemisionesPage() {
     };
   }
 
+  const rowActions: RowAction<Fila>[] = useMemo(() => {
   const accionesRemision: RowAction<Remision>[] = [
-    { id: "editar", label: "Editar", icon: <Pencil size={15} />, onClick: (r) => { void openEdit(r); },
+    { id: "editar", label: "Editar", icon: <Pencil size={15} />, onClick: (r) => { void filaRef.current.openEdit(r); },
       hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "RESERVADO" || r.estado === "CONFIRMADA")
         && (!r.factura_id || r.factura_estado === "CANCELADA")) },
     { id: "confirmar", label: "Confirmar", icon: <Check size={15} />, tone: "success",
@@ -2433,49 +2506,53 @@ export default function RemisionesPage() {
     // «por revisar» tiene su propia acción aquí mismo). Un BORRADOR se
     // auto-confirma al facturar (mismo criterio que el botón del lote).
     { id: "facturar", label: "Facturar", icon: <FileText size={15} />, tone: "success",
-      onClick: (r) => { void facturarUna(r); },
+      onClick: (r) => { void filaRef.current.facturarUna(r); },
       hidden: (r) => !(canWrite && puedeFacturar(r) && !r.revision_pendiente) },
     { id: "revisada", label: "Dar por revisada", icon: <Check size={15} />, tone: "success",
-      onClick: (r) => { void darPorRevisada(r); },
+      onClick: (r) => { void filaRef.current.darPorRevisada(r); },
       hidden: (r) => !(canWrite && r.revision_pendiente) },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
       onClick: (r) => setToCancel(r), hidden: (r) => !(canWrite && r.estado !== "CANCELADA" && r.estado !== "FACTURADA") },
     { id: "devolucion", label: "Devolución", icon: <Undo2 size={15} />,
-      onClick: (r) => { void abrirDevolucion(r); },
+      onClick: (r) => { void filaRef.current.abrirDevolucion(r); },
       hidden: (r) => !(canWrite && r.estado === "CONFIRMADA") },
     { id: "oc", label: "Ver la OC original", icon: <FileSearch size={15} />,
       // Solo cuando hay documento: la bandeja de órdenes ya no existe como
       // pantalla, así que sin archivo no hay a dónde llevar a nadie.
       onClick: (r) => { window.open(r.oc_archivo_url!, "_blank", "noopener"); },
       hidden: (r) => !r.oc_archivo_url },
-    { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => { void imprimirRemision(r); } },
+    { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => { void filaRef.current.imprimirRemision(r); } },
     { id: "enviar-factura", label: "Enviar factura", icon: <Mail size={15} />,
       // La remisión ya facturada tiene DOS documentos: esta acción manda la
       // FACTURA timbrada (ticket 86bby3tx9); la de abajo sigue mandando la
       // remisión, con el nombre explícito para que nadie confunda cuál va.
-      onClick: (r) => abrirEnviarFactura(r.factura_id!, r.cliente_facturacion_id, r.factura_folio ?? "", r.proyecto_id),
+      onClick: (r) => filaRef.current.abrirEnviarFactura(r.factura_id!, r.cliente_facturacion_id, r.factura_folio ?? "", r.proyecto_id),
       hidden: (r) => !(canWrite && r.factura_id && r.factura_estado === "TIMBRADA") },
-    { id: "enviar", label: "Enviar remisión por correo", icon: <Mail size={15} />, onClick: enviarRemision,
+    { id: "enviar", label: "Enviar remisión por correo", icon: <Mail size={15} />,
+      onClick: (r) => filaRef.current.enviarRemision(r),
       hidden: () => !canWrite },
   ];
 
   // Las de la orden por resolver: la salida buena (volverla remisión) y la
-  // salida mala (descartarla), más el documento con el que llegó.
-  const rowActions: RowAction<Fila>[] = [
+  // salida mala (descartarla), más el documento con el que llegó. El estado
+  // vivo (ocupada/puedeResolver) se lee del ref al momento de dibujar/clic.
+  return [
     ...accionesRemision.map(soloRemision),
     { id: "resolver", label: "Pasar a remisiones", tone: "success",
-      icon: (f) => (porResolver.ocupada === f.oc?.id
+      icon: (f) => (filaRef.current.porResolver.ocupada === f.oc?.id
         ? <Spinner className="h-4 w-4 border" />
         : <Wand2 size={15} />),
-      onClick: (f) => { if (f.oc) porResolver.resolver(f.oc); },
-      hidden: (f) => !f.oc || !porResolver.puedeResolver },
+      onClick: (f) => { if (f.oc) filaRef.current.porResolver.resolver(f.oc); },
+      hidden: (f) => !f.oc || !filaRef.current.porResolver.puedeResolver },
     { id: "oc-doc", label: "Ver la orden original", icon: <FileSearch size={15} />,
       onClick: (f) => { window.open(f.oc!.archivo_url!, "_blank", "noopener"); },
       hidden: (f) => !f.oc?.archivo_url },
     { id: "descartar", label: "Descartar", icon: <Trash2 size={15} />, tone: "danger",
-      onClick: (f) => { if (f.oc) porResolver.descartar(f.oc); },
-      hidden: (f) => !f.oc || !porResolver.puedeResolver },
+      onClick: (f) => { if (f.oc) filaRef.current.porResolver.descartar(f.oc); },
+      hidden: (f) => !f.oc || !filaRef.current.porResolver.puedeResolver },
   ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- handlers vía filaRef; setters estables
+  }, [canWrite]);
 
   // ───────────────────────── render ─────────────────────────
   if (mode === "create") {
@@ -2651,7 +2728,7 @@ export default function RemisionesPage() {
                   <Input
                     inputMode="decimal" value={l.cantidad}
                     ref={(el) => { cellRefs.current[`${l.key}:cantidad`] = el; }}
-                    onChange={(e) => { const v = e.target.value.replace(",", "."); setLinea(l.key, { cantidad: v, importe: Number(l.precio || 0) * Number(v || 0) }); cotizar(l.key, l.producto_id, l.presentacion, v); }}
+                    onChange={(e) => { const v = e.target.value.replace(",", "."); setLinea(l.key, { cantidad: v, importe: Number(l.precio || 0) * Number(v || 0) }); cotizarDebounced(l.key, l.producto_id, l.presentacion, v); }}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); advanceLine(l.key, "cantidad"); } }}
                     onPaste={(e) => {
                       const text = e.clipboardData.getData("text");
@@ -2806,10 +2883,15 @@ export default function RemisionesPage() {
             <div />
             <div className="flex flex-col items-end gap-4">
               <div className="flex flex-col items-end gap-1 text-sm">
+                {fiscalFallo && (
+                  <span className="text-xs text-warning">
+                    No se pudieron calcular los totales; se calculan al guardar.
+                  </span>
+                )}
                 <div className="flex gap-4"><span className="text-muted">Subtotal</span><span className="tabular-nums">{fmtMoney(subtotalPreview)}</span></div>
-                <div className="flex gap-4"><span className="text-muted">IEPS</span><span className="tabular-nums">{fmtMoney(iepsPreview)}</span></div>
-                <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fmtMoney(ivaPreview)}</span></div>
-                <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fmtMoney(totalPreview)}</span></div>
+                <div className="flex gap-4"><span className="text-muted">IEPS</span><span className="tabular-nums">{fiscalFallo ? "—" : fmtMoney(iepsPreview)}</span></div>
+                <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fiscalFallo ? "—" : fmtMoney(ivaPreview)}</span></div>
+                <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fiscalFallo ? "—" : fmtMoney(totalPreview)}</span></div>
               </div>
               <div className="flex gap-2">
                 <Button variant="secondary" onClick={resetForm} disabled={saving}>Borrar</Button>
@@ -3002,16 +3084,15 @@ export default function RemisionesPage() {
           />
           Solo por revisar
         </label>
-        {(busca || fDesde || fHasta || fCliente || fPorRevisar || fEstado || fSucursal) && (
-          <Button
-            variant="secondary"
-            onClick={() => { setBusca(""); setFDesde(""); setFHasta(""); setFCliente(""); setFPorRevisar(false); setFEstado(""); setFSucursal(""); }}
-          >
+        {hayFiltros && (
+          <Button variant="secondary" onClick={limpiarFiltros}>
             Limpiar filtros
           </Button>
         )}
-        {buscaAplicada && !loading && (() => {
-          // Las órdenes por resolver son filas de la tabla: cuentan.
+        {hayFiltros && !loading && (() => {
+          // Las órdenes por resolver son filas de la tabla: cuentan. Y el
+          // conteo sale con CUALQUIER filtro, no solo con la búsqueda —
+          // filtrar por cliente/fecha/estado también acota resultados.
           const n = (data?.total ?? 0) + porResolver.ordenes.length;
           return (
             <span className="pb-2 text-sm text-muted">
@@ -3085,7 +3166,16 @@ export default function RemisionesPage() {
         searchValue={busca}
         onSearchChange={setBusca}
         searchPlaceholder="Folio, su pedido o factura SAE…"
-        empty="Sin remisiones"
+        empty={
+          hayFiltros ? (
+            <EmptyState
+              title="Ninguna remisión coincide con los filtros"
+              action={<Button variant="secondary" onClick={limpiarFiltros}>Limpiar filtros</Button>}
+            />
+          ) : (
+            "Sin remisiones"
+          )
+        }
         rowKey={(f) => f.id}
         actions={rowActions}
         onRowExpand={verDetalle}

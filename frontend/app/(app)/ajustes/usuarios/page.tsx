@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Building2, KeyRound, Plus, Trash2, UserCog } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -45,7 +45,7 @@ export default function UsuariosPage() {
   const membersRes = useResource<Membership[]>("/api/v1/memberships");
   const rolesRes = useResource<Role[]>("/api/v1/roles");
   const members = membersRes.data ?? [];
-  const roles = rolesRes.data ?? [];
+  const roles = useMemo(() => rolesRes.data ?? [], [rolesRes.data]);
   // El catálogo de clientes solo se pide cuando algún modal lo necesita
   // (limitar alcance): 500 filas gratis en cada visita a Usuarios sería tirar red.
   const [clientesNeeded, setClientesNeeded] = useState(false);
@@ -54,14 +54,20 @@ export default function UsuariosPage() {
   // Solo el OWNER puede otorgar OWNER o tocar la membresía de un OWNER (el
   // backend lo exige). Reflejarlo en la UI para no ofrecer acciones que darán 403.
   const isOwner = !!me?.active_tenant.is_owner;
-  const roleOptions = roles.filter((r) => isOwner || !(r.es_preset && r.nombre === "OWNER"));
+  const roleOptions = useMemo(
+    () => roles.filter((r) => isOwner || !(r.es_preset && r.nombre === "OWNER")),
+    [roles, isOwner]
+  );
   // Los roles listados son los de la empresa ACTUAL. Los preset son globales y
   // existen en todas; un rol personalizado pertenece a una sola empresa, y el
   // backend rechaza con 422 ("Rol inválido para esa empresa") si se intenta
   // asignar en otra. Fuera de casa solo se ofrecen los preset.
   const rolesDeEmpresa = (e: EmpresaAcceso) =>
     e.es_actual ? roleOptions : roleOptions.filter((r) => r.es_preset);
-  const rowLocked = (m: Membership) => m.role_nombre === "OWNER" && !isOwner;
+  const rowLocked = useCallback(
+    (m: Membership) => m.role_nombre === "OWNER" && !isOwner,
+    [isOwner]
+  );
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toRemove, setToRemove] = useState<Membership | null>(null);
@@ -94,7 +100,7 @@ export default function UsuariosPage() {
   const [empresas, setEmpresas] = useState<EmpresaAcceso[] | null>(null);
   const [empresaBusy, setEmpresaBusy] = useState<string | null>(null); // tenant_id en vuelo
 
-  const isSelf = (m: Membership) => m.user_id === me?.user_id;
+  const isSelf = useCallback((m: Membership) => m.user_id === me?.user_id, [me]);
 
   function openCreate() {
     setCEmail("");
@@ -131,12 +137,12 @@ export default function UsuariosPage() {
     }
   }
 
-  function openScope(m: Membership) {
+  const openScope = useCallback((m: Membership) => {
     setScopeSel(new Set(m.cliente_scope ?? []));
     setScopeTodos(!m.cliente_scope?.length);
     setClientesNeeded(true);
     setScopeFor(m);
-  }
+  }, []);
 
   async function saveScope() {
     if (!scopeFor) return;
@@ -156,7 +162,7 @@ export default function UsuariosPage() {
     }
   }
 
-  async function loadEmpresas(membershipId: string) {
+  const loadEmpresas = useCallback(async (membershipId: string) => {
     try {
       const r = await apiFetch<{ user_email: string; empresas: EmpresaAcceso[] }>(
         `/api/v1/memberships/${membershipId}/empresas`,
@@ -166,13 +172,13 @@ export default function UsuariosPage() {
       toast.error(e instanceof ApiError ? e.message : "No se pudieron cargar las empresas");
       setEmpresasFor(null);
     }
-  }
+  }, [toast]);
 
-  function openEmpresas(m: Membership) {
+  const openEmpresas = useCallback((m: Membership) => {
     setEmpresas(null);
     setEmpresasFor(m);
     void loadEmpresas(m.id);
-  }
+  }, [loadEmpresas]);
 
   async function updateEmpresa(e: EmpresaAcceso, acceso: boolean, roleId?: string) {
     if (!empresasFor) return;
@@ -192,10 +198,10 @@ export default function UsuariosPage() {
     }
   }
 
-  function openPwd(m: Membership) {
+  const openPwd = useCallback((m: Membership) => {
     setNewPass("");
     setPwdFor(m);
-  }
+  }, []);
 
   async function submitPwd() {
     if (!pwdFor || newPass.length < 8) return;
@@ -211,7 +217,10 @@ export default function UsuariosPage() {
     }
   }
 
-  async function changeRole(m: Membership, roleId: string) {
+  // OJO: `patch` (useMutation) se recrea en cada render — la dependencia es
+  // correcta, pero mientras hooks.ts no lo estabilice, estos callbacks (y las
+  // columnas que los usan) se recalculan igual en cada render.
+  const changeRole = useCallback(async (m: Membership, roleId: string) => {
     if (roleId === m.role_id) return;
     setBusyId(m.id);
     try {
@@ -223,9 +232,9 @@ export default function UsuariosPage() {
     } finally {
       setBusyId(null);
     }
-  }
+  }, [patch, toast, membersRes.reload]);
 
-  async function toggleActive(m: Membership, active: boolean) {
+  const toggleActive = useCallback(async (m: Membership, active: boolean) => {
     setBusyId(m.id);
     try {
       await patch(`/api/v1/memberships/${m.id}`, { active });
@@ -236,7 +245,7 @@ export default function UsuariosPage() {
     } finally {
       setBusyId(null);
     }
-  }
+  }, [patch, toast, membersRes.reload]);
 
   async function confirmRemove() {
     if (!toRemove) return;
@@ -253,7 +262,7 @@ export default function UsuariosPage() {
     }
   }
 
-  const columns: Column<Membership>[] = [
+  const columns = useMemo<Column<Membership>[]>(() => [
     {
       header: "Usuario",
       cell: (m) => (
@@ -364,7 +373,19 @@ export default function UsuariosPage() {
           </div>
         ) : null,
     },
-  ];
+  ], [
+    busyId,
+    canWrite,
+    canDelete,
+    isSelf,
+    rowLocked,
+    roleOptions,
+    changeRole,
+    toggleActive,
+    openScope,
+    openEmpresas,
+    openPwd,
+  ]);
 
   return (
     <div>

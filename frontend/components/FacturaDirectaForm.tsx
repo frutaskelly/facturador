@@ -165,13 +165,16 @@ export function FacturaDirectaForm({ ambiente, editar, onClose, onSaved }: Props
   // Totales calculados por el SERVIDOR (regla "el backend calcula todo"):
   // mismo cerebro fiscal que guarda la factura; debounce + secuencia anti-race.
   const [fiscalPreview, setFiscalPreview] = useState<FiscalPreview | null>(null);
+  // Un fallo del preview NO es «sin líneas»: con null a secas se pintaba
+  // IVA $0.00 y Total=Subtotal — plausible y equivocado antes de Timbrar.
+  const [fiscalFallo, setFiscalFallo] = useState(false);
   const fiscalSeq = useRef(0);
   useEffect(() => {
     const seq = ++fiscalSeq.current;
     const t = setTimeout(() => {
       fetchFiscalPreview(lineas)
-        .then((p) => { if (seq === fiscalSeq.current) setFiscalPreview(p); })
-        .catch(() => { if (seq === fiscalSeq.current) setFiscalPreview(null); });
+        .then((p) => { if (seq === fiscalSeq.current) { setFiscalPreview(p); setFiscalFallo(false); } })
+        .catch(() => { if (seq === fiscalSeq.current) { setFiscalPreview(null); setFiscalFallo(true); } });
     }, 300);
     return () => clearTimeout(t);
   }, [lineas]);
@@ -856,10 +859,15 @@ export function FacturaDirectaForm({ ambiente, editar, onClose, onSaved }: Props
           <div />
           <div className="flex flex-col items-end gap-4">
             <div className="flex flex-col items-end gap-1 text-sm">
+              {fiscalFallo && (
+                <span className="text-xs text-warning">
+                  No se pudieron calcular los totales; se calculan al guardar.
+                </span>
+              )}
               <div className="flex gap-4"><span className="text-muted">Subtotal</span><span className="tabular-nums">{fmtMoney(subtotalPreview)}</span></div>
-              <div className="flex gap-4"><span className="text-muted">IEPS</span><span className="tabular-nums">{fmtMoney(iepsPreview)}</span></div>
-              <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fmtMoney(ivaPreview)}</span></div>
-              <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fmtMoney(totalPreview)}</span></div>
+              <div className="flex gap-4"><span className="text-muted">IEPS</span><span className="tabular-nums">{fiscalFallo ? "—" : fmtMoney(iepsPreview)}</span></div>
+              <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fiscalFallo ? "—" : fmtMoney(ivaPreview)}</span></div>
+              <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fiscalFallo ? "—" : fmtMoney(totalPreview)}</span></div>
             </div>
             <div className="flex gap-2">
               {!editar && <Button variant="secondary" onClick={resetForm} disabled={busy}>Borrar</Button>}

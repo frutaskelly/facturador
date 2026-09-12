@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { FileUp, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
@@ -118,7 +118,7 @@ export default function ProductosPage() {
   const canDelete = can(me, DELETE);
 
   const categoriasRes = useResource<Page<Categoria>>("/api/v1/categorias?limit=200");
-  const categorias = categoriasRes.data?.items ?? [];
+  const categorias = useMemo(() => categoriasRes.data?.items ?? [], [categoriasRes.data]);
   const catName = useMemo(
     () => Object.fromEntries(categorias.map((c) => [c.id, c.nombre])),
     [categorias]
@@ -198,13 +198,13 @@ export default function ProductosPage() {
     setParecidos([]);
     setForm({ ...emptyForm(), nombre });
   }
-  function openEdit(p: Producto) {
+  const openEdit = useCallback((p: Producto) => {
     setEditingId(p.id);
     setSatOpciones([]);
     setParecidos([]);
     setTab("datos");        // abrir siempre en Datos, aunque el anterior se cerró en alias
     setForm(toForm(p));
-  }
+  }, []);
 
   async function save(forzar = false) {
     if (!form) return;
@@ -285,7 +285,7 @@ export default function ProductosPage() {
   // Cada columna lleva `sortValue`: es el texto que el buscador de la tabla
   // indexa (y el que sale al exportar a Excel). Sin él, las celdas JSX no
   // aportan texto y buscar no encontraba nada.
-  const columns: Column<Producto>[] = [
+  const columns = useMemo<Column<Producto>[]>(() => [
     { header: "SKU", sortValue: (p) => p.sku, cell: (p) => <span className="font-medium">{p.sku}</span> },
     { header: "Nombre", truncate: true, sortValue: (p) => p.nombre, cell: (p) => <span title={p.nombre}>{p.nombre}</span> },
     {
@@ -351,7 +351,7 @@ export default function ProductosPage() {
           </div>
         ) : null,
     },
-  ];
+  ], [catName, esqName, canWrite, canDelete, openEdit]);
 
   return (
     <div>

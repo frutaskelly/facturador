@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Field";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
+import { fmtDateTime } from "@/lib/format";
 import type { CambioLinea, OCRecibidaDetalle } from "@/lib/types";
 
 const ETIQUETA_CABECERA: Record<string, string> = {
@@ -78,9 +79,9 @@ export function CambioOCPanel({ ocId, canWrite, onResuelto }: {
   if (!oc?.cambio_detectado_at || !oc.cambio_detalle) return null;
   const d = oc.cambio_detalle;
   const abierto = oc.cambio_abierto;
-  const cuando = new Date(oc.cambio_detectado_at).toLocaleString("es-MX", {
-    dateStyle: "short", timeStyle: "short",
-  });
+  // fmtDateTime: mismo formato que las columnas de la tabla donde vive este
+  // panel («12 sept 2026» junto a «12/09/26» se leía como dos pantallas).
+  const cuando = fmtDateTime(oc.cambio_detectado_at);
 
   async function resolver() {
     if (nota.trim().length < 3) {
@@ -180,9 +181,7 @@ export function CambioOCPanel({ ocId, canWrite, onResuelto }: {
               {oc.cambio_resuelto_nota ? <>«{oc.cambio_resuelto_nota}»</> : null}
               {oc.cambio_resuelto_at ? (
                 <span className="text-muted">
-                  {" "}— {new Date(oc.cambio_resuelto_at).toLocaleString("es-MX", {
-                    dateStyle: "short", timeStyle: "short",
-                  })}
+                  {" "}— {fmtDateTime(oc.cambio_resuelto_at)}
                 </span>
               ) : null}
             </div>

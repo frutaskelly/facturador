@@ -197,7 +197,7 @@ export default function AsignacionesPreciosPage() {
     };
   }, [sim]);
 
-  const columns: Column<ListaAsignacion>[] = [
+  const columns = useMemo<Column<ListaAsignacion>[]>(() => [
     {
       header: "Alcance",
       cell: (a) => {
@@ -264,7 +264,7 @@ export default function AsignacionesPreciosPage() {
           },
         ]
       : []),
-  ];
+  ], [canWrite]);
 
   return (
     <div>
