@@ -16,6 +16,7 @@ import { ArrowLeft, Download, FileUp, Sparkles } from "lucide-react";
 import { CategoriaCombobox } from "@/components/CategoriaCombobox";
 import { ProductoAccionCombobox } from "@/components/ProductoAccionCombobox";
 import { Badge } from "@/components/ui/Badge";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select, Switch } from "@/components/ui/Field";
@@ -134,7 +135,11 @@ export default function ImportarProductosPage() {
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=1000");
   const clientes = clientesRes.data?.items ?? [];
   const esquemasRes = useResource<Page<EsquemaImpuesto>>("/api/v1/esquemas-impuesto?limit=200");
-  const esquemas = (esquemasRes.data?.items ?? []).filter((e) => e.activo);
+  // Memoizado: es dependencia de las columnas memoizadas del preview.
+  const esquemas = useMemo(
+    () => (esquemasRes.data?.items ?? []).filter((e) => e.activo),
+    [esquemasRes.data]
+  );
   // limit=200 es el tope del endpoint (con 500 respondía 422 y la lista salía
   // vacía). Solo las ACTIVAS: son las que el usuario ve en /categorias.
   const categoriasRes = useResource<Page<Categoria>>(
@@ -371,6 +376,9 @@ export default function ImportarProductosPage() {
 
   // Media hora de decisiones no se pierden por un F5 o un clic al menú.
   const hayTrabajo = filas.length > 0 && paso !== "resultado";
+  // Salir con trabajo en curso se confirma con el ConfirmDialog de la casa; la
+  // navegación se hace a mano (router.push) porque el diálogo no bloquea el Link.
+  const [confirmSalir, setConfirmSalir] = useState<"importando" | "decisiones" | null>(null);
   useEffect(() => {
     if (!hayTrabajo) return;
     const avisar = (e: BeforeUnloadEvent) => {
@@ -447,7 +455,19 @@ export default function ImportarProductosPage() {
     [archivo, usarIa, listaNombre, toast]
   );
 
-  async function confirmarColumnas() {
+  // Releer el archivo descarta los ajustes fila por fila: pasa por el
+  // ConfirmDialog de la casa (estado + diálogo) en vez del confirm nativo.
+  const [confirmRelectura, setConfirmRelectura] = useState(false);
+
+  async function releerColumnas() {
+    const mapeo: Record<number, string> = {};
+    columnas.forEach((c) => {
+      if (c.campo) mapeo[c.indice] = c.campo;
+    });
+    await analizar(mapeo);
+  }
+
+  function confirmarColumnas() {
     if (!meta) return;
     if (!columnas.some((c) => c.campo === "nombre")) {
       toast.error("Indica qué columna trae la descripción (nombre) del producto");
@@ -458,17 +478,11 @@ export default function ImportarProductosPage() {
       setPaso("revisar");
       return;
     }
-    if (
-      filas.length > 0 &&
-      !window.confirm("Releer el archivo descarta los ajustes que hiciste fila por fila. ¿Continuar?")
-    ) {
+    if (filas.length > 0) {
+      setConfirmRelectura(true);
       return;
     }
-    const mapeo: Record<number, string> = {};
-    columnas.forEach((c) => {
-      if (c.campo) mapeo[c.indice] = c.campo;
-    });
-    await analizar(mapeo);
+    void releerColumnas();
   }
 
   /** Claves y unidades SAT faltantes, según lo elegido en el paso 3.
@@ -694,15 +708,17 @@ export default function ImportarProductosPage() {
     })();
   }
 
-  function setFila(fila: number, patch: Partial<Fila>) {
+  // Estables entre renders (useCallback): son dependencias de las columnas
+  // memoizadas del preview.
+  const setFila = useCallback((fila: number, patch: Partial<Fila>) => {
     setFilas((rows) => rows.map((r) => (r.fila === fila ? { ...r, ...patch } : r)));
-  }
+  }, []);
 
   /** Vincula la fila a un producto. Si vino del buscador (no estaba entre los
    *  parecidos del preview), se guarda en `candidatos` de esa fila: de ahí
    *  salen la categoría y el esquema que hereda, y el cálculo de si su unidad
    *  es una presentación nueva. */
-  function vincularFila(fila: number, c: Candidato) {
+  const vincularFila = useCallback((fila: number, c: Candidato) => {
     setFilas((rows) =>
       rows.map((r) =>
         r.fila === fila
@@ -710,22 +726,25 @@ export default function ImportarProductosPage() {
           : r
       )
     );
-  }
+  }, []);
 
-  async function importar() {
+  // Aprobar mientras la IA sigue asignando en segundo plano se confirma con
+  // el ConfirmDialog de la casa (antes era el confirm nativo del navegador).
+  const [confirmImportarFondo, setConfirmImportarFondo] = useState(false);
+
+  function importar() {
     if (incluidas.size === 0) {
       toast.error("No hay ninguna fila marcada para importar");
       return;
     }
-    if (
-      analizandoFondo &&
-      !window.confirm(
-        `Aún se están asignando ${tareasFondo} en segundo plano. Si apruebas ahora, ` +
-        "algunos productos pueden quedar sin esos datos. ¿Importar así?"
-      )
-    ) {
+    if (analizandoFondo) {
+      setConfirmImportarFondo(true);
       return;
     }
+    void ejecutarImport();
+  }
+
+  async function ejecutarImport() {
     // Un "0,5" con coma llegaba al backend como texto y lo rechazaba entero,
     // con un mensaje en inglés y sin decir de qué fila. Se avisa aquí, por fila.
     const malFactor = filas.find(
@@ -878,7 +897,9 @@ export default function ImportarProductosPage() {
   }
 
   // Columnas de la tabla del preview: todo lo que se va a dar de alta.
-  const columnasPreview: Column<Fila>[] = [
+  // Memoizadas para no invalidar los memos internos del DataTable en cada
+  // render; todo lo externo que usan las celdas va en las deps.
+  const columnasPreview: Column<Fila>[] = useMemo(() => [
     {
       key: "fila",
       header: "#",
@@ -1115,7 +1136,7 @@ export default function ImportarProductosPage() {
       sortValue: (f) => f.precio || "",
       cell: (f) => <span className="tabular-nums">{f.precio || "—"}</span>,
     },
-  ];
+  ], [seImporta, mismoProducto, setFila, vincularFila, categorias, esquemas, satNombres]);
 
   if (!puedeEscribir) {
     return <div className="text-sm text-muted">No tienes permiso para importar productos.</div>;
@@ -1141,13 +1162,9 @@ export default function ImportarProductosPage() {
               // Con clic modificado (abrir en pestaña nueva) esta página sigue
               // viva: ni confirm ni dar por muerto el trabajo en curso.
               if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-              const importando = cargando && paso === "preview";
-              const aviso = importando
-                ? "La aprobación ya se envió y terminará en el servidor aunque salgas — " +
-                  "revisa el catálogo después. ¿Salir?"
-                : "Se perderán las decisiones de esta importación. ¿Salir?";
-              if (hayTrabajo && !window.confirm(aviso)) {
+              if (hayTrabajo) {
                 e.preventDefault();
+                setConfirmSalir(cargando && paso === "preview" ? "importando" : "decisiones");
                 return;
               }
               // Al salir, todo lo que siga en vuelo ya no aplica ni toastea.
@@ -1786,6 +1803,43 @@ export default function ImportarProductosPage() {
           </Button>
         </div>
       )}
+
+      {/* Confirmaciones (sustituyen los window.confirm del navegador) */}
+      <ConfirmDialog
+        open={confirmRelectura}
+        title="Releer el archivo"
+        message="Releer el archivo descarta los ajustes que hiciste fila por fila. ¿Continuar?"
+        confirmLabel="Continuar"
+        confirmVariant="danger"
+        onConfirm={() => { setConfirmRelectura(false); void releerColumnas(); }}
+        onClose={() => setConfirmRelectura(false)}
+      />
+      <ConfirmDialog
+        open={confirmImportarFondo}
+        title="Análisis en curso"
+        message={`Aún se están asignando ${tareasFondo} en segundo plano. Si apruebas ahora, algunos productos pueden quedar sin esos datos. ¿Importar así?`}
+        confirmLabel="Importar así"
+        confirmVariant="primary"
+        onConfirm={() => { setConfirmImportarFondo(false); void ejecutarImport(); }}
+        onClose={() => setConfirmImportarFondo(false)}
+      />
+      <ConfirmDialog
+        open={confirmSalir !== null}
+        title="Salir de la importación"
+        message={confirmSalir === "importando"
+          ? "La aprobación ya se envió y terminará en el servidor aunque salgas — revisa el catálogo después. ¿Salir?"
+          : "Se perderán las decisiones de esta importación. ¿Salir?"}
+        confirmLabel="Salir"
+        cancelLabel="Seguir aquí"
+        confirmVariant={confirmSalir === "importando" ? "primary" : "danger"}
+        onConfirm={() => {
+          setConfirmSalir(null);
+          // Al salir, todo lo que siga en vuelo ya no aplica ni toastea.
+          loteRef.current += 1;
+          router.push("/productos");
+        }}
+        onClose={() => setConfirmSalir(null)}
+      />
     </div>
   );
 }

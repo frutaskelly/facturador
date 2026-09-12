@@ -73,13 +73,15 @@ export default function Page() {
 
   // ── Totales del servidor (regla "el backend calcula todo") ──
   const [preview, setPreview] = useState<FiscalPreview | null>(null);
+  // Fallo ≠ «sin líneas»: con null a secas los totales decían $0.00.
+  const [previewFallo, setPreviewFallo] = useState(false);
   const previewSeq = useRef(0);
   useEffect(() => {
     const seq = ++previewSeq.current;
     const t = setTimeout(() => {
       fetchFiscalPreview(draft.lineas)
-        .then((p) => { if (seq === previewSeq.current) setPreview(p); })
-        .catch(() => { if (seq === previewSeq.current) setPreview(null); });
+        .then((p) => { if (seq === previewSeq.current) { setPreview(p); setPreviewFallo(false); } })
+        .catch(() => { if (seq === previewSeq.current) { setPreview(null); setPreviewFallo(true); } });
     }, 300);
     return () => clearTimeout(t);
   }, [draft.lineas]);
@@ -295,10 +297,13 @@ export default function Page() {
           <div />
           <div className="flex flex-col items-end gap-4">
             <div className="flex flex-col items-end gap-1 text-sm">
-              <div className="flex gap-6"><span className="text-muted">Subtotal</span><span className="tabular-nums">{fmtMoney(preview?.subtotal ?? 0)}</span></div>
-              <div className="flex gap-6"><span className="text-muted">IEPS</span><span className="tabular-nums">{fmtMoney(preview?.ieps ?? 0)}</span></div>
-              <div className="flex gap-6"><span className="text-muted">IVA</span><span className="tabular-nums">{fmtMoney(preview?.iva ?? 0)}</span></div>
-              <div className="flex gap-6 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fmtMoney(preview?.total ?? 0)}</span></div>
+              {previewFallo && (
+                <span className="text-xs text-warning">No se pudieron calcular los totales; se calculan al guardar.</span>
+              )}
+              <div className="flex gap-6"><span className="text-muted">Subtotal</span><span className="tabular-nums">{previewFallo ? "—" : fmtMoney(preview?.subtotal ?? 0)}</span></div>
+              <div className="flex gap-6"><span className="text-muted">IEPS</span><span className="tabular-nums">{previewFallo ? "—" : fmtMoney(preview?.ieps ?? 0)}</span></div>
+              <div className="flex gap-6"><span className="text-muted">IVA</span><span className="tabular-nums">{previewFallo ? "—" : fmtMoney(preview?.iva ?? 0)}</span></div>
+              <div className="flex gap-6 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{previewFallo ? "—" : fmtMoney(preview?.total ?? 0)}</span></div>
             </div>
             <Button onClick={() => void crearPedido()} disabled={!puedeGuardar || saving}>
               {saving ? "Enviando…" : "Enviar al flujo"}

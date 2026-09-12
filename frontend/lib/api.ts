@@ -87,6 +87,58 @@ function detailToMessage(detail: unknown, fallback: string): string {
  * es un SELECTOR de empresa para usuarios con varias (grupo) que el backend
  * valida contra sus membresías — nunca otorga acceso por sí mismo.
  */
+// Aviso de mutación: lib/hooks.ts registra aquí el vaciado de su caché de
+// GETs (registro en vez de import para no crear un ciclo hooks↔api).
+let alMutar: (() => void) | null = null;
+export function registrarAlMutar(cb: () => void) {
+  alMutar = cb;
+}
+
+// ── caché del access token ──
+// `getSession()` serializa con navigator.locks: al montar una pantalla que
+// dispara 5-8 peticiones en paralelo, todas hacían fila por el lock antes de
+// salir a la red. El JWT trae su `exp`: mientras le queden >60 s se reusa el
+// cacheado y solo entonces se vuelve a preguntar a supabase-js (que además
+// refresca si hace falta). El listener invalida en cada cambio de sesión
+// (login, logout, rotación), así nunca se reusa el token de otra sesión.
+let tokenCache: { token: string; exp: number } | null = null;
+let tokenListenerOn = false;
+
+function jwtExp(token: string): number {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.exp === "number" ? payload.exp : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function sessionToken(): Promise<string | null> {
+  const supabase = getSupabase();
+  if (!tokenListenerOn) {
+    tokenListenerOn = true;
+    supabase.auth.onAuthStateChange(
+      (_event: string, session: { access_token?: string } | null) => {
+        const t = session?.access_token;
+        tokenCache = t ? { token: t, exp: jwtExp(t) } : null;
+      },
+    );
+  }
+  if (tokenCache && tokenCache.exp - Date.now() / 1000 > 60) {
+    return tokenCache.token;
+  }
+  const { data, error } = await supabase.auth.getSession();
+  const token = data.session?.access_token ?? null;
+  if (error && !token) {
+    throw new ApiError(
+      0,
+      "No pudimos validar tu sesión. Recarga la página (F5) e intenta de nuevo.",
+    );
+  }
+  tokenCache = token ? { token, exp: jwtExp(token) } : null;
+  return token;
+}
+
 export async function apiFetch<T = unknown>(
   path: string,
   init: RequestInit = {},
@@ -97,21 +149,12 @@ export async function apiFetch<T = unknown>(
     timeoutMs?: number;
   } = {},
 ): Promise<T> {
-  // La sesión se lee ANTES de salir a la red; si esta lectura falla (o el
-  // refresh del token no pudo completarse), la petición ni siquiera se emite
-  // — sin traducirlo, cada pantalla mostraba su mensaje genérico y el fallo
-  // no dejaba rastro en el servidor. Se reporta como lo que es: sesión.
-  let session: { access_token?: string } | null = null;
+  // El token se resuelve ANTES de salir a la red; si esta lectura falla (o el
+  // refresh no pudo completarse), la petición ni siquiera se emite — se
+  // reporta como lo que es: sesión.
+  let accessToken: string | null = null;
   try {
-    const supabase = getSupabase();
-    const { data, error } = await supabase.auth.getSession();
-    session = data.session;
-    if (error && !session) {
-      throw new ApiError(
-        0,
-        "No pudimos validar tu sesión. Recarga la página (F5) e intenta de nuevo.",
-      );
-    }
+    accessToken = await sessionToken();
   } catch (e) {
     if (e instanceof ApiError) throw e;
     throw new ApiError(
@@ -125,8 +168,8 @@ export async function apiFetch<T = unknown>(
   if (!(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
-  if (session?.access_token) {
-    headers.set("Authorization", `Bearer ${session.access_token}`);
+  if (accessToken) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
   }
   tenantHeader(headers);
 
@@ -169,6 +212,10 @@ export async function apiFetch<T = unknown>(
     throw new ApiError(res.status, detail, crudo);
   }
 
+  // Cualquier escritura exitosa invalida el caché de GETs de useResource —
+  // no solo las que pasan por useMutation.
+  if ((init.method ?? "GET").toUpperCase() !== "GET") alMutar?.();
+
   if (res.status === 204) return undefined as T;
   try {
     return (await res.json()) as T;
@@ -185,12 +232,9 @@ export async function apiFetch<T = unknown>(
 
 /** Descarga autenticada de un archivo binario (XML/PDF) y dispara el guardado. */
 export async function apiDownload(path: string, filename: string): Promise<void> {
-  const supabase = getSupabase();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const token = await sessionToken().catch(() => null);
   const headers = new Headers();
-  if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   tenantHeader(headers);
 
   const res = await fetch(`${apiBaseUrl()}${path}`, { headers });
@@ -225,12 +269,9 @@ export async function apiDownloadPost(
   body: unknown,
   fallbackFilename: string
 ): Promise<void> {
-  const supabase = getSupabase();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const token = await sessionToken().catch(() => null);
   const headers = new Headers({ "Content-Type": "application/json" });
-  if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   tenantHeader(headers);
 
   const res = await fetch(`${apiBaseUrl()}${path}`, {
@@ -294,12 +335,9 @@ export async function apiOpenInTab(path: string, win: Window | null): Promise<vo
   } catch {
     /* pestaña de otra procedencia o ya navegada: el aviso es cortesía, no requisito */
   }
-  const supabase = getSupabase();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const token = await sessionToken().catch(() => null);
   const headers = new Headers();
-  if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   tenantHeader(headers);
 
   const res = await fetch(`${apiBaseUrl()}${path}`, { headers });

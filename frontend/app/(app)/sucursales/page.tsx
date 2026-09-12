@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Modal } from "@/components/ui/Modal";
@@ -58,7 +59,7 @@ export default function SucursalesPage() {
   const canSuc = can(me, WRITE_SUC);
   const canOvr = can(me, WRITE_OVR);
   const verOvr = can(me, "menu:listas_precios");
-  const { post, put, del } = useMutation();
+  const { post, put, del, loading: saving } = useMutation();
 
   // ── catálogos (una sola carga) ──
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=500");
@@ -156,10 +157,15 @@ export default function SucursalesPage() {
     }
   }
 
-  async function delSucursal(s: Sucursal) {
+  // Borrar una plaza arrastra sus vínculos de clientes y sus series: pasa por
+  // confirmación (el bote de basura solo deja la fila "en espera").
+  const [sucABorrar, setSucABorrar] = useState<Sucursal | null>(null);
+  async function confirmDelSucursal() {
+    if (!sucABorrar) return;
     try {
-      await del(`/api/v1/sucursales/${s.id}`);
+      await del(`/api/v1/sucursales/${sucABorrar.id}`);
       toast.success("Sucursal eliminada");
+      setSucABorrar(null);
       sucursalesRes.reload();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo eliminar");
@@ -223,11 +229,16 @@ export default function SucursalesPage() {
     }
   }
 
-  async function delVinculo(sucursalId: string, v: ClienteSucursal) {
+  // Desvincular también se confirma: quitar al cliente le borra la serie con
+  // la que folia en esta plaza.
+  const [vincABorrar, setVincABorrar] = useState<{ sucursalId: string; vinculo: ClienteSucursal } | null>(null);
+  async function confirmDelVinculo() {
+    if (!vincABorrar) return;
     try {
-      await del(`/api/v1/sucursales/${sucursalId}/clientes/${v.cliente_id}`);
+      await del(`/api/v1/sucursales/${vincABorrar.sucursalId}/clientes/${vincABorrar.vinculo.cliente_id}`);
       toast.success("Cliente desvinculado");
-      reloadDetalle(sucursalId);
+      setVincABorrar(null);
+      reloadDetalle(vincABorrar.sucursalId);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo desvincular");
     }
@@ -265,10 +276,13 @@ export default function SucursalesPage() {
     }
   }
 
-  async function delOverride(o: PrecioOverride) {
+  const [ovrABorrar, setOvrABorrar] = useState<PrecioOverride | null>(null);
+  async function confirmDelOverride() {
+    if (!ovrABorrar) return;
     try {
-      await del(`/api/v1/precios/overrides/${o.id}`);
+      await del(`/api/v1/precios/overrides/${ovrABorrar.id}`);
       toast.success("Precio especial eliminado");
+      setOvrABorrar(null);
       overridesRes.reload();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo eliminar");
@@ -276,7 +290,7 @@ export default function SucursalesPage() {
   }
 
   // ── columnas de la tabla principal (plazas) ──
-  const cols: Column<Sucursal>[] = [
+  const cols: Column<Sucursal>[] = useMemo(() => [
     { header: "Sucursal", cell: (s) => <span className="font-medium">{s.nombre}</span>, sortable: true, sortValue: (s) => s.nombre },
     { header: "Código", cell: (s) => s.codigo ?? "—", sortable: true, sortValue: (s) => s.codigo ?? "" },
     {
@@ -298,11 +312,11 @@ export default function SucursalesPage() {
       ? [{
           header: "", className: "text-right w-1",
           cell: (s: Sucursal) => (
-            <button onClick={(e) => { e.stopPropagation(); delSucursal(s); }} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Eliminar sucursal"><Trash2 size={16} /></button>
+            <button onClick={(e) => { e.stopPropagation(); setSucABorrar(s); }} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Eliminar sucursal"><Trash2 size={16} /></button>
           ),
         }]
       : []),
-  ];
+  ], [canSuc, almName]);
 
   // ── panel expandible por plaza: sus clientes vinculados ──
   function ExpandedPlaza({ plaza }: { plaza: Sucursal }) {
@@ -344,7 +358,7 @@ export default function SucursalesPage() {
             cell: (v: ClienteSucursal) => (
               <>
                 <button onClick={() => openEditarVinculo(plaza.id, v)} className="rounded-md p-1.5 text-muted hover:bg-surface-2" aria-label="Editar series del vínculo"><Pencil size={16} /></button>
-                <button onClick={() => delVinculo(plaza.id, v)} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Desvincular cliente"><Trash2 size={16} /></button>
+                <button onClick={() => setVincABorrar({ sucursalId: plaza.id, vinculo: v })} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Desvincular cliente"><Trash2 size={16} /></button>
               </>
             ),
           }]
@@ -374,7 +388,7 @@ export default function SucursalesPage() {
   }
 
   // ── sección: precios especiales ──
-  const ovrCols: Column<PrecioOverride>[] = [
+  const ovrCols: Column<PrecioOverride>[] = useMemo(() => [
     { header: "Producto", cell: (o) => prodName[o.producto_id] ?? o.producto_id },
     { header: "Present.", cell: (o) => o.presentacion },
     { header: "Cliente", cell: (o) => (o.cliente_id ? cliName[o.cliente_id] ?? "—" : <span className="text-muted">(todos los de la sucursal)</span>) },
@@ -384,11 +398,11 @@ export default function SucursalesPage() {
       ? [{
           header: "", className: "text-right w-1",
           cell: (o: PrecioOverride) => (
-            <button onClick={() => delOverride(o)} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Eliminar precio especial"><Trash2 size={16} /></button>
+            <button onClick={() => setOvrABorrar(o)} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Eliminar precio especial"><Trash2 size={16} /></button>
           ),
         }]
       : []),
-  ];
+  ], [canOvr, prodName, cliName, sucName]);
 
   const clientesVinculables = vincModal && !vincModal.existente
     ? clientes.filter((c) => {
@@ -438,6 +452,8 @@ export default function SucursalesPage() {
             rows={overrides}
             loading={overridesRes.loading}
             empty="Sin precios especiales"
+            paginated
+            defaultPageSize={50}
           />
         </section>
       )}
@@ -624,6 +640,34 @@ export default function SucursalesPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Confirmaciones de borrado: antes eran de UN clic y borrar una plaza
+          arrastra sus vínculos y series. */}
+      <ConfirmDialog
+        open={sucABorrar !== null}
+        title="Eliminar sucursal"
+        message={`¿Eliminar la plaza "${sucABorrar?.nombre ?? ""}"? Se pierden sus vínculos de clientes y sus series.`}
+        onConfirm={confirmDelSucursal}
+        onClose={() => setSucABorrar(null)}
+        loading={saving}
+      />
+      <ConfirmDialog
+        open={vincABorrar !== null}
+        title="Desvincular cliente"
+        message={`¿Quitar a "${vincABorrar ? vincABorrar.vinculo.cliente_nombre ?? cliName[vincABorrar.vinculo.cliente_id] ?? "este cliente" : ""}" de esta plaza?`}
+        confirmLabel="Quitar"
+        onConfirm={confirmDelVinculo}
+        onClose={() => setVincABorrar(null)}
+        loading={saving}
+      />
+      <ConfirmDialog
+        open={ovrABorrar !== null}
+        title="Eliminar precio especial"
+        message="¿Eliminar este precio especial?"
+        onConfirm={confirmDelOverride}
+        onClose={() => setOvrABorrar(null)}
+        loading={saving}
+      />
     </div>
   );
 }

@@ -6,8 +6,13 @@ need no live database.
 """
 import os
 
+# La BD de pruebas de la casa es el docker de :5434 (smartsupply_v2). Antes el
+# default era :5432/test, que no existe en ninguna máquina: `pytest -q` pelado
+# "pasaba" saltándose ~85% de la suite sin que nadie lo notara. Con DATABASE_URL
+# exportado este default no aplica.
 os.environ.setdefault(
-    "DATABASE_URL", "postgresql+psycopg2://postgres:postgres@localhost:5432/test"
+    "DATABASE_URL",
+    "postgresql+psycopg2://postgres:postgres@localhost:5434/smartsupply_v2",
 )
 os.environ.setdefault("AUTH_CACHE_TTL", "0")  # sin caché de auth en tests (determinismo)
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")

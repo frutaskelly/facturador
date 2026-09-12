@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Eye, Lock, Pencil, Plus, Shield, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -186,7 +186,7 @@ export default function RolesPage() {
     setOpen(true);
   }
 
-  async function openRole(role: Role) {
+  const openRole = useCallback(async (role: Role) => {
     setEditing(role);
     setReadOnly(role.es_preset || !canWrite);
     setNombre(role.nombre);
@@ -206,7 +206,7 @@ export default function RolesPage() {
     } finally {
       setLoadingDetail(false);
     }
-  }
+  }, [canWrite, toast]);
 
   function toggle(id: string) {
     if (readOnly) return;
@@ -272,7 +272,7 @@ export default function RolesPage() {
     }
   }
 
-  const columns: Column<Role>[] = [
+  const columns = useMemo<Column<Role>[]>(() => [
     {
       header: "Rol",
       cell: (r) => (
@@ -318,7 +318,7 @@ export default function RolesPage() {
         </div>
       ),
     },
-  ];
+  ], [openRole, canWrite, canDelete]);
 
   return (
     <div>

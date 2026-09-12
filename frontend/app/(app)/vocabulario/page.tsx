@@ -111,15 +111,16 @@ export default function VocabularioPage() {
   const [nuevoAlcance, setNuevoAlcance] = useState(GLOBAL);
   const [nuevoProducto, setNuevoProducto] = useState<ProductoPick | null>(null);
 
-  function editable(f: Fila) {
-    return f.cliente_id !== null || puedeGlobal;
-  }
+  const editable = useCallback(
+    (f: Fila) => f.cliente_id !== null || puedeGlobal,
+    [puedeGlobal]
+  );
 
-  function abrirEdicion(f: Fila) {
+  const abrirEdicion = useCallback((f: Fila) => {
     setEditar(f);
     setEdTexto(f.texto);
     setEdProducto(null);
-  }
+  }, []);
 
   async function guardarEdicion() {
     if (!editar) return;
@@ -190,7 +191,7 @@ export default function VocabularioPage() {
     }
   }
 
-  const columns: Column<Fila>[] = [
+  const columns = useMemo<Column<Fila>[]>(() => [
     {
       header: "Si la orden dice…",
       key: "texto",
@@ -288,9 +289,9 @@ export default function VocabularioPage() {
           <span className="text-muted">—</span>
         ),
     },
-  ];
+  ], []);
 
-  const acciones: RowAction<Fila>[] = [
+  const acciones = useMemo<RowAction<Fila>[]>(() => [
     {
       id: "editar",
       label: "Editar equivalencia",
@@ -306,7 +307,7 @@ export default function VocabularioPage() {
       onClick: (f) => setAQuitar(f),
       hidden: (f) => !editable(f),
     },
-  ];
+  ], [abrirEdicion, editable]);
 
   return (
     <div>

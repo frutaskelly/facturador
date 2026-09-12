@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, FileText, ListPlus, Pencil, Plus, Tag, Trash2, Upload } from "lucide-react";
 
 import { NuevaPresentacionDialog } from "@/components/NuevaPresentacionDialog";
@@ -150,13 +150,9 @@ export default function ListasPreciosPage() {
   // Producto al que se le está agregando una presentación desde esta pantalla.
   const [nuevaPres, setNuevaPres] = useState<string | null>(null);
 
-  async function openPrecios(lista: ListaPrecios) {
-    setActiveLista(lista);
-    setNuevo({ producto_id: "", presentacion: "", cantidad_minima: "1", precio_unitario: "" });
-    await loadPrecios(lista.id);
-  }
-
-  async function loadPrecios(listaId: string) {
+  // Estables entre renders (useCallback): son dependencias de las columnas
+  // memoizadas de la tabla de listas.
+  const loadPrecios = useCallback(async (listaId: string) => {
     setLoadingPrecios(true);
     try {
       const res = await apiFetch<Page<Precio>>(`/api/v1/listas-precios/${listaId}/precios?limit=500`);
@@ -166,7 +162,13 @@ export default function ListasPreciosPage() {
     } finally {
       setLoadingPrecios(false);
     }
-  }
+  }, [toast]);
+
+  const openPrecios = useCallback(async (lista: ListaPrecios) => {
+    setActiveLista(lista);
+    setNuevo({ producto_id: "", presentacion: "", cantidad_minima: "1", precio_unitario: "" });
+    await loadPrecios(lista.id);
+  }, [loadPrecios]);
 
   async function addPrecio() {
     if (!activeLista) return;
@@ -218,9 +220,46 @@ export default function ListasPreciosPage() {
     );
   }
 
-  function setCargarRow(producto_id: string, patch: Partial<CatalogRow>) {
+  const setCargarRow = useCallback((producto_id: string, patch: Partial<CatalogRow>) => {
     setCargarRows((rows) => rows.map((r) => (r.producto_id === producto_id ? { ...r, ...patch } : r)));
-  }
+  }, []);
+
+  // Columnas de la rejilla "Cargar productos del catálogo", memoizadas.
+  const cargarCols: Column<CatalogRow>[] = useMemo(() => [
+    { header: "Producto", cell: (r) => prodName[r.producto_id] ?? r.producto_id },
+    {
+      header: "Present.",
+      cell: (r) => (
+        <Select
+          value={r.presentacion}
+          onChange={(e) => {
+            if (e.target.value === NUEVA_PRESENTACION) { setNuevaPres(r.producto_id); return; }
+            setCargarRow(r.producto_id, { presentacion: e.target.value });
+          }}
+        >
+          {presentacionOptions(prodById[r.producto_id]).map((k) => (
+            <option key={k} value={k}>{k}</option>
+          ))}
+          {canWriteProductos && (
+            <option value={NUEVA_PRESENTACION}>＋ Nueva presentación…</option>
+          )}
+        </Select>
+      ),
+    },
+    {
+      header: "Precio",
+      className: "w-40",
+      cell: (r) => (
+        <Input
+          type="number"
+          step="0.0001"
+          min="0"
+          value={r.precio_unitario}
+          onChange={(e) => setCargarRow(r.producto_id, { precio_unitario: e.target.value })}
+        />
+      ),
+    },
+  ], [prodName, prodById, canWriteProductos, setCargarRow]);
 
   async function submitCargar() {
     if (!activeLista) return;
@@ -249,10 +288,15 @@ export default function ListasPreciosPage() {
     }
   }
 
-  async function delPrecio(p: Precio) {
-    if (!activeLista) return;
+  // Borrar un precio pasa por confirmación (mismo patrón que borrar la lista):
+  // el bote de basura solo deja el precio "en espera" y el diálogo remata.
+  const [precioABorrar, setPrecioABorrar] = useState<Precio | null>(null);
+  async function confirmDeletePrecio() {
+    if (!activeLista || !precioABorrar) return;
     try {
-      await del(`/api/v1/listas-precios/${activeLista.id}/precios/${p.id}`);
+      await del(`/api/v1/listas-precios/${activeLista.id}/precios/${precioABorrar.id}`);
+      toast.success("Precio eliminado");
+      setPrecioABorrar(null);
       await loadPrecios(activeLista.id);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo eliminar");
@@ -272,7 +316,7 @@ export default function ListasPreciosPage() {
     }
   }
 
-  const columns: Column<ListaPrecios>[] = [
+  const columns: Column<ListaPrecios>[] = useMemo(() => [
     { header: "Código", cell: (l) => <span className="font-medium">{l.codigo}</span> },
     { header: "Nombre", truncate: true, cell: (l) => <span title={l.nombre}>{l.nombre}</span> },
     { header: "Estado", cell: (l) => <Badge tone={l.status === "ACTIVO" ? "success" : "muted"}>{l.status}</Badge> },
@@ -309,7 +353,24 @@ export default function ListasPreciosPage() {
         </div>
       ),
     },
-  ];
+  ], [canWrite, canDelete, openPrecios]);
+
+  // Columnas del gestor de precios y de la rejilla del catálogo: memoizadas
+  // para no invalidar los memos internos del DataTable en cada render.
+  const preciosCols: Column<Precio>[] = useMemo(() => [
+    { header: "Producto", cell: (p) => prodName[p.producto_id] ?? p.producto_id },
+    { header: "Present.", cell: (p) => p.presentacion },
+    { header: "Desde cant.", cell: (p) => p.cantidad_minima, className: "text-right" },
+    { header: "Precio", cell: (p) => fmtMoney(p.precio_unitario), className: "text-right" },
+    {
+      header: "", className: "text-right w-1",
+      cell: (p) => canWrite ? (
+        <button onClick={() => setPrecioABorrar(p)} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Eliminar">
+          <Trash2 size={16} />
+        </button>
+      ) : null,
+    },
+  ], [prodName, canWrite]);
 
   return (
     <div>
@@ -521,25 +582,14 @@ export default function ListasPreciosPage() {
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : (
             <DataTable
-              columns={[
-                { header: "Producto", cell: (p: Precio) => prodName[p.producto_id] ?? p.producto_id },
-                { header: "Present.", cell: (p: Precio) => p.presentacion },
-                { header: "Desde cant.", cell: (p: Precio) => p.cantidad_minima, className: "text-right" },
-                { header: "Precio", cell: (p: Precio) => fmtMoney(p.precio_unitario), className: "text-right" },
-                {
-                  header: "", className: "text-right w-1",
-                  cell: (p: Precio) => canWrite ? (
-                    <button onClick={() => delPrecio(p)} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Eliminar">
-                      <Trash2 size={16} />
-                    </button>
-                  ) : null,
-                },
-              ]}
+              columns={preciosCols}
               rows={buscaPrecio.trim()
                 ? precios.filter((p) =>
                     (prodName[p.producto_id] ?? "").toLowerCase().includes(buscaPrecio.trim().toLowerCase()))
                 : precios}
               empty="Sin precios en esta lista"
+              paginated
+              defaultPageSize={50}
             />
           )}
         </div>
@@ -573,43 +623,11 @@ export default function ListasPreciosPage() {
 
           <div className="max-h-[50vh] overflow-y-auto">
             <DataTable
-              columns={[
-                { header: "Producto", cell: (r: CatalogRow) => prodName[r.producto_id] ?? r.producto_id },
-                {
-                  header: "Present.",
-                  cell: (r: CatalogRow) => (
-                    <Select
-                      value={r.presentacion}
-                      onChange={(e) => {
-                        if (e.target.value === NUEVA_PRESENTACION) { setNuevaPres(r.producto_id); return; }
-                        setCargarRow(r.producto_id, { presentacion: e.target.value });
-                      }}
-                    >
-                      {presentacionOptions(prodById[r.producto_id]).map((k) => (
-                        <option key={k} value={k}>{k}</option>
-                      ))}
-                      {canWriteProductos && (
-                        <option value={NUEVA_PRESENTACION}>＋ Nueva presentación…</option>
-                      )}
-                    </Select>
-                  ),
-                },
-                {
-                  header: "Precio",
-                  className: "w-40",
-                  cell: (r: CatalogRow) => (
-                    <Input
-                      type="number"
-                      step="0.0001"
-                      min="0"
-                      value={r.precio_unitario}
-                      onChange={(e) => setCargarRow(r.producto_id, { precio_unitario: e.target.value })}
-                    />
-                  ),
-                },
-              ]}
+              columns={cargarCols}
               rows={cargarRows}
               empty="No hay productos en esta categoría"
+              paginated
+              defaultPageSize={50}
             />
           </div>
         </div>
@@ -621,6 +639,17 @@ export default function ListasPreciosPage() {
         message={`¿Eliminar la lista "${toDelete?.nombre}"? Sus precios se quitan también.`}
         onConfirm={confirmDeleteLista}
         onClose={() => setToDelete(null)}
+        loading={saving}
+      />
+
+      {/* Va DESPUÉS del modal del gestor en el árbol: mismo z-index, así que el
+          orden del DOM lo pinta encima. */}
+      <ConfirmDialog
+        open={precioABorrar !== null}
+        title="Eliminar precio"
+        message={`¿Eliminar el precio de "${precioABorrar ? prodName[precioABorrar.producto_id] ?? precioABorrar.producto_id : ""}"?`}
+        onConfirm={confirmDeletePrecio}
+        onClose={() => setPrecioABorrar(null)}
         loading={saving}
       />
 

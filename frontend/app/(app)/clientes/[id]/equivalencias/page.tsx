@@ -8,7 +8,7 @@
 // Regla: solo las CONFIRMADAS deciden. Lo que el bot propuso solo (SUGERIDA)
 // espera aquí a que una persona lo apruebe; si no, un error se propagaría solo.
 import Link from "next/link";
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
@@ -89,10 +89,10 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
   // casi siempre se busca al etiquetar por proyecto.
   const proyectosOrden = [...proyectos].sort((a, b) =>
     Number(b.cliente_id === id) - Number(a.cliente_id === id) || a.nombre.localeCompare(b.nombre));
-  const serieNombre = (sid?: string | null) => {
+  const serieNombre = useCallback((sid?: string | null) => {
     const s = series.find((x) => x.id === sid);
     return s ? `${s.codigo}${s.nombre ? ` · ${s.nombre}` : ""}` : null;
-  };
+  }, [series]);
 
   const meta = SISTEMAS.find((s) => s.valor === sistema)!;
 
@@ -148,7 +148,7 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
     }
   }
 
-  const columns: Column<ClienteExterno>[] = [
+  const columns = useMemo<Column<ClienteExterno>[]>(() => [
     {
       header: "Sistema",
       cell: (r) => SISTEMAS.find((s) => s.valor === r.sistema)?.label ?? r.sistema,
@@ -208,7 +208,7 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
           </button>
         ) : null,
     },
-  ];
+  ], [canWrite, proyectos, serieNombre, sucursales]);
 
   if (error) return <Alert tone="danger">No se pudieron cargar las equivalencias.</Alert>;
   if (!cliente || rows === null)
@@ -239,6 +239,8 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
       <DataTable
         columns={columns}
         rows={rows}
+        paginated
+        defaultPageSize={50}
         empty="Sin equivalencias. Mientras no haya ninguna, las órdenes de este cliente llegan a la bandeja sin asignar — y al asignarlas a mano ahí, se registran aquí solas."
       />
 

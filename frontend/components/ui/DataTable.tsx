@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, ChevronRight, ChevronsUpDown, Columns3, Download, Eye, EyeOff, GripVertical, MoreVertical, Filter } from "lucide-react";
 
 import { Alert } from "./Alert";
@@ -272,7 +272,7 @@ export type DataTableProps<T> = {
   rows: T[];
   loading?: boolean;
   error?: string | null;
-  empty?: string;
+  empty?: ReactNode;
   onRowClick?: (row: T) => void;
   /** Si se indica, cada fila es expandible: al hacer clic se despliega un panel
    *  (slide-down) debajo con este contenido. Sustituye a `onRowClick`. */
@@ -411,6 +411,30 @@ export function DataTable<T>({
   }, [columns]);
   const byId = useMemo(() => Object.fromEntries(cols.map((c) => [c.id, c])), [cols]);
   const managedIds = useMemo(() => cols.filter((c) => c.manageable).map((c) => c.id), [cols]);
+
+  // ── caché del texto visible de cada celda ──
+  // exportText sin accessor renderiza el JSX de la celda y lo recorre: ordenar,
+  // filtrar, buscar y exportar lo llamaban una y otra vez por (fila, columna).
+  // WeakMap por fila (se vacía solo cuando las filas se van) + invalidación por
+  // identidad de `cols`. La mutación del ref durante render es solo caché.
+  const cellCacheRef = useRef<{ cols: unknown; map: WeakMap<object, Record<string, string>> }>({
+    cols: null,
+    map: new WeakMap(),
+  });
+  if (cellCacheRef.current.cols !== cols) {
+    cellCacheRef.current = { cols, map: new WeakMap() };
+  }
+  function cellText(id: string, col: Column<T>, row: T): string {
+    if (row === null || typeof row !== "object") return exportText(col, row);
+    const map = cellCacheRef.current.map;
+    let m = map.get(row as object);
+    if (!m) {
+      m = {};
+      map.set(row as object, m);
+    }
+    if (!(id in m)) m[id] = exportText(col, row);
+    return m[id];
+  }
 
   // ── filas expandibles (slide-down) ──
   const expandable = !!renderExpanded;
@@ -578,7 +602,7 @@ export function DataTable<T>({
     const valorDe = (row: T): string | number | null => {
       const v = comparable(entry.col, row);
       if (v != null) return v;
-      const t = exportText(entry.col, row);
+      const t = cellText(entry.id, entry.col, row);
       return t === "" ? null : t;
     };
     return [...rows].sort((a, b) => {
@@ -630,6 +654,9 @@ export function DataTable<T>({
     };
   }, [filterOpen]);
   const hayColFilters = Object.keys(colFilters).length > 0 || Object.keys(colConds).length > 0;
+  // Diferido: teclear en el buscador actualiza el input al instante y el
+  // re-filtrado del dataset corre como render de baja prioridad.
+  const deferredSearch = useDeferredValue(search);
   const filteredRows = useMemo(() => {
     const fn = rowFilterRef.current;
     let base = fn ? sortedRows.filter((row) => fn(row)) : sortedRows;
@@ -637,50 +664,53 @@ export function DataTable<T>({
     const activos = Object.entries(colFilters);
     const conds = Object.entries(colConds);
     if (activos.length > 0 || conds.length > 0) {
-      const porId = new Map(cols.map((c) => [c.id, c.col]));
       base = base.filter((row) =>
         activos.every(([id, vals]) => {
-          const col = porId.get(id);
-          return col ? vals.includes(exportText(col, row)) : true;
+          const c = byId[id];
+          return c ? vals.includes(cellText(id, c.col, row)) : true;
         }) &&
-        conds.every(([id, c]) => {
-          const col = porId.get(id);
-          return col ? cumpleCond(exportText(col, row), c) : true;
+        conds.every(([id, cond]) => {
+          const c = byId[id];
+          return c ? cumpleCond(cellText(id, c.col, row), cond) : true;
         }),
       );
     }
-    const q = onSearchChange ? "" : norm(search.trim());
+    const q = onSearchChange ? "" : norm(deferredSearch.trim());
     if (!q) return base;
     const tokens = q.split(/\s+/).filter(Boolean);
     return base.filter((row) => {
-      const text = norm(cols.map(({ col }) => exportText(col, row)).join("  "));
+      const text = norm(cols.map(({ col, id }) => cellText(id, col, row)).join("  "));
       return tokens.every((t) => text.includes(t));
     });
     // `rowFilter` entra por ref + `rowFilterKey`: como arrow inline cambiaría
     // de identidad en cada render y recalcularía este memo siempre.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedRows, search, cols, rowFilterKey, onSearchChange, colFilters, colConds]);
+  }, [sortedRows, deferredSearch, cols, byId, rowFilterKey, onSearchChange, colFilters, colConds]);
 
   // Filas de referencia para la LISTA de valores del popup: lo cargado, con el
   // filtro externo y los filtros de las DEMÁS columnas aplicados (como Excel:
-  // cada autofiltro lista lo que queda visible bajo los otros).
-  function baseParaFiltro(excludeId: string): T[] {
+  // cada autofiltro lista lo que queda visible bajo los otros). Memoizado: se
+  // calculaba en CADA render del componente (referencia nueva → el memo de
+  // valores del popup nunca acertaba y cada tecla re-escaneaba el dataset).
+  const filtroBase = useMemo(() => {
+    if (!filterOpen) return [] as T[];
+    const excludeId = filterOpen;
     const fn = rowFilterRef.current;
     const base = fn ? sortedRows.filter((r) => fn(r)) : sortedRows;
-    const porId = new Map(cols.map((c) => [c.id, c.col]));
     return base.filter((row) =>
       Object.entries(colFilters).every(([cid, vals]) => {
         if (cid === excludeId) return true;
-        const col = porId.get(cid);
-        return col ? vals.includes(exportText(col, row)) : true;
+        const c = byId[cid];
+        return c ? vals.includes(cellText(cid, c.col, row)) : true;
       }) &&
-      Object.entries(colConds).every(([cid, c]) => {
+      Object.entries(colConds).every(([cid, cond]) => {
         if (cid === excludeId) return true;
-        const col = porId.get(cid);
-        return col ? cumpleCond(exportText(col, row), c) : true;
+        const c = byId[cid];
+        return c ? cumpleCond(cellText(cid, c.col, row), cond) : true;
       }),
     );
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cellText es caché pura
+  }, [filterOpen, sortedRows, colFilters, colConds, byId]);
 
   // ── selección: derivados + notificación al padre ──
   // Objetos seleccionados: todas las filas (de `rows`) cuya clave esté marcada.
@@ -839,7 +869,7 @@ export function DataTable<T>({
   function doExport() {
     const expCols = renderCols.filter(({ col }) => col.header.trim() !== ""); // sin columna de acciones
     const headers = expCols.map(({ col }) => col.header);
-    const matrix = filteredRows.map((row) => expCols.map(({ col }) => exportText(col, row)));
+    const matrix = filteredRows.map((row) => expCols.map(({ col, id }) => cellText(id, col, row)));
     downloadCsv(headers, matrix, exportFilename);
   }
 
@@ -1023,15 +1053,27 @@ export function DataTable<T>({
     : undefined;
 
   let body: ReactNode;
-  if (loading) {
+  if (loading && rows.length === 0) {
+    // El spinner de página completa SOLO cuando aún no hay nada que enseñar:
+    // en un refiltrado de servidor la tabla anterior se queda visible,
+    // atenuada, en vez de colapsar a un spinner (parpadeo + scroll perdido).
     body = <div className="flex justify-center py-16"><Spinner /></div>;
   } else if (error) {
     body = <Alert tone="danger">{error}</Alert>;
   } else if (rows.length === 0) {
-    body = <EmptyState title={empty ?? "Sin resultados"} />;
+    body =
+      empty == null || typeof empty === "string" ? (
+        <EmptyState title={empty ?? "Sin resultados"} />
+      ) : (
+        empty
+      );
   } else {
     body = (
-      <div ref={scrollerRef} className="overflow-x-auto rounded-xl border border-border">
+      <div
+        ref={scrollerRef}
+        className={`overflow-x-auto rounded-xl border border-border ${loading ? "pointer-events-none opacity-60" : ""}`}
+        aria-busy={loading || undefined}
+      >
         {/* Con anchos definidos (modo Excel): table-fixed + ancho explícito = la
             tabla se ensancha y el contenedor hace scroll, sin comprimir columnas.
             Sin anchos: w-full normal (la tabla se ajusta al contenedor). */}
@@ -1127,7 +1169,7 @@ export function DataTable<T>({
                         >
                           <HeaderFilterPopup
                             col={col}
-                            rows={baseParaFiltro(id)}
+                            rows={filtroBase}
                             filtro={fVals}
                             cond={fCond}
                             sortDir={active ? sort!.dir : null}

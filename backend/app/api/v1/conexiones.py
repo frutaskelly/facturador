@@ -321,22 +321,36 @@ def listar_grupos(
 
     # Lo que REALMENTE ha entrado por cada grupo, que puede diferir de lo
     # configurado — y esa diferencia es justo lo que hay que poder ver.
+    # Agregado en SQL: materializar TODAS las OCs (con sus JSONB) para contar
+    # por jid crecía sin tope con la tabla.
     stats: dict = {}
     desde = datetime.now(timezone.utc) - timedelta(hours=24)
-    for oc in db.query(OCRecibida).all():
-        jid = str((oc.payload or {}).get("jid") or "")
-        if not jid:
-            continue
-        st = stats.setdefault(jid, {"n": 0, "n24": 0, "ultima": None, "pend": 0, "clientes": set()})
-        st["n"] += 1
-        if oc.recibida_at and oc.recibida_at >= desde:
-            st["n24"] += 1
-        if st["ultima"] is None or (oc.recibida_at and oc.recibida_at > st["ultima"]):
-            st["ultima"] = oc.recibida_at
-        if oc.cliente_id is None:
-            st["pend"] += 1
-        else:
-            st["clientes"].add(oc.cliente_id)
+    jid_col = OCRecibida.payload["jid"].astext
+    for fila in (
+        db.query(
+            jid_col.label("jid"),
+            func.count().label("n"),
+            func.count().filter(OCRecibida.recibida_at >= desde).label("n24"),
+            func.max(OCRecibida.recibida_at).label("ultima"),
+            func.count().filter(OCRecibida.cliente_id.is_(None)).label("pend"),
+        )
+        .filter(jid_col.isnot(None), jid_col != "")
+        .group_by(jid_col)
+        .all()
+    ):
+        stats[fila.jid] = {
+            "n": fila.n, "n24": fila.n24, "ultima": fila.ultima,
+            "pend": fila.pend, "clientes": set(),
+        }
+    for jid, cid in (
+        db.query(jid_col, OCRecibida.cliente_id)
+        .filter(jid_col.isnot(None), jid_col != "", OCRecibida.cliente_id.isnot(None))
+        .distinct()
+        .all()
+    ):
+        stats.setdefault(
+            jid, {"n": 0, "n24": 0, "ultima": None, "pend": 0, "clientes": set()}
+        )["clientes"].add(cid)
 
     salida: list[GrupoOut] = []
     for g in grupos:

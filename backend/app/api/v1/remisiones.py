@@ -77,7 +77,7 @@ from ...schemas.remision import (
     RemisionOut,
     RemisionUpdate,
 )
-from ...services.inventario import build_movimiento, presentacion_factor, resolve_lote
+from ...services.inventario import build_movimiento, lotes_for_update, presentacion_factor, resolve_lote
 from ...services.remision_pdf import build_remision_pdf, build_remisiones_pdf
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
@@ -570,15 +570,11 @@ def _liberar_reservas(db: Session, ctx: AuthContext, rem: Remision, *, motivo: s
     (que luego vuelve a descontar)."""
     prod_ids = {ln.producto_id for ln in rem.lineas if ln.lote_id is not None}
     productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+    lotes = lotes_for_update(db, (ln.lote_id for ln in rem.lineas))
     for ln in rem.lineas:
         if ln.lote_id is None:
             continue
-        lote = (
-            db.query(LoteInventario)
-            .filter(LoteInventario.id == ln.lote_id)
-            .with_for_update()
-            .one_or_none()
-        )
+        lote = lotes.get(ln.lote_id)
         if lote is None:
             continue
         # Libera exactamente lo reservado al confirmar (unidad base guardada);
@@ -1471,6 +1467,10 @@ def enviar_remisiones_lote(
     recibe un único correo con todas sus remisiones."""
     if not payload.ids:
         raise HTTPException(status_code=422, detail="Sin remisiones para enviar")
+    if len(payload.ids) > 50:
+        # Un PDF por remisión + SMTP con todo adjunto, con la conexión del
+        # pool tomada mientras tanto — mismo tope que los PDF en lote.
+        raise HTTPException(status_code=422, detail="Máximo 50 remisiones por correo")
     rems = (
         db.query(Remision)
         .filter(Remision.id.in_(payload.ids), Remision.deleted_at.is_(None))

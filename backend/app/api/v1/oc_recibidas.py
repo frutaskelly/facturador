@@ -32,7 +32,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer, selectinload
 
 from ...core.config import settings
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
@@ -457,7 +457,16 @@ def listar(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    query = db.query(OCRecibida)
+    # selectinload: OCRecibidaOut serializa cliente/sucursal/proyecto/remisión
+    # vía propiedades lazy — sin esto, una página de 50 eran hasta 200 SELECTs.
+    # defer payload_nuevo: el JSONB del documento nuevo solo lo usa el detalle.
+    query = db.query(OCRecibida).options(
+        selectinload(OCRecibida.cliente),
+        selectinload(OCRecibida.sucursal),
+        selectinload(OCRecibida.proyecto),
+        selectinload(OCRecibida.remision),
+        defer(OCRecibida.payload_nuevo),
+    )
     if ctx.cliente_scope:
         # Candado del portal: solo órdenes de SUS clientes.
         query = query.filter(OCRecibida.cliente_id.in_(ctx.cliente_scope))
@@ -533,7 +542,14 @@ def _codigos_para(db: Session, cliente_id) -> tuple[dict, dict, dict]:
     del_cliente: dict[str, object] = {}
     de_otros: dict[str, object] = {}
     pres_cliente: dict[UUID, str] = {}
-    q = db.query(ProductoCliente)
+    # Solo las 4 columnas que usa el cruce: hidratar la tabla entera como
+    # objetos ORM (miles de filas por apertura de OC) era 5-10× más caro.
+    q = db.query(
+        ProductoCliente.cliente_id,
+        ProductoCliente.producto_id,
+        ProductoCliente.codigo_cliente,
+        ProductoCliente.presentacion,
+    )
     if cliente_id is not None:
         # Solo lo que este cruce puede usar: el catálogo del cliente y el de
         # quienes comparten códigos. Sin filtro, cada apertura de OC traía la
@@ -585,15 +601,43 @@ def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
     # (texto, cantidad, unidad, clave) — cargar el catálogo, cruzar candidatos y
     # evaluar precios para eso es pagar la pantalla completa por un renglón.
     # Con el catálogo vacío, todo el cruce de abajo se vuelve gratis.
-    catalogo = productos_activos(db, oc.tenant_id) if (lineas_raw and not vistazo) else []
+    #
+    # `db.info["cruce_cache"]`: procesar-pendientes convierte hasta 100 órdenes
+    # en un request y cada una recargaba el catálogo completo, los alias del
+    # tenant y toda producto_clientes. El lote arma el dict ANTES del loop y
+    # aquí se reusa; sin el dict (aperturas sueltas) todo se carga como siempre.
+    cache = db.info.get("cruce_cache")
+    if lineas_raw and not vistazo:
+        if cache is not None and "catalogo" in cache:
+            catalogo = cache["catalogo"]
+        else:
+            catalogo = productos_activos(db, oc.tenant_id)
+            if cache is not None:
+                cache["catalogo"] = catalogo
+    else:
+        catalogo = []
     # Precalculado una vez para las N partidas: si no, el cruce es
     # O(partidas × productos) normalizaciones por cada apertura de la orden.
-    norms = normalizar_catalogo(catalogo) if catalogo else {}
-    aliases = alias_del_tenant(db, oc.tenant_id) if catalogo else {}
-    aliases_cli = alias_de_cliente(db, oc.tenant_id, oc.cliente_id, oc.sucursal_id) if catalogo else {}
-    cods_cli, cods_otros, pres_cli = (
-        _codigos_para(db, oc.cliente_id) if catalogo else ({}, {}, {})
-    )
+    if catalogo:
+        if cache is not None:
+            norms = cache.setdefault("norms", normalizar_catalogo(catalogo))
+            aliases = cache.setdefault("aliases", alias_del_tenant(db, oc.tenant_id))
+            k_cli = ("alias_cli", oc.cliente_id, oc.sucursal_id)
+            if k_cli not in cache:
+                cache[k_cli] = alias_de_cliente(db, oc.tenant_id, oc.cliente_id, oc.sucursal_id)
+            aliases_cli = cache[k_cli]
+            k_cod = ("codigos", oc.cliente_id)
+            if k_cod not in cache:
+                cache[k_cod] = _codigos_para(db, oc.cliente_id)
+            cods_cli, cods_otros, pres_cli = cache[k_cod]
+        else:
+            norms = normalizar_catalogo(catalogo)
+            aliases = alias_del_tenant(db, oc.tenant_id)
+            aliases_cli = alias_de_cliente(db, oc.tenant_id, oc.cliente_id, oc.sucursal_id)
+            cods_cli, cods_otros, pres_cli = _codigos_para(db, oc.cliente_id)
+    else:
+        norms, aliases, aliases_cli = {}, {}, {}
+        cods_cli, cods_otros, pres_cli = {}, {}, {}
     by_id = {p.id: p for p in catalogo}
     lineas = []
     for i, ln in enumerate(lineas_raw, start=1):
@@ -1558,8 +1602,14 @@ def procesar_pendientes(
     # así). Lo no-intentable se SALTA sin contarlo — se queda para un humano —
     # pero solo después de re-resolver: mapear un hospital debe destrabar sus
     # órdenes en esta misma pasada.
-    candidatas = _query().order_by(OCRecibida.recibida_at).all()
+    # Solo los ids: las entidades completas (payload y diffs JSONB incluidos)
+    # se materializaban para usar nada más el .id — el candado de abajo ya
+    # recarga cada fila fresca.
+    candidatas = _query().with_entities(OCRecibida.id).order_by(OCRecibida.recibida_at).all()
     creadas = fallidas = 0
+    # Catálogo, alias y códigos UNA vez por lote, no una vez por orden
+    # (ver _detalle): con 25 órdenes eran 25 recargas de todo el catálogo.
+    db.info["cruce_cache"] = {}
     for fila in candidatas:
         if creadas + fallidas >= limite:
             break
@@ -1574,6 +1624,7 @@ def procesar_pendientes(
             creadas += 1
         else:
             fallidas += 1
+    db.info.pop("cruce_cache", None)
     db.flush()
     restantes = _query().count()
     # Commit AQUÍ, no en el teardown: la respuesta de un lote puede no llegar
