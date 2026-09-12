@@ -24,6 +24,7 @@ import { ApiError, apiDownload, apiFetch, apiOpenInTab } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtDateTime, fmtMoney } from "@/lib/format";
 import { useResource, type Page } from "@/lib/hooks";
+import { LOTE_A_LA_VEZ, enPoolSettled } from "@/lib/lineas";
 import { FORMA_PAGO_OPTS, METODO_PAGO_OPTS, USO_CFDI_OPTS } from "@/lib/sat";
 import type { Cliente, Factura, FacturaDetail, Proyecto, Remision, Serie, Sucursal } from "@/lib/types";
 
@@ -594,11 +595,11 @@ export default function FacturasPage() {
     if (objetivo.length === 0) return;
     setBulkBusy(true);
     try {
-      const res = await Promise.allSettled(objetivo.map((f) =>
+      const res = await enPoolSettled(objetivo, LOTE_A_LA_VEZ, (f) =>
         apiFetch(`/api/v1/facturas/${f.id}/timbrar`, {
           method: "POST",
           body: JSON.stringify({ permitir_negativos: permitirNegativos }),
-        })));
+        }));
       const sinStock: Factura[] = [];
       let ok = 0, otras = 0;
       res.forEach((r, i) => {
@@ -639,11 +640,11 @@ export default function FacturasPage() {
     if (objetivo.length === 0) return;
     setBulkBusy(true);
     try {
-      const res = await Promise.allSettled(objetivo.map((f) =>
+      const res = await enPoolSettled(objetivo, LOTE_A_LA_VEZ, (f) =>
         apiFetch(`/api/v1/facturas/${f.id}/cancelar`, {
           method: "POST",
           body: JSON.stringify({ motivo: bulkCancelMotivo, inventario: bulkCancelInventario }),
-        })));
+        }));
       const ok = res.filter((r) => r.status === "fulfilled").length;
       const fail = res.length - ok;
       objetivo.forEach((f) => invalidar(f.id));

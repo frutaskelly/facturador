@@ -222,14 +222,54 @@ export async function fetchFiscalPreview(lineas: LineaForm[]): Promise<FiscalPre
   };
 }
 
-// ── Cotizaciones en ráfaga ──────────────────────────────────────────────────
+// ── Peticiones en ráfaga ────────────────────────────────────────────────────
 // Una remisión de 50+ partidas disparaba una petición GET /precios/cotizar por
 // línea, TODAS a la vez (al abrir la edición, al pegar de Excel o con
 // "Actualizar precios"). La estampida saturaba el backend en producción y las
 // conexiones se reseteaban: el guardado moría con "No se pudo conectar con el
 // servidor" y cada renglón marcaba "no se pudo consultar el catálogo". El pool
 // corre las MISMAS peticiones, pero con pocas en vuelo a la vez.
+//
+// Lo mismo aplica a CUALQUIER acción en lote (timbrar/cancelar/confirmar N):
+// cada petición retiene una conexión de Postgres mientras el backend habla con
+// el PAC, y el pool del backend es de 5+7. La cancelación masiva del 12-sep
+// disparó 34 a la vez y 18 murieron con "QueuePool limit reached" (500).
 export const COTIZACIONES_A_LA_VEZ = 6;
+export const LOTE_A_LA_VEZ = 6;
+
+/** Corre `tarea` sobre cada elemento con a lo más `limite` en vuelo y devuelve
+ *  los resultados en el orden del arreglo. La tarea no debe lanzar (si puede
+ *  fallar por elemento, usa enPoolSettled). */
+export async function enPoolMap<T, R>(
+  items: readonly T[],
+  limite: number,
+  tarea: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let i = 0;
+  const carril = async (): Promise<void> => {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await tarea(items[idx]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limite, items.length) }, carril));
+  return out;
+}
+
+/** Promise.allSettled con a lo más `limite` en vuelo: mismos resultados (y en
+ *  el mismo orden), sin la estampida. */
+export function enPoolSettled<T, R>(
+  items: readonly T[],
+  limite: number,
+  tarea: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  return enPoolMap(items, limite, (item) =>
+    tarea(item).then(
+      (value): PromiseSettledResult<R> => ({ status: "fulfilled", value }),
+      (reason): PromiseSettledResult<R> => ({ status: "rejected", reason }),
+    ));
+}
 
 /** Corre `tarea` sobre cada elemento con a lo más `limite` en vuelo. Un fallo
  *  en una tarea no detiene a las demás (cotizar ya atrapa y marca el suyo). */
@@ -238,16 +278,5 @@ export async function enPool<T>(
   limite: number,
   tarea: (item: T) => Promise<unknown>,
 ): Promise<void> {
-  let i = 0;
-  const carril = async (): Promise<void> => {
-    while (i < items.length) {
-      const item = items[i++];
-      try {
-        await tarea(item);
-      } catch {
-        /* la tarea reporta su propio fallo; el pool sigue con las demás */
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limite, items.length) }, carril));
+  await enPoolSettled(items, limite, tarea);
 }

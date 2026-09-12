@@ -30,7 +30,7 @@ import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
 import {
-  COTIZACIONES_A_LA_VEZ, enPool,
+  COTIZACIONES_A_LA_VEZ, LOTE_A_LA_VEZ, enPool, enPoolMap, enPoolSettled,
   fetchFiscalPreview, lineaDesdePegado, matchPresentacion,
   nuevaLinea, pegarLocalFallback, unidadBaseDesde,
   type FiscalPreview, type LineaForm,
@@ -1925,8 +1925,8 @@ export default function RemisionesPage() {
     rems: Remision[],
     permitir_negativos: boolean,
   ): Promise<{ ok: number; sinStock: Remision[]; otras: number }> {
-    const results = await Promise.allSettled(
-      rems.map((r) => post(`/api/v1/remisiones/${r.id}/confirmar`, { permitir_negativos })),
+    const results = await enPoolSettled(rems, LOTE_A_LA_VEZ, (r) =>
+      post(`/api/v1/remisiones/${r.id}/confirmar`, { permitir_negativos }),
     );
     invalidarDetalles(rems.map((r) => r.id));
     const sinStock: Remision[] = [];
@@ -2005,8 +2005,8 @@ export default function RemisionesPage() {
     }
     setBulkBusy(true);
     try {
-      const results = await Promise.allSettled(
-        elegibles.map((r) => post(`/api/v1/remisiones/${r.id}/cancelar`, {})),
+      const results = await enPoolSettled(elegibles, LOTE_A_LA_VEZ, (r) =>
+        post(`/api/v1/remisiones/${r.id}/cancelar`, {}),
       );
       invalidarDetalles(elegibles.map((r) => r.id));
       const ok = results.filter((x) => x.status === "fulfilled").length;
@@ -2084,8 +2084,9 @@ export default function RemisionesPage() {
     // Facturar directo: por cada grupo se crea la factura y SE TIMBRA de inmediato.
     // Si el PAC rechaza (o Facturama no está listo), la factura queda en BORRADOR
     // y se puede reintentar/descartar desde Facturas — no se pierde el trabajo.
-    const resultados = await Promise.all(
-      grupos.map(async (remision_ids): Promise<{ r: "timbrada" | "borrador" | "sinStock" | "otra"; fac?: Factura }> => {
+    const resultados = await enPoolMap(
+      grupos, LOTE_A_LA_VEZ,
+      async (remision_ids): Promise<{ r: "timbrada" | "borrador" | "sinStock" | "otra"; fac?: Factura }> => {
         let fac: Factura;
         try {
           fac = await post<Factura>(
@@ -2104,7 +2105,7 @@ export default function RemisionesPage() {
         } catch {
           return { r: "borrador" }; // creada pero el timbrado falló
         }
-      }),
+      },
     );
     invalidarDetalles(grupos.flat());
     const sinStock: string[][] = [];
@@ -2219,7 +2220,7 @@ export default function RemisionesPage() {
     if (elegibles.length === 0) return;
     // Trae detalles de las elegibles para saber si hay productos repetidos
     // (define si "sumatoria vs sin sumatoria" aporta algo).
-    const dets = (await Promise.all(elegibles.map((r) => getDetalle(r))))
+    const dets = (await enPoolMap(elegibles, LOTE_A_LA_VEZ, (r) => getDetalle(r)))
       .filter((d): d is RemisionDetail => d != null);
     const dups = hayProductosRepetidos(dets.flatMap((d) => d.lineas));
     setFacturarDups(dups);
