@@ -23,7 +23,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, st
 from pydantic import BaseModel, Field as PydField
 from sqlalchemy import and_, func, or_, true as sa_true
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ...core.config import settings
 from ...core.db import set_role_tenant
@@ -74,7 +74,13 @@ from ...services.factura_pdf import build_factura_pdf, build_facturas_pdf
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea_producto, totales
 from ...services.onboarding import exigir_listo_para_facturar
-from ...services.inventario import build_movimiento, presentacion_factor, presentacion_sat, resolve_lote
+from ...services.inventario import (
+    build_movimiento,
+    lotes_for_update,
+    presentacion_factor,
+    presentacion_sat,
+    resolve_lote,
+)
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import ensure_fk, get_or_404, paginate
 from .remisiones import _validar_destinatarios, exigir_precios, reservar_stock_remision
@@ -117,18 +123,14 @@ def _release_remision_stock(db: Session, rems, ctx, factura) -> None:
     FACTURADAS al cancelar su factura (quedan liberadas como BORRADOR)."""
     prod_ids = {ln.producto_id for r in rems for ln in r.lineas if ln.lote_id}
     productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+    lotes = lotes_for_update(db, (ln.lote_id for r in rems for ln in r.lineas))
     for r in rems:
         if r.estado not in ("CONFIRMADA", "FACTURADA"):
             continue
         for ln in r.lineas:
             if ln.lote_id is None:
                 continue
-            lote = (
-                db.query(LoteInventario)
-                .filter(LoteInventario.id == ln.lote_id)
-                .with_for_update()
-                .one_or_none()
-            )
+            lote = lotes.get(ln.lote_id)
             if lote is None:
                 continue
             if ln.cantidad_surtida is not None:
@@ -154,18 +156,14 @@ def _writeoff_remision_stock(db: Session, rems, ctx, factura) -> None:
     (se libera la reserva sin sumar a disponible) y se registra una merma."""
     prod_ids = {ln.producto_id for r in rems for ln in r.lineas if ln.lote_id}
     productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+    lotes = lotes_for_update(db, (ln.lote_id for r in rems for ln in r.lineas))
     for r in rems:
         if r.estado not in ("CONFIRMADA", "FACTURADA"):
             continue
         for ln in r.lineas:
             if ln.lote_id is None:
                 continue
-            lote = (
-                db.query(LoteInventario)
-                .filter(LoteInventario.id == ln.lote_id)
-                .with_for_update()
-                .one_or_none()
-            )
+            lote = lotes.get(ln.lote_id)
             if lote is None:
                 continue
             if ln.cantidad_surtida is not None:
@@ -227,17 +225,13 @@ def _revertir_factura_directa(db: Session, ctx, factura, *, perdida: bool) -> No
     if factura.almacen_id is None:
         return
     lineas = db.query(LineaFactura).filter(LineaFactura.factura_id == factura.id).all()
+    lotes = lotes_for_update(db, (ln.lote_id for ln in lineas)) if not perdida else {}
     for ln in lineas:
         if ln.lote_id is None:          # no se timbró / ya revertida
             continue
         base = Decimal(ln.cantidad_base) if ln.cantidad_base is not None else Decimal(ln.cantidad)
         if not perdida:
-            lote = (
-                db.query(LoteInventario)
-                .filter(LoteInventario.id == ln.lote_id)
-                .with_for_update()
-                .one_or_none()
-            )
+            lote = lotes.get(ln.lote_id)
             if lote is not None:
                 lote.cantidad_disponible = lote.cantidad_disponible + base
                 db.add(build_movimiento(
@@ -1285,9 +1279,16 @@ def factura_espejo(
             ))
         # Borrar ANTES de insertar: el UNIQUE (factura, numero_linea) choca si
         # SQLAlchemy mete las líneas nuevas en el mismo flush que borra las viejas.
-        factura.lineas.clear()
-        db.flush()
-        factura.lineas.extend(nuevas)
+        # En bloque, no vía factura.lineas.clear(): el cascade delete-orphan
+        # emite un DELETE por línea (1.2M en tres semanas de espejo, el tercer
+        # consumidor de la BD) y además carga las líneas viejas solo para tirarlas.
+        db.query(LineaFactura).filter(
+            LineaFactura.factura_id == factura.id
+        ).delete(synchronize_session=False)
+        for ln in nuevas:
+            ln.factura_id = factura.id
+        db.add_all(nuevas)
+        db.expire(factura, ["lineas"])
     db.flush()
 
     # Ciclo del espejo con las remisiones estampadas. La marca también se
@@ -1947,8 +1948,14 @@ def enviar_facturas_lote(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
+    if len(payload.ids) > 50:
+        # Cada factura genera su PDF y el SMTP viaja con todos los adjuntos,
+        # reteniendo una conexión del pool durante todo el armado — el mismo
+        # tope que ya tienen los PDF en lote.
+        raise HTTPException(status_code=422, detail="Máximo 50 facturas por correo")
     facturas = (
         db.query(Factura)
+        .options(selectinload(Factura.lineas))   # el PDF recorre las líneas
         .filter(Factura.id.in_(payload.ids), Factura.deleted_at.is_(None))
         .order_by(Factura.serie, Factura.folio)
         .all()

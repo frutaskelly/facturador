@@ -85,13 +85,31 @@ def flush_or_conflict(db: Session, *, detail: str = "Registro duplicado") -> Non
 def paginate(
     query: Query, out_model: Type[T], limit: int, offset: int, *, preparar=None
 ) -> Page:
-    """Count the (ordered) query, then return one page mapped to `out_model`.
+    """One page mapped to `out_model`, with the total in the SAME round-trip.
+
+    El total viaja como `count(*) OVER ()` pegado a cada renglón en vez de un
+    COUNT aparte: eran dos idas al pooler por listado, y con filtros ILIKE el
+    COUNT repetía el scan completo en cada teclazo del buscador. Solo cuando
+    la página llega vacía (offset más allá del final, o cero resultados) se
+    pregunta el COUNT clásico para no inventar total=0.
 
     `preparar` recibe los renglones de la página ANTES de serializarlos: es el
     lugar para resolver en UNA consulta lo que si no sería una por renglón.
     """
-    total = query.order_by(None).count()
-    rows = query.offset(offset).limit(limit).all()
+    from sqlalchemy import func
+
+    filas = (
+        query.add_columns(func.count().over().label("_total"))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    if filas:
+        total = int(filas[0][-1])
+        rows = [f[0] for f in filas]
+    else:
+        total = query.order_by(None).count()
+        rows = []
     if preparar is not None:
         preparar(rows)
     return Page[out_model](

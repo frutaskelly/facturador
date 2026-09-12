@@ -144,6 +144,26 @@ def resolve_lote(
     return lote
 
 
+def lotes_for_update(db: Session, lote_ids) -> dict:
+    """{lote_id: lote} de todos los lotes, bloqueados en UNA consulta.
+
+    Los flujos de cancelación/devolución tomaban el candado lote por lote
+    dentro del loop de líneas: N round-trips y los locks adquiridos de a poco
+    (ventana de deadlock más ancha). El ORDER BY id da orden de adquisición
+    determinista entre transacciones concurrentes."""
+    ids = {i for i in lote_ids if i is not None}
+    if not ids:
+        return {}
+    return {
+        l.id: l
+        for l in db.query(LoteInventario)
+        .filter(LoteInventario.id.in_(ids))
+        .order_by(LoteInventario.id)
+        .with_for_update()
+        .all()
+    }
+
+
 def build_movimiento(
     tenant_id: UUID,
     user_id: Optional[UUID],

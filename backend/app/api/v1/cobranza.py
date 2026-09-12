@@ -448,17 +448,25 @@ class ReciboPagoIn(BaseModel):
     facturas: list[ReciboFacturaIn] = Field(min_length=1, max_length=100)
 
 
-def _recibo_out(db: Session, recibo: ReciboPago) -> dict:
-    filas = (
-        db.query(ReciboPagoFactura)
-        .filter(ReciboPagoFactura.recibo_id == recibo.id)
-        .all()
-    )
-    fac = {
-        f.id: f for f in db.query(Factura).filter(
-            Factura.id.in_([r.factura_id for r in filas])
-        ).all()
-    } if filas else {}
+def _recibo_out(
+    db: Session, recibo: ReciboPago, *, filas_pre=None, folios_pre=None
+) -> dict:
+    """`filas_pre`/`folios_pre`: el listado los precarga en DOS consultas para
+    toda la página — sin ellos (el GET individual) se consultan aquí."""
+    if filas_pre is not None:
+        filas = filas_pre
+        fac = folios_pre or {}
+    else:
+        filas = (
+            db.query(ReciboPagoFactura)
+            .filter(ReciboPagoFactura.recibo_id == recibo.id)
+            .all()
+        )
+        fac = {
+            f.id: f for f in db.query(Factura.id, Factura.serie, Factura.folio).filter(
+                Factura.id.in_([r.factura_id for r in filas])
+            ).all()
+        } if filas else {}
     return {
         "id": str(recibo.id),
         "serie": recibo.serie, "folio": recibo.folio,
@@ -497,8 +505,24 @@ def list_recibos(
         q = q.filter(ReciboPago.cliente_id == cliente_id)
     total = q.count()
     rows = q.order_by(ReciboPago.created_at.desc()).limit(limit).offset(offset).all()
-    return {"items": [_recibo_out(db, r) for r in rows], "total": total,
-            "limit": limit, "offset": offset}
+    # Precarga en 2 consultas lo que _recibo_out hacía por recibo (2×N por página).
+    filas_todas = (
+        db.query(ReciboPagoFactura)
+        .filter(ReciboPagoFactura.recibo_id.in_([r.id for r in rows] or [None]))
+        .all()
+    )
+    por_recibo: dict = {}
+    for f in filas_todas:
+        por_recibo.setdefault(f.recibo_id, []).append(f)
+    folios = {
+        f.id: f for f in db.query(Factura.id, Factura.serie, Factura.folio).filter(
+            Factura.id.in_({f.factura_id for f in filas_todas} or [None])
+        ).all()
+    } if filas_todas else {}
+    return {"items": [
+        _recibo_out(db, r, filas_pre=por_recibo.get(r.id, []), folios_pre=folios)
+        for r in rows
+    ], "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/recibos-pago/{recibo_id}")

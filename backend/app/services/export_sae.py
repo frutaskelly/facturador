@@ -216,21 +216,30 @@ def _clave_para_remision(pares: list, sucursal_id) -> tuple:
     return next(iter(distintas)), None
 
 
-def _codigos_cliente(db: Session, tenant_id: UUID, cliente_ids: set) -> dict:
+def _codigos_cliente(
+    db: Session, tenant_id: UUID, cliente_ids: set, producto_ids: Optional[set] = None
+) -> dict:
     """{(cliente_id, producto_id, sucursal_id): codigo_cliente} — la CVE_ART
     que SAE conoce. sucursal_id None = fila genérica; una línea concreta se
-    resuelve con codigo_cliente_de(), nunca indexando el dict directo."""
-    filas = (
-        db.query(ProductoCliente)
-        .filter(
-            ProductoCliente.tenant_id == tenant_id,
-            ProductoCliente.cliente_id.in_(cliente_ids or [None]),
-            ProductoCliente.codigo_cliente.isnot(None),
-        )
-        .all()
+    resuelve con codigo_cliente_de(), nunca indexando el dict directo.
+
+    `producto_ids` acota a los productos que de verdad aparecen (el preflight
+    del listado de remisiones tocaba el catálogo COMPLETO de cada cliente de
+    la página); sin él se trae todo, que es lo que preparar() necesita."""
+    q = db.query(
+        ProductoCliente.cliente_id,
+        ProductoCliente.producto_id,
+        ProductoCliente.sucursal_id,
+        ProductoCliente.codigo_cliente,
+    ).filter(
+        ProductoCliente.tenant_id == tenant_id,
+        ProductoCliente.cliente_id.in_(cliente_ids or [None]),
+        ProductoCliente.codigo_cliente.isnot(None),
     )
+    if producto_ids is not None:
+        q = q.filter(ProductoCliente.producto_id.in_(producto_ids or [None]))
     return {
-        (f.cliente_id, f.producto_id, f.sucursal_id): f.codigo_cliente for f in filas
+        (f.cliente_id, f.producto_id, f.sucursal_id): f.codigo_cliente for f in q.all()
     }
 
 
@@ -259,9 +268,6 @@ def lineas_sin_clave(db: Session, tenant_id: UUID, rems: list) -> dict:
     if not ids:
         return {}
     por_rem = {r.id: r for r in rems}
-    codigos = _codigos_cliente(
-        db, tenant_id, {r.cliente_facturacion_id for r in rems}
-    )
     filas = (
         db.query(
             LineaRemision.remision_id,
@@ -271,6 +277,12 @@ def lineas_sin_clave(db: Session, tenant_id: UUID, rems: list) -> dict:
         .filter(LineaRemision.remision_id.in_(ids))
         .order_by(LineaRemision.numero_linea)
         .all()
+    )
+    # Las líneas primero: así los códigos se piden SOLO de los productos de la
+    # página, no del catálogo completo de cada cliente.
+    codigos = _codigos_cliente(
+        db, tenant_id, {r.cliente_facturacion_id for r in rems},
+        producto_ids={f.producto_id for f in filas},
     )
     out: dict = {}
     for rem_id, producto_id, cantidad in filas:
@@ -353,9 +365,11 @@ def preparar(
     cliente_ids = {r.cliente_facturacion_id for r in rems}
     claves = _claves_sae_de_clientes(db, tenant_id, cliente_ids)
     codigos = _codigos_cliente(db, tenant_id, cliente_ids)
-    nombres = dict(
-        db.query(Cliente.id, Cliente.legal_name).filter(Cliente.id.in_(cliente_ids)).all()
-    )
+    filas_cli = db.query(Cliente.id, Cliente.legal_name, Cliente.espejo_sae).filter(
+        Cliente.id.in_(cliente_ids)
+    ).all()
+    nombres = {c.id: c.legal_name for c in filas_cli}
+    espejo_por_cliente = {c.id: bool(c.espejo_sae) for c in filas_cli}
     # Facturas NATIVAS vivas ligadas a estas remisiones (el candado crítico).
     fact_ids = {r.factura_id for r in rems if r.factura_id}
     nativas_vivas = {
@@ -398,10 +412,7 @@ def preparar(
                 f"{rem.factura_sae} — re-exportarla duplicaría el documento en SAE"
             )
             continue
-        if tipo == "FACTURA" and not getattr(
-            db.query(Cliente).filter(Cliente.id == rem.cliente_facturacion_id).one(),
-            "espejo_sae", False,
-        ):
+        if tipo == "FACTURA" and not espejo_por_cliente.get(rem.cliente_facturacion_id, False):
             # Sin espejo, la factura de SAE JAMÁS regresará a amparar la
             # remisión: quedaría exportada y facturable nativa a la vez (dos
             # CFDI). Se activa el candado del cliente y se re-exporta.

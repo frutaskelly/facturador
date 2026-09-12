@@ -82,6 +82,10 @@ def _ultimo_costo_compra(db: Session, producto_id) -> Optional[Decimal]:
 def existencias(
     producto_id: Optional[UUID] = Query(default=None),
     almacen_id: Optional[UUID] = Query(default=None),
+    # Tope aditivo: la respuesta es una fila por (producto, almacén) y crecía
+    # sin límite con el catálogo. Orden estable para poder paginar con offset.
+    limit: int = Query(default=1000, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
@@ -112,7 +116,7 @@ def existencias(
         Producto.nombre,
         LoteInventario.almacen_id,
         Almacen.nombre,
-    )
+    ).order_by(Producto.nombre, Almacen.nombre).limit(limit).offset(offset)
 
     out = []
     for pid, sku, nombre, aid, alm_nombre, disponible, reservada, valor in query.all():

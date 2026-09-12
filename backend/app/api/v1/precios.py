@@ -203,11 +203,19 @@ def listas_del_cliente(
                 filas.append(a)
     vistos, out = set(), []
     nombres_proy = {p.id: p.nombre for p in db.query(Proyecto).filter(Proyecto.deleted_at.is_(None))}
+    # Las listas en UNA consulta, no una por asignación.
+    listas = {
+        lp.id: lp
+        for lp in db.query(ListaPrecios).filter(
+            ListaPrecios.id.in_({a.lista_id for a in filas} or [None]),
+            ListaPrecios.deleted_at.is_(None),
+        )
+    } if filas else {}
     for a in filas:
         if a.lista_id in vistos:
             continue
         vistos.add(a.lista_id)
-        lp = db.query(ListaPrecios).filter(ListaPrecios.id == a.lista_id, ListaPrecios.deleted_at.is_(None)).one_or_none()
+        lp = listas.get(a.lista_id)
         if lp is None:
             continue
         alcance = ("Proyecto " + (nombres_proy.get(a.proyecto_id) or "")) if a.proyecto_id else (

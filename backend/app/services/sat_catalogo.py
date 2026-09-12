@@ -115,9 +115,15 @@ def buscar_claves_batch(db: Session, textos: list[str], *, limit: int = 10) -> d
                 SELECT v.i AS i, c.clave, c.descripcion
                 FROM unnest(CAST(:tks AS text[])) WITH ORDINALITY AS v(tk, i)
                 CROSS JOIN LATERAL (
+                    -- ORDER BY clave || '': el sufijo vacío no cambia el orden
+                    -- pero impide al planner "caminar la pkey en orden hasta
+                    -- juntar n" — con un token raro eso recorría la tabla
+                    -- entera (36 s por llamada en prod). Así elige el bitmap
+                    -- de los índices trigram (0074) y ordena las ~centenas
+                    -- que coinciden.
                     SELECT clave, descripcion FROM sat_clave_prodserv
                     WHERE descripcion ILIKE v.tk OR palabras_similares ILIKE v.tk
-                    ORDER BY clave LIMIT :n
+                    ORDER BY clave || '' LIMIT :n
                 ) c
                 ORDER BY v.i, c.clave
             """),

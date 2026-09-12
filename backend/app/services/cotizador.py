@@ -32,7 +32,7 @@ from ..models import Cliente, EsquemaImpuesto, Precio, PrecioOverride, Producto,
 from . import producto_match
 from .fiscal import calcular_linea_producto
 from .importar_productos import _MIME_POR_EXT, _tabla_a_texto
-from .precios import listas_asignadas_a_cliente, resolver_precio
+from .precios import listas_asignadas_a_cliente, resolver_precio, resolver_precios_lote
 
 logger = logging.getLogger(__name__)
 
@@ -245,9 +245,16 @@ def cotizar_documento(
     # Solo se cotiza lo que está en la lista del cliente (None = sin negociación,
     # todo el catálogo a lista base).
     permitidos = productos_cotizables(db, tenant_id, cliente_id)
+    # Precalculado UNA vez para todo el documento: sin esto, cada partida que
+    # no cruza por clave hace su SELECT de alias y re-normaliza el catálogo
+    # entero (60 partidas × catálogo completo, puro CPU en el worker).
+    aliases = producto_match.alias_del_tenant(db, tenant_id)
+    norms = producto_match.normalizar_catalogo(prods)
 
-    lineas, sin_cruce = [], []
-    subtotal = iva = ieps = Decimal("0")
+    # Primera pasada: SOLO el cruce. El precio se resuelve al final en lote —
+    # partida por partida eran ~8-15 consultas por renglón contra el pooler.
+    pendientes: list[tuple[dict, object, str, Optional[str]]] = []
+    sin_cruce = []
     for pt in partidas:
         prod = None
         via = None
@@ -258,7 +265,8 @@ def cotizar_documento(
                 via = "su clave"
         if prod is None:
             cands = producto_match.buscar(db, tenant_id, pt["descripcion"], limit=3,
-                                          prods=prods, unidad=pt["unidad"] or None)
+                                          prods=prods, aliases=aliases, norms=norms,
+                                          unidad=pt["unidad"] or None)
             fuerte = cands[0] if cands and cands[0].score >= 96 else None
             if fuerte:
                 prod = por_id.get(fuerte.producto_id)
@@ -283,11 +291,21 @@ def cotizar_documento(
             continue
 
         presentacion = _presentacion_para(prod, pt["unidad"], presentacion_cliente.get(prod.id))
-        cot = resolver_precio(
-            db, producto_id=prod.id, presentacion=presentacion, cantidad=pt["cantidad"],
-            cliente_id=cliente_id, sucursal_id=sucursal_id, serie_id=serie_id,
-            proyecto_id=proyecto_id,
-        )
+        pendientes.append((pt, prod, via, presentacion))
+
+    cots = resolver_precios_lote(
+        db,
+        items=[
+            {"producto_id": prod.id, "presentacion": presentacion, "cantidad": pt["cantidad"]}
+            for pt, prod, _via, presentacion in pendientes
+        ],
+        cliente_id=cliente_id, sucursal_id=sucursal_id, serie_id=serie_id,
+        proyecto_id=proyecto_id,
+    )
+
+    lineas = []
+    subtotal = iva = ieps = Decimal("0")
+    for (pt, prod, via, presentacion), cot in zip(pendientes, cots):
         precio = Decimal(str(cot["precio"])) if cot else None
         importe = (precio * pt["cantidad"]).quantize(Decimal("0.01")) if precio is not None else None
         fila = {
@@ -412,40 +430,63 @@ def cotizar_requisicion(
     esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(
         EsquemaImpuesto.tenant_id == tenant_id, EsquemaImpuesto.deleted_at.is_(None))}
 
-    # ── validación de precio por partida: las reglas del bot, verbatim
-    items, n_respeta, n_sin_precio, n_incorrecto = [], 0, 0, 0
-    sub = ieps_t = iva_t = 0.0
-    incorrectos, sin_autorizar = [], []
-    for pt in doc["items"]:
-        cant = float(pt.get("cantidad") or 0)
-        oc = float(pt.get("costo_unitario") or 0)
-        clave_doc = (pt.get("clave") or "").strip()
+    # Precalculado una vez por documento (igual que en cotizar_documento): sin
+    # esto cada partida sin clave paga su SELECT de alias y una normalización
+    # del catálogo completo.
+    aliases = producto_match.alias_del_tenant(db, tenant_id)
+    norms = producto_match.normalizar_catalogo(prods)
 
+    # ── cruce primero, precios en LOTE después: partida por partida eran
+    # ~8-15 consultas por renglón contra el pooler.
+    cruzados: list = []
+    for pt in doc["items"]:
+        clave_doc = (pt.get("clave") or "").strip()
         prod = None
         if clave_doc:
             pid = por_sku.get(_norm_codigo(clave_doc)) or codigos_cliente.get(_norm_codigo(clave_doc))
             prod = por_id.get(pid) if pid else None
         if prod is None and pt.get("descripcion"):
             cands = producto_match.buscar(db, tenant_id, pt["descripcion"], limit=3,
-                                          prods=prods, unidad=pt.get("unidad") or None)
+                                          prods=prods, aliases=aliases, norms=norms,
+                                          unidad=pt.get("unidad") or None)
             if cands and cands[0].score >= 96:
                 prod = por_id.get(cands[0].producto_id)
+        cruzados.append((pt, prod))
+
+    lote_items, lote_idx = [], {}
+    for i, (pt, prod) in enumerate(cruzados):
+        if prod is None:
+            continue
+        cant = float(pt.get("cantidad") or 0)
+        presentacion = _presentacion_para(prod, pt.get("unidad") or "",
+                                          presentacion_cliente.get(prod.id))
+        # Cantidades fraccionarias (0.5 kg) se cotizan con el escalón base:
+        # los tramos arrancan en cantidad_minima=1 y sin esto medio kilo se
+        # quedaría "sin precio" — el bot (SAE) cobra la lista a cualquier
+        # cantidad.
+        lote_idx[i] = len(lote_items)
+        lote_items.append({
+            "producto_id": prod.id, "presentacion": presentacion,
+            "cantidad": Decimal(str(cant)) if cant >= 1 else Decimal("1"),
+        })
+    lote_cots = resolver_precios_lote(
+        db, items=lote_items, cliente_id=cliente.id, sucursal_id=sucursal_id,
+        serie_id=serie_id, proyecto_id=proyecto_id,
+    )
+
+    # ── validación de precio por partida: las reglas del bot, verbatim
+    items, n_respeta, n_sin_precio, n_incorrecto = [], 0, 0, 0
+    sub = ieps_t = iva_t = 0.0
+    incorrectos, sin_autorizar = [], []
+    for i, (pt, prod) in enumerate(cruzados):
+        cant = float(pt.get("cantidad") or 0)
+        oc = float(pt.get("costo_unitario") or 0)
+        clave_doc = (pt.get("clave") or "").strip()
 
         precio_sistema = None
         iva_pct = ieps_pct = 0.0
         if prod is not None:
-            presentacion = _presentacion_para(prod, pt.get("unidad") or "",
-                                              presentacion_cliente.get(prod.id))
-            # Cantidades fraccionarias (0.5 kg) se cotizan con el escalón base:
-            # los tramos arrancan en cantidad_minima=1 y sin esto medio kilo se
-            # quedaría "sin precio" — el bot (SAE) cobra la lista a cualquier
-            # cantidad.
-            cot = resolver_precio(
-                db, producto_id=prod.id, presentacion=presentacion,
-                cantidad=Decimal(str(cant)) if cant >= 1 else Decimal("1"),
-                cliente_id=cliente.id, sucursal_id=sucursal_id,
-                serie_id=serie_id, proyecto_id=proyecto_id,
-            )
+            cot = lote_cots[lote_idx[i]]
             if cot and cot.get("precio") is not None:
                 precio_sistema = float(cot["precio"])
             esq = esquemas.get(prod.esquema_impuesto_id)

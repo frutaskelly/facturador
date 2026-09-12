@@ -19,7 +19,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
 
 from ..core.db import Base
 from .base import SoftDeleteMixin, TimestampMixin, tenant_fk, uuid_pk
@@ -82,7 +82,11 @@ class Factura(Base, TimestampMixin, SoftDeleteMixin):
     uuid = Column(String(36))
     facturama_id = Column(String(40))
     fecha_timbrado = Column(DateTime(timezone=True))
-    xml = Column(Text)
+    # deferred: el CFDI completo (5–30 KB por factura) NO viaja en cada SELECT
+    # de facturas — los listados y el estado de cuenta lo arrastraban entero
+    # (hasta 6 MB por página). Quien lo necesita (descarga, correo) dispara un
+    # SELECT puntual al tocarlo.
+    xml = deferred(Column(Text))
     pdf_url = Column(Text)
 
     # ── cancelación CFDI ──
