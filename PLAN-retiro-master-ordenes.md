@@ -5,7 +5,8 @@
 > `PLAN-migracion-master-facturador.md` del 28-ago y 30 días de bitácora del router del bot
 > (2 al 31 de agosto). Versión legible con tablas y diagrama: artifact «Retiro del Master Órdenes».
 > Decisiones D9 a D17 y D22 resueltas por el dueño el 2 de septiembre de 2026 (marcadas en el
-> texto); quedan abiertas D18 (dónde vive el original de cada orden) y D19-D21, del plan del agente.
+> texto). REVISADO el 12-sep contra los commits de los últimos diez días: ver «Revisión del 12 de
+> septiembre». Abiertas: D18, D21 y D23; D19 y D20 resueltas en la práctica, falta el cierre formal.
 
 ## Objetivo
 
@@ -13,17 +14,17 @@ El bot de WhatsApp deja de escribir y leer la hoja de Google («Master Órdenes�
 «Master EHMO» por perfil). Cada comando del chat se resuelve contra el Facturador, y todo producto
 o precio que nazca en el SAE aparece en el Facturador por un espejo de catálogo. La operación se ve
 igual desde el teléfono; cambia dónde vive la verdad. Este plan es independiente del corte de
-facturación del SAE, que sigue su calendario por cliente.
+facturación del SAE, que sigue su calendario por plaza y serie (Pachuca ya cortó el 9-sep).
 
 ## Resumen
 
 - **El Master hace tres trabajos**: almacén de órdenes, estado de negocio (SIN CLAVE / SIN PRECIO /
   PRECIO EN CONFLICTO, lote EXTRA / REPOSICIÓN, fecha de bodega y reparto, amarre con la factura,
   quién hizo qué) y reportes (resumen de órdenes, hoja de armado, sin precio, Master Facturas,
-  estado de cuenta, cierre de periodo). El Facturador ya hace bien el primero (bandeja + remisiones con
-  ingesta idempotente); la conciliación de cada 6 h existe, pero no avisó de 14 órdenes perdidas
-  que se recuperaron a mano el 31-ago (pendiente 10, se cierra antes de apagar nada); le faltan
-  piezas del segundo y casi todo el tercero.
+  estado de cuenta, cierre de periodo). El Facturador ya hace bien el primero (ingesta directa
+  idempotente, sin pantalla de bandeja); la conciliación de cada 6 h existe y la causa raíz de las
+  14 órdenes que no vio ya se encontró (falta commit y test); le faltan piezas del segundo y casi
+  todo el tercero.
 - **46 comandos vivos en dos motores** que no comparten código (`sheets_push.py` para Balles/Jubran,
   `ehmo_pedidos.py` para EHMO/MAFAN). 7,294 comandos en 30 días solo en la tubería de Balles.
 - **El bot se vuelve un cliente delgado**: un comando = una llamada con vista previa y aplicar. El bot
@@ -47,6 +48,43 @@ facturación del SAE, que sigue su calendario por cliente.
 | 5 · Limpieza | 1 d | 4–5 d | al terminar el último perfil |
 
 Días de trabajo aproximados: Facturador 21 a 29, bot 27 a 34. La columna del bot incluye lo que cada fase del plan del agente exige para que su etapa funcione: en la 0, secretos fuera de disco, prueba automática real y perfil declarado por grupo; en la 1, el comparador ampliado y las 86 llamadas a la hoja redirigidas; en la 2, los once estados en memoria convertidos a propuestas; en la 3, el conector SAE de solo lectura; en la 4 y la 5, la conciliación sustituta y el borrado con lista cerrada. Las etapas 1 a 3 corren con el Master vivo y un comparador que exige resultados idénticos antes de avanzar.
+
+## Revisión del 12 de septiembre
+
+Diez días y unos 150 commits después; verificado contra el código del Facturador en main, el repo
+del bot y el git. Tres cosas se adelantaron fuera del orden del plan, seis piezas no se movieron y
+el bot acumuló más riesgo.
+
+| Tema | Qué decía el plan | Qué pasó del 2 al 12 | Estado |
+|---|---|---|---|
+| **Corte del SAE** (Fase 5) | Después de catálogo, por cliente, con checklist y comandos por chat | Pachuca se cortó el 9-sep por serie, no por cliente: EHMO y MAFAN nativos con FEHMOHOS/FMAFAN desde folio 1 (FEHMOHOS 1 timbrada el 10-sep); el candado bajó del cliente a la serie (migr 0070, seis candados con tests); se opera en pantalla (confirmar→facturar→enviar en /remisiones). Balles/Jubran y Tabasco siguen en SAE con espejo | ADELANTADO |
+| **La bandeja de órdenes** | Pantalla propia donde el operador procesa | Desapareció el 9-sep: la ingesta crea remisión directa (`OC_INGESTA_DIRECTA`), la orden con duda es fila REVISAR en /remisiones con «Procesar órdenes»; backlog drenado el 10-sep (quedaron ~43 órdenes con motivo: las filas REVISAR). La API de ingesta del bot quedó intacta, mismos estados | CAMBIÓ |
+| **P6 espejo de catálogo** | Precios + productos + espejo puntual | La mitad de precios existe: listas vinculadas (migr 0065), endpoints de depósito, botón «Sincronizar SAE» (migr 0064) con expiración (PR #109) y caché en el bot (~116→~2 escrituras). productos no: renglón sin cruce se reporta, no se crea; sin espejo puntual ni reevaluación | PARCIAL |
+| **Listas y D10** | El SAE manda; puerta de Etapa 3 = 7 listas iguales | El corte desvinculó las 5 listas de proyecto: esas ya las manda el Facturador. Quedan espejadas 2 (Balles/Jubran y Tabasco); la puerta baja de 7 a 2 | INVERTIDO EN PARTE |
+| **Estado de cuenta** | El comando se serviría del Facturador (P8, D12) | Excel formato SAE + semana automática + filtro por serie + crédito (11-sep); mezcla nativo y espejo. Al bot solo le falta el permiso de cobranza (`menu:facturas` no está en la clave) | CASI |
+| **OC que cambia tras remisionar** | P2 avisaría | Detector con diff, insignia «OC CAMBIÓ» y cierre con nota (migr 0072); se cierra solo si el documento vuelve a coincidir | HECHO |
+| **P1 · P2 · P3 · P4 · P10 · P9** | Por construir | Sin movimiento: ni fechas persistidas, ni propuestas, ni resumen, ni armado, ni eventos; `PERMISOS_CONEXION` idéntico byte por byte y `factura:espejo` sigue sin sembrar | IGUAL |
+| **Fase 0 del bot** | Congelar el Master y pisar firme | No arrancó y empeoró: 317 → 2,989 renglones sin commitear en los mismos archivos de las órdenes perdidas; el main del bot quedó roto («une remisiones»: disparador commiteado, motor no); 5 comandos nuevos nacieron en el Master; secretos, `npm test` y perfil por grupo iguales. La causa raíz del pendiente 10 se encontró (fechas DD/MM contra campo `date`, 4xx sin rastro) y hay log de rechazadas, pero sin commit ni test | EMPEORÓ |
+
+### Qué cambia en el plan
+
+- **El corte es por plaza y serie, no por cliente.** La Fase 5 se reescribe con lo demostrado en
+  Pachuca: serie nueva desde folio 1, candado por serie, operación en pantalla. Remates: verificar
+  el primer timbrado de MAFAN, cuidar folios de series renombradas, resolver D21.
+- **D20 resuelta de facto**: el primer corte llegó sin comandos de chat; se factura en pantalla y
+  la clave del bot sigue sin poder timbrar. Cerrarla así; reevaluar el chat con el Master apagado.
+- **D19 en la práctica**: el grupo se configura completo desde Equivalencias del Facturador
+  (11-sep). Manda el Facturador; falta el cierre formal.
+- **P6 se parte**: P6a precios (hecho) y P6b productos/espejo puntual/reevaluación (pendiente; hoy
+  importa para la lista 3, Tabasco y las altas por chat).
+- **Etapa 3 se acorta**: puerta = las 2 listas espejadas. Los retiros de D9 siguen enteros por
+  hacer: el bot conserva todas sus escrituras directas al SAE y sus masivos.
+- **Decisión nueva D23**: 5 comandos nacieron en el Master el 11-12 sep, contra la Etapa 0 y fuera
+  de D22 — `lista de compras`, `pronóstico de compra`, `nota de remisión`, `nota de armado`,
+  `calendario de entregas`; «lista de compras» dejó de ser sinónimo de hoja de armado.
+  Propuesta: entran a la gramática global mapeados a P3/P4, y el Master se congela de verdad,
+  empezando por commitear lo que hay.
+- **Lo primero sigue siendo la Fase 0 del bot**, hoy con 9× más código en el aire.
 
 ## Comandos más usados (30 días, bitácora `logs/router_decisions.jsonl`)
 
@@ -96,7 +134,8 @@ De los 46 comandos de hoy quedan **20**: los repetidos entre motores se funden e
 casi no se usan se retiran. Uso en 30 días: exacto para Balles/Jubran (bitácora del router); ≈ es
 aproximado de EHMO (sin bitácora) y «≈ pocos», uso sin conteo fiable; 0 es cero medido; raya, sin
 registro; «nuevo», comando que aún no existe; «bajo», unidades sueltas. La cifra suma las
-variantes absorbidas cuando hay conteo.
+variantes absorbidas cuando hay conteo. El 11-12 sep nacieron 5 comandos más, directo en el
+Master: ver D23 en la revisión (propuestos para entrar por P3 y P4).
 
 ### Los 20 que se quedan
 
@@ -110,7 +149,7 @@ variantes absorbidas cuando hay conteo.
 | `une remisiones R-34-01 con R-34-02` | El código sin commitear del bot; nace global | nuevo | Operación de remisiones con vista previa (P2) | FALTA |
 | `pedido por ubicación <folio>` | Parte una orden de CONALEP en una entrega por plantel, con hoja por destino y fecha de bodega; hoy solo Balles, queda global | 10 | Reparto por punto de entrega sobre la orden (P2) y hojas por destino (P4) | FALTA |
 | `hoja de armado` por OC, fecha, semana, rango o entrega | Las dos variantes; FRUVE/SECOS; extras y reposiciones marcadas | ≈107 | Pivote desde remisiones y órdenes (P4), eje = fecha de bodega (P1) | FALTA |
-| `precio de <producto>` (ficha) | El comando más usado | 1,296 | Catálogo y listas espejadas (P6), sin sqlcmd ni túnel; la fuente no cambia hasta que las 7 listas vivas sean iguales | PARCIAL |
+| `precio de <producto>` (ficha) | El comando más usado | 1,296 | Catálogo y listas espejadas (P6), sin sqlcmd ni túnel; la fuente no cambia hasta que las 2 listas aún espejadas sean iguales (las 5 de proyecto ya las manda el Facturador) | PARCIAL |
 | `crea producto <nombre> en la lista de <cliente o proyecto> a <precio>` | El alta de Balles y la de EHMO, una sintaxis; absorbe `busca SAT` (la clave SAT se sugiere sola) | ≈336 | SAE con «sí» como hoy + espejo puntual (P6) + reevaluación de órdenes que lo esperaban | FALTA |
 | `actualiza <precio, categoría o ficha> de <producto>` | Precio por clave, precios de una OC (regla de primera vez), categoría, campos de la ficha | 292 | Igual en SAE + espejo puntual: la lista nunca se desalinea | FALTA |
 | `lista de precios de <cliente o proyecto>` | Las listas por proyecto y la de Balles/Jubran | ≈18 | PDF/Excel existen; falta el permiso (P9) | PARCIAL |
@@ -125,8 +164,9 @@ variantes absorbidas cuando hay conteo.
 | `ayuda` / `manual` | Se reescriben el día que su perfil se apaga | 5 + ≈6 | Sin cambio | SE QUEDA |
 
 Los comandos de operación interna (`grupos`, `prueba alerta`, `conectar facturador`) siguen igual
-y no cuentan en los 20. Los de facturación nativa (timbrar desde el chat, registrar pago) se
-suman a la gramática después del corte de cada cliente, con la decisión D20.
+y no cuentan en los 20. Los de facturación nativa (timbrar desde el chat, registrar pago)
+quedaron fuera por ahora: el corte opera en pantalla (D20 resuelta de facto) y se reevalúan
+cuando el Master esté apagado.
 
 ### Los que se retiran
 
@@ -168,18 +208,22 @@ semanas diciendo cuál es el nuevo.
 - **P6 Espejo de catálogo SAE → Facturador**: el conector de facturas lee también INVE y
   PRECIO_X_PROD por empresa. Producto nuevo → se crea con presentación, clave SAT, código SAE para
   cada cliente de esa empresa (`producto_clientes.codigo_cliente`) y alias con la descripción. Precio
-  nuevo/cambiado → lista correspondiente (3 → Balles/Jubran, 5–9 → proyectos, Tabasco → EHMO VH).
+  nuevo/cambiado → lista correspondiente, hoy las 2 aún espejadas (3 → Balles/Jubran, Tabasco →
+  EHMO VH); las 5 de proyecto se desvincularon con el corte del 9-sep.
   Nunca desactiva ni borra; duplicados se desempatan por partidas facturadas; si la lista SAE no
   existe o difiere de lo facturado, toma el precio de la última factura no cancelada y avisa. Espejo puntual por
   clave tras cada comando que escribe el SAE, y reevaluación de órdenes pendientes. Sentido único
-  hasta el corte: el SAE manda y el Facturador lo sigue (D10).
+  hasta el corte: el SAE manda y el Facturador lo sigue (D10). **Estado 12-sep**: la mitad de
+  precios ya está en prod (listas vinculadas migr 0065 + botón Sincronizar SAE migr 0064); falta
+  productos, espejo puntual y reevaluación.
 - **P7 Masivos con el folio real del SAE**: el bot deja su .xls; usa el export del Facturador y le
   pasa el siguiente folio real del SAE (`_sae_sig_folio_pedido` existe; hoy solo la llama el motor
   EHMO, y solo contra la empresa 02; `cmd_massivo` de Balles no la usa). Cierra el
   pendiente 12 y D1. Con D9 es el ÚNICO camino de pedidos y facturas hacia el SAE: `cmd_pedido_sae`
   (INSERT directo en FACTP02) se retira y el bot deja de escribir FACTP02/FOLIOSF02.
 - **P8 Lectura del espejo para el bot**: factura de la OC, estado SAT, totales, pendientes. El PDF
-  sigue saliendo del SAE.
+  sigue saliendo del SAE. **Estado 12-sep**: la clave ya puede pedir y reportar el sync del espejo;
+  para estado de cuenta le falta el permiso de cobranza (`menu:facturas`).
 - **P9 Permisos de conexión acotados**: leer espejo, leer listas (y cotizar, por si `cotiza` se
   reactiva), editar partidas con
   propuesta, espejar catálogo, folio sugerido. Nunca `producto:gestionar` ni `cliente:gestionar`.
@@ -189,7 +233,8 @@ semanas diciendo cuál es el nuevo.
   apagar el Master; necesario para que los grupos se enteren de lo hecho en pantalla.
 - **P11 Datos previos**: pendiente 7 (equivalencia VH + reabrir 35 órdenes), 8 (183 links Drive), 10
   (causa raíz de las 14 órdenes perdidas), 9b (código del cliente en el cotizador). El interruptor solo
-  se mueve con los cuatro en cero.
+  se mueve con los cuatro en cero. **Estado 12-sep**: la causa del 10 ya se encontró (fechas DD/MM
+  contra campo `date`, 4xx sin rastro) + log de rechazadas en el bot; falta commit y test.
 - **P12 El original de cada orden vive en el Facturador**: hoy el bot descarga el PDF/foto a una
   carpeta de la Mac sincronizada por OneDrive y lo sube a Google Drive; el Facturador solo guarda
   el link (`archivo_url`) y 183 órdenes llegaron sin él. El bot manda el archivo junto con la orden
@@ -240,16 +285,16 @@ semanas diciendo cuál es el nuevo.
    (como la lista de Tabasco el 1-sep); espejo puntual tras comandos; masivos con folio real. Se
    retiran `crear pedido SAE`, `actualizar pedido` y la prefactura que sigue en el código: desde aquí
    pedidos y facturas llegan al SAE solo por el masivo (D9).
-   *Comprobación*: las 7 listas vivas iguales renglón por renglón, SAE = Facturador (02 → 3
-   Balles/Jubran, 5 CEREZOS, 6 SEGURIDAD PÚBLICA, 7 SECRETARIO NERI, 8 DIF, 9 HOSPITALES; 03 → 4
-   EHMO TABASCO; fuera las de fábrica y la 4 CHANEQUES); producto creado por el bot aparece en la
-   bandeja antes del siguiente pedido; 2 masivos de pedido y 2 de factura importados sin error.
+   *Comprobación*: las 2 listas aún espejadas iguales renglón por renglón, SAE = Facturador (02 →
+   3 Balles/Jubran; 03 → 4 EHMO TABASCO). Las 5 de proyecto se desvincularon con el corte de
+   Pachuca (9-sep) y ya las manda el Facturador. Producto creado por el bot aparece antes del
+   siguiente pedido; 2 masivos de pedido y 2 de factura importados sin error.
 4. **Apagar el Master por perfil** (3 semanas de calendario). Balles+Jubran → EHMO Pachuca →
    Villahermosa; hoja de solo lectura; conciliación Master↔bandeja apagada con cada perfil; Drive
    sigue recibiendo los originales como respaldo (con D18 aprobada, el Facturador ya guarda su copia).
    *Comprobación*: una semana por perfil sin abrir la hoja para resolver nada.
 5. **Limpieza**. Borrar código de Sheets y archivos locales; exportar cada Master a Drive como
-   archivo muerto; actualizar manuales. El corte del SAE sigue su plan por cliente.
+   archivo muerto; actualizar manuales. El corte del SAE sigue su plan por plaza (Fase 5 del agente).
    *Comprobación*: cero referencias a Google Sheets en el código del bot y `npm test` en verde
    tras el borrado.
 
@@ -277,8 +322,9 @@ los robots; lo que distingue a un tenant son filas en la base.
   (`_sae_query`/`_sae_exec_sql` y `_sae_query_ehmo`/`_sae_exec_ehmo`); los dos se extraen en la Fase 3.
 - **21-ago, piloto**: guardas de «factura la OC», runbook de recuperación, cruce compra↔venta con
   Mini Conta. Solo cambian de fecha.
-- **28-ago**: espejo SAE, corte por cliente, outbox, y «el bot escribe el Master primero» para la
-  ENTRADA de órdenes mientras el perfil siga encendido.
+- **28-ago**: espejo SAE, el corte del SAE (hoy por plaza y serie, ver la revisión del 12-sep),
+  outbox, y «el bot escribe el Master primero» para la ENTRADA de órdenes mientras el perfil siga
+  encendido.
 - **De esta propuesta**: las seis reglas, P1-P12, D9-D18 y la gramática global de D22.
 
 ### Lo que se descarta
@@ -307,14 +353,14 @@ de producción. Menos de cinco minutos.
 | 0 · Piso firme | Etapa 0 | git limpio; 0 secretos en `sheets_config.json`; `npm test` verde; una propuesta de prueba sobrevive al reinicio del bot y del backend; cada grupo activo con perfil declarado | 5–6 d | 2–3 d |
 | 1 · Paridad de lectura | Etapa 1 | 5 días hábiles con los reportes idénticos en los 3 perfiles | 5–6 d | 6–8 d |
 | 2 · Paridad de escritura | Etapa 2 · D18 solo para P12 | conciliación en cero 5 días con el Master como copia; 0 cruces del bot; toda orden nueva con su original (archivo o link); abandonados 236 → <20/mes | 6–8 d | 7–9 d |
-| 3 · Catálogo, precios y masivos | Etapa 3 | las 7 listas vivas iguales; 0 INSERT/UPDATE del bot en FACTP02, PAR_FACTP02, FACTF02, PAR_FACTF02, CUEN_M02, FOLIOSF02, TBLCONTROL02; motores sin lecturas SQL del SAE | 5–6 d | 5–7 d |
+| 3 · Catálogo, precios y masivos | Etapa 3 | las 2 listas aún espejadas iguales; 0 INSERT/UPDATE del bot en FACTP02, PAR_FACTP02, FACTF02, PAR_FACTF02, CUEN_M02, FOLIOSF02, TBLCONTROL02; motores sin lecturas SQL del SAE | 5–6 d | 5–7 d |
 | 4 · Apagar el Master y borrar | Etapas 4 y 5 | una semana por perfil sin abrir la hoja; cero referencias a gspread/Sheets en los tres motores | 6–8 d + 3 sem | 1–2 d |
-| 5 · Corte del SAE por cliente | Migración 28-ago · Fase 3 · D20 | por cliente: 2 periodos a factura timbrada sin intervención; 0 CFDI duplicados | 3–4 d | 2–3 d |
+| 5 · Corte del SAE por plaza | Migración 28-ago · Fase 3 | por plaza: 2 periodos a factura timbrada sin intervención; 0 CFDI duplicados. Pachuca ya está dentro (9-sep) | 3–4 d | 2–3 d |
 | 6 · Plataforma | sin calendario | alta de tenant/cliente solo con filas; conciliación de dinero en cero 2 semanas | 5–7 d | 8–12 d |
 
 **Fase 0 · Piso firme** (semana 1, con la Etapa 0)
-- Causa raíz del pendiente 10 con test que lo reproduzca; después commit o rama de los 317 renglones
-  sin commitear (mismas fechas y archivos que las 14 órdenes perdidas).
+- Causa raíz del pendiente 10 con test que lo reproduzca; después commit o rama del trabajo sin
+  commitear: 317 renglones el 1-sep, 2,989 hoy, en los mismos archivos de las órdenes perdidas.
 - **Perfil explícito por grupo**: hoy Balles/Jubran y EHMO Pachuca viajan con perfil nulo y
   `facturador_client.py` pone `'ehmo'` por omisión; sin perfil `balles` (D5 del 28-ago) el
   interruptor por perfil no puede separarlos.
@@ -360,7 +406,8 @@ de producción. Menos de cinco minutos.
   referencia=origen_externo, wa_id): base de la conciliación sustituta de la Fase 4.
 - D17: la visión de fotos sigue en `ehmo_pedidos.py`; libro, reintentos y watchdog en `index.js`.
 
-**Fase 3 · Catálogo, precios y masivos** (semanas 5–6, con la Etapa 3; se cierra antes del primer corte)
+**Fase 3 · Catálogo, precios y masivos** (semanas 5–6, con la Etapa 3; se cierra antes del corte de
+las plazas que quedan; Pachuca ya cortó)
 - P6 con la regla del dueño: entre dos claves vivas manda lo último facturado; si la lista SAE no
   existe o difiere de lo facturado, el espejo toma el precio de la última factura no cancelada
   (PAR_FACTF) y avisa. `PROYECTO_LISTA_SAE` deja el bot y se vuelve equivalencia del Facturador.
@@ -388,14 +435,15 @@ de producción. Menos de cinco minutos.
   Drive como archivo muerto; Drive sigue de respaldo según D18.
 - Líneas de los tres motores medidas antes y después, publicadas en ESTADO.
 
-**Fase 5 · Corte del SAE por cliente** (2–3 meses, con las Etapas 3 y 4 de la migración del 28-ago;
-depende de la Fase 3 para ese perfil, NO del apagado del Master; depende de D20)
-- «factura la OC», «registra pago» y «estado de cuenta» como vista previa, «sí» y aplicar, con las
-  guardas del 21-ago (candado $0, anti-duplicado por OC, método de pago explícito, verificar factura
-  existente antes de crear).
-- Antes del primer corte: runbook de recuperación (Baileys sin sesión, Facturador caído a medio
-  timbrado, clave revocada), REP F3 y zona horaria confirmados en prod, temas E–K del manual como
-  casos dorados, respaldo de la Mac Mini.
+**Fase 5 · Corte del SAE por plaza** (Pachuca ya cortó el 9-sep, por serie y operando en pantalla;
+para las plazas que quedan depende de la Fase 3 de su perfil, NO del apagado del Master)
+- Solo si D20 se reabre con el Master apagado: «factura la OC», «registra pago» y «estado de
+  cuenta» como vista previa, «sí» y aplicar, con las guardas del 21-ago (candado $0, anti-duplicado
+  por OC, método de pago explícito, verificar factura existente antes de crear). Mientras, el corte
+  opera en pantalla.
+- Antes del corte de la siguiente plaza, y como deuda de Pachuca (cortó sin ellos): runbook de
+  recuperación (Baileys sin sesión, Facturador caído a medio timbrado, clave revocada), REP F3 y
+  zona horaria confirmados en prod, temas E–K del manual como casos dorados, respaldo de la Mac Mini.
 - Checklist por cliente: CSD/RFC verificados; `series.folio_actual` = último folio del espejo;
   saldos PPD cuadrados al peso contra SAE; inventario según D4; candado fuera.
 - Al cortar el último cliente desaparece la escritura al SAE; `conector_sae/` queda de consulta
@@ -416,32 +464,34 @@ depende de la Fase 3 para ese perfil, NO del apagado del Master; depende de D20)
 ### Decisiones que abre este plan
 
 - **D19** Tres registros del mismo grupo (bloque `grupos` del config, tabla `grupos` del agente,
-  `grupos_whatsapp` del Facturador). Propuesta: manda el Facturador (pantalla Conexiones); hasta la
-  Fase 4 sin cambio.
-- **D20** Para un cliente ya cortado, ¿el bot aplica con «sí» timbrado, pago y alta de producto
-  (permiso de conexión nuevo, acotado por cliente) o solo prepara la propuesta y se aplica en
-  pantalla? P9 hoy excluye todo CFDI nativo. Se decide antes del primer corte.
+  `grupos_whatsapp` del Facturador). Manda el Facturador; en la práctica ya ocurrió (Equivalencias,
+  11-sep). Falta el cierre formal.
+- **D20** Para una plaza ya cortada, ¿el bot aplica con «sí» timbrado, pago y alta de producto, o
+  solo prepara la propuesta y se aplica en pantalla? Resuelta de facto el 9-sep: el primer corte
+  llegó sin comandos de chat y se factura en pantalla. Se reevalúa con el Master apagado.
 - **D21** Las 8 remisiones de Tabasco que divergen del Excel subido al SAE (pendiente 11):
   regenerar los masivos o corregir en el SAE a mano.
 
 ### Riesgos propios del agente
 
-- 317 renglones sin commitear en las mismas fechas y archivos que las 14 órdenes perdidas.
+- El trabajo sin commitear del bot (317 renglones el 1-sep, 2,989 hoy) vive en los mismos archivos
+  que las 14 órdenes perdidas; la Fase 0 lo commitea antes de tocar nada.
 - Refactor sin red sobre >27,000 líneas en tres archivos: nunca reescribir, solo redirigir detrás de
   `master.activo` y borrar al final; `npm test` como puerta.
 - Precio equivocado antes de la paridad del espejo (ZMAFAN 168): la ficha no cambia de fuente hasta
-  que las 7 listas vivas sean iguales.
+  que las 2 listas aún espejadas sean iguales.
 - Si el Facturador cae tras el cambio de fuente, se callan las alertas: outbox y aviso al grupo
   interno cubren también las lecturas programadas.
 - Apagar un perfil sin conciliación deja pérdidas silenciosas (pendiente 10): la conciliación
   sustituta corre antes de mover el interruptor.
 - La visión de fotos sigue en el bot (D17) y sigue frágil (60 s por foto vs 25 s de SIGTERM): libro,
   reintentos y watchdog se conservan hasta el corte.
-- La Mac Mini es un solo punto físico de falla: respaldo y runbook antes del primer corte.
+- La Mac Mini es un solo punto físico de falla: respaldo y runbook antes del corte de la siguiente
+  plaza; Pachuca ya corre sin ellos.
 
 ## Decisiones del dueño
 
-El dueño resolvió D9 a D17 y D22 el 2-sep-2026. Quedan abiertas D18 (OneDrive) y D19–D21, que abre el plan del agente.
+El dueño resolvió D9 a D17 y D22 el 2-sep-2026. Abiertas: D18 (OneDrive), D21 (Tabasco) y D23 (comandos nacidos en el Master); D19 y D20 resueltas en la práctica, falta el cierre formal.
 
 | # | Decisión | Resolución o recomendación | Estado |
 |---|---|---|---|
@@ -456,9 +506,10 @@ El dueño resolvió D9 a D17 y D22 el 2-sep-2026. Quedan abiertas D18 (OneDrive)
 | D17 | ¿Fotos de EHMO se leen en el bot o en el Facturador? | **Decidido**: en el bot por ahora; revisar tras el corte. | DECIDIDO |
 | D22 | ¿Comandos por motor o unificados? | **Decidido**: una sola gramática global para todos los clientes; quedan 20 comandos y los poco usados o repetidos se retiran (ver «Los comandos: una sola gramática»). | DECIDIDO |
 | D18 | La orden original vive en Drive (y en la carpeta OneDrive de la Mac); el Facturador solo guarda el link. ¿Se sigue así? | **Propuesta**: el Facturador guarda el archivo (P12); OneDrive/Drive de respaldo durante la transición, opcionales después. | ABIERTA |
-| D19 | Tres registros del mismo grupo (config del bot, tabla `grupos` del agente, `grupos_whatsapp` del Facturador). | **Propuesta**: manda el Facturador (pantalla Conexiones); hasta la Fase 4 sin cambio. | ABIERTA |
-| D20 | Cliente ya cortado: ¿el bot aplica con «sí» timbrado, pago y alta de producto, o solo prepara la propuesta? P9 excluye CFDI nativo. | **Propuesta**: permiso de conexión nuevo acotado por cliente cortado, siempre con vista previa y «sí». Antes del primer corte. | ABIERTA |
+| D19 | Tres registros del mismo grupo (config del bot, tabla `grupos` del agente, `grupos_whatsapp` del Facturador). | **Propuesta**: manda el Facturador. En la práctica ya ocurrió: desde el 11-sep el grupo se configura completo desde Equivalencias. Falta el cierre formal. | POR CERRAR |
+| D20 | Cliente ya cortado: ¿el bot aplica con «sí» timbrado, pago y alta de producto, o solo prepara la propuesta? P9 excluye CFDI nativo. | **Resuelta de facto el 9-sep**: el primer corte llegó sin comandos de chat; se factura en pantalla y la clave del bot sigue sin poder timbrar. Cerrarla así; reevaluar con el Master apagado. | POR CERRAR |
 | D21 | 8 remisiones de Tabasco divergen del Excel subido al SAE (pendiente 11). | **Propuesta**: regenerar esos masivos desde el Facturador antes de la Fase 3. | ABIERTA |
+| D23 | 5 comandos nacieron en el Master el 11-12 sep, fuera de D22: `lista de compras`, `pronóstico de compra`, `nota de remisión`, `nota de armado`, `calendario de entregas`. | **Propuesta**: entran a la gramática global por P3/P4, y el Master se congela de verdad: lo primero es commitear los 2,989 renglones en el aire. | ABIERTA |
 
 ## Riesgos
 
@@ -469,6 +520,9 @@ El dueño resolvió D9 a D17 y D22 el 2-sep-2026. Quedan abiertas D18 (OneDrive)
 | Precio corregido en SAE y el Facturador cobra el viejo | Espejo puntual tras cada comando + pasada de 30 min; lo facturado no se reprecia |
 | La clave del bot gana permisos amplios | Permisos acotados (P9); catálogo se escribe por el espejo, no por endpoints de gestión |
 | El equipo sigue capturando en la hoja | Solo lectura desde el apagado; ayuda y manuales cambian ese día |
+| Doble captura tras el corte (nativa aquí + a mano en SAE): el masivo de pedidos de Pachuca no está bloqueado por código | Candado del export de pedidos para series cortadas + conciliación del espejo; mientras, disciplina declarada en el plan del corte |
+| El main del bot no arranca limpio («une remisiones» a medias) | Primer paso de la Fase 0: commitear o mover a rama los 2,989 renglones, hoy |
+| docs/ESTADO.md congelado en el 2-sep (no sabe del corte ni de la bandeja fusionada) | Reescribirlo en el próximo cierre; esta revisión sirve de puente |
 | El pedido del SAE deja de crearse al instante desde el chat (37/mes) | El mismo comando devuelve el masivo de pedido con folio real y avisa que se importa en Aspel; el rastro queda en la remisión |
 | Se mezclan los dos tenants de prod | Clave y espejo apuntan al tenant que opera; el de pruebas no recibe nada |
 
@@ -477,6 +531,7 @@ El dueño resolvió D9 a D17 y D22 el 2-sep-2026. Quedan abiertas D18 (OneDrive)
 Grupos y roles (el bot enruta por grupo y rol; los perfiles se declaran una vez en la Fase 0 —
 Balles/Jubran → `balles`, EHMO Pachuca → `ehmo` — sin cambiar lo que cada grupo puede pedir);
 los comandos por chat con la gramática global de D22 y la confirmación sí/no; acuses, alarmas y PDFs; el SAE factura e importa los
-masivos de pedido y de factura hasta el corte por cliente; los originales siguen llegando a Drive
+masivos de pedido y de factura hasta el corte de cada plaza (Pachuca ya cortó; sigue para Balles,
+Jubran y Tabasco); los originales siguen llegando a Drive
 durante la transición, con su link en cada orden (y, con D18 aprobada, el archivo en el
 Facturador); alertas y horarios.
