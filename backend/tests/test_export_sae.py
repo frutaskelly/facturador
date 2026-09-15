@@ -33,7 +33,7 @@ from app.services.export_sae import (
 
 _PURGE = (
     "lineas_factura", "facturas", "lineas_remision", "remisiones", "cliente_externos",
-    "producto_clientes", "productos", "series", "clientes",
+    "producto_clientes", "productos", "series", "clientes", "claves_sae",
 )
 
 
@@ -628,3 +628,143 @@ def test_catalogo_cliente_generica_y_por_sucursal_conviven(client, env, auth_as)
     rows = client.get(f"/api/v1/clientes/{env['cli']}/catalogo", headers=h).json()
     del_prod = [x for x in rows if x["producto_id"] == env["prod"]]
     assert len(del_prod) == 1 and del_prod[0]["sucursal_id"] is None
+
+
+# ─── Validación del catálogo de SAE (espejo de INVE##) ──────────────────────
+# El 14-sep-2026 la ZEHMOHOS 906 no se creó porque FRESADOMOPZ no existe en el
+# inventario de SAE. El preview la dejó pasar: comprobaba que el producto
+# tuviera código de cliente, no que SAE lo conociera.
+
+@pytest.fixture
+def espejo_user(env):
+    """Usuario OWNER en el tenant de `env`: depositar el catálogo exige
+    `factura:espejo`, que es alcance de conexión y el ADMIN preset no trae."""
+    db = SessionLocal()
+    suffix = uuid.uuid4().hex[:8]
+    try:
+        owner_role = db.query(Role).filter(
+            Role.nombre == "OWNER", Role.es_preset.is_(True)).one()
+        u = User(email=f"esp-{suffix}@t.test", auth_user_id=f"sub-esp-{suffix}",
+                 full_name="espejo")
+        db.add(u); db.flush()
+        m = Membership(tenant_id=env["tenant"], user_id=u.id, role_id=owner_role.id)
+        db.add(m); db.flush()
+        db.commit()
+        yield {"sub": u.auth_user_id, "email": u.email, "tenant_id": env["tenant"],
+               "_uid": u.id, "_mid": m.id}
+    finally:
+        db.query(Membership).filter(Membership.id == m.id).delete()
+        db.query(User).filter(User.id == u.id).delete()
+        db.commit(); db.close()
+
+
+def _depositar_claves(client, h, claves, empresa="02", forzar=False):
+    return client.post("/api/v1/facturas/espejo/claves", headers=h, json={
+        "empresa": empresa, "forzar": forzar,
+        "claves": [c if isinstance(c, dict) else {"clave": c} for c in claves],
+    })
+
+
+def test_sin_espejo_del_catalogo_el_export_no_cambia(client, env, auth_as):
+    # Fail-open: quien no corre el conector no tiene espejo, y el export debe
+    # seguir funcionando igual que antes de esta validación.
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem = _rem(client, h, env)
+    r = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                    json={"ids": [rem["id"]], "tipo": "FACTURA"})
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+
+
+def test_clave_que_sae_no_conoce_bloquea_el_export(client, env, auth_as, espejo_user):
+    h = _hdr(env["admin"])
+    # El espejo trae OTRA clave: la del producto no está en el catálogo.
+    auth_as(espejo_user)
+    assert _depositar_claves(client, h, ["OTRACLAVEKG"]).status_code == 200
+    auth_as(env["admin"])
+    rem = _rem(client, h, env)
+
+    r = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                    json={"ids": [rem["id"]], "tipo": "FACTURA"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is False
+    assert any("no existen en SAE" in e and "ACEI-ACEI-639" in e for e in body["errores"])
+
+    # Y generar de verdad tampoco pasa: el archivo nunca se produce.
+    r = client.post("/api/v1/remisiones/export-sae", headers=h,
+                    json={"ids": [rem["id"]], "tipo": "FACTURA",
+                          "folios": {"ZHGO": 100}})
+    assert r.status_code == 422
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["factura_sae"] is None        # no salió archivo ni marca
+
+
+def test_clave_dada_de_baja_se_reporta_distinto(client, env, auth_as, espejo_user):
+    # Existe pero no factura: el operador necesita distinguirlo de "no existe",
+    # porque la solución es otra (reactivarla vs darla de alta).
+    h = _hdr(env["admin"])
+    auth_as(espejo_user)
+    assert _depositar_claves(
+        client, h, [{"clave": "ACEI-ACEI-639", "activa": False}]).status_code == 200
+    auth_as(env["admin"])
+    rem = _rem(client, h, env)
+    r = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                    json={"ids": [rem["id"]], "tipo": "FACTURA"})
+    body = r.json()
+    assert body["ok"] is False
+    assert any("BAJA" in e for e in body["errores"])
+
+
+def test_clave_en_el_catalogo_deja_pasar(client, env, auth_as, espejo_user):
+    h = _hdr(env["admin"])
+    # minúsculas y espacios: el cruce normaliza en ambos lados.
+    auth_as(espejo_user)
+    assert _depositar_claves(client, h, ["  acei-acei-639 "]).status_code == 200
+    auth_as(env["admin"])
+    rem = _rem(client, h, env)
+    r = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                    json={"ids": [rem["id"]], "tipo": "FACTURA"})
+    assert r.json()["ok"] is True, r.json()["errores"]
+
+
+def test_deposito_de_claves_reemplaza_el_catalogo(client, env, auth_as, espejo_user):
+    auth_as(espejo_user); h = _hdr(env["admin"])
+    r = _depositar_claves(client, h, ["A1", "A2", "A3"])
+    assert r.status_code == 200, r.text
+    assert r.json()["creadas"] == 3
+
+    # Segunda pasada: A3 ya no está en SAE -> desaparece del espejo.
+    r = _depositar_claves(client, h, ["A1", "A2"])
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["eliminadas"] == 1 and b["creadas"] == 0 and b["total"] == 2
+
+
+def test_catalogo_que_encoge_a_la_mitad_se_rechaza(client, env, auth_as, espejo_user):
+    # Una lectura cortada de SAE convertiría claves buenas en "no existe" y
+    # trabaría exports legítimos. Se exige confirmación explícita.
+    auth_as(espejo_user); h = _hdr(env["admin"])
+    assert _depositar_claves(client, h, [f"K{i}" for i in range(10)]).status_code == 200
+
+    r = _depositar_claves(client, h, ["K0", "K1"])
+    assert r.status_code == 409
+    assert "lectura incompleta" in r.json()["detail"]
+
+    # Con forzar sí se aplica.
+    r = _depositar_claves(client, h, ["K0", "K1"], forzar=True)
+    assert r.status_code == 200, r.text
+    assert r.json()["eliminadas"] == 8
+
+
+def test_el_catalogo_es_por_empresa(client, env, auth_as, espejo_user):
+    # 02 y 03 son inventarios distintos: la clave de una no ampara en la otra.
+    h = _hdr(env["admin"])
+    auth_as(espejo_user)
+    assert _depositar_claves(client, h, ["ACEI-ACEI-639"], empresa="03").status_code == 200
+    auth_as(env["admin"])
+    rem = _rem(client, h, env)   # el cliente es de la empresa 02
+    r = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                    json={"ids": [rem["id"]], "tipo": "FACTURA"})
+    # sin espejo de la 02, no se valida (fail-open) — el de la 03 no aplica
+    assert r.json()["ok"] is True
