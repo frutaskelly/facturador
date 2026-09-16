@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   Boxes,
   Briefcase,
   Building2,
@@ -57,6 +58,9 @@ export const NAV: NavSection[] = [
       { label: "Remisiones", href: "/remisiones", perm: "menu:remisiones", icon: FileText },
       { label: "Facturas", href: "/facturas", perm: "menu:facturas", icon: Receipt },
       { label: "Cobranza (REP)", href: "/cobranza", perm: "menu:facturas", icon: HandCoins },
+      // Los cortes del negocio (saldos por proyecto y los que vengan). Mismo
+      // permiso que cobranza: ver reportes de saldos ES ver cobranza.
+      { label: "Reportes", href: "/reportes", perm: "menu:facturas", icon: BarChart3 },
     ],
   },
   {
