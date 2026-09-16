@@ -15,7 +15,7 @@ tenant no tiene espejo, la validación NO aplica (fail-open): quien no usa el
 bot sigue exportando igual que antes.
 
 Revision ID: 0076_claves_sae
-Revises: 0075_indices_listados
+Revises: 0077_factura_cancelacion_msj
 """
 from typing import Sequence, Union
 
@@ -24,7 +24,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0076_claves_sae"
-down_revision: Union[str, None] = "0075_indices_listados"
+down_revision: Union[str, None] = "0077_factura_cancelacion_msj"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
