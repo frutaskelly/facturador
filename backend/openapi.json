@@ -20641,6 +20641,71 @@
     ]
    }
   },
+  "/api/v1/cobranza/saldos-por-proyecto": {
+   "get": {
+    "description": "Una fila por proyecto: saldo, vencido y cuántas facturas, más el total.\n\nVencido = el saldo cuya fecha de vencimiento (fecha de la factura + días de\ncrédito del cliente) ya pasó — el mismo criterio del estado de cuenta, para\nque un número visto aquí cuadre con el detalle al hacer clic.",
+    "operationId": "saldos_por_proyecto_api_v1_cobranza_saldos_por_proyecto_get",
+    "parameters": [
+     {
+      "description": "Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)",
+      "in": "query",
+      "name": "incluir_en_cancelacion",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)",
+       "title": "Incluir En Cancelacion",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Saldos Por Proyecto",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
   "/api/v1/conexiones": {
    "get": {
     "description": "Todo lo conectable, conectado o no. La pantalla no necesita otra llamada.",
