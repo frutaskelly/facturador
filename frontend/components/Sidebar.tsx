@@ -18,9 +18,14 @@ function esActivo(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function Sidebar({ me }: { me: Me }) {
+/** `forzarExpandido`: el cajón móvil siempre enseña el menú completo — el
+ *  riel de iconos colapsado no tiene sentido dentro de un overlay que ya
+ *  ocupa casi toda la pantalla, y respetar ahí la preferencia guardada del
+ *  escritorio dejaría un cajón de 64px. */
+export function Sidebar({ me, forzarExpandido = false }: { me: Me; forzarExpandido?: boolean }) {
   const pathname = usePathname();
-  const { colapsado, alternar } = useSidebarColapsado(me.user_id);
+  const { colapsado: colapsadoGuardado, alternar } = useSidebarColapsado(me.user_id);
+  const colapsado = forzarExpandido ? false : colapsadoGuardado;
   const { favorites, hydrated, toggle, isFavorite } = useFavorites(me.user_id);
 
   /** El menú que ESTE usuario puede ver. Todo lo demás (riel, panel, favoritos,
@@ -127,7 +132,7 @@ export function Sidebar({ me }: { me: Me }) {
     if (abierta) panelRef.current?.querySelector<HTMLElement>("a,button")?.focus();
   }, [abierta]);
 
-  const pie = (
+  const pie = forzarExpandido ? null : (
     <div className="shrink-0 border-t border-border p-2">
       <button
         type="button"

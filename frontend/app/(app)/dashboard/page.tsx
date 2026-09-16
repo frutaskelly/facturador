@@ -47,7 +47,38 @@ function SaldosPorProyectoCard() {
 
   return (
     <Card title={`Saldos por proyecto · corte ${fmtDate(data.corte)}`}>
-      <table className="w-full text-sm">
+      {/* En el teléfono la tabla de tres columnas aprieta: cada proyecto se
+          apila como renglón de dos líneas. En sm+ vuelve la tabla clásica. */}
+      <div className="sm:hidden">
+        {data.proyectos.map((p) => {
+          const href = destino(p);
+          const fila = (
+            <div className="flex items-baseline justify-between gap-2 border-b border-border/60 py-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm">{p.proyecto}</div>
+                <div className="text-xs text-muted">
+                  {p.facturas} fact.
+                  {Number(p.vencido) > 0 && (
+                    <> · vencido <span className="font-medium text-danger">{fmtMoney(p.vencido)}</span></>
+                  )}
+                </div>
+              </div>
+              <div className="shrink-0 text-right text-sm font-medium tabular-nums">{fmtMoney(p.saldo)}</div>
+            </div>
+          );
+          return href
+            ? <Link key={p.proyecto} href={href} className="block">{fila}</Link>
+            : <div key={p.proyecto}>{fila}</div>;
+        })}
+        <div className="flex items-baseline justify-between py-2 font-semibold">
+          <span>Total</span>
+          <span className="text-right tabular-nums">
+            {fmtMoney(data.saldo_total)}
+            <span className="block text-xs font-medium text-danger">vencido {fmtMoney(data.vencido_total)}</span>
+          </span>
+        </div>
+      </div>
+      <table className="hidden w-full text-sm sm:table">
         <thead>
           <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted">
             <th className="py-1.5">Proyecto</th>
