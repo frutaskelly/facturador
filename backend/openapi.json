@@ -5777,6 +5777,18 @@
    "FacturaEspejoIn": {
     "description": "Reflejo de una factura EMITIDA POR SAE (fase espejo de la migración).\n\nIdempotente por (serie, folio): re-mandarla actualiza el reflejo (estado,\nUUID, totales) — así es como llegan las cancelaciones de SAE. Nunca toca\nal PAC ni consume folios propios: serie y folio son los REALES de SAE.",
     "properties": {
+     "cancelacion_msj": {
+      "anyOf": [
+       {
+        "maxLength": 120,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cancelacion Msj"
+     },
      "cliente_sae": {
       "maxLength": 10,
       "title": "Cliente Sae",
@@ -19527,6 +19539,18 @@
       }
      },
      {
+      "description": "Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)",
+      "in": "query",
+      "name": "incluir_en_cancelacion",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)",
+       "title": "Incluir En Cancelacion",
+       "type": "boolean"
+      }
+     },
+     {
       "in": "header",
       "name": "X-Tenant-Id",
       "required": false,
@@ -19625,6 +19649,18 @@
        ],
        "description": "Acotar a una serie",
        "title": "Serie"
+      }
+     },
+     {
+      "description": "Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)",
+      "in": "query",
+      "name": "incluir_en_cancelacion",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)",
+       "title": "Incluir En Cancelacion",
+       "type": "boolean"
       }
      },
      {
@@ -19739,6 +19775,18 @@
       }
      },
      {
+      "description": "Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)",
+      "in": "query",
+      "name": "incluir_en_cancelacion",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)",
+       "title": "Incluir En Cancelacion",
+       "type": "boolean"
+      }
+     },
+     {
       "in": "header",
       "name": "X-Tenant-Id",
       "required": false,
@@ -19837,6 +19885,18 @@
        ],
        "description": "Acotar a una serie",
        "title": "Serie"
+      }
+     },
+     {
+      "description": "Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)",
+      "in": "query",
+      "name": "incluir_en_cancelacion",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)",
+       "title": "Incluir En Cancelacion",
+       "type": "boolean"
       }
      },
      {
@@ -24836,6 +24896,29 @@
         }
        ],
        "title": "Almacen Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 1000,
+       "maximum": 5000,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
       }
      },
      {

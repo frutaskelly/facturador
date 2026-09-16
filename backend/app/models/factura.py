@@ -91,6 +91,13 @@ class Factura(Base, TimestampMixin, SoftDeleteMixin):
 
     # ── cancelación CFDI ──
     fecha_cancelacion = Column(DateTime(timezone=True))
+    # Solo espejos: la cancelación PEDIDA al SAT y todavía sin respuesta, tal
+    # como la reporta SAE en `CFDIxx.MSJ_CANC` ("Cancelación enviada al SAT",
+    # "En espera de aprobación", "No Cancelable"). Mientras el SAT no contesta,
+    # SAE muestra la factura viva (`STATUS<>'C'`) y el estado de cuenta la
+    # cobraba: ~$1.5M así el 15-sep-2026. Se guarda el texto y no un booleano
+    # porque "No Cancelable" significa lo contrario que los otros dos.
+    cancelacion_msj = Column(String(120))
     motivo_cancelacion = Column(String(2))      # 01-04 (CFDI 4.0)
     # Sentido VIEJA → NUEVA: al cancelar esta factura con motivo "01", el UUID del
     # CFDI que la sustituye (se reporta al SAT como uuidReplacement).

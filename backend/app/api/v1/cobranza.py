@@ -41,6 +41,19 @@ _WRITE = "factura:gestionar"  # registrar/timbrar REP = mismo permiso que timbra
 ZERO = Decimal("0")
 
 
+def _en_cancelacion(msj: str | None) -> bool:
+    """¿Su cancelación ya se pidió al SAT y sigue sin respuesta?
+
+    `CFDIxx.MSJ_CANC` trae tres textos. Dos significan que el trámite está en
+    curso y el cliente no va a pagar esa factura ("Cancelación enviada al SAT",
+    "En espera de aprobación"); el tercero, "No Cancelable", significa lo
+    contrario — el SAT la rechazó y la factura sigue siendo exigible. Por eso
+    la pregunta no es "¿tiene mensaje?" sino "¿el mensaje dice que va en camino?".
+    """
+    t = (msj or "").strip().lower()
+    return bool(t) and "no cancelable" not in t
+
+
 def _bucket(dias_vencida: int) -> str:
     """Cubeta de antigüedad estilo SAE: por vencer + intervalos de 30 días."""
     if dias_vencida <= 0:
@@ -56,7 +69,7 @@ def _bucket(dias_vencida: int) -> str:
 
 def _armar_estado_cuenta(
     db: Session, ctx: AuthContext, cliente_id: UUID, corte: date | None,
-    serie: str | None = None,
+    serie: str | None = None, incluir_en_cancelacion: bool = False,
 ) -> dict:
     """El cálculo del estado de cuenta, uno solo para el JSON, el PDF, el Excel
     y el correo.
@@ -87,6 +100,15 @@ def _armar_estado_cuenta(
         .order_by(Factura.fecha.asc(), Factura.folio.asc())
         .all()
     )
+
+    # Las que ya tienen la cancelación pedida al SAT salen del saldo por
+    # omisión: cobrarlas es perseguir dinero que no va a llegar. No se borran
+    # —el trámite se puede negar— sino que se suman aparte, y el que quiera
+    # verlas prende el interruptor.
+    en_cancelacion = [f for f in facturas if _en_cancelacion(f.cancelacion_msj)]
+    saldo_en_cancelacion = sum((Decimal(f.saldo_insoluto) for f in en_cancelacion), ZERO)
+    if not incluir_en_cancelacion:
+        facturas = [f for f in facturas if not _en_cancelacion(f.cancelacion_msj)]
 
     series: dict[str, dict] = {}
     for f in facturas:
@@ -136,6 +158,7 @@ def _armar_estado_cuenta(
             "saldo_insoluto": saldo,
             "semana": extraer_semana(f.notas, su_pedido),
             "proyecto": proyecto,
+            "cancelacion_msj": f.cancelacion_msj,
         })
 
     # Solo ~1 de cada 5 facturas espejo tiene remisión ligada, pero dentro de
@@ -161,6 +184,11 @@ def _armar_estado_cuenta(
         "series": sorted(series.values(), key=lambda s: s["serie"]),
         "saldo_total": saldo_total,
         "antiguedad": antiguedad,
+        # Siempre presentes, se incluyan o no: es lo que deja ver el interruptor
+        # "$X en proceso de cancelación" sin tener que pedir el corte otra vez.
+        "incluye_en_cancelacion": incluir_en_cancelacion,
+        "saldo_en_cancelacion": saldo_en_cancelacion,
+        "facturas_en_cancelacion": len(en_cancelacion),
         "facturas": docs,
     }
 
@@ -243,12 +271,14 @@ def estado_cuenta(
     cliente_id: UUID,
     corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
     serie: str | None = Query(default=None, max_length=10, description="Acotar a una serie"),
+    incluir_en_cancelacion: bool = Query(default=False, description="Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)"),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     """Estado de cuenta de un cliente: sus facturas PPD timbradas con saldo
     pendiente + antigüedad de saldos por fecha de vencimiento."""
-    return _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie)
+    return _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie,
+                                incluir_en_cancelacion=incluir_en_cancelacion)
 
 
 _ANTIGUEDAD_ETIQUETAS = (
@@ -310,13 +340,15 @@ def estado_cuenta_pdf(
     cliente_id: UUID,
     corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
     serie: str | None = Query(default=None, max_length=10, description="Acotar a una serie"),
+    incluir_en_cancelacion: bool = Query(default=False, description="Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)"),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     """El estado de cuenta en PDF, listo para mandárselo al cliente."""
     from fastapi import Response
 
-    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie)
+    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie,
+                                incluir_en_cancelacion=incluir_en_cancelacion)
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
     pdf = _estado_cuenta_pdf(tenant, datos)
     return Response(
@@ -330,6 +362,7 @@ def estado_cuenta_xlsx(
     cliente_id: UUID,
     corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
     serie: str | None = Query(default=None, max_length=10, description="Acotar a una serie"),
+    incluir_en_cancelacion: bool = Query(default=False, description="Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)"),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
@@ -340,7 +373,8 @@ def estado_cuenta_xlsx(
 
     from ...services.estado_cuenta_xlsx import generar as generar_xlsx
 
-    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie)
+    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie,
+                                incluir_en_cancelacion=incluir_en_cancelacion)
     cliente = get_or_404(db, Cliente, cliente_id)
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
     contenido = generar_xlsx(tenant, cliente, datos)
@@ -363,6 +397,7 @@ def enviar_estado_cuenta(
     payload: EnviarEstadoCuentaIn,
     corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
     serie: str | None = Query(default=None, max_length=10, description="Acotar a una serie"),
+    incluir_en_cancelacion: bool = Query(default=False, description="Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)"),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
@@ -378,7 +413,8 @@ def enviar_estado_cuenta(
     from ...services import email as email_service
     from .remisiones import _validar_destinatarios
 
-    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie)
+    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie,
+                                incluir_en_cancelacion=incluir_en_cancelacion)
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
     if not email_service.configured(tenant):
         raise HTTPException(status_code=503, detail="Configura una cuenta de correo en Ajustes › Correo")

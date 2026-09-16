@@ -6100,6 +6100,8 @@ export interface components {
          *     al PAC ni consume folios propios: serie y folio son los REALES de SAE.
          */
         FacturaEspejoIn: {
+            /** Cancelacion Msj */
+            cancelacion_msj?: string | null;
             /** Cliente Sae */
             cliente_sae: string;
             /** Empresa */
@@ -10957,6 +10959,8 @@ export interface operations {
                 corte?: string | null;
                 /** @description Acotar a una serie */
                 serie?: string | null;
+                /** @description Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen) */
+                incluir_en_cancelacion?: boolean;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
@@ -10995,6 +10999,8 @@ export interface operations {
                 corte?: string | null;
                 /** @description Acotar a una serie */
                 serie?: string | null;
+                /** @description Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen) */
+                incluir_en_cancelacion?: boolean;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
@@ -11037,6 +11043,8 @@ export interface operations {
                 corte?: string | null;
                 /** @description Acotar a una serie */
                 serie?: string | null;
+                /** @description Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen) */
+                incluir_en_cancelacion?: boolean;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
@@ -11075,6 +11083,8 @@ export interface operations {
                 corte?: string | null;
                 /** @description Acotar a una serie */
                 serie?: string | null;
+                /** @description Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen) */
+                incluir_en_cancelacion?: boolean;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
@@ -13591,6 +13601,8 @@ export interface operations {
             query?: {
                 producto_id?: string | null;
                 almacen_id?: string | null;
+                limit?: number;
+                offset?: number;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
