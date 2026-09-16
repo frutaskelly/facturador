@@ -172,6 +172,39 @@ def test_estado_cuenta_excluye_las_que_van_camino_a_cancelarse(client, env, auth
     assert msj[12] == "Cancelación enviada al SAT" and msj[11] is None
 
 
+def test_saldos_por_proyecto(client, env, auth):
+    """El resumen GRAL: la serie decide la fila, ZMAFAN se parte por la
+    observación, lo inclasificable tiene fila propia, y las que van camino a
+    cancelarse quedan fuera del total por omisión."""
+    _factura_ppd_timbrada(env, total=100, dias_atras=40, folio=21, serie="ZEHMOTG")
+    _factura_ppd_timbrada(env, total=200, dias_atras=1, folio=22, serie="ZEHMOTG")
+    _factura_ppd_timbrada(env, total=50, dias_atras=40, folio=23, serie="ZMAFAN",
+                          notas="SEMANA 35 CEREZOS ENTREGA MIERCOLES")
+    _factura_ppd_timbrada(env, total=70, dias_atras=1, folio=24, serie="ZMAFAN",
+                          notas="SEMANA 31 COSTALES SERIGRAFIADOS ENTREGA")
+    _factura_ppd_timbrada(env, total=30, dias_atras=1, folio=26, serie="ZMAFAN",
+                          notas="SEMANA 35 SECRETARIO NERI ENTREGA")
+    _factura_ppd_timbrada(env, total=999, dias_atras=1, folio=25, serie="ZEHMOTG",
+                          cancelacion_msj="En espera de aprobación")
+
+    r = client.get("/api/v1/cobranza/saldos-por-proyecto", headers=_h(env))
+    assert r.status_code == 200, r.text
+    d = r.json()
+    filas = {p["proyecto"]: p for p in d["proyectos"]}
+    tuxtla = filas["HOSPITALES TUXTLA"]
+    assert float(tuxtla["saldo"]) == 300.0 and tuxtla["facturas"] == 2
+    assert float(tuxtla["vencido"]) == 100.0          # 30 días de crédito: solo la vieja venció
+    # CERESOS es el cajón del dueño: Neri cae ahí; los costales son del DIF.
+    assert float(filas["CERESOS"]["saldo"]) == 80.0
+    assert float(filas["DIF HIDALGO"]["saldo"]) == 70.0
+    assert float(d["saldo_total"]) == 450.0            # la 25 quedó fuera
+    assert float(d["saldo_en_cancelacion"]) == 999.0
+
+    d2 = client.get("/api/v1/cobranza/saldos-por-proyecto",
+                    params={"incluir_en_cancelacion": "true"}, headers=_h(env)).json()
+    assert float(d2["saldo_total"]) == 1449.0
+
+
 def test_estado_cuenta_vacio(client, env, auth):
     r = client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli']}", headers=_h(env))
     assert r.status_code == 200, r.text

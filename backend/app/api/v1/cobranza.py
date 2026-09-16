@@ -7,6 +7,8 @@ VENCIMIENTO (fecha de la factura + días de crédito del cliente) en intervalos 
 """
 from __future__ import annotations
 
+import re
+
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
@@ -190,6 +192,121 @@ def _armar_estado_cuenta(
         "saldo_en_cancelacion": saldo_en_cancelacion,
         "facturas_en_cancelacion": len(en_cancelacion),
         "facturas": docs,
+    }
+
+
+# ─── Saldos por proyecto (el "GRAL" del dueño) ──────────────────────────────
+#
+# El resumen que el negocio lleva a mano en la hoja GRAL de su Excel: una fila
+# por proyecto/plaza con su saldo y su vencido, y el total abajo. La fila NO es
+# el cliente (EHMO tiene cinco) ni la serie a secas (ZMAFAN mezcla cuatro
+# negociaciones): es la NEGOCIACIÓN, con el nombre con el que el dueño la llama.
+#
+# La serie decide casi todo; ZMAFAN se parte leyendo la observación que el
+# espejo trae de SAE (igual que la semana), porque es donde el propio negocio
+# escribe a qué proyecto fue cada factura. Lo que no se puede clasificar se
+# reporta como fila propia en vez de esconderse en otra.
+_PROYECTO_POR_SERIE = {
+    "ZEHMOVH":  "VILLAHERMOSA HOSPITALES 2026",
+    "ZDIF":     "CHIAPAS DIF",
+    "ZSUR":     "COMEDORES TUXTLA",
+    "ZEHMOTG":  "HOSPITALES TUXTLA",
+    "ZECA":     "CAMPECHE HOSPITALES",
+    "ZEHMOHOS": "HOSPITALES HIDALGO",
+    "ZEHMOFAC": "HOSPITALES HIDALGO",
+    "ZBPT":     "BODEGA DE DON PEDRO",
+    "ZCH5C":    "CODISEL",
+    "MIN5C":    "CODISEL",
+    "ZCS":      "CASA DE SOCTONES",
+    "ZVIDA":    "CENTRO DE VIDA SANA",
+    "ZHGO":     None,   # Balles y Jubran comparten serie: la fila es el cliente
+}
+
+# El desglose de ZMAFAN COPIA el criterio del dueño, no el de las listas de
+# precios: en su hoja GRAL solo existen tres destinos (DIF, CDMX y CERESOS), y
+# CERESOS es el cajón de todo lo demás — ahí caen también Neri y Seguridad
+# Pública, que aunque negocian con lista propia se cobran bajo el mismo techo.
+# "COSTAL" identifica a los costales serigrafiados del programa del DIF: sus
+# observaciones no dicen "DIF", pero el dueño los clasifica ahí (ZMAFAN 144 y
+# 161 en su propio estado de cuenta).
+_MAFAN_EN_OBS = (
+    (re.compile(r"\bDIF\b|COSTAL", re.I),    "DIF HIDALGO"),
+    (re.compile(r"CDMX|AZCAPOTZALCO", re.I), "CDMX AZCAPOTZALCO"),
+)
+
+
+def _fila_de_reporte(f, nombre_cliente: str) -> str:
+    etiqueta = _PROYECTO_POR_SERIE.get(f.serie or "")
+    if etiqueta:
+        return etiqueta
+    if (f.serie or "") == "ZMAFAN":
+        for patron, nombre in _MAFAN_EN_OBS:
+            if patron.search(f.notas or ""):
+                return nombre
+        return "CERESOS"
+    # Series sin mapa (ZHGO, RIO, series nativas nuevas): la fila es el cliente.
+    return nombre_cliente
+
+
+@router.get("/saldos-por-proyecto")
+def saldos_por_proyecto(
+    incluir_en_cancelacion: bool = Query(default=False, description="Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Una fila por proyecto: saldo, vencido y cuántas facturas, más el total.
+
+    Vencido = el saldo cuya fecha de vencimiento (fecha de la factura + días de
+    crédito del cliente) ya pasó — el mismo criterio del estado de cuenta, para
+    que un número visto aquí cuadre con el detalle al hacer clic.
+    """
+    hoy = datetime.now(timezone.utc).date()
+    q = (
+        db.query(Factura, Cliente.legal_name, Cliente.dias_credito, Cliente.id)
+        .join(Cliente, Cliente.id == Factura.cliente_id)
+        .filter(
+            Factura.deleted_at.is_(None),
+            Factura.estado == "TIMBRADA",
+            Factura.metodo_pago == "PPD",
+            Factura.saldo_insoluto > 0,
+        )
+    )
+    filas: dict[str, dict] = {}
+    en_cancelacion = ZERO
+    for f, nombre_cliente, dias_credito, cliente_id in q.all():
+        if not ctx.cliente_permitido(cliente_id):
+            continue                      # el portal solo ve su propio cliente
+        saldo = Decimal(f.saldo_insoluto)
+        if _en_cancelacion(f.cancelacion_msj):
+            en_cancelacion += saldo
+            if not incluir_en_cancelacion:
+                continue
+        fila = filas.setdefault(_fila_de_reporte(f, nombre_cliente), {
+            "saldo": ZERO, "vencido": ZERO, "facturas": 0,
+            "cliente_id": str(cliente_id), "serie": f.serie,
+        })
+        fila["saldo"] += saldo
+        fila["facturas"] += 1
+        f_fecha = f.fecha.date() if isinstance(f.fecha, datetime) else f.fecha
+        if f_fecha + timedelta(days=int(dias_credito or 0)) < hoy:
+            fila["vencido"] += saldo
+        # Una fila con varias series o clientes no puede enlazar a un solo
+        # estado de cuenta acotado: el enlace se queda al cliente a secas.
+        if fila["serie"] != f.serie:
+            fila["serie"] = None
+        if fila["cliente_id"] != str(cliente_id):
+            fila["cliente_id"] = None
+    proyectos = [
+        {"proyecto": nombre, **datos}
+        for nombre, datos in sorted(filas.items(), key=lambda kv: kv[1]["saldo"], reverse=True)
+    ]
+    return {
+        "corte": hoy,
+        "proyectos": proyectos,
+        "saldo_total": sum((p["saldo"] for p in proyectos), ZERO),
+        "vencido_total": sum((p["vencido"] for p in proyectos), ZERO),
+        "incluye_en_cancelacion": incluir_en_cancelacion,
+        "saldo_en_cancelacion": en_cancelacion,
     }
 
 
