@@ -196,7 +196,7 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
         ))}
       </div>
 
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-medium">
           Facturas PPD con saldo{serie ? ` · serie ${serie}` : ""}
         </div>

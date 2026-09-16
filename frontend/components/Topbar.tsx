@@ -1,13 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronsUpDown, LogOut, Plus } from "lucide-react";
+import { Check, ChevronsUpDown, LogOut, Menu, Plus } from "lucide-react";
 
 import { AgregarEmpresaModal } from "@/components/AgregarEmpresaModal";
 import { can, useAuth, type Me } from "@/lib/auth";
 import { colorEmpresa } from "@/lib/empresa-color";
 
-export function Topbar({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+export function Topbar({ me, onSignOut, onAbrirMenu }: {
+  me: Me; onSignOut: () => void;
+  /** Presente solo cuando hay cajón móvil que abrir (el layout lo decide). */
+  onAbrirMenu?: () => void;
+}) {
   const { switchTenant } = useAuth();
   const tenant = me.tenants.find(
     (t) => t.tenant_id === me.active_tenant.tenant_id
@@ -39,7 +43,17 @@ export function Topbar({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   }, [open]);
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-6">
+    <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-3 md:px-6">
+      {/* En el teléfono el menú lateral vive en un cajón: esta es su manija. */}
+      {onAbrirMenu && (
+        <button
+          onClick={onAbrirMenu}
+          aria-label="Abrir menú"
+          className="rounded-lg p-2 text-muted transition hover:bg-surface-2 hover:text-foreground md:hidden"
+        >
+          <Menu size={20} />
+        </button>
+      )}
       {multi ? (
         <div className="relative" ref={menuRef}>
           {/* Disclosure simple (no listbox ARIA): los botones se navegan con
@@ -57,7 +71,7 @@ export function Topbar({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 style={{ background: colorEmpresa(tenant.tenant_id, tenant.color) }}
               />
             )}
-            <span className="max-w-[16rem] truncate">{tenant?.name ?? "—"}</span>
+            <span className="max-w-[8.5rem] truncate sm:max-w-[16rem]">{tenant?.name ?? "—"}</span>
             <ChevronsUpDown size={14} className="shrink-0" />
           </button>
           {open && (
@@ -113,8 +127,8 @@ export function Topbar({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
       ) : (
         <div className="text-sm font-medium text-muted">{tenant?.name ?? "—"}</div>
       )}
-      <div className="flex items-center gap-4">
-        <div className="text-right leading-tight">
+      <div className="flex items-center gap-2 md:gap-4">
+        <div className="hidden text-right leading-tight sm:block">
           <div className="text-sm font-medium">{me.email}</div>
           <div className="text-xs text-muted">
             {me.active_tenant.role}
