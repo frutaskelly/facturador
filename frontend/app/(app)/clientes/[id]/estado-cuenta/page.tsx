@@ -25,6 +25,7 @@ type Doc = {
   fecha: string; vencimiento: string; dias_vencida: number;
   total: string; saldo_insoluto: string;
   semana: number | null; proyecto: string | null;
+  cancelacion_msj: string | null;
 };
 type EstadoCuenta = {
   cliente_nombre: string; dias_credito: number; limite_credito: string;
@@ -32,6 +33,11 @@ type EstadoCuenta = {
   serie: string | null;
   series: { serie: string; facturas: number; saldo: string }[];
   antiguedad: { por_vencer: string; d1_30: string; d31_60: string; d61_90: string; d90_mas: string };
+  // Las que ya tienen la cancelación pedida al SAT: fuera del saldo por
+  // omisión, pero siempre contadas, para poder ofrecer verlas.
+  incluye_en_cancelacion: boolean;
+  saldo_en_cancelacion: string;
+  facturas_en_cancelacion: number;
   facturas: Doc[];
 };
 
@@ -43,10 +49,11 @@ const BUCKETS: { key: keyof EstadoCuenta["antiguedad"]; label: string }[] = [
   { key: "d90_mas", label: "90+ días" },
 ];
 
-function query(serie: string, corte: string): string {
+function query(serie: string, corte: string, enCancelacion = false): string {
   const p = new URLSearchParams();
   if (serie) p.set("serie", serie);
   if (corte) p.set("corte", corte);
+  if (enCancelacion) p.set("incluir_en_cancelacion", "true");
   const s = p.toString();
   return s ? `?${s}` : "";
 }
@@ -58,22 +65,23 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
   const [error, setError] = useState(false);
   const [serie, setSerie] = useState("");
   const [corte, setCorte] = useState("");
+  const [verEnCancelacion, setVerEnCancelacion] = useState(false);
   const [bajando, setBajando] = useState(false);
 
   useEffect(() => {
     let vivo = true;
-    apiFetch<EstadoCuenta>(`/api/v1/cobranza/estado-cuenta/${id}${query(serie, corte)}`)
+    apiFetch<EstadoCuenta>(`/api/v1/cobranza/estado-cuenta/${id}${query(serie, corte, verEnCancelacion)}`)
       .then((d) => { if (vivo) { setData(d); setError(false); } })
       .catch(() => { if (vivo) setError(true); });
     return () => { vivo = false; };
-  }, [id, serie, corte]);
+  }, [id, serie, corte, verEnCancelacion]);
 
   const bajarExcel = async () => {
     if (!data || bajando) return;
     setBajando(true);
     try {
       const nombre = `estado-cuenta${serie ? `-${serie}` : ""}-${data.corte.replaceAll("-", "")}.xlsx`;
-      await apiDownload(`/api/v1/cobranza/estado-cuenta/${id}/xlsx${query(serie, corte)}`, nombre);
+      await apiDownload(`/api/v1/cobranza/estado-cuenta/${id}/xlsx${query(serie, corte, verEnCancelacion)}`, nombre);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo generar el Excel.");
     } finally {
@@ -90,7 +98,15 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
     { header: "Factura",
       sortValue: (d) => `${d.serie}${String(d.folio).padStart(10, "0")}`,
       exportValue: (d) => `${d.serie}${d.folio}`,
-      cell: (d) => <span className="font-medium">{d.serie}{d.folio}</span> },
+      cell: (d) => (
+        <span className="font-medium">
+          {d.serie}{d.folio}
+          {d.cancelacion_msj && (
+            <span className="ml-2 rounded bg-warning/15 px-1.5 py-0.5 text-xs font-normal text-warning"
+                  title={d.cancelacion_msj}>en cancelación</span>
+          )}
+        </span>
+      ) },
     { header: "Proyecto", className: "text-muted",
       sortValue: (d) => d.proyecto ?? "",
       exportValue: (d) => d.proyecto ?? "",
@@ -152,6 +168,22 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
         <Field label="Corte">
           <Input type="date" value={corte} onChange={(e) => setCorte(e.target.value)} aria-label="Fecha de corte" />
         </Field>
+        {/* Por omisión el saldo NO incluye las facturas cuya cancelación ya se
+            pidió al SAT: perseguirlas es cobrar algo que no va a llegar. El
+            interruptor las trae de vuelta para poder revisarlas. */}
+        {data.facturas_en_cancelacion > 0 && (
+          <label className="flex items-center gap-2 pb-2 text-sm">
+            <input type="checkbox" className="h-4 w-4 accent-warning"
+                   checked={verEnCancelacion}
+                   onChange={(e) => setVerEnCancelacion(e.target.checked)} />
+            <span>
+              Incluir {data.facturas_en_cancelacion} en proceso de cancelación
+              <span className="ml-1 font-medium tabular-nums text-warning">
+                {fmtMoney(data.saldo_en_cancelacion)}
+              </span>
+            </span>
+          </label>
+        )}
       </div>
 
       {/* Antigüedad de saldos */}

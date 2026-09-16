@@ -127,6 +127,9 @@ class FacturaEspejoIn(BaseModel):
     # vacío): se refleja sin efectos — ni estado de cuenta ni remisiones.
     estado: str = Field(default="TIMBRADA", pattern="^(BORRADOR|TIMBRADA|CANCELADA)$")
     uuid_fiscal: Optional[str] = Field(default=None, max_length=36)   # CFDI02.UUID
+    # `CFDIxx.MSJ_CANC` tal cual: la cancelación ya pedida al SAT de una factura
+    # que SAE todavía muestra viva. Vacío = sin trámite de cancelación.
+    cancelacion_msj: Optional[str] = Field(default=None, max_length=120)
     metodo_pago: Optional[str] = Field(default=None, max_length=5)
     forma_pago: Optional[str] = Field(default=None, max_length=5)
     uso_cfdi: Optional[str] = Field(default=None, max_length=5)

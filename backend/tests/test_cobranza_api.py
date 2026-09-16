@@ -95,7 +95,8 @@ def _h(env):
     return {"X-Tenant-Id": str(env["tenant_id"])}
 
 
-def _factura_ppd_timbrada(env, *, total, dias_atras, metodo="PPD", folio, serie="F", notas=None):
+def _factura_ppd_timbrada(env, *, total, dias_atras, metodo="PPD", folio, serie="F", notas=None,
+                          cancelacion_msj=None):
     """Inserta una factura TIMBRADA directamente (sin PAC) con fecha dada."""
     db = SessionLocal()
     try:
@@ -106,6 +107,7 @@ def _factura_ppd_timbrada(env, *, total, dias_atras, metodo="PPD", folio, serie=
             estado="TIMBRADA", uuid=str(uuid.uuid4()), notas=notas,
             fecha=datetime.now(timezone.utc) - timedelta(days=dias_atras),
             saldo_insoluto=Decimal(str(total)) if metodo == "PPD" else Decimal("0"),
+            cancelacion_msj=cancelacion_msj,
         )
         db.add(f); db.commit()
         return str(f.id)
@@ -135,6 +137,39 @@ def test_estado_cuenta_antiguedad_por_vencimiento(client, env, auth):
     assert float(a["d61_90"]) == 3000.0
     assert float(a["d31_60"]) == 0.0 and float(a["d90_mas"]) == 0.0
     assert d["dias_credito"] == 30
+
+
+def test_estado_cuenta_excluye_las_que_van_camino_a_cancelarse(client, env, auth):
+    """SAE las muestra vivas hasta que el SAT responde, pero el cliente no las
+    va a pagar: fuera del saldo por omisión, sumadas aparte, y de vuelta con el
+    interruptor. "No Cancelable" es el caso contrario — el SAT la negó, así que
+    esa SÍ se cobra."""
+    _factura_ppd_timbrada(env, total=1000, dias_atras=10, folio=11)
+    _factura_ppd_timbrada(env, total=2000, dias_atras=10, folio=12,
+                          cancelacion_msj="Cancelación enviada al SAT")
+    _factura_ppd_timbrada(env, total=400, dias_atras=10, folio=13,
+                          cancelacion_msj="En espera de aprobación")
+    _factura_ppd_timbrada(env, total=700, dias_atras=10, folio=14,
+                          cancelacion_msj="No Cancelable")
+
+    r = client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli']}", headers=_h(env))
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert float(d["saldo_total"]) == 1700.0          # 1000 + la No Cancelable
+    assert float(d["saldo_en_cancelacion"]) == 2400.0
+    assert d["facturas_en_cancelacion"] == 2
+    assert d["incluye_en_cancelacion"] is False
+    assert {f["folio"] for f in d["facturas"]} == {11, 14}
+
+    r2 = client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli']}",
+                    params={"incluir_en_cancelacion": "true"}, headers=_h(env))
+    d2 = r2.json()
+    assert float(d2["saldo_total"]) == 4100.0
+    assert d2["incluye_en_cancelacion"] is True
+    assert {f["folio"] for f in d2["facturas"]} == {11, 12, 13, 14}
+    # y la marca viaja en el documento, para poder pintarla en la tabla
+    msj = {f["folio"]: f["cancelacion_msj"] for f in d2["facturas"]}
+    assert msj[12] == "Cancelación enviada al SAT" and msj[11] is None
 
 
 def test_estado_cuenta_vacio(client, env, auth):

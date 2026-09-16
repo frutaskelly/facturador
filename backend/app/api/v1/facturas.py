@@ -1248,6 +1248,9 @@ def factura_espejo(
     factura.forma_pago = payload.forma_pago or cliente.forma_pago_default or "99"
     factura.uso_cfdi = payload.uso_cfdi or cliente.uso_cfdi_default or "G01"
     factura.notas = payload.observaciones or factura.notas
+    # La cancelación pedida al SAT se refleja SIEMPRE, también cuando se borra:
+    # si el SAT la negó, SAE limpia MSJ_CANC y la factura vuelve a ser cobrable.
+    factura.cancelacion_msj = (payload.cancelacion_msj or "").strip() or None
     factura.subtotal = subtotal
     factura.iva_trasladado = max(Decimal("0"), Decimal(str(total)) - Decimal(str(subtotal)))
     factura.total = total
