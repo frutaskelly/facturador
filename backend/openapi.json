@@ -1484,6 +1484,106 @@
     "title": "ClaveNuevaOut",
     "type": "object"
    },
+   "ClaveSaeItem": {
+    "properties": {
+     "activa": {
+      "default": true,
+      "title": "Activa",
+      "type": "boolean"
+     },
+     "clave": {
+      "maxLength": 50,
+      "minLength": 1,
+      "title": "Clave",
+      "type": "string"
+     },
+     "descripcion": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Descripcion"
+     }
+    },
+    "required": [
+     "clave"
+    ],
+    "title": "ClaveSaeItem",
+    "type": "object"
+   },
+   "ClavesSaeIn": {
+    "properties": {
+     "claves": {
+      "items": {
+       "$ref": "#/components/schemas/ClaveSaeItem"
+      },
+      "maxItems": 50000,
+      "minItems": 1,
+      "title": "Claves",
+      "type": "array"
+     },
+     "empresa": {
+      "maxLength": 4,
+      "minLength": 1,
+      "title": "Empresa",
+      "type": "string"
+     },
+     "forzar": {
+      "default": false,
+      "title": "Forzar",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "empresa",
+     "claves"
+    ],
+    "title": "ClavesSaeIn",
+    "type": "object"
+   },
+   "ClavesSaeResult": {
+    "properties": {
+     "actualizadas": {
+      "title": "Actualizadas",
+      "type": "integer"
+     },
+     "creadas": {
+      "title": "Creadas",
+      "type": "integer"
+     },
+     "eliminadas": {
+      "title": "Eliminadas",
+      "type": "integer"
+     },
+     "empresa": {
+      "title": "Empresa",
+      "type": "string"
+     },
+     "recibidas": {
+      "title": "Recibidas",
+      "type": "integer"
+     },
+     "total": {
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "empresa",
+     "recibidas",
+     "creadas",
+     "actualizadas",
+     "eliminadas",
+     "total"
+    ],
+    "title": "ClavesSaeResult",
+    "type": "object"
+   },
    "ClienteCreate": {
     "properties": {
      "almacen_id": {
@@ -23853,6 +23953,71 @@
      }
     ],
     "summary": "Factura Espejo",
+    "tags": [
+     "facturas"
+    ]
+   }
+  },
+  "/api/v1/facturas/espejo/claves": {
+   "post": {
+    "description": "El conector deposita el catálogo de artículos que SAE tiene HOY.\n\nCon esto el preview del masivo puede decir «esa clave SAE no la conoce»\nANTES de generar el archivo. Hasta el 14-sep-2026 solo se comprobaba que el\nproducto tuviera código de cliente: FRESADOMOPZ pasó el preview y SAE no\ncreó la factura.\n\nREEMPLAZA el catálogo de esa empresa (es un espejo, no un acumulado): lo que\nya no está en SAE deja de estar aquí. La única salvaguarda es contra una\nlectura incompleta — ver `forzar` en el schema.",
+    "operationId": "depositar_claves_sae_api_v1_facturas_espejo_claves_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ClavesSaeIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ClavesSaeResult"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Depositar Claves Sae",
     "tags": [
      "facturas"
     ]

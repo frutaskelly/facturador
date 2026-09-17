@@ -1346,6 +1346,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/facturas/espejo/claves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Depositar Claves Sae
+         * @description El conector deposita el catálogo de artículos que SAE tiene HOY.
+         *
+         *     Con esto el preview del masivo puede decir «esa clave SAE no la conoce»
+         *     ANTES de generar el archivo. Hasta el 14-sep-2026 solo se comprobaba que el
+         *     producto tuviera código de cliente: FRESADOMOPZ pasó el preview y SAE no
+         *     creó la factura.
+         *
+         *     REEMPLAZA el catálogo de esa empresa (es un espejo, no un acumulado): lo que
+         *     ya no está en SAE deja de estar aquí. La única salvaguarda es contra una
+         *     lectura incompleta — ver `forzar` en el schema.
+         */
+        post: operations["depositar_claves_sae_api_v1_facturas_espejo_claves_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/facturas/espejo/clientes": {
         parameters: {
             query?: never;
@@ -4563,6 +4592,45 @@ export interface components {
             conexion: components["schemas"]["ConexionOut"];
             /** Instruccion Whatsapp */
             instruccion_whatsapp: string;
+        };
+        /** ClaveSaeItem */
+        ClaveSaeItem: {
+            /**
+             * Activa
+             * @default true
+             */
+            activa: boolean;
+            /** Clave */
+            clave: string;
+            /** Descripcion */
+            descripcion?: string | null;
+        };
+        /** ClavesSaeIn */
+        ClavesSaeIn: {
+            /** Claves */
+            claves: components["schemas"]["ClaveSaeItem"][];
+            /** Empresa */
+            empresa: string;
+            /**
+             * Forzar
+             * @default false
+             */
+            forzar: boolean;
+        };
+        /** ClavesSaeResult */
+        ClavesSaeResult: {
+            /** Actualizadas */
+            actualizadas: number;
+            /** Creadas */
+            creadas: number;
+            /** Eliminadas */
+            eliminadas: number;
+            /** Empresa */
+            empresa: string;
+            /** Recibidas */
+            recibidas: number;
+            /** Total */
+            total: number;
         };
         /** ClienteCreate */
         ClienteCreate: {
@@ -13098,6 +13166,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FacturaDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    depositar_claves_sae_api_v1_facturas_espejo_claves_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClavesSaeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClavesSaeResult"];
                 };
             };
             /** @description Validation Error */

@@ -55,6 +55,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session, selectinload
 
 from ..models import (
+    ClaveSae,
     Cliente,
     ClienteExterno,
     Factura,
@@ -243,6 +244,22 @@ def _codigos_cliente(
     }
 
 
+def catalogo_sae(db: Session, tenant_id: UUID, empresa: Optional[str]) -> Optional[dict]:
+    """{clave: activa} del espejo de INVE## para esa empresa, o None si no hay espejo.
+
+    None NO significa "catálogo vacío" sino "no sabemos": quien no corre el bot
+    no tiene espejo, y ahí la validación de claves se salta entera en vez de
+    bloquear un export que antes funcionaba (fail-open deliberado)."""
+    if not empresa:
+        return None
+    filas = (
+        db.query(ClaveSae.clave, ClaveSae.activa)
+        .filter(ClaveSae.tenant_id == tenant_id, ClaveSae.empresa == empresa)
+        .all()
+    )
+    return {c: a for c, a in filas} or None
+
+
 def codigo_cliente_de(
     codigos: dict, cliente_id, producto_id, sucursal_id
 ) -> Optional[str]:
@@ -384,6 +401,9 @@ def preparar(
     docs: list[DocExport] = []
     empresas: set[str] = set()
     series_conteo: dict[str, int] = {}
+    # Espejo del catálogo por empresa, cargado a lo más una vez cada uno.
+    # El valor None marca "sin espejo" y apaga la validación para esa empresa.
+    catalogos: dict[str, Optional[dict]] = {}
 
     for rem in sorted(rems, key=lambda r: (r.fecha_remision, r.folio_interno)):
         nombre_cli = nombres.get(rem.cliente_facturacion_id, "?")
@@ -492,6 +512,43 @@ def preparar(
         if not vivas:
             res.errores.append(f"{rem.folio_interno}: no tiene partidas con cantidad")
             continue
+
+        # La clave existe en el Facturador; ¿la conoce SAE? Tener código de
+        # cliente no basta: FRESADOMOPZ pasó este preview y SAE no creó la
+        # factura (14-sep-2026). Solo aplica si hay espejo del catálogo.
+        if empresa not in catalogos:
+            catalogos[empresa] = catalogo_sae(db, tenant_id, empresa)
+        cat = catalogos[empresa]
+        if cat:
+            desconocidas, de_baja = [], []
+            for ln in vivas:
+                clave = codigo_cliente_de(
+                    codigos, rem.cliente_facturacion_id, ln.producto_id, rem.sucursal_id
+                )
+                estado = cat.get((clave or "").strip().upper())
+                if estado is None:
+                    desconocidas.append((ln, clave))
+                elif not estado:
+                    de_baja.append((ln, clave))
+            if desconocidas or de_baja:
+                partes = []
+                if desconocidas:
+                    partes.append(
+                        "no existen en SAE: "
+                        + ", ".join(f"{c} (línea {ln.numero_linea})" for ln, c in desconocidas)
+                    )
+                if de_baja:
+                    partes.append(
+                        "dadas de BAJA en SAE: "
+                        + ", ".join(f"{c} (línea {ln.numero_linea})" for ln, c in de_baja)
+                    )
+                res.errores.append(
+                    f"{rem.folio_interno}: {'; '.join(partes)} — la empresa {empresa} "
+                    "descartaría esas partidas al importar y la factura saldría "
+                    "incompleta (o no saldría). Da de alta la clave en SAE, o "
+                    "reapunta el código del producto a la clave correcta"
+                )
+                continue
 
         doc = DocExport(remision=rem, cliente_sae=numero, empresa=empresa)
         if tipo == "FACTURA":

@@ -31,6 +31,7 @@ from ...core.ratelimit import enforce
 from ...core.rbac import AuthContext, get_auth_context, get_tenant_db, require_permission
 from ...models import (
     Almacen,
+    ClaveSae,
     Cliente,
     ClienteExterno,
     EspejoSync,
@@ -49,6 +50,8 @@ from ...models import (
     Tenant,
     TimbradoIntento,
 )
+from ...models.clave_sae import norm_clave
+from ...schemas.clave_sae import ClavesSaeIn, ClavesSaeResult
 from ...schemas.common import Page
 from ...schemas.factura import (
     CancelarFacturaIn,
@@ -1010,6 +1013,81 @@ def reportar_espejo_sync(
     db.flush()
     db.refresh(sol)
     return sol
+
+
+@router.post("/espejo/claves", response_model=ClavesSaeResult)
+def depositar_claves_sae(
+    payload: ClavesSaeIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("factura:espejo")),
+):
+    """El conector deposita el catálogo de artículos que SAE tiene HOY.
+
+    Con esto el preview del masivo puede decir «esa clave SAE no la conoce»
+    ANTES de generar el archivo. Hasta el 14-sep-2026 solo se comprobaba que el
+    producto tuviera código de cliente: FRESADOMOPZ pasó el preview y SAE no
+    creó la factura.
+
+    REEMPLAZA el catálogo de esa empresa (es un espejo, no un acumulado): lo que
+    ya no está en SAE deja de estar aquí. La única salvaguarda es contra una
+    lectura incompleta — ver `forzar` en el schema.
+    """
+    empresa = payload.empresa.strip()
+    recibidas = {
+        norm_clave(i.clave): i for i in payload.claves if norm_clave(i.clave)
+    }
+    if not recibidas:
+        raise HTTPException(status_code=422, detail="No llegó ninguna clave utilizable")
+
+    actuales = {
+        c.clave: c for c in db.query(ClaveSae).filter(
+            ClaveSae.tenant_id == ctx.tenant_id, ClaveSae.empresa == empresa
+        ).with_for_update()
+    }
+    # Un catálogo que se encoge a menos de la mitad es casi siempre una lectura
+    # cortada, no un inventario vaciado. Bloquear aquí evita convertir cientos
+    # de claves buenas en "no existe en SAE" y trabar exports legítimos.
+    if actuales and len(recibidas) * 2 < len(actuales) and not payload.forzar:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Llegaron {len(recibidas)} claves para la empresa {empresa} y había "
+                f"{len(actuales)}: parece una lectura incompleta de SAE. Si el catálogo "
+                "de verdad encogió así, repite con forzar=true"
+            ),
+        )
+
+    ahora = datetime.now(timezone.utc)
+    creadas = actualizadas = 0
+    for clave, item in recibidas.items():
+        desc = (item.descripcion or "").strip()[:254] or None
+        fila = actuales.get(clave)
+        if fila is None:
+            db.add(ClaveSae(
+                tenant_id=ctx.tenant_id, empresa=empresa, clave=clave,
+                descripcion=desc, activa=item.activa, sincronizado_at=ahora,
+            ))
+            creadas += 1
+        else:
+            if fila.activa != item.activa or fila.descripcion != desc:
+                fila.activa = item.activa
+                fila.descripcion = desc
+                actualizadas += 1
+            fila.sincronizado_at = ahora
+
+    sobrantes = [c for c in actuales if c not in recibidas]
+    if sobrantes:
+        db.query(ClaveSae).filter(
+            ClaveSae.tenant_id == ctx.tenant_id,
+            ClaveSae.empresa == empresa,
+            ClaveSae.clave.in_(sobrantes),
+        ).delete(synchronize_session=False)
+    db.flush()
+
+    return ClavesSaeResult(
+        empresa=empresa, recibidas=len(recibidas), creadas=creadas,
+        actualizadas=actualizadas, eliminadas=len(sobrantes), total=len(recibidas),
+    )
 
 
 @router.get("/espejo/clientes", response_model=EspejoClientesSaeOut)

@@ -5,6 +5,7 @@ from .almacen import Almacen
 from .categoria import CategoriaProducto
 from .cliente import Cliente
 from .cliente_externo import ClienteExterno
+from .clave_sae import ClaveSae
 from .conexion import Conexion
 from .grupo_whatsapp import GrupoWhatsapp
 from .conversion import ConversionProducto
@@ -55,6 +56,7 @@ __all__ = [
     "Proyecto",
     "Cliente",
     "ClienteExterno",
+    "ClaveSae",
     "Conexion",
     "GrupoWhatsapp",
     # ── Phase 4: operaciones ──
