@@ -9181,6 +9181,8 @@ export interface components {
             id: string;
             /** Ieps */
             ieps: string;
+            /** Impresa At */
+            impresa_at?: string | null;
             /** Iva */
             iva: string;
             /**
@@ -9293,6 +9295,8 @@ export interface components {
             id: string;
             /** Ieps */
             ieps: string;
+            /** Impresa At */
+            impresa_at?: string | null;
             /** Iva */
             iva: string;
             /** Lista Precios Id */

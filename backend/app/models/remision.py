@@ -100,6 +100,12 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     # "Su pedido": la ORDEN DE COMPRA del cliente ("24478"), con la que él
     # reconoce el documento. Texto libre: es un folio de su sistema, no del nuestro.
     su_pedido = Column(String(30))
+    # Cuándo salió el PDF por primera vez. A partir de ese momento hay un papel
+    # en la calle que el cliente firma y sella, y ese papel manda: una
+    # sincronización automática ya no puede reescribir la remisión por detrás
+    # (ver el candado en PATCH /remisiones/{id}). Lo estampa el endpoint del
+    # PDF, una sola vez; reimprimir no lo mueve.
+    impresa_at = Column(DateTime(timezone=True))
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
 

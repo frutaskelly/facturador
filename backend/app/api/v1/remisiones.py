@@ -442,6 +442,21 @@ def create_remision(
     return rem
 
 
+def _marcar_impresas(db: Session, rems: list[Remision]) -> None:
+    """Deja el rastro de que estas remisiones ya salieron en papel.
+
+    Desde aquí el cliente puede tener el documento firmado, así que el PATCH
+    deja de aceptar cambios de partidas que vengan de una conexión (ver el
+    candado en `update_remision`). Se estampa UNA vez: reimprimir no mueve la
+    fecha, porque lo que importa es cuándo salió el primer papel.
+    """
+    ahora = func.now()
+    for rem in rems:
+        if rem.impresa_at is None:
+            rem.impresa_at = ahora
+    db.flush()
+
+
 @router.get("/pdf")
 def remisiones_pdf_lote(
     ids: str = Query(..., description="IDs de remisión separados por coma"),
@@ -477,6 +492,7 @@ def remisiones_pdf_lote(
     clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.id.in_(cli_ids)).all()}
     items = [(r, clientes.get(r.cliente_facturacion_id), por_rem[r.id]) for r in rems]
     pdf = build_remisiones_pdf(items, tenant)
+    _marcar_impresas(db, rems)
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": 'inline; filename="remisiones.pdf"'},
@@ -622,6 +638,24 @@ def update_remision(
     almacen_anterior = rem.almacen_id           # para detectar cambio de almacén
     data = payload.model_dump(exclude_unset=True)
     lineas_in = data.pop("lineas", None)
+    # UNA REMISIÓN IMPRESA NO LA REESCRIBE UNA SINCRONIZACIÓN (16-sep-2026).
+    # El vigía del bot pisó nueve remisiones de la semana 38 que ya estaban
+    # impresas y firmadas: les devolvió las cantidades del pedido encima de los
+    # pesos de báscula y les volvió a meter partidas que el cliente no recibió.
+    # Con el papel ya en la calle, las partidas solo las mueve una PERSONA, que
+    # es quien puede hablar con el cliente; una conexión (`conexion_id`) no
+    # tiene con qué decidir eso. El resto del PATCH —fecha de entrega, notas—
+    # sigue pasando: lo que se congela es el detalle que el cliente firmó.
+    if lineas_in is not None and rem.impresa_at is not None and ctx.conexion_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"La remisión {rem.folio_interno} ya se imprimió "
+                f"({rem.impresa_at:%d/%m/%Y %H:%M}) y el cliente tiene ese papel: "
+                "sus partidas ya no se sincronizan solas. Si lo entregado cambió, "
+                "corrígelo en el Facturador."
+            ),
+        )
     # `exclude_unset` también poda las líneas: una que no mande `presentacion`
     # (tiene default "KILO" en el schema, así que omitirla es válido) salía del
     # dict sin la llave y el endpoint reventaba con KeyError. El pop de arriba
@@ -1564,6 +1598,7 @@ def remision_pdf(
     # El papel que firma el cliente trae SU clave y SU nombre del producto
     # (catálogo del cliente), con el interno de respaldo — igual que el CFDI.
     pdf = build_remision_pdf(rem, tenant, cliente, _nombres_para_pdf(db, [rem])[rem.id])
+    _marcar_impresas(db, [rem])
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{rem.folio_interno}.pdf"'},

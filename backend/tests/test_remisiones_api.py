@@ -634,3 +634,82 @@ def test_busqueda_q_folio_pedido_factura_sae(client, env, auth_as):
     assert _ids(f"Z{tag}588") == {con_sae["id"]}
     assert _ids(f"Z{tag} 0000588") == {con_sae["id"]}
     assert _ids(f"sin-coincidencias-{tag}") == set()
+
+
+# ─── Una remisión impresa no la reescribe una sincronización ─────────────────
+# El 16-sep-2026 el vigía del bot (Master de Sheets -> Facturador, cada hora)
+# pisó nueve remisiones de la semana 38 que ya estaban impresas y firmadas por
+# el cliente: les devolvió las cantidades del pedido encima de los pesos de
+# báscula y les volvió a meter partidas que no se entregaron.
+
+def _ctx_de_conexion(tenant_id):
+    """El contexto que arma una CONEXIÓN (el bot), sin persona detrás."""
+    from app.core.rbac import AuthContext, PERMISOS_CONEXION
+    return AuthContext(
+        user_id=None, auth_user_id="conexion-test", email=None,
+        tenant_id=uuid.UUID(str(tenant_id)), role_id=None,
+        role_name="Conexión · test", is_owner=False,
+        permissions=set(PERMISOS_CONEXION), memberships=[],
+        conexion_id=uuid.uuid4(),
+    )
+
+
+def test_imprimir_marca_la_remision_y_congela_el_sync(client, env, auth_as):
+    from app.core.rbac import get_auth_context
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    rem = _create_rem(client, h, env, "10", "5").json()
+    assert rem["impresa_at"] is None
+
+    pdf = client.get(f"/api/v1/remisiones/{rem['id']}/pdf", headers=h)
+    assert pdf.status_code == 200, pdf.text
+
+    detalle = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    impresa_at = detalle["impresa_at"]
+    assert impresa_at is not None, "imprimir tiene que dejar rastro"
+
+    # Reimprimir no mueve la fecha: lo que importa es el PRIMER papel.
+    client.get(f"/api/v1/remisiones/{rem['id']}/pdf", headers=h)
+    assert client.get(f"/api/v1/remisiones/{rem['id']}",
+                      headers=h).json()["impresa_at"] == impresa_at
+
+    partidas = {"lineas": [{"producto_id": env["prod_a"],
+                            "cantidad_solicitada": "99", "precio_unitario": "5"}]}
+
+    # La conexión ya no puede tocar las partidas del papel firmado.
+    app.dependency_overrides[get_auth_context] = (
+        lambda: _ctx_de_conexion(env["admin_a"]["tenant_id"]))
+    try:
+        r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json=partidas)
+        assert r.status_code == 409, r.text
+        assert "ya se imprimió" in r.json()["detail"]
+        # Lo que NO es el detalle firmado sigue pasando.
+        assert client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                            json={"notas": "llegó tarde"}).status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_auth_context, None)
+
+    # Una PERSONA sí corrige: es quien puede hablar con el cliente.
+    r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json=partidas)
+    assert r.status_code == 200, r.text
+    assert float(r.json()["subtotal"]) == 495.0
+
+
+def test_sin_imprimir_el_sync_sigue_entrando(client, env, auth_as):
+    """El candado es por el papel, no por la conexión: mientras no se imprima,
+    el bot sigue pudiendo corregir lo que bodega pesó."""
+    from app.core.rbac import get_auth_context
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    rem = _create_rem(client, h, env, "10", "5").json()
+
+    app.dependency_overrides[get_auth_context] = (
+        lambda: _ctx_de_conexion(env["admin_a"]["tenant_id"]))
+    try:
+        r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={
+            "lineas": [{"producto_id": env["prod_a"],
+                        "cantidad_solicitada": "10.3", "precio_unitario": "5"}]})
+        assert r.status_code == 200, r.text
+        assert float(r.json()["subtotal"]) == 51.5
+    finally:
+        app.dependency_overrides.pop(get_auth_context, None)

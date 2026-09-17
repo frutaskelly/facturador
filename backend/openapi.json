@@ -14848,6 +14848,18 @@
       "title": "Ieps",
       "type": "string"
      },
+     "impresa_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Impresa At"
+     },
      "iva": {
       "title": "Iva",
       "type": "string"
@@ -15179,6 +15191,18 @@
      "ieps": {
       "title": "Ieps",
       "type": "string"
+     },
+     "impresa_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Impresa At"
      },
      "iva": {
       "title": "Iva",
