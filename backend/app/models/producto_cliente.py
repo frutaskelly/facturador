@@ -74,5 +74,10 @@ class ProductoCliente(Base, TimestampMixin):
     # Unidad con la que ESE cliente compra ("Cilantro por manojo" → MANOJO):
     # debe existir en las presentaciones del producto. Vacía = la default.
     presentacion = Column(String(20))
+    # Quién escribió esta fila: `codigo_cliente` y `nombre_cliente` SON el
+    # NoIdentificacion y la Descripcion de todos los CFDI futuros de ese
+    # cliente, así que una fila mal apuntada tiene que poder rastrearse.
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
 
     producto = relationship("Producto")

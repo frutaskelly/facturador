@@ -1303,6 +1303,7 @@ def _registrar_codigos(db: Session, ctx: AuthContext, oc: OCRecibida, lineas) ->
             codigo_cliente=clave,
             nombre_cliente=(ln.texto_original or "").strip()[:254] or None,
             presentacion=ln.presentacion,
+            created_by=ctx.user_id, updated_by=ctx.user_id,
         )
         db.add(fila)
         # el objeto (no un centinela): una línea repetida en este mismo lote

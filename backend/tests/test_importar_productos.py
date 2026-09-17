@@ -17,13 +17,13 @@ from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
 from app.models import (
-    Almacen, CategoriaProducto, Cliente, EsquemaImpuesto, ListaAsignacion,
-    ListaPrecios, Membership, Precio, Producto, ProductoAlias, ProductoCliente,
-    Role, Tenant, User,
+    Almacen, CategoriaProducto, Cliente, EsquemaImpuesto, ImportProductosLog,
+    ListaAsignacion, ListaPrecios, Membership, Precio, Producto, ProductoAlias,
+    ProductoCliente, Role, Tenant, User,
 )
 
 _PURGE = (
-    "movimientos_inventario", "lineas_factura", "facturas", "lotes_inventario",
+    "import_productos_log", "movimientos_inventario", "lineas_factura", "facturas", "lotes_inventario",
     "producto_clientes", "producto_alias", "precios", "lista_asignaciones",
     "listas_precios", "productos", "categorias_producto", "esquemas_impuesto",
     "clientes", "almacenes",
@@ -1626,7 +1626,10 @@ def test_catalogo_cliente_batch_no_escala_consultas(client, env, auth_as):
     finally:
         event.remove(engine, "before_cursor_execute", _contar)
     assert r.status_code == 200 and r.json()["guardados"] == 40
-    assert len(sentencias) <= 15, f"{len(sentencias)} sentencias para 40 productos"
+    # 17 y no 15 desde la bitácora de importación (0078): su savepoint + INSERT
+    # son DOS sentencias fijas, no dos por producto — el techo sigue sin crecer
+    # con las filas, que es lo que este test cuida.
+    assert len(sentencias) <= 17, f"{len(sentencias)} sentencias para 40 productos"
 
 
 def test_candidato_trae_categoria_y_esquema_del_producto(client, env, auth_as):
@@ -1739,3 +1742,154 @@ def test_sugerido_por_codigo_viaja_entre_los_candidatos(client, env, auth_as):
     assert elegido["nombre"] == "JITOMATE SALADETTE"
     assert elegido["categoria_nombre"] == "Fruta y verdura"
     assert elegido["unidad_base"] == "KILO"
+
+
+# ─── autoría: quién dio de alta esto (16-sep-2026) ───────────────────────────
+# Ese día fue imposible atribuir un producto recién importado y sus cinco filas
+# de catálogo apuntando a clientes equivocados: las tablas no guardaban autor,
+# no hay tabla de auditoría y el Excel no se conserva.
+def _uid(email):
+    db = SessionLocal()
+    try:
+        return db.query(User.id).filter(User.email == email).scalar()
+    finally:
+        db.close()
+
+
+def test_importar_deja_autor_y_bitacora(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/importar", headers=h, json={
+        "cliente_id": env["cli_id"],
+        "archivo_nombre": "LISTA EHMO SEP.xlsx",
+        "esquema_default_id": _esquema_lote(env["tenant_id"]),
+        "filas": [{
+            "accion": "crear", "nombre": "CHAYOTE SIN ESPINA", "unidad_base": "KILO",
+            "codigo_cliente": "CHAY-001", "nombre_cliente": "CHAYOTE",
+        }],
+    })
+    assert r.status_code == 200, r.text
+    uid = _uid(env["admin"]["email"])
+    db = SessionLocal()
+    try:
+        prod = db.query(Producto).filter(
+            Producto.tenant_id == env["tenant_id"],
+            Producto.nombre == "CHAYOTE SIN ESPINA").one()
+        assert prod.created_by == uid and prod.updated_by == uid
+        pc = db.query(ProductoCliente).filter(
+            ProductoCliente.producto_id == prod.id).one()
+        assert pc.created_by == uid and pc.updated_by == uid
+
+        log = db.query(ImportProductosLog).filter(
+            ImportProductosLog.tenant_id == env["tenant_id"],
+            ImportProductosLog.origen == "IMPORT").one()
+        assert log.user_id == uid
+        assert log.archivo_nombre == "LISTA EHMO SEP.xlsx"
+        assert log.cliente_ids == [env["cli_id"]]
+        assert (log.filas_enviadas, log.productos_creados) == (1, 1)
+        assert (log.catalogo_guardado, log.filas_con_error) == (1, 0)
+    finally:
+        db.close()
+
+
+def test_catalogo_batch_deja_autor_y_bitacora(client, env, auth_as):
+    """El último paso del wizard es donde se elige de QUIÉN es la lista, así que
+    es el único renglón que contesta a qué clientes se les escribió el catálogo:
+    /importar viaja sin cliente_ids."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos/catalogo-cliente-batch", headers=h, json={
+        "cliente_ids": [env["cli_id"]],
+        "archivo_nombre": "LISTA EHMO SEP.xlsx",
+        "items": [{"fila": 1, "producto_id": env["prod_id"], "codigo": "JIT-9",
+                   "nombre": "JITOMATE ROMA", "presentacion": "KILO"}],
+    })
+    assert r.status_code == 200, r.text
+    uid = _uid(env["admin"]["email"])
+    db = SessionLocal()
+    try:
+        pc = db.query(ProductoCliente).filter(
+            ProductoCliente.producto_id == uuid.UUID(env["prod_id"])).one()
+        assert pc.created_by == uid and pc.updated_by == uid
+        log = db.query(ImportProductosLog).filter(
+            ImportProductosLog.tenant_id == env["tenant_id"],
+            ImportProductosLog.origen == "CATALOGO").one()
+        assert (log.user_id, log.cliente_ids) == (uid, [env["cli_id"]])
+        assert log.archivo_nombre == "LISTA EHMO SEP.xlsx"
+        assert log.catalogo_guardado == 1
+    finally:
+        db.close()
+
+
+def test_alta_y_edicion_individual_dejan_autor(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.post("/api/v1/productos", headers=h, json={
+        "sku": "", "nombre": "PEPINO PERSA", "clave_sat": "50421800",
+        "unidad_sat": "KGM", "esquema_impuesto_id": _esquema_lote(env["tenant_id"]),
+    })
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    uid = _uid(env["admin"]["email"])
+    db = SessionLocal()
+    try:
+        prod = db.query(Producto).filter(Producto.id == uuid.UUID(pid)).one()
+        assert prod.created_by == uid and prod.updated_by == uid
+    finally:
+        db.close()
+
+    # Editar y dar de baja también dejan quién: `updated_by` sin escrituras que
+    # lo muevan sería una columna decorativa.
+    assert client.patch(f"/api/v1/productos/{pid}", headers=h,
+                        json={"descripcion": "corregido"}).status_code == 200
+    assert client.delete(f"/api/v1/productos/{pid}", headers=h).status_code == 204
+    db = SessionLocal()
+    try:
+        prod = db.query(Producto).filter(Producto.id == uuid.UUID(pid)).one()
+        assert prod.updated_by == uid and prod.deleted_at is not None
+    finally:
+        db.close()
+
+
+def test_catalogo_cliente_a_mano_deja_autor(client, env, auth_as):
+    """La captura manual del catálogo del cliente (PUT desde la ficha)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.put(
+        f"/api/v1/clientes/{env['cli_id']}/catalogo/{env['prod_id']}",
+        headers=h, json={"codigo_cliente": "JIT-MANO", "nombre_cliente": "JITOMATE"},
+    )
+    assert r.status_code == 200, r.text
+    uid = _uid(env["admin"]["email"])
+    db = SessionLocal()
+    try:
+        pc = db.query(ProductoCliente).filter(
+            ProductoCliente.producto_id == uuid.UUID(env["prod_id"])).one()
+        assert pc.created_by == uid and pc.updated_by == uid
+    finally:
+        db.close()
+
+
+def test_bitacora_rota_no_tumba_el_import(client, env, auth_as, monkeypatch):
+    """La bitácora es rastro, no negocio: si falla, el alta tiene que pasar igual.
+
+    Sin esto, una bitácora rota (la tabla sin migrar en un despliegue a medias)
+    convertiría CADA importación en un 500 — el rastro saldría más caro que el
+    hueco que vino a tapar.
+    """
+    from app.api.v1 import productos as mod
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    monkeypatch.setattr(mod, "ImportProductosLog", lambda **kw: object())
+    r = client.post("/api/v1/productos/importar", headers=h, json={
+        "archivo_nombre": "ROTA.xlsx",
+        "esquema_default_id": _esquema_lote(env["tenant_id"]),
+        "filas": [{"accion": "crear", "nombre": "LECHUGA ORELLANA", "unidad_base": "KILO"}],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["creados"] == 1
+    db = SessionLocal()
+    try:
+        assert db.query(Producto).filter(
+            Producto.tenant_id == env["tenant_id"],
+            Producto.nombre == "LECHUGA ORELLANA").one_or_none() is not None
+        assert db.query(ImportProductosLog).filter(
+            ImportProductosLog.tenant_id == env["tenant_id"]).count() == 0
+    finally:
+        db.close()

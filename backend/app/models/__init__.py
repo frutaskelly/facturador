@@ -8,6 +8,7 @@ from .cliente_externo import ClienteExterno
 from .clave_sae import ClaveSae
 from .conexion import Conexion
 from .grupo_whatsapp import GrupoWhatsapp
+from .import_productos_log import ImportProductosLog
 from .conversion import ConversionProducto
 from .esquema_impuesto import EsquemaImpuesto
 from .espejo_sync import EspejoSync
@@ -48,6 +49,7 @@ __all__ = [
     "Producto",
     "ProductoAlias",
     "ProductoCliente",
+    "ImportProductosLog",
     "SatClaveProdServ",
     "SatClaveUnidad",
     "ListaPrecios",

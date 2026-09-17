@@ -4487,6 +4487,8 @@ export interface components {
          *     clientes para una lista de productos (el último paso de la importación).
          */
         CatalogoClienteBatchIn: {
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
             /** Cliente Ids */
             cliente_ids: string[];
             /** Items */
@@ -6611,6 +6613,8 @@ export interface components {
         };
         /** ImportIn */
         ImportIn: {
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
             /** Cliente Id */
             cliente_id?: string | null;
             /** Cliente Ids */

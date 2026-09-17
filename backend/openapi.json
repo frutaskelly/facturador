@@ -1201,6 +1201,18 @@
    "CatalogoClienteBatchIn": {
     "description": "Guardar de golpe el código/nombre/presentación que usan uno o varios\nclientes para una lista de productos (el último paso de la importación).",
     "properties": {
+     "archivo_nombre": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Nombre"
+     },
      "cliente_ids": {
       "items": {
        "format": "uuid",
@@ -7076,6 +7088,18 @@
    },
    "ImportIn": {
     "properties": {
+     "archivo_nombre": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Nombre"
+     },
      "cliente_id": {
       "anyOf": [
        {
