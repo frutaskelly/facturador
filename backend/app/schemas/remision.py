@@ -140,6 +140,9 @@ class RemisionOut(ORMModel):
     # Llegó de la bandeja sin que nadie la revisara: la lista la marca y ni se
     # confirma ni se factura hasta que alguien la dé por revisada.
     revision_pendiente: bool = False
+    # Ya salió en papel: el cliente puede tener este documento firmado y sus
+    # partidas dejaron de sincronizarse solas desde WhatsApp.
+    impresa_at: Optional[datetime] = None
     # La OC original en la bandeja de órdenes: su id y el documento con el que
     # llegó, para abrirlo desde la lista sin ir a buscarlo.
     oc_id: Optional[uuid.UUID] = None
