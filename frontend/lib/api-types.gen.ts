@@ -3658,6 +3658,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/remisiones/{rem_id}/lineas/{linea_id}/cruzar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cruzar Linea
+         * @description Re-apunta UNA partida a otro producto del catálogo, sin re-capturar.
+         *
+         *     El caso que lo pide: el aviso «N partidas sin clave SAE del cliente». La
+         *     partida cruzó a un producto que ese cliente no tiene en su inventario de
+         *     SAE, y el arreglo no siempre es inventarle una clave —eso es dar de alta un
+         *     artículo en SAE por la puerta de atrás—: casi siempre la partida va al
+         *     producto que el cliente SÍ conoce, y lo que falla es el cruce.
+         *
+         *     Se edita la línea EN SU SITIO (mismo id, mismo número, su nota y su
+         *     devolución intactas) en vez de reenviar todas por el PATCH, que las borra y
+         *     las vuelve a insertar: ahí se perdían las notas de «qué revisar» y una
+         *     partida devuelta al 100% (cantidad 0) ni siquiera podía viajar de vuelta.
+         *
+         *     Lo que NO decide solo: el precio. Cambiar el producto no autoriza a cambiar
+         *     lo que se cobra, así que por default se conserva el de la partida y tomar el
+         *     de la lista es una elección explícita de quien cruza.
+         */
+        post: operations["cruzar_linea_api_v1_remisiones__rem_id__lineas__linea_id__cruzar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/remisiones/{rem_id}/pdf": {
         parameters: {
             query?: never;
@@ -5389,6 +5424,47 @@ export interface components {
              * Format: uuid
              */
             role_id: string;
+        };
+        /**
+         * CruzarLineaIn
+         * @description Cambiar la partida por OTRO producto del catálogo, sin re-capturar.
+         *
+         *     Nace del aviso «N partidas sin clave SAE del cliente»: la partida cruzó a un
+         *     producto que ese cliente no tiene en SAE, y el arreglo real no siempre es
+         *     darle de alta una clave — casi siempre es que la partida va al producto que
+         *     el cliente SÍ conoce. Esto la re-apunta ahí conservando la línea (su id, su
+         *     número, su nota y su devolución), que es justo lo que perdería re-mandar
+         *     todas las líneas por el PATCH.
+         */
+        CruzarLineaIn: {
+            /**
+             * Aprender Alcance
+             * @default cliente
+             * @enum {string}
+             */
+            aprender_alcance: "cliente" | "plaza" | "global";
+            /** Aprender Texto */
+            aprender_texto?: string | null;
+            /** Cantidad Solicitada */
+            cantidad_solicitada?: number | string | null;
+            /**
+             * Permitir Negativos
+             * @default false
+             */
+            permitir_negativos: boolean;
+            /**
+             * Precio
+             * @default mantener
+             * @enum {string}
+             */
+            precio: "mantener" | "lista";
+            /** Presentacion */
+            presentacion?: string | null;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
         };
         /** DevolucionIn */
         DevolucionIn: {
@@ -17877,6 +17953,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cruzar_linea_api_v1_remisiones__rem_id__lineas__linea_id__cruzar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                rem_id: string;
+                linea_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CruzarLineaIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemisionDetailOut"];
                 };
             };
             /** @description Validation Error */

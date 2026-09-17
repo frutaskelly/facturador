@@ -61,6 +61,8 @@ from ...services.importar_remisiones import (
 )
 from ...services.producto_match import (
     alias_del_tenant,
+    aprender_alias,
+    aprender_alias_con_alcance,
     buscar,
     normalizar,
     normalizar_catalogo,
@@ -72,6 +74,7 @@ from ...services.sucursales import es_sucursal_de
 from ...schemas.common import Page
 from ...schemas.remision import (
     ConfirmarRemisionIn,
+    CruzarLineaIn,
     RemisionCreate,
     RemisionDetailOut,
     RemisionOut,
@@ -544,15 +547,15 @@ def _nombres_para_pdf(db: Session, rems: list[Remision]) -> dict:
     return out
 
 
-@router.get("/{rem_id}", response_model=RemisionDetailOut)
-def get_remision(
-    rem_id: UUID,
-    db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_READ)),
-):
-    rem = get_or_404(db, Remision, rem_id)
-    if not ctx.cliente_permitido(rem.cliente_facturacion_id):
-        raise HTTPException(status_code=404, detail="Remisión no encontrada")
+def _decorar_detalle(db: Session, ctx: AuthContext, rem: Remision) -> Remision:
+    """El detalle como lo espera la pantalla: el nombre del producto por línea,
+    la OC de la que vino y el preflight de claves SAE.
+
+    Lo comparten el GET y los endpoints que devuelven la remisión YA modificada
+    (cruzar una partida): si uno se lo saltara, el aviso «N partidas sin clave
+    SAE» se apagaría solo al guardar —justo cuando hay que volver a mirarlo—
+    hasta la siguiente recarga.
+    """
     prod_ids = {ln.producto_id for ln in rem.lineas}
     names = dict(db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all())
     for ln in rem.lineas:
@@ -577,6 +580,18 @@ def get_remision(
                     and Decimal(str(ln.cantidad_solicitada or 0)) > 0
                 )
     return rem
+
+
+@router.get("/{rem_id}", response_model=RemisionDetailOut)
+def get_remision(
+    rem_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    rem = get_or_404(db, Remision, rem_id)
+    if not ctx.cliente_permitido(rem.cliente_facturacion_id):
+        raise HTTPException(status_code=404, detail="Remisión no encontrada")
+    return _decorar_detalle(db, ctx, rem)
 
 
 def _liberar_reservas(db: Session, ctx: AuthContext, rem: Remision, *, motivo: str) -> None:
@@ -611,6 +626,28 @@ def _liberar_reservas(db: Session, ctx: AuthContext, rem: Remision, *, motivo: s
         ln.cantidad_surtida = None
 
 
+def _exigir_editable(db: Session, rem: Remision) -> None:
+    """Las dos puertas que comparten editar y cruzar una partida.
+
+    Una FACTURADA o CANCELADA no se toca, y tampoco una que esté por detrás de
+    una factura viva (BORRADOR o TIMBRADA): cambiarle una línea desincronizaría
+    un comprobante ya emitido. Solo pasa la que no tiene factura o cuya última
+    fue CANCELADA.
+    """
+    if rem.estado not in ("BORRADOR", "RESERVADO", "CONFIRMADA"):
+        raise HTTPException(
+            status_code=409,
+            detail="Solo se puede editar una remisión en borrador, reservada o confirmada",
+        )
+    if rem.factura_id is not None:
+        fac = db.query(Factura).filter(Factura.id == rem.factura_id).one_or_none()
+        if fac is not None and fac.estado != "CANCELADA":
+            raise HTTPException(
+                status_code=409,
+                detail="La remisión está ligada a una factura; cancélala o descártala antes de editar",
+            )
+
+
 @router.patch("/{rem_id}", response_model=RemisionDetailOut)
 def update_remision(
     rem_id: UUID,
@@ -619,21 +656,7 @@ def update_remision(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     rem = get_or_404(db, Remision, rem_id)
-    if rem.estado not in ("BORRADOR", "RESERVADO", "CONFIRMADA"):
-        raise HTTPException(
-            status_code=409,
-            detail="Solo se puede editar una remisión en borrador, reservada o confirmada",
-        )
-    # No editar por detrás de una factura viva: si la remisión está ligada a una
-    # factura BORRADOR o TIMBRADA, editarla desincronizaría el comprobante ya
-    # emitido. Solo se edita si no tiene factura o si la última fue CANCELADA.
-    if rem.factura_id is not None:
-        fac = db.query(Factura).filter(Factura.id == rem.factura_id).one_or_none()
-        if fac is not None and fac.estado != "CANCELADA":
-            raise HTTPException(
-                status_code=409,
-                detail="La remisión está ligada a una factura; cancélala o descártala antes de editar",
-            )
+    _exigir_editable(db, rem)
     era_confirmada = rem.estado == "CONFIRMADA"
     almacen_anterior = rem.almacen_id           # para detectar cambio de almacén
     data = payload.model_dump(exclude_unset=True)
@@ -817,6 +840,177 @@ def update_remision(
     db.flush()
     db.refresh(rem)
     return rem
+
+
+@router.post("/{rem_id}/lineas/{linea_id}/cruzar", response_model=RemisionDetailOut)
+def cruzar_linea(
+    rem_id: UUID,
+    linea_id: UUID,
+    payload: CruzarLineaIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Re-apunta UNA partida a otro producto del catálogo, sin re-capturar.
+
+    El caso que lo pide: el aviso «N partidas sin clave SAE del cliente». La
+    partida cruzó a un producto que ese cliente no tiene en su inventario de
+    SAE, y el arreglo no siempre es inventarle una clave —eso es dar de alta un
+    artículo en SAE por la puerta de atrás—: casi siempre la partida va al
+    producto que el cliente SÍ conoce, y lo que falla es el cruce.
+
+    Se edita la línea EN SU SITIO (mismo id, mismo número, su nota y su
+    devolución intactas) en vez de reenviar todas por el PATCH, que las borra y
+    las vuelve a insertar: ahí se perdían las notas de «qué revisar» y una
+    partida devuelta al 100% (cantidad 0) ni siquiera podía viajar de vuelta.
+
+    Lo que NO decide solo: el precio. Cambiar el producto no autoriza a cambiar
+    lo que se cobra, así que por default se conserva el de la partida y tomar el
+    de la lista es una elección explícita de quien cruza.
+    """
+    rem = get_or_404(db, Remision, rem_id)
+    if not ctx.cliente_permitido(rem.cliente_facturacion_id):
+        raise HTTPException(status_code=404, detail="Remisión no encontrada")
+    _exigir_editable(db, rem)
+
+    ln = next((x for x in rem.lineas if x.id == linea_id), None)
+    if ln is None:
+        raise HTTPException(status_code=404, detail="Esa partida no es de esta remisión")
+    _ensure_productos(db, [payload.producto_id])
+    prod = db.query(Producto).filter(Producto.id == payload.producto_id).one()
+    presentaciones = prod.presentaciones or {}
+
+    if payload.presentacion:
+        presentacion = payload.presentacion.strip().upper()
+        if presentacion not in presentaciones:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{prod.nombre} no se vende por {presentacion}; "
+                    "da de alta esa presentación en el producto antes de cruzar"
+                ),
+            )
+    else:
+        # Sin presentación explícita se conserva la de la partida, y solo si el
+        # producto nuevo la tiene: heredar una que no existe dejaría el factor
+        # en 1 y el inventario descontaría manojos como si fueran kilos.
+        presentacion = (
+            ln.presentacion
+            if ln.presentacion in presentaciones
+            else (prod.presentacion_default or prod.unidad_base)
+        )
+
+    cantidad = (
+        payload.cantidad_solicitada
+        if payload.cantidad_solicitada is not None
+        else ln.cantidad_solicitada
+    )
+    if Decimal(str(cantidad or 0)) <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"La partida {ln.numero_linea} quedó en cero (devuelta por completo): "
+                "captura la cantidad con la que va el producto nuevo"
+            ),
+        )
+
+    cambia = (
+        payload.producto_id != ln.producto_id
+        or presentacion != ln.presentacion
+        or Decimal(str(cantidad)) != Decimal(str(ln.cantidad_solicitada))
+        or payload.precio == "lista"
+    )
+    texto_alias = (payload.aprender_texto or "").strip()
+    if not cambia and not texto_alias:
+        raise HTTPException(
+            status_code=409,
+            detail="La partida ya va a ese producto con esa presentación y cantidad",
+        )
+
+    # Confirmada + cambio real de inventario: se libera la reserva de TODA la
+    # remisión y se vuelve a reservar con la partida ya cruzada (el mismo
+    # camino que la reedición — la reserva vive por línea y por lote).
+    era_confirmada = rem.estado == "CONFIRMADA"
+    inv_cambio = (
+        payload.producto_id != ln.producto_id
+        or presentacion != ln.presentacion
+        or Decimal(str(cantidad)) != Decimal(str(ln.cantidad_solicitada))
+    )
+    if era_confirmada and inv_cambio:
+        _liberar_reservas(
+            db, ctx, rem,
+            motivo=f"Cruce de partida en remisión {rem.folio_interno} (libera reserva previa)",
+        )
+        db.flush()
+
+    antes = db.query(Producto.nombre).filter(Producto.id == ln.producto_id).scalar()
+    cambia_producto = payload.producto_id != ln.producto_id
+    ln.producto_id = payload.producto_id
+    ln.presentacion = presentacion
+    ln.cantidad_solicitada = cantidad
+    if payload.precio == "lista":
+        precio = _precios_de_lineas(db, rem, [{
+            "producto_id": ln.producto_id,
+            "presentacion": ln.presentacion,
+            "cantidad_solicitada": ln.cantidad_solicitada,
+            "precio_unitario": None,
+        }])[0]
+        if precio is None or precio <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{prod.nombre} no tiene precio en la lista de este cliente; "
+                    "deja el precio de la partida o captúralo en la lista"
+                ),
+            )
+        ln.precio_unitario = precio
+    ln.importe = ln.cantidad_solicitada * ln.precio_unitario
+    prod_fiscal, esq = _fiscal_por_producto(db, [ln.producto_id]).get(ln.producto_id, (None, None))
+    calc = calcular_linea_producto(prod_fiscal, esq, ln.importe, ln.cantidad_solicitada)
+    ln.iva_importe = calc["iva_importe"]
+    ln.ieps_importe = calc["ieps_importe"]
+    # El rastro se queda en la propia partida: quien la mire después tiene que
+    # poder ver que el producto no es el que trajo el documento.
+    if cambia_producto and antes:
+        rastro = f"Cruzada a mano: venía a «{antes}»"
+        ln.notas = f"{ln.notas.strip()} · {rastro}" if (ln.notas or "").strip() else rastro
+
+    rem.subtotal = sum((x.importe or _ZERO for x in rem.lineas), _ZERO)
+    rem.iva = sum((x.iva_importe or _ZERO for x in rem.lineas), _ZERO)
+    rem.ieps = sum((x.ieps_importe or _ZERO for x in rem.lineas), _ZERO)
+    rem.total = rem.subtotal - (rem.descuento or _ZERO) + rem.iva + rem.ieps
+
+    if era_confirmada and inv_cambio:
+        db.flush()
+        db.refresh(rem)
+        reservar_stock_remision(db, ctx, rem, permitir_negativos=payload.permitir_negativos)
+
+    # Lo aprendido: por default SOLO para este cliente. El motivo del cruce
+    # suele ser el catálogo de ESE cliente en SAE, no una verdad del vocabulario
+    # de la casa —un global mal puesto ya mandó 24 remisiones equivocadas—, así
+    # que «global» pasa por el helper de alcance, que jamás reapunta un global
+    # ajeno: si el texto ya significa otro producto, aterriza en el cliente.
+    if texto_alias:
+        if payload.aprender_alcance == "global":
+            aprender_alias_con_alcance(
+                db, ctx.tenant_id, texto_alias, payload.producto_id,
+                cliente_id=rem.cliente_facturacion_id, sucursal_id=rem.sucursal_id,
+                origen="MANUAL", user_id=ctx.user_id,
+            )
+        else:
+            aprender_alias(
+                db, ctx.tenant_id, texto_alias, payload.producto_id,
+                cliente_id=rem.cliente_facturacion_id,
+                sucursal_id=rem.sucursal_id if payload.aprender_alcance == "plaza" else None,
+                origen="MANUAL", user_id=ctx.user_id,
+            )
+
+    # El cruce puede completar la llave con el espejo (el producto correcto hace
+    # que el importe cuadre con la factura de SAE), igual que la edición.
+    ligar_remision_con_espejo(db, rem)
+    rem.updated_by = ctx.user_id
+    db.flush()
+    db.refresh(rem)
+    return _decorar_detalle(db, ctx, rem)
 
 
 def exigir_precios(rem: Remision) -> None:

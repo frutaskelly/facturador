@@ -3876,6 +3876,84 @@
     "title": "CrearUsuarioIn",
     "type": "object"
    },
+   "CruzarLineaIn": {
+    "description": "Cambiar la partida por OTRO producto del catálogo, sin re-capturar.\n\nNace del aviso «N partidas sin clave SAE del cliente»: la partida cruzó a un\nproducto que ese cliente no tiene en SAE, y el arreglo real no siempre es\ndarle de alta una clave — casi siempre es que la partida va al producto que\nel cliente SÍ conoce. Esto la re-apunta ahí conservando la línea (su id, su\nnúmero, su nota y su devolución), que es justo lo que perdería re-mandar\ntodas las líneas por el PATCH.",
+    "properties": {
+     "aprender_alcance": {
+      "default": "cliente",
+      "enum": [
+       "cliente",
+       "plaza",
+       "global"
+      ],
+      "title": "Aprender Alcance",
+      "type": "string"
+     },
+     "aprender_texto": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Aprender Texto"
+     },
+     "cantidad_solicitada": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cantidad Solicitada"
+     },
+     "permitir_negativos": {
+      "default": false,
+      "title": "Permitir Negativos",
+      "type": "boolean"
+     },
+     "precio": {
+      "default": "mantener",
+      "enum": [
+       "mantener",
+       "lista"
+      ],
+      "title": "Precio",
+      "type": "string"
+     },
+     "presentacion": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "producto_id"
+    ],
+    "title": "CruzarLineaIn",
+    "type": "object"
+   },
    "DevolucionIn": {
     "properties": {
      "lineas": {
@@ -34085,6 +34163,91 @@
      }
     ],
     "summary": "Enviar Remision",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
+  "/api/v1/remisiones/{rem_id}/lineas/{linea_id}/cruzar": {
+   "post": {
+    "description": "Re-apunta UNA partida a otro producto del catálogo, sin re-capturar.\n\nEl caso que lo pide: el aviso «N partidas sin clave SAE del cliente». La\npartida cruzó a un producto que ese cliente no tiene en su inventario de\nSAE, y el arreglo no siempre es inventarle una clave —eso es dar de alta un\nartículo en SAE por la puerta de atrás—: casi siempre la partida va al\nproducto que el cliente SÍ conoce, y lo que falla es el cruce.\n\nSe edita la línea EN SU SITIO (mismo id, mismo número, su nota y su\ndevolución intactas) en vez de reenviar todas por el PATCH, que las borra y\nlas vuelve a insertar: ahí se perdían las notas de «qué revisar» y una\npartida devuelta al 100% (cantidad 0) ni siquiera podía viajar de vuelta.\n\nLo que NO decide solo: el precio. Cambiar el producto no autoriza a cambiar\nlo que se cobra, así que por default se conserva el de la partida y tomar el\nde la lista es una elección explícita de quien cruza.",
+    "operationId": "cruzar_linea_api_v1_remisiones__rem_id__lineas__linea_id__cruzar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rem_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Rem Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "linea_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Linea Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CruzarLineaIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RemisionDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cruzar Linea",
     "tags": [
      "remisiones"
     ]

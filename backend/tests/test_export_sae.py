@@ -3,6 +3,7 @@ rastro del export (export_sae_at, SIN estampar folios), y los candados que evita
 duplicar documentos en SAE (re-export, cliente sin clave, partida sin código)."""
 import io
 import uuid
+from decimal import Decimal
 
 import pytest
 import xlrd
@@ -17,6 +18,7 @@ from app.models import (
     ClienteExterno,
     Membership,
     Producto,
+    ProductoAlias,
     ProductoCliente,
     Role,
     Serie,
@@ -33,7 +35,7 @@ from app.services.export_sae import (
 
 _PURGE = (
     "lineas_factura", "facturas", "lineas_remision", "remisiones", "cliente_externos",
-    "producto_clientes", "productos", "series", "clientes", "claves_sae",
+    "producto_alias", "producto_clientes", "productos", "series", "clientes", "claves_sae",
 )
 
 
@@ -586,6 +588,129 @@ def test_preflight_sin_clave_en_lista_y_detalle(client, env, auth_as):
     pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
                      json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
     assert pv["ok"] is True, pv
+
+
+def test_cruzar_partida_sin_clave_por_un_producto_del_catalogo(client, env, auth_as):
+    """El otro arreglo del aviso «sin clave SAE»: la partida no necesita una
+    clave nueva en SAE, necesita ir al producto que el cliente SÍ tiene.
+
+    Cruzarla re-apunta la línea EN SU SITIO (mismo id, su nota intacta), deja
+    el precio con el que entró, apaga el aviso, destraba el export y aprende el
+    cruce para ESE cliente — no para todo el negocio.
+    """
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        # El que trajo la orden: existe en el catálogo de la casa, pero el
+        # cliente no lo tiene en SAE.
+        huerfano = Producto(tenant_id=env["tenant"], sku=f"8{suffix}",
+                            nombre="ESPINACA MANOJO DE 1 KG",
+                            clave_sat="50300000", unidad_sat="KGM")
+        # Al que debe ir: el que el cliente sí conoce, con su clave.
+        bueno = Producto(tenant_id=env["tenant"], sku=f"9{suffix}", nombre="ESPINACA",
+                         clave_sat="50300000", unidad_sat="KGM")
+        db.add_all([huerfano, bueno]); db.flush()
+        db.add(ProductoCliente(tenant_id=env["tenant"], cliente_id=env["cli"],
+                               producto_id=bueno.id, codigo_cliente="ESPI-001"))
+        db.commit()
+        huerfano_id, bueno_id = str(huerfano.id), str(bueno.id)
+    finally:
+        db.close()
+
+    rem = _rem(client, h, env, lineas=[
+        {"producto_id": env["prod"], "cantidad_solicitada": 5, "precio_unitario": 836},
+        {"producto_id": huerfano_id, "cantidad_solicitada": 2, "precio_unitario": 10,
+         "notas": "Como venía: «ESPINACA MANOJO DE 1 KG»"},
+    ])
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["sin_clave_sae"] == 1
+    linea = next(ln for ln in det["lineas"] if ln["producto_id"] == huerfano_id)
+    assert linea["sin_clave_sae"] is True
+
+    # El cruce: mismo renglón, otro producto, el precio de la orden intacto.
+    r = client.post(
+        f"/api/v1/remisiones/{rem['id']}/lineas/{linea['id']}/cruzar", headers=h,
+        json={"producto_id": bueno_id,
+              "aprender_texto": "ESPINACA MANOJO DE 1 KG",
+              "aprender_alcance": "cliente"},
+    )
+    assert r.status_code == 200, r.text
+    det = r.json()
+    assert det["sin_clave_sae"] is None          # el aviso se apagó en el acto
+    cruzada = next(ln for ln in det["lineas"] if ln["id"] == linea["id"])
+    assert cruzada["producto_id"] == bueno_id
+    assert cruzada["numero_linea"] == linea["numero_linea"]
+    assert Decimal(cruzada["precio_unitario"]) == Decimal("10")   # nadie tocó el precio
+    assert Decimal(cruzada["importe"]) == Decimal("20")
+    # La nota original se conserva y el cruce deja rastro en la misma partida.
+    assert "Como venía: «ESPINACA MANOJO DE 1 KG»" in cruzada["notas"]
+    assert "venía a «ESPINACA MANOJO DE 1 KG»" in cruzada["notas"]
+    # Totales del encabezado recalculados con la partida ya cruzada.
+    assert Decimal(det["subtotal"]) == Decimal("4200")            # 5×836 + 2×10
+
+    # Con eso, el export deja de estar detenido.
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
+    assert pv["ok"] is True, pv
+
+    # Lo aprendido es del cliente, no del negocio entero.
+    db = SessionLocal()
+    try:
+        alias = (
+            db.query(ProductoAlias)
+            .filter(ProductoAlias.tenant_id == env["tenant"],
+                    ProductoAlias.producto_id == bueno_id)
+            .all()
+        )
+        assert len(alias) == 1
+        assert str(alias[0].cliente_id) == env["cli"]
+        assert alias[0].sucursal_id is None
+    finally:
+        db.close()
+
+    # Repetir el mismo cruce sin nada que aprender no hace nada: lo dice.
+    r = client.post(
+        f"/api/v1/remisiones/{rem['id']}/lineas/{linea['id']}/cruzar", headers=h,
+        json={"producto_id": bueno_id},
+    )
+    assert r.status_code == 409, r.text
+
+
+def test_cruzar_partida_valida_presentacion_y_precio_de_lista(client, env, auth_as):
+    """Los dos frenos del cruce: una presentación que el producto nuevo no tiene
+    (heredarla dejaría el factor en 1 y descuadraría el inventario) y pedir el
+    precio de la lista cuando ese cliente no tiene precio ahí."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        otro = Producto(tenant_id=env["tenant"], sku=f"6{suffix}", nombre="CILANTRO",
+                        clave_sat="50300000", unidad_sat="KGM")
+        db.add(otro); db.commit()
+        otro_id = str(otro.id)
+    finally:
+        db.close()
+    rem = _rem(client, h, env)
+    linea = rem["lineas"][0]
+
+    r = client.post(
+        f"/api/v1/remisiones/{rem['id']}/lineas/{linea['id']}/cruzar", headers=h,
+        json={"producto_id": otro_id, "presentacion": "MANOJO"},
+    )
+    assert r.status_code == 422
+    assert "no se vende por MANOJO" in r.json()["detail"]
+
+    r = client.post(
+        f"/api/v1/remisiones/{rem['id']}/lineas/{linea['id']}/cruzar", headers=h,
+        json={"producto_id": otro_id, "precio": "lista"},
+    )
+    assert r.status_code == 422
+    assert "no tiene precio en la lista" in r.json()["detail"]
+
+    # Y la partida quedó como estaba: un 422 no cruza a medias.
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["lineas"][0]["producto_id"] == env["prod"]
 
 
 def test_catalogo_cliente_generica_y_por_sucursal_conviven(client, env, auth_as):
