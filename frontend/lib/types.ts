@@ -313,6 +313,11 @@ export type LineaRemision = {
   // Preflight del export a SAE: esta línea no tiene clave del cliente (ni de
   // su sucursal ni genérica). Solo viene en el detalle.
   sin_clave_sae?: boolean | null;
+  /** La clave SÍ está, pero la empresa de SAE de esta plaza no la factura.
+   *  Viaja la clave para poder nombrarla en el aviso. */
+  clave_no_en_sae?: string | null;
+  /** …y si es porque existe pero está DADA DE BAJA en esa empresa. */
+  clave_de_baja_en_sae?: boolean | null;
 };
 
 export type Remision = {
@@ -344,6 +349,10 @@ export type Remision = {
   // Preflight del export a SAE: cuántas partidas vivas no tienen clave del
   // cliente (el mismo conteo que detiene el lote al exportar). null = ninguna.
   sin_clave_sae?: number | null;
+  /** Partidas con una clave que la empresa de SAE de su plaza NO factura. */
+  clave_no_en_sae?: number | null;
+  /** La empresa de SAE que le toca a esta remisión (para nombrarla). */
+  empresa_sae?: string | null;
   factura_estado?: "BORRADOR" | "TIMBRADA" | "CANCELADA" | null;
   factura_id?: string | null;
   /** La OC de esta remisión recibió una versión posterior sin atender. */

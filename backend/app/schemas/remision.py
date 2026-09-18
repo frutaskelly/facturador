@@ -38,6 +38,11 @@ class LineaRemisionOut(ORMModel):
     # Preflight del export a SAE: True = esta línea no tiene clave del cliente
     # (ni de su sucursal ni genérica). Solo viene en el detalle.
     sin_clave_sae: Optional[bool] = None
+    # La clave SÍ está, pero la empresa de SAE de esta plaza no la factura: o no
+    # la tiene (la clave es de otra empresa) o la tiene DADA DE BAJA. Viaja la
+    # clave, no un bool, para poder nombrarla en el aviso.
+    clave_no_en_sae: Optional[str] = None
+    clave_de_baja_en_sae: Optional[bool] = None
 
 
 class RemisionCreate(BaseModel):
@@ -156,6 +161,12 @@ class RemisionOut(ORMModel):
     # cliente (el mismo conteo que detiene el lote en el modal de exportar).
     # None = todas la tienen, o la remisión ya está amparada/cancelada.
     sin_clave_sae: Optional[int] = None
+    # Cuántas partidas llevan una clave que la empresa de SAE de su plaza NO
+    # factura. Se detiene igual que «sin clave», pero el arreglo es otro: la
+    # clave existe, sólo que en la empresa equivocada.
+    clave_no_en_sae: Optional[int] = None
+    # La empresa de SAE que le toca a esta remisión, para poder nombrarla.
+    empresa_sae: Optional[str] = None
     subtotal: Decimal
     descuento: Decimal
     iva: Decimal

@@ -1359,6 +1359,11 @@ export default function RemisionesPage() {
           {(d.sin_clave_sae ?? 0) > 0 ? (
             <Badge tone="warning">{d.sin_clave_sae} SIN CLAVE SAE</Badge>
           ) : null}
+          {(d.clave_no_en_sae ?? 0) > 0 ? (
+            <Badge tone="warning">
+              {d.clave_no_en_sae} CLAVE{d.clave_no_en_sae === 1 ? "" : "S"} QUE SAE NO TIENE
+            </Badge>
+          ) : null}
         </div>
         {d.revision_pendiente ? (
           <Alert tone="warning">
@@ -1417,6 +1422,60 @@ export default function RemisionesPage() {
                 <span className="text-xs text-muted">
                   Se guardan en el producto: la próxima remisión ya las trae puestas.
                 </span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {(d.clave_no_en_sae ?? 0) > 0 ? (
+          <div className="mt-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
+            <div className="mb-1 font-medium">
+              {d.clave_no_en_sae === 1
+                ? `1 partida con una clave que la empresa ${d.empresa_sae ?? ""} de SAE no factura`
+                : `${d.clave_no_en_sae} partidas con claves que la empresa ${d.empresa_sae ?? ""} de SAE no factura`}
+            </div>
+            <p className="mb-2 text-xs text-muted">
+              La clave está puesta, pero es de <b>otra empresa</b>: cada empresa de SAE tiene su
+              propio catálogo de artículos. Al importar, esa empresa descartaría estas partidas y
+              la factura saldría incompleta. Elige una clave que sí exista aquí, o da de alta el
+              artículo en SAE con esa misma clave.
+            </p>
+            <ul className="space-y-1">
+              {d.lineas.filter((l) => l.clave_no_en_sae).map((l) => (
+                <li key={l.id} className="flex flex-wrap items-center gap-2 tabular-nums">
+                  <span className="min-w-56">
+                    <span className="text-muted">{l.numero_linea}.</span>{" "}
+                    {l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id}
+                    <span className="ml-2 text-xs text-warning">
+                      {l.clave_no_en_sae}
+                      {l.clave_de_baja_en_sae ? " · dada de BAJA" : " · no existe ahí"}
+                    </span>
+                  </span>
+                  {puedeProductos ? (
+                    <ClaveSaeInline
+                      remisionId={d.id}
+                      productoId={l.producto_id}
+                      productoNombre={l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? ""}
+                      value={clavesPendientes[l.producto_id] ?? ""}
+                      onChange={(v) =>
+                        setClavesPendientes((m) => {
+                          const copia = { ...m };
+                          if (v) copia[l.producto_id] = v;
+                          else delete copia[l.producto_id];
+                          return copia;
+                        })
+                      }
+                    />
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            {puedeProductos && pendientesNoFacturables(d) > 0 ? (
+              <div className="mt-3">
+                <Button onClick={() => { void guardarClavesPendientes(d); }} disabled={guardandoClaves}>
+                  {guardandoClaves
+                    ? "Guardando…"
+                    : `Guardar ${pendientesNoFacturables(d)} clave${pendientesNoFacturables(d) === 1 ? "" : "s"}`}
+                </Button>
               </div>
             ) : null}
           </div>
@@ -1533,11 +1592,19 @@ export default function RemisionesPage() {
     return Object.keys(clavesPendientes).filter((pid) => suyos.has(pid)).length;
   }
 
+  /** Lo mismo para el panel de «claves que esta empresa no factura». */
+  function pendientesNoFacturables(d: RemisionDetail): number {
+    const suyos = new Set(d.lineas.filter((l) => l.clave_no_en_sae).map((l) => l.producto_id));
+    return Object.keys(clavesPendientes).filter((pid) => suyos.has(pid)).length;
+  }
+
   /** Escribe de un jalón las claves elegidas en el aviso. Van por el pool para
    *  no abrir veinte conexiones a la vez, y la pantalla recarga UNA vez al
    *  final — el motivo de que el control no guarde solo. */
   async function guardarClavesPendientes(d: RemisionDetail) {
-    const suyos = new Set(d.lineas.filter((l) => l.sin_clave_sae).map((l) => l.producto_id));
+    const suyos = new Set(
+      d.lineas.filter((l) => l.sin_clave_sae || l.clave_no_en_sae).map((l) => l.producto_id),
+    );
     const items = Object.entries(clavesPendientes).filter(([pid]) => suyos.has(pid));
     if (!items.length) return;
     setGuardandoClaves(true);

@@ -680,6 +680,59 @@ def test_cruzar_partida_sin_clave_por_un_producto_del_catalogo(client, env, auth
     assert r.status_code == 409, r.text
 
 
+def test_el_aviso_marca_la_clave_que_esa_empresa_no_factura(client, env, auth_as):
+    """El otro candado del masivo, traído al preflight: la partida TIENE clave,
+    pero es de otra empresa de SAE. Antes la remisión se veía limpia y moría al
+    exportar — el LIMON de Tabasco con una clave de Pachuca (18-sep-2026)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        prod = Producto(tenant_id=env["tenant"], sku=f"L{suffix}", nombre="LIMON PRUEBA",
+                        clave_sat="50300000", unidad_sat="KGM", clave_sae="LIMO-DE-OTRA")
+        db.add(prod)
+        # El espejo de la 02 (la empresa del cliente del fixture) existe, pero no
+        # conoce esa clave; y una segunda, viva, para poder corregir.
+        db.add_all([
+            ClaveSae(tenant_id=env["tenant"], empresa="02", clave="LIMONSINSEMILLKG",
+                     descripcion="LIMON SIN SEMILLA"),
+            ClaveSae(tenant_id=env["tenant"], empresa="02", clave="LIMONVIEJOKG",
+                     descripcion="LIMON (BAJA)", activa=False),
+        ])
+        db.commit()
+        prod_id = str(prod.id)
+    finally:
+        db.close()
+
+    rem = _rem(client, h, env, lineas=[
+        {"producto_id": prod_id, "cantidad_solicitada": 3, "precio_unitario": 20}])
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["sin_clave_sae"] is None          # clave SÍ tiene
+    assert det["clave_no_en_sae"] == 1           # …pero la 02 no la factura
+    assert det["empresa_sae"] == "02"
+    linea = next(ln for ln in det["lineas"] if ln["producto_id"] == prod_id)
+    assert linea["clave_no_en_sae"] == "LIMO-DE-OTRA"
+    assert linea["clave_de_baja_en_sae"] is False
+    # Y la lista lo cuenta igual que el detalle.
+    filas = client.get("/api/v1/remisiones", headers=h,
+                       params={"q": rem["folio_interno"]}).json()["items"]
+    assert next(f for f in filas if f["id"] == rem["id"])["clave_no_en_sae"] == 1
+
+    # Una clave DE BAJA se reporta distinto: existe, pero no factura.
+    client.patch(f"/api/v1/productos/{prod_id}", headers=h, json={"clave_sae": "LIMONVIEJOKG"})
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    linea = next(ln for ln in det["lineas"] if ln["producto_id"] == prod_id)
+    assert linea["clave_de_baja_en_sae"] is True
+
+    # Con una clave que esa empresa sí factura, el aviso se apaga y el export pasa.
+    client.patch(f"/api/v1/productos/{prod_id}", headers=h, json={"clave_sae": "LIMONSINSEMILLKG"})
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["clave_no_en_sae"] is None
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
+    assert pv["ok"] is True, pv
+
+
 def test_el_aviso_calla_para_un_cliente_que_no_va_a_sae(client, env, auth_as):
     """Un cliente sin equivalencia con SAE no se exporta nunca: pedirle claves
     es pedirle que arregle algo que no usa, y ese ruido enseña a ignorar el

@@ -7208,6 +7208,10 @@ export interface components {
             cantidad_solicitada: string;
             /** Cantidad Surtida */
             cantidad_surtida?: string | null;
+            /** Clave De Baja En Sae */
+            clave_de_baja_en_sae?: boolean | null;
+            /** Clave No En Sae */
+            clave_no_en_sae?: string | null;
             /**
              * Id
              * Format: uuid
@@ -9341,6 +9345,8 @@ export interface components {
             almacen_id?: string | null;
             /** Canal */
             canal: string;
+            /** Clave No En Sae */
+            clave_no_en_sae?: number | null;
             /**
              * Cliente Facturacion Id
              * Format: uuid
@@ -9358,6 +9364,8 @@ export interface components {
              * @default []
              */
             devoluciones: components["schemas"]["DevolucionOut"][];
+            /** Empresa Sae */
+            empresa_sae?: string | null;
             /** Estado */
             estado: string;
             /** Factura Estado */
@@ -9460,6 +9468,8 @@ export interface components {
             almacen_id?: string | null;
             /** Canal */
             canal: string;
+            /** Clave No En Sae */
+            clave_no_en_sae?: number | null;
             /**
              * Cliente Facturacion Id
              * Format: uuid
@@ -9472,6 +9482,8 @@ export interface components {
             created_at: string;
             /** Descuento */
             descuento: string;
+            /** Empresa Sae */
+            empresa_sae?: string | null;
             /** Estado */
             estado: string;
             /** Factura Estado */

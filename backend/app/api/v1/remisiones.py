@@ -227,12 +227,16 @@ def _adjuntar_sin_clave(db: Session, tenant_id, rems: list) -> None:
     revisar, no hasta que el lote ya está armado en el modal de exportar.
     Cuenta con el MISMO helper que la validación (services/export_sae), así los
     números siempre casan. Una remisión ya amparada por SAE no se marca."""
-    from ...services.export_sae import lineas_sin_clave
+    from ...services.export_sae import lineas_clave_no_facturable, lineas_sin_clave
 
     pendientes = [r for r in rems if not r.factura_sae and r.estado != "CANCELADA"]
     faltan = lineas_sin_clave(db, tenant_id, pendientes)
+    # Y el otro candado del masivo: la clave está, pero la empresa de SAE de esa
+    # plaza no la factura. Sin esto la remisión se ve limpia y muere al exportar.
+    no_facturables = lineas_clave_no_facturable(db, tenant_id, pendientes)
     for r in rems:
         r.sin_clave_sae = len(faltan.get(r.id, [])) or None
+        r.clave_no_en_sae = len(no_facturables.get(r.id, {})) or None
 
 
 def _adjuntar_oc(db: Session, rems: list) -> None:
@@ -568,8 +572,12 @@ def _decorar_detalle(db: Session, ctx: AuthContext, rem: Remision) -> Remision:
     # Preflight de claves SAE: el conteo del encabezado Y la marca por línea,
     # con el mismo helper que valida el export para que los números casen.
     rem.sin_clave_sae = None
+    rem.clave_no_en_sae = None
     if not rem.factura_sae and rem.estado != "CANCELADA":
-        from ...services.export_sae import lineas_sin_clave
+        from ...services.export_sae import (
+            _clave_para_remision, _claves_sae_de_clientes,
+            lineas_clave_no_facturable, lineas_sin_clave,
+        )
 
         faltan = lineas_sin_clave(db, ctx.tenant_id, [rem]).get(rem.id, [])
         if faltan:
@@ -583,6 +591,20 @@ def _decorar_detalle(db: Session, ctx: AuthContext, rem: Remision) -> Remision:
                     ln.producto_id in sin
                     and Decimal(str(ln.cantidad_solicitada or 0)) > 0
                 )
+        # La clave que la empresa de esta plaza no factura: misma idea, otro
+        # arreglo — la clave existe, pero en la empresa equivocada.
+        no_fact = lineas_clave_no_facturable(db, ctx.tenant_id, [rem]).get(rem.id, {})
+        if no_fact:
+            rem.clave_no_en_sae = len(no_fact)
+            for ln in rem.lineas:
+                dato = no_fact.get(ln.producto_id)
+                if dato and Decimal(str(ln.cantidad_solicitada or 0)) > 0:
+                    ln.clave_no_en_sae, ln.clave_de_baja_en_sae = dato
+            pares = _claves_sae_de_clientes(
+                db, ctx.tenant_id, {rem.cliente_facturacion_id}
+            ).get(rem.cliente_facturacion_id, [])
+            par, _c = _clave_para_remision(pares, rem.sucursal_id) if pares else (None, None)
+            rem.empresa_sae = par[0] if par else None
     return rem
 
 
