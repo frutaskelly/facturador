@@ -1,10 +1,10 @@
 "use client";
 
-// Ponerle su clave de SAE a un producto SIN salir del aviso de la remisión.
+// Elegir la clave de SAE de un producto SIN salir del aviso de la remisión.
 //
-// El aviso ofrecía dos enlaces que abrían un diálogo; para siete partidas eso
-// son catorce clics y siete popups. Aquí la clave se busca y se elige en la
-// misma línea.
+// NO guarda: reporta lo elegido y la pantalla escribe todas juntas con el botón
+// «Guardar». Corregir cinco claves son cinco elecciones y UNA recarga, no cinco
+// recargas que te devuelven al principio de la lista cada vez.
 //
 // Lo primero que muestra es «lo que este producto ya usa», porque casi nunca
 // falta la clave: está guardada donde no ampara. El CILANTRO de EHMO tenía
@@ -17,8 +17,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 
-import { useToast } from "@/components/ui/Toast";
-import { ApiError, apiFetch } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 type ClaveSugerida = {
   clave: string;
@@ -45,21 +44,24 @@ export function ClaveSaeInline({
   remisionId,
   productoId,
   productoNombre,
-  onGuardada,
+  value,
+  onChange,
 }: {
   remisionId: string;
   productoId: string;
   productoNombre: string;
-  /** Ya quedó: la pantalla recarga para que el aviso se apague. */
-  onGuardada: () => void;
+  /** La clave elegida y todavía sin guardar. */
+  value: string;
+  onChange: (clave: string) => void;
 }) {
-  const toast = useToast();
   const [abierto, setAbierto] = useState(false);
-  const [texto, setTexto] = useState("");
+  const [texto, setTexto] = useState(value);
   const [datos, setDatos] = useState<Respuesta | null>(null);
   const [cargando, setCargando] = useState(false);
-  const [guardando, setGuardando] = useState<string | null>(null);
   const caja = useRef<HTMLDivElement>(null);
+
+  // El valor que manda es el de la pantalla (se limpia al guardar).
+  useEffect(() => setTexto(value), [value]);
 
   useEffect(() => {
     function fuera(e: MouseEvent) {
@@ -88,21 +90,10 @@ export function ClaveSaeInline({
   const enLista = (datos?.claves ?? []).some((c) => c.clave.toUpperCase() === limpia);
   const enUso = (datos?.ya_usa ?? []).some((c) => c.clave.toUpperCase() === limpia);
 
-  async function guardar(clave: string) {
-    setGuardando(clave);
-    try {
-      await apiFetch(`/api/v1/productos/${productoId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ clave_sae: clave }),
-      });
-      toast.success(`${productoNombre} ya es ${clave} en SAE`);
-      setAbierto(false);
-      onGuardada();
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la clave");
-    } finally {
-      setGuardando(null);
-    }
+  function elegir(clave: string) {
+    setTexto(clave);
+    onChange(clave);
+    setAbierto(false);
   }
 
   function Fila({
@@ -111,8 +102,7 @@ export function ClaveSaeInline({
     return (
       <button
         type="button"
-        disabled={guardando !== null}
-        onClick={() => void guardar(clave)}
+        onClick={() => elegir(clave)}
         className={`flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-surface-2 disabled:opacity-60 ${
           tono === "usa" ? "bg-success/5" : ""
         }`}
@@ -122,26 +112,24 @@ export function ClaveSaeInline({
           {detalle ? <span className="ml-2 text-xs text-muted">{detalle}</span> : null}
           {aviso ? <span className="block text-xs text-warning">{aviso}</span> : null}
         </span>
-        {guardando === clave ? (
-          <span className="shrink-0 text-xs text-muted">guardando…</span>
-        ) : (
-          <Check size={14} className="mt-0.5 shrink-0 text-muted" />
-        )}
+        <Check size={14} className="mt-0.5 shrink-0 text-muted" />
       </button>
     );
   }
 
   return (
     <div ref={caja} className="relative inline-block w-72 align-middle">
-      <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1">
+      <div className={`flex items-center gap-1 rounded-lg border bg-background px-2 py-1 ${
+        value ? "border-accent" : "border-border"
+      }`}>
         <input
           className="w-full bg-transparent text-sm outline-none"
           placeholder="Clave SAE: buscar o escribir…"
           value={texto}
           onFocus={() => setAbierto(true)}
-          onChange={(e) => { setTexto(e.target.value); setAbierto(true); }}
+          onChange={(e) => { setTexto(e.target.value); onChange(e.target.value.trim().toUpperCase()); setAbierto(true); }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && limpia) { e.preventDefault(); void guardar(limpia); }
+            if (e.key === "Enter" && limpia) { e.preventDefault(); elegir(limpia); }
             else if (e.key === "Escape") setAbierto(false);
           }}
         />
@@ -203,10 +191,9 @@ export function ClaveSaeInline({
           {limpia && !enLista && !enUso ? (
             <button
               type="button"
-              disabled={guardando !== null}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => void guardar(limpia)}
-              className="flex w-full flex-col items-start border-t border-border px-3 py-2 text-left text-sm hover:bg-accent/5 disabled:opacity-60"
+              onClick={() => elegir(limpia)}
+              className="flex w-full flex-col items-start border-t border-border px-3 py-2 text-left text-sm hover:bg-accent/5"
             >
               <span className="font-medium text-accent">Usar «{limpia}» tal cual</span>
               {datos?.espejo ? (
