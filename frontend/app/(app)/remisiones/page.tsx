@@ -1243,11 +1243,31 @@ export default function RemisionesPage() {
   // confirmar, cancelar, facturar): el slide-down y getDetalle vuelven a pedir
   // datos frescos en el siguiente uso.
   function invalidarDetalles(ids: string[]) {
+    // Las que estaban cargadas hay que VOLVER A PEDIRLAS, no sólo tirarlas:
+    // `verDetalle` corre al EXPANDIR la fila, así que una fila ya abierta no
+    // vuelve a pedir nada sola y su panel se queda con el spinner girando para
+    // siempre. Se nota al guardar claves desde el propio panel — lo que se
+    // acaba de tocar es justo lo que está abierto.
+    const abiertas = ids.filter((id) => detalles[id]);
     setDetalles((m) => {
       const n = { ...m };
       for (const id of ids) delete n[id];
       return n;
     });
+    for (const id of abiertas) void recargarDetalle(id);
+  }
+
+  async function recargarDetalle(id: string) {
+    setDetalleLoading((s) => new Set(s).add(id));
+    try {
+      const d = await apiFetch<RemisionDetail>(`/api/v1/remisiones/${id}`);
+      setDetalles((m) => ({ ...m, [id]: d }));
+    } catch (e) {
+      // Sin detalle el panel enseña su spinner; plegar y abrir reintenta.
+      toast.error(e instanceof ApiError ? e.message : "No se pudo recargar el detalle");
+    } finally {
+      setDetalleLoading((s) => { const n = new Set(s); n.delete(id); return n; });
+    }
   }
 
   async function verDetalle(f: Fila) {
