@@ -152,6 +152,15 @@ class ContextoPreciosOut(BaseModel):
     # Productos que SÍ tienen precio en este contexto (listas aplicables +
     # overrides): alimenta el badge $ del buscador sin cotizar uno por uno.
     productos_con_precio: list[uuid.UUID] = Field(default_factory=list)
+    # La clave de SAE con la que saldría CADA producto en este documento, ya
+    # resuelta con la cascada del export (plaza del cliente → genérica → clave
+    # base del producto). La captura la muestra por línea: el «sin clave» se ve
+    # al capturar, no al exportar tres días después.
+    claves_sae: dict[uuid.UUID, str] = Field(default_factory=dict)
+    # De ésas, las que vienen del catálogo de ESTE cliente y no del producto:
+    # editarlas es otra cosa (toca sólo a él), así que la pantalla no deja
+    # cambiarlas de pasada.
+    claves_del_cliente: list[uuid.UUID] = Field(default_factory=list)
 
 
 # ── Cotización (precio resuelto) ──

@@ -5250,6 +5250,12 @@ export interface components {
         };
         /** ContextoPreciosOut */
         ContextoPreciosOut: {
+            /** Claves Del Cliente */
+            claves_del_cliente?: string[];
+            /** Claves Sae */
+            claves_sae?: {
+                [key: string]: string;
+            };
             lista?: components["schemas"]["ContextoListaOut"] | null;
             /**
              * Listas Por Proyecto Omitidas

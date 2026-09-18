@@ -833,6 +833,31 @@ def test_claves_sae_buscables_desde_la_remision(client, env, auth_as):
     assert out["claves"][0]["producto_nombre"] == "ACEITE 20 LT"
 
 
+def test_el_contexto_trae_la_clave_sae_por_producto(client, env, auth_as):
+    """La captura enseña la clave por línea sin preguntar producto por producto:
+    viaja con el contexto de precios, ya resuelta con la cascada del export. Y
+    marca cuáles vienen del catálogo del CLIENTE, que no se editan de pasada."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        suyo = Producto(tenant_id=env["tenant"], sku=f"1{suffix}", nombre="BETABEL",
+                        clave_sat="50300000", unidad_sat="KGM", clave_sae="BETABELKG")
+        db.add(suyo); db.commit()
+        suyo_id = str(suyo.id)
+    finally:
+        db.close()
+
+    ctx = client.get("/api/v1/precios/contexto", headers=h,
+                     params={"cliente_id": env["cli"]}).json()
+    # La base del producto…
+    assert ctx["claves_sae"][suyo_id] == "BETABELKG"
+    assert suyo_id not in ctx["claves_del_cliente"]
+    # …y la del catálogo del cliente la pisa, señalada como suya.
+    assert ctx["claves_sae"][env["prod"]] == "ACEI-ACEI-639"
+    assert env["prod"] in ctx["claves_del_cliente"]
+
+
 def test_el_buscador_ofrece_primero_lo_que_el_producto_ya_usa(client, env, auth_as):
     """Casi nunca falta la clave: está guardada donde no ampara. El CILANTRO de
     EHMO tenía CILANTROKG amarrado a Tabasco y la remisión era de Pachuca. Con

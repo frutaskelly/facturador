@@ -3298,6 +3298,21 @@
    },
    "ContextoPreciosOut": {
     "properties": {
+     "claves_del_cliente": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Claves Del Cliente",
+      "type": "array"
+     },
+     "claves_sae": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "title": "Claves Sae",
+      "type": "object"
+     },
      "lista": {
       "anyOf": [
        {
