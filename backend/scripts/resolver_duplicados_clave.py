@@ -132,6 +132,39 @@ def main() -> int:
             continue
         decididos.append((cod, viejo, nuevo))
 
+    # Una clave que YA tiene dueño no se le quita a nadie. Pasa cuando alguien
+    # la asignó a mano desde la pantalla —y a veces al revés de esta regla, al
+    # gemelo en vez de al viejo—: esa es una decisión de una persona mirando el
+    # caso, y un script no la pisa. Se reporta para que quien la tomó confirme.
+    cur.execute(
+        "select p.id, upper(btrim(p.clave_sae)), p.nombre from productos p"
+        " join tenants t on t.id = p.tenant_id"
+        " where t.slug = %(tenant)s and p.deleted_at is null and p.clave_sae is not null",
+        {"tenant": args.tenant},
+    )
+    dueno_de = {clave: (pid, nombre) for pid, clave, nombre in cur.fetchall()}
+    reasignadas = []
+    for cod, v, g in list(decididos):
+        dueno = dueno_de.get(cod)
+        if dueno is None or dueno[0] == v["id"]:
+            continue                       # libre, o ya es del viejo: adelante
+        if dueno[0] == g["id"]:
+            # La tiene el gemelo (alguien la capturó a mano el 18-sep, al revés
+            # de la regla). Decisión del dueño: manda la regla — se le quita al
+            # apagarlo y pasa al viejo.
+            reasignadas.append((cod, dueno[1], v["nombre"]))
+            continue
+        decididos.remove((cod, v, g))
+        saltados["la clave es de un TERCER producto"].append(
+            (cod, [f"{dueno[1]} la tiene · el viejo sería {v['nombre']}"]))
+
+    for cod, v, g in list(decididos):
+        suya = (v["clave_sae"] or "").strip().upper()
+        if suya and suya != cod:
+            decididos.remove((cod, v, g))
+            saltados["el viejo ya tiene OTRA clave"].append(
+                (cod, [f"{v['nombre']} tiene {suya}"]))
+
     # Un producto no puede quedarse DOS claves: el índice único sólo deja una y
     # el UPDATE aplicaría cualquiera de las dos en silencio. Pasa cuando SAE
     # mismo tiene el artículo duplicado (CALABAZACASTIKG y CALABAZACASTILKG son
@@ -152,6 +185,11 @@ def main() -> int:
 
     print(f"claves en disputa            : {len(por_clave)}")
     print(f"  · resueltas (gana el viejo): {len(decididos)}")
+    if reasignadas:
+        print(f"  · de ésas, {len(reasignadas)} le QUITAN la clave al gemelo"
+              f" (se capturó a mano al revés de la regla):")
+        for cod, tenia, pasa_a in reasignadas:
+            print(f"      {cod:18} {tenia[:28]:28} → {pasa_a[:34]}")
     for cod, v, g in decididos[:12]:
         print(f"      {cod:18} {v['nombre'][:34]:34} ${v['imp']:>9,.0f}"
               f"   ⟵ se apaga: {g['nombre'][:28]} (${g['imp']:,.0f})")
@@ -187,17 +225,19 @@ def main() -> int:
         print("      se quedan como están: " + ", ".join(f"{k} {v}" for k, v in estados.items()))
 
     if args.aplicar:
+        # PRIMERO se apaga al gemelo y se le quita la clave: si no, el índice
+        # único rechaza dárse la al viejo (la del gemelo sigue ocupándola).
+        cur.execute(
+            "update productos set activo = false, clave_sae = null, updated_at = now()"
+            " where id = any(%s::uuid[])",
+            ([str(g["id"]) for _, _, g in decididos],),
+        )
         execute_values(
             cur,
             "update productos p set clave_sae = v.cod, updated_at = now()"
             " from (values %s) as v(pid, cod)"
             " where p.id = v.pid::uuid and p.clave_sae is null",
             [(str(viejo["id"]), cod) for cod, viejo, _ in decididos],
-        )
-        cur.execute(
-            "update productos set activo = false, updated_at = now()"
-            " where id = any(%s::uuid[]) and activo",
-            ([str(g["id"]) for _, _, g in decididos],),
         )
         print(f"→ clave puesta a {len(decididos)} productos viejos; gemelos desactivados")
 
