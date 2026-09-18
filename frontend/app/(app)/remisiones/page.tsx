@@ -1343,7 +1343,7 @@ export default function RemisionesPage() {
                       cruzar con otro producto
                     </button>
                   ) : null}
-                  {puedeCatalogo ? (
+                  {puedeCatalogo || puedeProductos ? (
                     <button
                       onClick={() => setPartidaSinClave({ rem: d, linea: l, modo: "clave" })}
                       className="text-xs text-accent underline hover:no-underline"
@@ -2979,6 +2979,8 @@ export default function RemisionesPage() {
           clienteNombre={cliName[partidaSinClave?.rem.cliente_facturacion_id ?? ""] ?? "el cliente"}
           plazaNombre={sucNombre[partidaSinClave?.rem.sucursal_id ?? ""]}
           puedeCatalogo={puedeCatalogo}
+          puedeProductos={puedeProductos}
+          claveBase={prodById[partidaSinClave?.linea.producto_id ?? ""]?.clave_sae}
           onClose={() => setPartidaSinClave(null)}
           onListo={() => {
             const id = partidaSinClave?.rem.id;

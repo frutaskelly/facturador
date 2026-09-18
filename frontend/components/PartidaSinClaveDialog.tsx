@@ -9,9 +9,11 @@
 // están las dos, y hay que elegir cuál es el caso:
 //
 //   • «Va a otro producto»  → se re-apunta la línea (POST …/cruzar).
-//   • «Es este producto»    → se le captura su clave (PUT …/catalogo/…), y se
-//     elige del espejo de SAE en vez de teclearla de memoria: así salió la
-//     FRESADOMOPZ que SAE no conocía y descartó al importar (14-sep-2026).
+//   • «Es este producto»    → se le captura su clave, elegida del espejo de SAE
+//     en vez de tecleada de memoria: así salió la FRESADOMOPZ que SAE no
+//     conocía y descartó al importar (14-sep-2026). Desde el 18-sep la clave
+//     normal es la del PRODUCTO —la misma en todas las empresas de SAE—, y la
+//     del catálogo del cliente quedó para la excepción.
 //
 // Lo que no se decide solo: el precio al cruzar, hasta dónde llega lo aprendido
 // y si la clave vale para todas las plazas o solo para esta.
@@ -60,6 +62,8 @@ export function PartidaSinClaveDialog({
   clienteNombre,
   plazaNombre,
   puedeCatalogo,
+  puedeProductos,
+  claveBase,
   onClose,
   onListo,
 }: {
@@ -74,9 +78,14 @@ export function PartidaSinClaveDialog({
   linea: LineaRemision | null;
   clienteNombre: string;
   plazaNombre?: string;
-  /** Capturar la clave escribe en el catálogo del cliente (`cliente:gestionar`);
-   *  sin ese permiso esa salida no se ofrece. */
+  /** Capturar la clave en el catálogo del cliente pide `cliente:gestionar`;
+   *  sin ese permiso ni ese ni el de producto, esa salida no se ofrece. */
   puedeCatalogo: boolean;
+  /** Escribir la clave BASE del producto pide `producto:gestionar`. */
+  puedeProductos: boolean;
+  /** La clave base que ya tenga el producto (informativa: con ella puesta esta
+   *  partida no estaría sin clave). */
+  claveBase?: string | null;
   onClose: () => void;
   /** Ya quedó (cruzada o con clave): la pantalla recarga lista y detalle. */
   onListo: () => void;
@@ -99,14 +108,14 @@ export function PartidaSinClaveDialog({
   // ── capturar la clave ──
   const [claveTexto, setClaveTexto] = useState("");
   const [sugerencias, setSugerencias] = useState<ClavesSae | null>(null);
-  const [alcanceClave, setAlcanceClave] = useState<"generica" | "plaza">("generica");
+  const [alcanceClave, setAlcanceClave] = useState<"base" | "generica" | "plaza">("base");
 
   const texto = textoOriginalDe(linea?.notas);
   const clienteId = remision?.cliente_facturacion_id ?? null;
 
   useEffect(() => {
     if (!open) return;
-    setModo(puedeCatalogo ? modoInicial : "cruzar");
+    setModo(puedeCatalogo || puedeProductos ? modoInicial : "cruzar");
     setPick(null);
     setPresentacion("");
     setCantidad(String(linea?.cantidad_solicitada ?? ""));
@@ -114,7 +123,7 @@ export function PartidaSinClaveDialog({
     setPrecioLista(undefined);
     setAprender(true);
     setAlcance("cliente");
-    setClaveTexto("");
+    setClaveTexto(claveBase ?? "");
     setSugerencias(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, linea?.id]);
@@ -164,8 +173,12 @@ export function PartidaSinClaveDialog({
   );
   useEffect(() => {
     if (!open) return;
-    setAlcanceClave(otrasPlazas.length > 0 && remision?.sucursal_id ? "plaza" : "generica");
-  }, [open, otrasPlazas.length, remision?.sucursal_id]);
+    // La clave normal es la del producto. Sólo se arranca acotado cuando este
+    // producto YA tiene clave propia en otra plaza (EHMO Pachuca contra
+    // Villahermosa): ahí la base sería mentira para la otra.
+    if (otrasPlazas.length > 0 && remision?.sucursal_id) setAlcanceClave("plaza");
+    else setAlcanceClave(puedeProductos ? "base" : "generica");
+  }, [open, otrasPlazas.length, remision?.sucursal_id, puedeProductos]);
 
   function onPick(p: ProductoPick | null) {
     setPick(p);
@@ -250,6 +263,16 @@ export function PartidaSinClaveDialog({
 
   async function capturarClave() {
     if (!remision || !linea) return;
+    if (alcanceClave === "base") {
+      // La clave del artículo, en el producto: vale para todas las empresas de
+      // SAE y para todos los clientes. Es el caso normal desde el 18-sep-2026.
+      await apiFetch(`/api/v1/productos/${linea.producto_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ clave_sae: claveLimpia }),
+      });
+      toast.success(`${linea.producto_nombre ?? "El producto"} ya es ${claveLimpia} en SAE`);
+      return;
+    }
     await apiFetch(`/api/v1/clientes/${remision.cliente_facturacion_id}/catalogo/${linea.producto_id}`, {
       method: "PUT",
       body: JSON.stringify({
@@ -259,7 +282,8 @@ export function PartidaSinClaveDialog({
     });
     toast.success(
       `${linea.producto_nombre ?? "El producto"} sale a SAE como ${claveLimpia}` +
-        (alcanceClave === "plaza" && plazaNombre ? ` en ${plazaNombre}` : ""),
+        (alcanceClave === "plaza" && plazaNombre ? ` en ${plazaNombre}` : "") +
+        `, sólo para ${clienteNombre}`,
     );
   }
 
@@ -316,7 +340,7 @@ export function PartidaSinClaveDialog({
           ) : null}
         </div>
 
-        {puedeCatalogo ? (
+        {puedeCatalogo || puedeProductos ? (
           <fieldset className="space-y-1.5">
             <legend className="mb-1 text-sm font-medium">¿Qué pasó con esta partida?</legend>
             <label className="flex items-start gap-2 text-sm">
@@ -338,7 +362,7 @@ export function PartidaSinClaveDialog({
                 onChange={() => setModo("clave")}
               />
               <span>
-                <b>Es este producto</b> y es nuevo para {clienteNombre}: captúrale su clave.
+                <b>Es este producto</b> y le falta su clave: captúrasela.
               </span>
             </label>
           </fieldset>
@@ -554,13 +578,27 @@ export function PartidaSinClaveDialog({
 
             <fieldset className="space-y-1.5">
               <legend className="mb-1 text-sm font-medium">¿Dónde vale esta clave?</legend>
+              {puedeProductos ? (
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="radio"
+                    className="mt-0.5"
+                    checked={alcanceClave === "base"}
+                    onChange={() => setAlcanceClave("base")}
+                  />
+                  <span>
+                    <b>Es la clave del producto</b> — la misma en todas las empresas de SAE y para
+                    todos los clientes. <span className="text-muted">Lo normal.</span>
+                  </span>
+                </label>
+              ) : null}
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="radio"
                   checked={alcanceClave === "generica"}
                   onChange={() => setAlcanceClave("generica")}
                 />
-                <span>En todas las plazas de {clienteNombre}</span>
+                <span>Sólo para {clienteNombre}, en todas sus plazas</span>
               </label>
               {remision?.sucursal_id ? (
                 <label className="flex items-center gap-2 text-sm">
@@ -569,7 +607,7 @@ export function PartidaSinClaveDialog({
                     checked={alcanceClave === "plaza"}
                     onChange={() => setAlcanceClave("plaza")}
                   />
-                  <span>Solo en {plazaNombre || "esta plaza"}</span>
+                  <span>Sólo para {clienteNombre} en {plazaNombre || "esta plaza"}</span>
                 </label>
               ) : null}
               {otrasPlazas.length > 0 ? (
@@ -582,8 +620,14 @@ export function PartidaSinClaveDialog({
             </fieldset>
 
             <p className="text-xs text-muted">
-              Esto escribe en el catálogo de {clienteNombre}: la clave es el <b>NoIdentificacion</b>{" "}
-              de todos sus CFDI futuros de este producto, y la CVE_ART con la que sale al masivo.
+              {alcanceClave === "base"
+                ? <>Esto cambia el <b>producto</b>: la clave queda para todos los clientes y todas
+                   las empresas de SAE. No toca lo ya facturado — sólo lo que se exporte de aquí en
+                   adelante.</>
+                : <>Esto escribe en el catálogo de {clienteNombre}: la clave es el{" "}
+                   <b>NoIdentificacion</b> de sus CFDI futuros de este producto y la CVE_ART con la
+                   que sale al masivo. Úsalo cuando ESE cliente use una clave distinta a la del
+                   producto.</>}
             </p>
           </>
         )}

@@ -239,9 +239,21 @@ def _codigos_cliente(
     )
     if producto_ids is not None:
         q = q.filter(ProductoCliente.producto_id.in_(producto_ids or [None]))
-    return {
+    out = {
         (f.cliente_id, f.producto_id, f.sucursal_id): f.codigo_cliente for f in q.all()
     }
+    # La clave BASE del producto entra al MISMO dict bajo (None, producto,
+    # None): `cliente_id` es NOT NULL, así que esa llave no puede chocar con la
+    # de un cliente, y así los cuatro puntos que resuelven una línea heredan el
+    # respaldo sin cambiar de firma.
+    qb = db.query(Producto.id, Producto.clave_sae).filter(
+        Producto.tenant_id == tenant_id, Producto.clave_sae.isnot(None)
+    )
+    if producto_ids is not None:
+        qb = qb.filter(Producto.id.in_(producto_ids or [None]))
+    for pid, clave in qb.all():
+        out[(None, pid, None)] = clave
+    return out
 
 
 def catalogo_sae(db: Session, tenant_id: UUID, empresa: Optional[str]) -> Optional[dict]:
@@ -264,14 +276,22 @@ def codigo_cliente_de(
     codigos: dict, cliente_id, producto_id, sucursal_id
 ) -> Optional[str]:
     """La clave para UNA línea: la fila de SU sucursal gana; si no hay, cae la
-    genérica. La clave de OTRA plaza jamás ampara (misma regla que
-    _clave_para_remision): prestarla mandaría a la otra empresa SAE una clave
-    que su inventario no conoce — o, peor, que sí conoce y es otro artículo."""
+    genérica del cliente; y si tampoco, la clave BASE del producto.
+
+    La clave de OTRA plaza jamás ampara (misma regla que _clave_para_remision):
+    prestarla mandaría a la otra empresa SAE una clave que su inventario no
+    conoce — o, peor, que sí conoce y es otro artículo. La base sí ampara en
+    todas, porque es justo lo que significa: el mismo artículo en las tres
+    empresas (decisión del dueño, 18-sep-2026).
+    """
     if sucursal_id is not None:
         clave = codigos.get((cliente_id, producto_id, sucursal_id))
         if clave is not None:
             return clave
-    return codigos.get((cliente_id, producto_id, None))
+    clave = codigos.get((cliente_id, producto_id, None))
+    if clave is not None:
+        return clave
+    return codigos.get((None, producto_id, None))
 
 
 def lineas_sin_clave(db: Session, tenant_id: UUID, rems: list) -> dict:
