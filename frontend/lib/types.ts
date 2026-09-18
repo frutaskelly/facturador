@@ -200,6 +200,12 @@ export type ContextoPrecios = {
    *  proyecto no puede ganar — alimenta el aviso "elige el proyecto". */
   listas_por_proyecto_omitidas: number;
   productos_con_precio: string[];
+  /** {producto_id: clave} con la que saldría cada producto en ESTE documento,
+   *  ya resuelta (plaza del cliente → genérica → clave base del producto). */
+  claves_sae: Record<string, string>;
+  /** De ésas, las que vienen del catálogo del cliente y no del producto: se
+   *  muestran pero no se editan de pasada (tocarlas afecta sólo a él). */
+  claves_del_cliente: string[];
 };
 
 export type TipoSerie = "FISCAL" | "NO_FISCAL";

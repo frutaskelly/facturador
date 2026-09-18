@@ -833,6 +833,73 @@ def test_claves_sae_buscables_desde_la_remision(client, env, auth_as):
     assert out["claves"][0]["producto_nombre"] == "ACEITE 20 LT"
 
 
+def test_el_contexto_trae_la_clave_sae_por_producto(client, env, auth_as):
+    """La captura enseña la clave por línea sin preguntar producto por producto:
+    viaja con el contexto de precios, ya resuelta con la cascada del export. Y
+    marca cuáles vienen del catálogo del CLIENTE, que no se editan de pasada."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        suyo = Producto(tenant_id=env["tenant"], sku=f"1{suffix}", nombre="BETABEL",
+                        clave_sat="50300000", unidad_sat="KGM", clave_sae="BETABELKG")
+        db.add(suyo); db.commit()
+        suyo_id = str(suyo.id)
+    finally:
+        db.close()
+
+    ctx = client.get("/api/v1/precios/contexto", headers=h,
+                     params={"cliente_id": env["cli"]}).json()
+    # La base del producto…
+    assert ctx["claves_sae"][suyo_id] == "BETABELKG"
+    assert suyo_id not in ctx["claves_del_cliente"]
+    # …y la del catálogo del cliente la pisa, señalada como suya.
+    assert ctx["claves_sae"][env["prod"]] == "ACEI-ACEI-639"
+    assert env["prod"] in ctx["claves_del_cliente"]
+
+
+def test_el_buscador_ofrece_primero_lo_que_el_producto_ya_usa(client, env, auth_as):
+    """Casi nunca falta la clave: está guardada donde no ampara. El CILANTRO de
+    EHMO tenía CILANTROKG amarrado a Tabasco y la remisión era de Pachuca. Con
+    `producto_id`, el buscador devuelve primero lo que ese producto ya trae
+    puesto —en el catálogo de cualquier cliente o plaza— y dice de dónde sale."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        suc = crear_sucursal(db, tenant_id=env["tenant"], cliente_id=env["cli"],
+                             nombre="Tabasco Lejos")
+        prod = Producto(tenant_id=env["tenant"], sku=f"2{suffix}", nombre="CILANTRO",
+                        clave_sat="50300000", unidad_sat="KGM")
+        db.add(prod); db.flush()
+        # La clave existe… acotada a OTRA plaza: por eso la remisión la ve faltante.
+        db.add(ProductoCliente(tenant_id=env["tenant"], cliente_id=env["cli"],
+                               producto_id=prod.id, sucursal_id=suc.id,
+                               codigo_cliente="CILANTROKG"))
+        db.add(ClaveSae(tenant_id=env["tenant"], empresa="02", clave="CILANTROKG",
+                        descripcion="CILANTRO"))
+        db.commit()
+        prod_id = str(prod.id)
+    finally:
+        db.close()
+
+    rem = _rem(client, h, env, lineas=[
+        {"producto_id": prod_id, "cantidad_solicitada": 1, "precio_unitario": 20}])
+    assert client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()["sin_clave_sae"] == 1
+
+    out = client.get(f"/api/v1/remisiones/{rem['id']}/claves-sae", headers=h,
+                     params={"producto_id": prod_id, "q": "cilantro"}).json()
+    assert [c["clave"] for c in out["ya_usa"]] == ["CILANTROKG"]
+    assert "Tabasco Lejos" in out["ya_usa"][0]["de_donde"]
+    assert out["ya_usa"][0]["activa"] is True          # la 02 sí la tiene viva
+
+    # Y ponerla como clave del producto apaga el aviso.
+    r = client.patch(f"/api/v1/productos/{prod_id}", headers=h,
+                     json={"clave_sae": "CILANTROKG"})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()["sin_clave_sae"] is None
+
+
 def test_claves_sae_sin_espejo_no_promete_nada(client, env, auth_as):
     """Sin espejo del catálogo la pantalla no puede validar nada: lo dice y deja
     capturar libre (mismo fail-open que el export)."""

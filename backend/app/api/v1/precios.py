@@ -338,11 +338,43 @@ def contexto_precios(
         q = db.query(PrecioOverride.producto_id).filter(_or(*condiciones)).distinct()
         con_precio.update(pid for (pid,) in _vigente(q, PrecioOverride, fecha).all())
 
+    # La clave de SAE por producto, con la MISMA cascada del export: la clave
+    # base del producto, pisada por la genérica del cliente, pisada por la de su
+    # plaza. Sale en una consulta y viaja con el contexto, así la captura puede
+    # enseñarla por línea sin preguntar producto por producto.
+    from ...models import ProductoCliente as _PC
+
+    claves: dict = {}
+    del_cliente: set = set()
+    for pid, clave in (
+        db.query(Producto.id, Producto.clave_sae)
+        .filter(Producto.tenant_id == ctx.tenant_id, Producto.clave_sae.isnot(None))
+        .all()
+    ):
+        claves[pid] = clave
+    if cliente_id is not None:
+        filas = (
+            db.query(_PC.producto_id, _PC.sucursal_id, _PC.codigo_cliente)
+            .filter(_PC.cliente_id == cliente_id, _PC.codigo_cliente.isnot(None))
+            .all()
+        )
+        for pid, suc, cod in filas:
+            if suc is None:
+                claves[pid] = cod
+                del_cliente.add(pid)
+        if sucursal_id is not None:
+            for pid, suc, cod in filas:
+                if suc == sucursal_id:
+                    claves[pid] = cod
+                    del_cliente.add(pid)
+
     return ContextoPreciosOut(
         lista=lista_out,
         listas_por_sucursal_omitidas=omitidas,
         listas_por_proyecto_omitidas=por_proyecto,
         productos_con_precio=sorted(con_precio, key=str),
+        claves_sae=claves,
+        claves_del_cliente=sorted(del_cliente, key=str),
     )
 
 

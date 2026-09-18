@@ -248,6 +248,20 @@ class ClaveSaeSugerida(BaseModel):
     producto_nombre: Optional[str] = None
 
 
+class ClaveSaeEnUso(BaseModel):
+    """Una clave que ESTE producto ya trae puesta en algún lado — el catálogo de
+    otro cliente, la fila de otra plaza, o su propia clave base.
+
+    Es lo primero que hay que ver al resolver un «sin clave»: casi nunca falta
+    la clave, está guardada donde no ampara (el CILANTRO de EHMO tenía
+    CILANTROKG amarrado a Tabasco y la remisión era de Pachuca)."""
+    clave: str
+    # Del espejo, cuando lo hay: si SAE la conoce y si está viva.
+    descripcion: Optional[str] = None
+    activa: Optional[bool] = None
+    de_donde: str
+
+
 class ClavesSaeOut(BaseModel):
     """El espejo buscable para UNA remisión: la empresa SAE que le toca y las
     claves que esa empresa conoce.
@@ -260,3 +274,6 @@ class ClavesSaeOut(BaseModel):
     espejo: bool = False
     motivo: Optional[str] = None
     claves: list[ClaveSaeSugerida] = []
+    # Con `producto_id`: lo que ese producto ya usa en otro lado. Va primero en
+    # la lista porque es la respuesta correcta la mayoría de las veces.
+    ya_usa: list[ClaveSaeEnUso] = []

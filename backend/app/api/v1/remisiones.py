@@ -74,6 +74,7 @@ from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ...services.sucursales import es_sucursal_de
 from ...schemas.common import Page
 from ...schemas.remision import (
+    ClaveSaeEnUso,
     ClaveSaeSugerida,
     ClavesSaeOut,
     ConfirmarRemisionIn,
@@ -845,10 +846,66 @@ def update_remision(
     return rem
 
 
+def _claves_que_ya_usa(db: Session, producto_id: Optional[UUID], empresa: Optional[str]) -> list:
+    """Las claves que ESE producto ya trae puestas: su clave base y las del
+    catálogo de cualquier cliente o plaza.
+
+    Va primero en el buscador porque casi nunca falta la clave — está guardada
+    donde no ampara. El CILANTRO de EHMO tenía CILANTROKG amarrado a Tabasco y
+    la remisión era de Pachuca; la clave existía, viva, en la empresa 02.
+    """
+    if producto_id is None:
+        return []
+    from ...models.clave_sae import norm_clave
+
+    prod = db.query(Producto).filter(Producto.id == producto_id).one_or_none()
+    if prod is None:
+        return []
+    usos: dict[str, str] = {}
+    if (prod.clave_sae or "").strip():
+        usos[norm_clave(prod.clave_sae)] = "clave del producto"
+    filas = (
+        db.query(ProductoCliente, Cliente.legal_name, Sucursal.nombre)
+        .join(Cliente, Cliente.id == ProductoCliente.cliente_id)
+        .outerjoin(Sucursal, Sucursal.id == ProductoCliente.sucursal_id)
+        .filter(
+            ProductoCliente.producto_id == producto_id,
+            ProductoCliente.codigo_cliente.isnot(None),
+        )
+        .all()
+    )
+    for pc, cliente, plaza in filas:
+        clave = norm_clave(pc.codigo_cliente)
+        if not clave:
+            continue
+        de_donde = cliente + (f" en {plaza}" if plaza else "")
+        usos[clave] = usos.get(clave) or de_donde
+        if usos[clave] != "clave del producto" and usos[clave] != de_donde:
+            usos[clave] = f"{usos[clave]} y otros"
+    espejo = {}
+    if empresa and usos:
+        espejo = {
+            norm_clave(c): (d, a)
+            for c, d, a in db.query(ClaveSae.clave, ClaveSae.descripcion, ClaveSae.activa)
+            .filter(ClaveSae.empresa == empresa, ClaveSae.clave.in_(list(usos)))
+            .all()
+        }
+    return [
+        ClaveSaeEnUso(
+            clave=clave,
+            descripcion=espejo.get(clave, (None, None))[0],
+            activa=espejo.get(clave, (None, None))[1] if clave in espejo else None,
+            de_donde=de_donde,
+        )
+        for clave, de_donde in sorted(usos.items())
+    ]
+
+
 @router.get("/{rem_id}/claves-sae", response_model=ClavesSaeOut)
 def claves_sae_de_remision(
     rem_id: UUID,
     q: str = Query("", max_length=80),
+    producto_id: Optional[UUID] = Query(default=None),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
@@ -875,7 +932,10 @@ def claves_sae_de_remision(
         db, ctx.tenant_id, {rem.cliente_facturacion_id}
     ).get(rem.cliente_facturacion_id, [])
     if not pares:
-        return ClavesSaeOut(motivo="Este cliente no tiene equivalencia con SAE todavía")
+        return ClavesSaeOut(
+            motivo="Este cliente no tiene equivalencia con SAE todavía",
+            ya_usa=_claves_que_ya_usa(db, producto_id, None),
+        )
     par, conflicto = _clave_para_remision(pares, rem.sucursal_id)
     if par is None:
         return ClavesSaeOut(
@@ -894,6 +954,7 @@ def claves_sae_de_remision(
         return ClavesSaeOut(
             empresa=empresa,
             motivo=f"No hay espejo del catálogo de la empresa {empresa}",
+            ya_usa=_claves_que_ya_usa(db, producto_id, empresa),
         )
 
     texto = q.strip()
@@ -928,6 +989,7 @@ def claves_sae_de_remision(
     return ClavesSaeOut(
         empresa=empresa,
         espejo=True,
+        ya_usa=_claves_que_ya_usa(db, producto_id, empresa),
         claves=[
             ClaveSaeSugerida(
                 clave=f.clave,

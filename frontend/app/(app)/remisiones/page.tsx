@@ -8,6 +8,7 @@ import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobo
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
 import { CrearProductoModal, type ProductoCreado } from "@/components/CrearProductoModal";
 import { PartidaSinClaveDialog, type ModoPartida } from "@/components/PartidaSinClaveDialog";
+import { ClaveSaeInline } from "@/components/ClaveSaeInline";
 import { CambioOCPanel } from "./CambioOCPanel";
 import { AprenderPreciosDialog, divergentes, type PrecioDivergente } from "@/components/AprenderPreciosDialog";
 import { NuevaPresentacionDialog } from "@/components/NuevaPresentacionDialog";
@@ -393,7 +394,8 @@ export default function RemisionesPage() {
   const [ctxPrecios, setCtxPrecios] = useState<ContextoPrecios | null>(null);
   const ctxPreciosSeq = useRef(0);
   useEffect(() => {
-    if (mode !== "create" || !clienteId) { setCtxPrecios(null); return; }
+    // También al EDITAR: la columna de clave SAE se usa en los dos modos.
+    if (!clienteId) { setCtxPrecios(null); return; }
     const seq = ++ctxPreciosSeq.current;
     const p = new URLSearchParams({ cliente_id: clienteId });
     if (sucursalId) p.set("sucursal_id", sucursalId);
@@ -407,6 +409,40 @@ export default function RemisionesPage() {
     () => (ctxPrecios ? new Set(ctxPrecios.productos_con_precio) : null),
     [ctxPrecios],
   );
+  // Clave de SAE por producto: lo que dijo el contexto, con lo que se haya
+  // editado en esta captura encima (para no recargar el contexto por tecla).
+  const [clavesEditadas, setClavesEditadas] = useState<Record<string, string>>({});
+  const clavesSae = useMemo(
+    () => ({ ...(ctxPrecios?.claves_sae ?? {}), ...clavesEditadas }),
+    [ctxPrecios, clavesEditadas],
+  );
+  const clavesDelCliente = useMemo(
+    () => new Set(ctxPrecios?.claves_del_cliente ?? []),
+    [ctxPrecios],
+  );
+
+  /** Guarda la clave en el PRODUCTO: queda para todos sus documentos futuros.
+   *  Se llama al salir del campo, sólo si cambió. */
+  async function guardarClaveSae(producto_id: string, valor: string) {
+    const clave = valor.trim().toUpperCase();
+    if (!producto_id || clave === (clavesSae[producto_id] ?? "")) return;
+    setClavesEditadas((m) => ({ ...m, [producto_id]: clave }));
+    try {
+      await apiFetch(`/api/v1/productos/${producto_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ clave_sae: clave || null }),
+      });
+      toast.success(clave ? `Clave de SAE guardada: ${clave}` : "Clave de SAE quitada");
+    } catch (e) {
+      // Se revierte lo pintado: si no se guardó, no puede quedarse en pantalla.
+      setClavesEditadas((m) => {
+        const copia = { ...m };
+        delete copia[producto_id];
+        return copia;
+      });
+      toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la clave de SAE");
+    }
+  }
 
   // Totales del alta calculados por el SERVIDOR (regla "el backend calcula
   // todo"): debounce por tecleo + secuencia contra respuestas fuera de orden.
@@ -1321,35 +1357,44 @@ export default function RemisionesPage() {
             </div>
             <p className="mb-2 text-xs text-muted">
               SAE rechaza claves que no están en su inventario, así que la exportación se va a
-              detener con este mismo conteo. Hay dos salidas: si el producto de verdad es nuevo
-              para el cliente, asígnale su código en Clientes →{" "}
-              {cliName[d.cliente_facturacion_id] ?? "el cliente"} → Catálogo (si la plaza usa clave
-              propia, captúrala con su sucursal); si la partida debía ir a un producto que el
-              cliente ya tiene, <b>crúzala</b> aquí mismo.
+              detener con este mismo conteo. Búscale su clave aquí mismo — el desplegable abre con
+              las que <b>ese producto ya usa en otro lado</b>, que casi siempre son la respuesta, y
+              deja escribir una a mano. Si la partida en realidad iba a otro producto, el cruce
+              está al lado.
             </p>
             <ul className="space-y-0.5">
               {d.lineas.filter((l) => l.sin_clave_sae).map((l) => (
                 <li key={l.id} className="flex flex-wrap items-center gap-2 tabular-nums">
-                  <span>
+                  <span className="min-w-56">
                     <span className="text-muted">{l.numero_linea}.</span>{" "}
                     {l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id}
                   </span>
+                  {puedeProductos ? (
+                    // La clave se elige aquí mismo: con siete partidas, abrir un
+                    // popup por cada una son catorce clics y siete diálogos.
+                    <ClaveSaeInline
+                      remisionId={d.id}
+                      productoId={l.producto_id}
+                      productoNombre={l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? ""}
+                      onGuardada={() => { invalidarDetalles([d.id]); reload(); }}
+                    />
+                  ) : null}
                   {canWrite && puedeEditarse(d) ? (
                     <button
                       onClick={() => setPartidaSinClave({ rem: d, linea: l, modo: "cruzar" })}
-                      className="text-xs text-accent underline hover:no-underline"
-                      title="Mandarla al producto que el cliente sí tiene en SAE"
+                      className="text-xs text-muted underline hover:text-foreground"
+                      title="La partida va a OTRO producto: el cruce falló"
                     >
-                      cruzar con otro producto
+                      va a otro producto
                     </button>
                   ) : null}
-                  {puedeCatalogo || puedeProductos ? (
+                  {puedeCatalogo ? (
                     <button
                       onClick={() => setPartidaSinClave({ rem: d, linea: l, modo: "clave" })}
-                      className="text-xs text-accent underline hover:no-underline"
-                      title="Es un producto nuevo para el cliente: captúrale su clave de SAE"
+                      className="text-xs text-muted underline hover:text-foreground"
+                      title="Cuando ESTE cliente usa una clave distinta a la del producto"
                     >
-                      capturarle su clave
+                      clave sólo para este cliente
                     </button>
                   ) : null}
                 </li>
@@ -2749,10 +2794,12 @@ export default function RemisionesPage() {
 
           <div className="space-y-2">
             <div className="hidden grid-cols-12 gap-2 px-1 text-xs text-muted sm:grid">
-              <div className={showMatchIA ? "col-span-1" : "col-span-2"}>Cantidad</div>
+              <div className="col-span-1">Cantidad</div>
               <div className="col-span-3">{showMatchIA ? "Producto del cliente" : "Producto"}</div>
               {showMatchIA && <div className="col-span-3 inline-flex items-center gap-1"><Sparkles size={12} /> Match IA</div>}
-              <div className="col-span-2">Presentación</div>
+              {/* Mientras se decide QUÉ producto es (Match IA), la clave es ruido. */}
+              {!showMatchIA && <div className="col-span-2">Clave SAE</div>}
+              <div className={showMatchIA ? "col-span-2" : "col-span-1"}>Presentación</div>
               <div className="col-span-2">Precio</div>
               {!showMatchIA && <div className="col-span-1 text-right">IEPS</div>}
               {!showMatchIA && <div className="col-span-1 text-right">IVA</div>}
@@ -2764,7 +2811,7 @@ export default function RemisionesPage() {
               const top = cands[0];
               return (
               <div key={l.key} className="grid grid-cols-12 items-start gap-2">
-                <div className={`col-span-3 ${showMatchIA ? "sm:col-span-1" : "sm:col-span-2"}`}>
+                <div className="col-span-3 sm:col-span-1">
                   <Input
                     inputMode="decimal" value={l.cantidad}
                     ref={(el) => { cellRefs.current[`${l.key}:cantidad`] = el; }}
@@ -2823,7 +2870,38 @@ export default function RemisionesPage() {
                     )}
                   </div>
                 )}
-                <div className="col-span-4 sm:col-span-2">
+                {!showMatchIA && (
+                  <div className="col-span-5 sm:col-span-2">
+                    {l.producto_id ? (
+                      clavesDelCliente.has(l.producto_id) ? (
+                        // Clave del catálogo de ESTE cliente: se enseña, pero
+                        // cambiarla aquí escribiría la del producto y el
+                        // documento seguiría saliendo con la del cliente.
+                        <div
+                          className="truncate rounded-lg border border-border bg-surface-2 px-2 py-2 text-xs text-muted"
+                          title={`Es la clave que ${cliName[clienteId] ?? "este cliente"} usa para este producto. Cámbiala en su catálogo.`}
+                        >
+                          {clavesSae[l.producto_id]} · del cliente
+                        </div>
+                      ) : (
+                        <Input
+                          className="text-xs"
+                          placeholder="sin clave"
+                          defaultValue={clavesSae[l.producto_id] ?? ""}
+                          key={`${l.producto_id}:${clavesSae[l.producto_id] ?? ""}`}
+                          title="La clave del artículo en SAE. Se guarda en el producto: la próxima vez ya viene puesta."
+                          onBlur={(e) => { void guardarClaveSae(l.producto_id, e.target.value); }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+                          }}
+                        />
+                      )
+                    ) : (
+                      <span className="text-xs text-muted">—</span>
+                    )}
+                  </div>
+                )}
+                <div className={`col-span-4 ${showMatchIA ? "sm:col-span-2" : "sm:col-span-1"}`}>
                   <KeyboardCombobox
                     options={[
                       ...(l.presentaciones.length ? l.presentaciones : [l.presentacion]).map((p) => ({ value: p, label: p })),
