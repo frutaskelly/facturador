@@ -7,7 +7,6 @@ import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, RefreshCw
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
 import { CrearProductoModal, type ProductoCreado } from "@/components/CrearProductoModal";
-import { PartidaSinClaveDialog, type ModoPartida } from "@/components/PartidaSinClaveDialog";
 import { ClaveSaeInline } from "@/components/ClaveSaeInline";
 import { CambioOCPanel } from "./CambioOCPanel";
 import { AprenderPreciosDialog, divergentes, type PrecioDivergente } from "@/components/AprenderPreciosDialog";
@@ -412,6 +411,9 @@ export default function RemisionesPage() {
   // Clave de SAE por producto: lo que dijo el contexto, con lo que se haya
   // editado en esta captura encima (para no recargar el contexto por tecla).
   const [clavesEditadas, setClavesEditadas] = useState<Record<string, string>>({});
+  // Lo que se va tecleando en el buscador de la captura, antes de elegir: sin
+  // esto cada tecla sería un PATCH al producto.
+  const [clavesBorrador, setClavesBorrador] = useState<Record<string, string>>({});
   const clavesSae = useMemo(
     () => ({ ...(ctxPrecios?.claves_sae ?? {}), ...clavesEditadas }),
     [ctxPrecios, clavesEditadas],
@@ -1092,8 +1094,6 @@ export default function RemisionesPage() {
   // no se lee). Solo a quien puede tocar precios.
   const puedePrecios = can(me, "lista_precios:gestionar");
   const puedeProductos = can(me, "producto:gestionar");
-  // Capturar la clave de un producto escribe en el catálogo del cliente.
-  const puedeCatalogo = can(me, "cliente:gestionar");
   const [aprender, setAprender] = useState<PrecioDivergente[] | null>(null);
   // Qué sigue después del diálogo de precios divergentes: el flujo normal de
   // Guardar, o guardar+confirmar (botón «Confirmar pedido» de la edición).
@@ -1223,10 +1223,10 @@ export default function RemisionesPage() {
   // Detalle por fila: se carga bajo demanda al expandir la fila (slide-down).
   const [detalles, setDetalles] = useState<Record<string, RemisionDetail>>({});
   const [detalleLoading, setDetalleLoading] = useState<Set<string>>(new Set());
-  // Partida del aviso «sin clave SAE» que se está resolviendo, y por cuál de
-  // las dos salidas se abrió (cruzarla, o capturarle su clave).
-  const [partidaSinClave, setPartidaSinClave] =
-    useState<{ rem: RemisionDetail; linea: LineaRemision; modo: ModoPartida } | null>(null);
+  // Claves de SAE elegidas en el aviso y todavía sin guardar {producto_id: clave}.
+  // Se escriben todas juntas con el botón: cinco correcciones, UNA recarga.
+  const [clavesPendientes, setClavesPendientes] = useState<Record<string, string>>({});
+  const [guardandoClaves, setGuardandoClaves] = useState(false);
   const [toConfirm, setToConfirm] = useState<Remision | null>(null);
   const [toCancel, setToCancel] = useState<Remision | null>(null);
   // Diálogo de elección al guardar el alta: Borrador vs Confirmar salida.
@@ -1359,8 +1359,7 @@ export default function RemisionesPage() {
               SAE rechaza claves que no están en su inventario, así que la exportación se va a
               detener con este mismo conteo. Búscale su clave aquí mismo — el desplegable abre con
               las que <b>ese producto ya usa en otro lado</b>, que casi siempre son la respuesta, y
-              deja escribir una a mano. Si la partida en realidad iba a otro producto, el cruce
-              está al lado.
+              deja escribir una a mano. Elige las que haya que corregir y guárdalas de un jalón.
             </p>
             <ul className="space-y-0.5">
               {d.lineas.filter((l) => l.sin_clave_sae).map((l) => (
@@ -1370,36 +1369,36 @@ export default function RemisionesPage() {
                     {l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id}
                   </span>
                   {puedeProductos ? (
-                    // La clave se elige aquí mismo: con siete partidas, abrir un
-                    // popup por cada una son catorce clics y siete diálogos.
                     <ClaveSaeInline
                       remisionId={d.id}
                       productoId={l.producto_id}
                       productoNombre={l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? ""}
-                      onGuardada={() => { invalidarDetalles([d.id]); reload(); }}
+                      value={clavesPendientes[l.producto_id] ?? ""}
+                      onChange={(v) =>
+                        setClavesPendientes((m) => {
+                          const copia = { ...m };
+                          if (v) copia[l.producto_id] = v;
+                          else delete copia[l.producto_id];
+                          return copia;
+                        })
+                      }
                     />
-                  ) : null}
-                  {canWrite && puedeEditarse(d) ? (
-                    <button
-                      onClick={() => setPartidaSinClave({ rem: d, linea: l, modo: "cruzar" })}
-                      className="text-xs text-muted underline hover:text-foreground"
-                      title="La partida va a OTRO producto: el cruce falló"
-                    >
-                      va a otro producto
-                    </button>
-                  ) : null}
-                  {puedeCatalogo ? (
-                    <button
-                      onClick={() => setPartidaSinClave({ rem: d, linea: l, modo: "clave" })}
-                      className="text-xs text-muted underline hover:text-foreground"
-                      title="Cuando ESTE cliente usa una clave distinta a la del producto"
-                    >
-                      clave sólo para este cliente
-                    </button>
                   ) : null}
                 </li>
               ))}
             </ul>
+            {puedeProductos && pendientesDe(d) > 0 ? (
+              <div className="mt-3 flex items-center gap-3">
+                <Button onClick={() => { void guardarClavesPendientes(d); }} disabled={guardandoClaves}>
+                  {guardandoClaves
+                    ? "Guardando…"
+                    : `Guardar ${pendientesDe(d)} clave${pendientesDe(d) === 1 ? "" : "s"}`}
+                </Button>
+                <span className="text-xs text-muted">
+                  Se guardan en el producto: la próxima remisión ya las trae puestas.
+                </span>
+              </div>
+            ) : null}
           </div>
         ) : null}
         {(d.partidas_por_cruzar?.length ?? 0) > 0 ? (
@@ -1507,6 +1506,52 @@ export default function RemisionesPage() {
       return false;
     }
   }
+  /** Cuántas de las pendientes son de ESTA remisión (el panel es por remisión,
+   *  y el mismo producto puede estar en varias abiertas a la vez). */
+  function pendientesDe(d: RemisionDetail): number {
+    const suyos = new Set(d.lineas.filter((l) => l.sin_clave_sae).map((l) => l.producto_id));
+    return Object.keys(clavesPendientes).filter((pid) => suyos.has(pid)).length;
+  }
+
+  /** Escribe de un jalón las claves elegidas en el aviso. Van por el pool para
+   *  no abrir veinte conexiones a la vez, y la pantalla recarga UNA vez al
+   *  final — el motivo de que el control no guarde solo. */
+  async function guardarClavesPendientes(d: RemisionDetail) {
+    const suyos = new Set(d.lineas.filter((l) => l.sin_clave_sae).map((l) => l.producto_id));
+    const items = Object.entries(clavesPendientes).filter(([pid]) => suyos.has(pid));
+    if (!items.length) return;
+    setGuardandoClaves(true);
+    try {
+      const res = await enPoolSettled(items, LOTE_A_LA_VEZ, ([pid, clave]) =>
+        apiFetch(`/api/v1/productos/${pid}`, {
+          method: "PATCH",
+          body: JSON.stringify({ clave_sae: clave }),
+        }),
+      );
+      // `enPoolSettled` conserva el orden, así que el índice casa con `items`.
+      const malas = new Set(
+        res.flatMap((r, i) => (r.status === "rejected" ? [items[i][0]] : [])),
+      );
+      const ok = items.length - malas.size;
+      if (ok) toast.success(`${ok} clave${ok === 1 ? "" : "s"} guardada${ok === 1 ? "" : "s"}`);
+      // Las que fallaron se quedan en pantalla para corregirlas: una clave
+      // repetida contesta 409 diciendo de qué producto es.
+      for (const r of res.filter((x) => x.status === "rejected").slice(0, 3)) {
+        const e = (r as PromiseRejectedResult).reason;
+        toast.error(e instanceof ApiError ? e.message : "No se pudo guardar una clave");
+      }
+      setClavesPendientes((m) => {
+        const copia = { ...m };
+        for (const [pid] of items) if (!malas.has(pid)) delete copia[pid];
+        return copia;
+      });
+      invalidarDetalles([d.id]);
+      reload();
+    } finally {
+      setGuardandoClaves(false);
+    }
+  }
+
   /** Quita una partida de la lista de «sin cruzar»: o ya se agregó como línea
    *  desde «Editar», o se decidió que no va. Se reenvía la lista completa menos
    *  esa — mientras no quede vacía, la remisión no se da por revisada. */
@@ -2884,15 +2929,26 @@ export default function RemisionesPage() {
                           {clavesSae[l.producto_id]} · del cliente
                         </div>
                       ) : (
-                        <Input
-                          className="text-xs"
-                          placeholder="sin clave"
-                          defaultValue={clavesSae[l.producto_id] ?? ""}
-                          key={`${l.producto_id}:${clavesSae[l.producto_id] ?? ""}`}
-                          title="La clave del artículo en SAE. Se guarda en el producto: la próxima vez ya viene puesta."
-                          onBlur={(e) => { void guardarClaveSae(l.producto_id, e.target.value); }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+                        // Mismo buscador del aviso, con el catálogo de la
+                        // empresa de SAE que le toca a ESTE cliente y plaza.
+                        // Aquí guarda al elegir: la captura no recarga nada.
+                        <ClaveSaeInline
+                          compacto
+                          clienteId={clienteId || null}
+                          sucursalId={sucursalId || null}
+                          productoId={l.producto_id}
+                          productoNombre={l.label || l.texto}
+                          value={clavesBorrador[l.producto_id] ?? clavesSae[l.producto_id] ?? ""}
+                          onChange={(v) =>
+                            setClavesBorrador((m) => ({ ...m, [l.producto_id]: v }))
+                          }
+                          onElegir={(v) => {
+                            void guardarClaveSae(l.producto_id, v);
+                            setClavesBorrador((m) => {
+                              const copia = { ...m };
+                              delete copia[l.producto_id];
+                              return copia;
+                            });
                           }}
                         />
                       )
@@ -3047,25 +3103,6 @@ export default function RemisionesPage() {
           nombreInicial={lineaCrear?.texto ?? ""}
           unidadBaseInicial={unidadBaseDesde(lineaCrear?.presPegada)}
           onCreated={aplicarProductoCreado}
-        />
-
-        <PartidaSinClaveDialog
-          open={partidaSinClave !== null}
-          modoInicial={partidaSinClave?.modo}
-          remision={partidaSinClave?.rem ?? null}
-          linea={partidaSinClave?.linea ?? null}
-          clienteNombre={cliName[partidaSinClave?.rem.cliente_facturacion_id ?? ""] ?? "el cliente"}
-          plazaNombre={sucNombre[partidaSinClave?.rem.sucursal_id ?? ""]}
-          puedeCatalogo={puedeCatalogo}
-          puedeProductos={puedeProductos}
-          claveBase={prodById[partidaSinClave?.linea.producto_id ?? ""]?.clave_sae}
-          onClose={() => setPartidaSinClave(null)}
-          onListo={() => {
-            const id = partidaSinClave?.rem.id;
-            setPartidaSinClave(null);
-            if (id) invalidarDetalles([id]);
-            reload();
-          }}
         />
 
         <NuevaPresentacionDialog

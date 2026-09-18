@@ -33,6 +33,7 @@ from ...schemas.cliente_externo import (
     ResolverIn,
 )
 from ...schemas.common import Page
+from ...schemas.remision import ClavesSaeOut
 from ...schemas.producto import ProductoClienteOut, ProductoClienteUpsert
 from ...services.cliente_codigo import generate_cliente_codigo
 from ...services import cliente_match
@@ -434,6 +435,29 @@ def delete_cliente(
     obj.deleted_at = func.now()
     db.flush()
     return None
+
+
+@router.get("/{cliente_id}/claves-sae", response_model=ClavesSaeOut)
+def claves_sae_del_cliente(
+    cliente_id: UUID,
+    sucursal_id: Optional[UUID] = Query(default=None),
+    q: str = Query("", max_length=80),
+    producto_id: Optional[UUID] = Query(default=None),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """El catálogo de SAE buscable para este cliente en esta plaza.
+
+    Es el mismo servicio que usa el aviso de la remisión, pero sin exigir una
+    remisión: la CAPTURA lo necesita mientras se escribe el documento, cuando
+    todavía no hay nada guardado que consultar.
+    """
+    from ...services.claves_sae import sugerencias_de_claves
+
+    if not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    get_or_404(db, Cliente, cliente_id)
+    return sugerencias_de_claves(db, ctx.tenant_id, cliente_id, sucursal_id, q, producto_id)
 
 
 # ─── Catálogo del cliente (cómo llama ESTE cliente a cada producto) ──────────
