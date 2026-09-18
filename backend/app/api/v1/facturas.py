@@ -17,7 +17,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field as PydField
@@ -1058,22 +1058,21 @@ def depositar_claves_sae(
         )
 
     ahora = datetime.now(timezone.utc)
-    creadas = actualizadas = 0
+    nuevas: list[dict] = []
+    actualizadas = 0
     for clave, item in recibidas.items():
         desc = (item.descripcion or "").strip()[:254] or None
         fila = actuales.get(clave)
         if fila is None:
-            db.add(ClaveSae(
-                tenant_id=ctx.tenant_id, empresa=empresa, clave=clave,
-                descripcion=desc, activa=item.activa, sincronizado_at=ahora,
-            ))
-            creadas += 1
-        else:
-            if fila.activa != item.activa or fila.descripcion != desc:
-                fila.activa = item.activa
-                fila.descripcion = desc
-                actualizadas += 1
-            fila.sincronizado_at = ahora
+            nuevas.append({
+                "id": uuid4(), "tenant_id": ctx.tenant_id, "empresa": empresa,
+                "clave": clave, "descripcion": desc, "activa": item.activa,
+                "sincronizado_at": ahora,
+            })
+        elif fila.activa != item.activa or fila.descripcion != desc:
+            fila.activa = item.activa
+            fila.descripcion = desc
+            actualizadas += 1
 
     sobrantes = [c for c in actuales if c not in recibidas]
     if sobrantes:
@@ -1082,7 +1081,18 @@ def depositar_claves_sae(
             ClaveSae.empresa == empresa,
             ClaveSae.clave.in_(sobrantes),
         ).delete(synchronize_session=False)
+    if nuevas:
+        db.bulk_insert_mappings(ClaveSae, nuevas)
+    # El sello de sincronización, en UN solo UPDATE. Ponerlo fila por fila
+    # ensuciaba las ~2,000 de la empresa y el depósito tardaba más que el
+    # timeout del conector (30 s): el espejo se quedaba días sin actualizar y
+    # nadie se enteraba, porque el bot reportaba «FALLÓ el depósito» en su log
+    # y el Facturador seguía enseñando el catálogo viejo (18-sep-2026).
+    db.query(ClaveSae).filter(
+        ClaveSae.tenant_id == ctx.tenant_id, ClaveSae.empresa == empresa,
+    ).update({ClaveSae.sincronizado_at: ahora}, synchronize_session=False)
     db.flush()
+    creadas = len(nuevas)
 
     return ClavesSaeResult(
         empresa=empresa, recibidas=len(recibidas), creadas=creadas,

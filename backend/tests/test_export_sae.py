@@ -1105,6 +1105,44 @@ def _depositar_claves(client, h, claves, empresa="02", forzar=False):
     })
 
 
+def test_el_deposito_del_espejo_cuenta_bien_y_sella_todo(client, env, auth_as, espejo_user):
+    """El depósito reemplaza el catálogo de la empresa y sella la fecha de TODAS
+    sus filas. El sello se pone en un solo UPDATE: hacerlo fila por fila hacía
+    que un catálogo de ~2,000 claves no cupiera en el timeout de 30 s del
+    conector, y el espejo se quedaba días viejo sin que nadie se enterara
+    (18-sep-2026)."""
+    h = _hdr(env["admin"])
+    auth_as(espejo_user)
+    r = _depositar_claves(client, h, [
+        {"clave": "UNAKG", "descripcion": "UNA"},
+        {"clave": "OTRAKG", "descripcion": "OTRA"},
+    ])
+    assert r.status_code == 200, r.text
+    assert r.json()["creadas"] == 2 and r.json()["actualizadas"] == 0
+
+    # Segunda pasada: una cambia de descripción, otra se va, una nace.
+    r = _depositar_claves(client, h, [
+        {"clave": "UNAKG", "descripcion": "UNA CORREGIDA"},
+        {"clave": "NUEVAKG", "descripcion": "NUEVA"},
+    ], forzar=True)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["creadas"], body["actualizadas"], body["eliminadas"]) == (1, 1, 1)
+
+    db = SessionLocal()
+    try:
+        filas = {
+            c.clave: c for c in db.query(ClaveSae).filter(
+                ClaveSae.tenant_id == env["tenant"], ClaveSae.empresa == "02").all()
+        }
+        assert set(filas) == {"UNAKG", "NUEVAKG"}
+        assert filas["UNAKG"].descripcion == "UNA CORREGIDA"
+        # Las dos con el MISMO sello, aunque sólo una haya cambiado de contenido.
+        assert filas["UNAKG"].sincronizado_at == filas["NUEVAKG"].sincronizado_at
+    finally:
+        db.close()
+
+
 def test_sin_espejo_del_catalogo_el_export_no_cambia(client, env, auth_as):
     # Fail-open: quien no corre el conector no tiene espejo, y el export debe
     # seguir funcionando igual que antes de esta validación.
