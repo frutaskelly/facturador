@@ -8711,6 +8711,8 @@ export interface components {
             activo: boolean;
             /** Categoria Id */
             categoria_id?: string | null;
+            /** Clave Sae */
+            clave_sae?: string | null;
             /** Clave Sat */
             clave_sat: string;
             /** Codigo Barras */
@@ -8804,6 +8806,8 @@ export interface components {
             activo: boolean;
             /** Categoria Id */
             categoria_id?: string | null;
+            /** Clave Sae */
+            clave_sae?: string | null;
             /** Clave Sat */
             clave_sat: string;
             /** Clave Sat Descripcion */
@@ -8911,6 +8915,8 @@ export interface components {
             activo?: boolean | null;
             /** Categoria Id */
             categoria_id?: string | null;
+            /** Clave Sae */
+            clave_sae?: string | null;
             /** Clave Sat */
             clave_sat?: string | null;
             /** Codigo Barras */

@@ -16,6 +16,7 @@ from .conftest import crear_sucursal
 from app.models import (
     ClaveSae,
     Cliente,
+    EsquemaImpuesto,
     ClienteExterno,
     Membership,
     Producto,
@@ -36,7 +37,8 @@ from app.services.export_sae import (
 
 _PURGE = (
     "lineas_factura", "facturas", "lineas_remision", "remisiones", "cliente_externos",
-    "producto_alias", "producto_clientes", "productos", "series", "clientes", "claves_sae",
+    "producto_alias", "producto_clientes", "productos", "esquemas_impuesto",
+    "series", "clientes", "claves_sae",
 )
 
 
@@ -676,6 +678,83 @@ def test_cruzar_partida_sin_clave_por_un_producto_del_catalogo(client, env, auth
         json={"producto_id": bueno_id},
     )
     assert r.status_code == 409, r.text
+
+
+def test_clave_base_del_producto_ampara_sin_catalogo_del_cliente(client, env, auth_as):
+    """La clave vive en el PRODUCTO y es la misma en todas las empresas de SAE
+    (decisión del dueño, 18-sep-2026): un producto con `clave_sae` ya no está
+    «sin clave» aunque el cliente no lo tenga en su catálogo, y el export sale
+    con ella. El catálogo del cliente sigue pisándola cuando existe."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        base = Producto(tenant_id=env["tenant"], sku=f"5{suffix}", nombre="PEPINO",
+                        clave_sat="50300000", unidad_sat="KGM", clave_sae="PEPINOKG")
+        db.add(base); db.commit()
+        base_id = str(base.id)
+    finally:
+        db.close()
+
+    rem = _rem(client, h, env, lineas=[
+        {"producto_id": base_id, "cantidad_solicitada": 3, "precio_unitario": 20},
+    ])
+    # Sin una sola fila en el catálogo del cliente: el aviso no se enciende.
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["sin_clave_sae"] is None
+    pv = client.post("/api/v1/remisiones/export-sae/preview", headers=h,
+                     json={"ids": [rem["id"]], "tipo": "FACTURA"}).json()
+    assert pv["ok"] is True, pv
+
+    # Y el archivo sale con la clave base.
+    r = client.post("/api/v1/remisiones/export-sae", headers=h,
+                    json={"ids": [rem["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 900}})
+    assert r.status_code == 200, r.text
+    hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_name("Facturas")
+    assert hoja.row(1)[4].value == "PEPINOKG"
+
+    # El catálogo del cliente sigue mandando: su clave PISA a la base.
+    client.put(f"/api/v1/clientes/{env['cli']}/catalogo/{base_id}", headers=h,
+               json={"codigo_cliente": "PEPI-CLI-9"})
+    rem2 = _rem(client, h, env, su_pedido="9931", lineas=[
+        {"producto_id": base_id, "cantidad_solicitada": 3, "precio_unitario": 20}])
+    r = client.post("/api/v1/remisiones/export-sae", headers=h,
+                    json={"ids": [rem2["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 901}})
+    hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_name("Facturas")
+    assert hoja.row(1)[4].value == "PEPI-CLI-9"
+
+
+def test_dos_productos_no_comparten_clave_base(client, env, auth_as):
+    """Dos productos con la misma CVE_ART le mandan a SAE la misma línea dos
+    veces: el alta y la edición lo rechazan diciendo de quién es la clave."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        esq = EsquemaImpuesto(tenant_id=env["tenant"], codigo=f"E{suffix[:4]}",
+                              nombre="IVA 0 pruebas")
+        db.add(esq)
+        dueno = Producto(tenant_id=env["tenant"], sku=f"4{suffix}", nombre="RABANO",
+                         clave_sat="50300000", unidad_sat="KGM", clave_sae="RABANOKG")
+        db.add(dueno); db.commit()
+        esq_id, dueno_id = str(esq.id), str(dueno.id)
+    finally:
+        db.close()
+
+    r = client.post("/api/v1/productos", headers=h, json={
+        "nombre": f"RABANO ROJO {uuid.uuid4().hex[:4]}", "clave_sat": "50300000",
+        "unidad_sat": "KGM", "esquema_impuesto_id": esq_id,
+        "clave_sae": " rabanokg ",          # mismo artículo, con ruido
+        "forzar": True,
+    })
+    assert r.status_code == 409, r.text
+    assert "RABANO" in r.json()["detail"]
+
+    # Y la clave se guarda normalizada (SAE rellena con espacios).
+    r = client.patch(f"/api/v1/productos/{dueno_id}", headers=h,
+                     json={"clave_sae": "  rabanoprimerakg "})
+    assert r.status_code == 200, r.text
+    assert r.json()["clave_sae"] == "RABANOPRIMERAKG"
 
 
 def test_claves_sae_buscables_desde_la_remision(client, env, auth_as):

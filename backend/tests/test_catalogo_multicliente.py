@@ -718,6 +718,48 @@ def test_la_correccion_del_humano_pisa_el_alias_del_cliente(client, env, auth_as
         db.close()
 
 
+def test_el_nombre_del_cliente_se_aprende_solo_para_ese_cliente(client, env, auth_as):
+    """El nombre del catálogo es lenguaje de SALIDA (la Descripcion de SU CFDI).
+    Que también sirva para entenderle al escribir es útil, pero sólo a él:
+    aprenderlo global mete el vocabulario de un cliente en el de todo el
+    negocio, que es como un alias mandó 24 remisiones al producto equivocado."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = client.put(f"/api/v1/clientes/{env['balles']}/catalogo/{env['serrano']}", headers=h,
+                   json={"codigo_cliente": "SERR-001", "nombre_cliente": "CHILE PARA SALSA"})
+    assert r.status_code in (200, 201), r.text
+    db = SessionLocal()
+    try:
+        filas = (
+            db.query(ProductoAlias)
+            .filter(ProductoAlias.tenant_id == uuid.UUID(env["tenant"]),
+                    ProductoAlias.alias_normalizado == "chile para salsa")
+            .all()
+        )
+        assert len(filas) == 1
+        assert str(filas[0].cliente_id) == env["balles"], "se aprendió para todos, no para él"
+        assert filas[0].sucursal_id is None          # la fila era genérica
+    finally:
+        db.close()
+
+    # Y con la fila de UNA plaza, lo aprendido queda acotado a esa plaza.
+    r = client.put(f"/api/v1/clientes/{env['ehmo']}/catalogo/{env['jalapeno']}", headers=h,
+                   json={"codigo_cliente": "JAL-VH-1", "nombre_cliente": "CHILE DE AGUA",
+                         "sucursal_id": env["suc_tab"]})
+    assert r.status_code in (200, 201), r.text
+    db = SessionLocal()
+    try:
+        fila = (
+            db.query(ProductoAlias)
+            .filter(ProductoAlias.tenant_id == uuid.UUID(env["tenant"]),
+                    ProductoAlias.alias_normalizado == "chile de agua")
+            .one()
+        )
+        assert str(fila.cliente_id) == env["ehmo"]
+        assert str(fila.sucursal_id) == env["suc_tab"]
+    finally:
+        db.close()
+
+
 def test_sin_permiso_de_catalogo_no_se_escribe_lo_que_se_timbra(client, env, auth_as):
     """`codigo_cliente` y `nombre_cliente` son el NoIdentificacion y la
     Descripcion del CFDI. Quien solo captura remisiones —el alcance de la clave

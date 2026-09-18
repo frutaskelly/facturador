@@ -84,6 +84,13 @@ class Producto(Base, TimestampMixin, SoftDeleteMixin):
     # NB: el costo NO vive aquí — su verdad está en lotes_inventario.costo_unitario
     # (promedio ponderado por lote) y se consulta vía existencias por almacén.
 
+    # Clave del artículo en SAE — la MISMA en todas sus empresas (decisión del
+    # dueño, 18-sep-2026). Es la base: el catálogo del cliente sigue pudiendo
+    # pisarla con una clave propia por plaza, pero ya no hace falta repetirla
+    # cliente por cliente. Única por tenant (índice parcial de la 0079): dos
+    # productos con la misma CVE_ART le mandan a SAE la misma línea dos veces.
+    clave_sae = Column(String(50))
+
     sinonimos = Column(ARRAY(Text), nullable=False, server_default="{}")
     activo = Column(Boolean, nullable=False, server_default="true")
     custom_fields = Column(JSONB, nullable=False, server_default="{}")

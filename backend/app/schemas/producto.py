@@ -30,6 +30,9 @@ class ProductoBase(BaseModel):
     # SAT / CFDI 4.0
     clave_sat: str = Field(max_length=8)
     unidad_sat: str = Field(max_length=3)
+    # Clave del artículo en SAE, la misma en todas sus empresas. El catálogo del
+    # cliente sólo la pisa cuando ESE cliente usa otra en su plaza.
+    clave_sae: Optional[str] = Field(default=None, max_length=50)
     objeto_imp: str = Field(default="02", max_length=2)
     iva_tasa: Decimal = Field(default=Decimal("0"), ge=0, le=1)
     ieps_tasa: Decimal = Field(default=Decimal("0"), ge=0, le=1)
@@ -71,6 +74,7 @@ class ProductoUpdate(BaseModel):
     esquema_impuesto_id: Optional[uuid.UUID] = None
     clave_sat: Optional[str] = Field(default=None, max_length=8)
     unidad_sat: Optional[str] = Field(default=None, max_length=3)
+    clave_sae: Optional[str] = Field(default=None, max_length=50)
     objeto_imp: Optional[str] = Field(default=None, max_length=2)
     iva_tasa: Optional[Decimal] = Field(default=None, ge=0, le=1)
     ieps_tasa: Optional[Decimal] = Field(default=None, ge=0, le=1)

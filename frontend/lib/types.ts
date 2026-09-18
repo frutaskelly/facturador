@@ -697,6 +697,9 @@ export type Producto = {
   categoria_id?: string | null;
   esquema_impuesto_id?: string | null;
   clave_sat: string;
+  // Clave del artículo en SAE: la misma en todas sus empresas. Es la base con
+  // la que se exporta cuando el cliente no tiene una propia en su catálogo.
+  clave_sae?: string | null;
   unidad_sat: string;
   objeto_imp: string;
   iva_tasa: string;

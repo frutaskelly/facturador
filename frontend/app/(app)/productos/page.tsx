@@ -58,6 +58,7 @@ type FormState = {
   categoria_id: string;
   esquema_impuesto_id: string;
   clave_sat: string;
+  clave_sae: string;
   unidad_sat: string;
   unidad_base: string;
   presentaciones: PresRow[];
@@ -74,6 +75,7 @@ function emptyForm(): FormState {
     categoria_id: "",
     esquema_impuesto_id: "",
     clave_sat: "01010101",
+    clave_sae: "",
     unidad_sat: "KGM",
     unidad_base: "KILO",
     presentaciones: [],   // adicionales a la base (la base es 1:1 implícita)
@@ -101,6 +103,7 @@ function toForm(p: Producto): FormState {
     categoria_id: p.categoria_id ?? "",
     esquema_impuesto_id: p.esquema_impuesto_id ?? "",
     clave_sat: p.clave_sat,
+    clave_sae: p.clave_sae ?? "",
     unidad_sat: p.unidad_sat,
     unidad_base: base,
     presentaciones: rows,
@@ -239,6 +242,9 @@ export default function ProductosPage() {
       categoria_id: form.categoria_id || null,
       esquema_impuesto_id: form.esquema_impuesto_id || null,
       clave_sat: form.clave_sat.trim(),
+      // La clave del artículo en SAE: vacía se manda como null (quitarla es
+      // legítimo), y el backend la normaliza a mayúsculas sin espacios.
+      clave_sae: form.clave_sae.trim() || null,
       unidad_sat: form.unidad_sat.trim(),
       unidad_base: unidadBase,
       presentaciones,
@@ -304,6 +310,15 @@ export default function ProductosPage() {
         ),
     },
     { header: "Clave SAT", sortValue: (p) => p.clave_sat, cell: (p) => <span className="text-muted">{p.clave_sat}</span> },
+    {
+      header: "Clave SAE",
+      sortValue: (p) => p.clave_sae ?? "",
+      exportValue: (p) => p.clave_sae ?? "",
+      cell: (p) =>
+        p.clave_sae
+          ? <span className="tabular-nums">{p.clave_sae}</span>
+          : <span className="text-warning" title="Sin ella, este producto sale «sin clave» en cada cliente que no lo tenga en su catálogo">—</span>,
+    },
     {
       // La descripción oficial del SAT para esa clave: la resuelve el backend
       // (el producto solo guarda la clave). Sin ella, los 8 dígitos no dicen
@@ -508,9 +523,20 @@ export default function ProductosPage() {
         {form && (!editingId || tab === "datos") && (
           <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
             {/* SKU — automático */}
-            <div className="sm:col-span-2">
+            <div className="sm:col-span-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="SKU" hint={editingId ? undefined : "Se genera automáticamente al guardar"}>
                 <Input value={editingId ? form.sku : ""} placeholder="(automático)" disabled className="max-w-[14rem]" />
+              </Field>
+              <Field
+                label="Clave en SAE"
+                hint="La misma en todas las empresas de SAE. Con ella, el producto ya no sale «sin clave» en ningún cliente."
+              >
+                <Input
+                  value={form.clave_sae}
+                  placeholder="AJOPRIMERAKG"
+                  onChange={(e) => setForm({ ...form, clave_sae: e.target.value.toUpperCase() })}
+                  className="max-w-[14rem]"
+                />
               </Field>
             </div>
             {/* nombre + unidad base */}

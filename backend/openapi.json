@@ -12979,6 +12979,18 @@
       ],
       "title": "Categoria Id"
      },
+     "clave_sae": {
+      "anyOf": [
+       {
+        "maxLength": 50,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sae"
+     },
      "clave_sat": {
       "maxLength": 8,
       "title": "Clave Sat",
@@ -13217,6 +13229,18 @@
        }
       ],
       "title": "Categoria Id"
+     },
+     "clave_sae": {
+      "anyOf": [
+       {
+        "maxLength": 50,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sae"
      },
      "clave_sat": {
       "maxLength": 8,
@@ -13464,6 +13488,18 @@
        }
       ],
       "title": "Categoria Id"
+     },
+     "clave_sae": {
+      "anyOf": [
+       {
+        "maxLength": 50,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sae"
      },
      "clave_sat": {
       "anyOf": [
