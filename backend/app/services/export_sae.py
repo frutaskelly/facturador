@@ -299,8 +299,33 @@ def lineas_sin_clave(db: Session, tenant_id: UUID, rems: list) -> dict:
 
     El preflight de la lista/detalle de remisiones cuenta con ESTE helper para
     usar el mismo criterio que preparar() (cantidad > 0, sucursal gana →
-    genérica): si contaran distinto, el operador vería números que no casan
-    con el candado del export. Consulta las líneas en batch (sin N+1)."""
+    genérica → clave base del producto): si contaran distinto, el operador vería
+    números que no casan con el candado del export. Consulta en batch (sin N+1).
+
+    Un cliente SIN equivalencia con SAE queda fuera del conteo: su remisión no
+    se exporta nunca —preparar() ni siquiera puede resolver a qué empresa
+    iría—, así que pedirle claves es pedirle que arregle algo que no usa. RIO
+    LIBRE tenía así 28 de las 67 remisiones marcadas (18-sep-2026), y el ruido
+    enseña a ignorar el aviso justo donde sí importa.
+    """
+    if not rems:
+        return {}
+    con_sae = {
+        cid
+        for (cid,) in db.query(ClienteExterno.cliente_id)
+        .filter(
+            ClienteExterno.tenant_id == tenant_id,
+            ClienteExterno.sistema == "SAE",
+            # Misma condición que _claves_sae_de_clientes: una equivalencia sin
+            # confirmar no exporta nada.
+            ClienteExterno.confianza == "CONFIRMADA",
+            ClienteExterno.cliente_id.in_(
+                {r.cliente_facturacion_id for r in rems} or [None]
+            ),
+        )
+        .distinct()
+    }
+    rems = [r for r in rems if r.cliente_facturacion_id in con_sae]
     ids = [r.id for r in rems]
     if not ids:
         return {}

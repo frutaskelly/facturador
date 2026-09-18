@@ -680,6 +680,41 @@ def test_cruzar_partida_sin_clave_por_un_producto_del_catalogo(client, env, auth
     assert r.status_code == 409, r.text
 
 
+def test_el_aviso_calla_para_un_cliente_que_no_va_a_sae(client, env, auth_as):
+    """Un cliente sin equivalencia con SAE no se exporta nunca: pedirle claves
+    es pedirle que arregle algo que no usa, y ese ruido enseña a ignorar el
+    aviso justo donde sí importa (RIO LIBRE: 28 de 67 remisiones marcadas)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        # Cliente propio, SIN fila en cliente_externos.
+        ajeno = Cliente(tenant_id=env["tenant"], codigo=f"CL{suffix[:4]}",
+                        legal_name="COMERCIALIZADORA SIN SAE", rfc="XAXX010101000",
+                        metodo_pago_default="PPD", forma_pago_default="99",
+                        uso_cfdi_default="G01")
+        sin_clave = Producto(tenant_id=env["tenant"], sku=f"3{suffix}",
+                             nombre="PRODUCTO SIN CLAVE NI BASE",
+                             clave_sat="50300000", unidad_sat="KGM")
+        db.add_all([ajeno, sin_clave]); db.commit()
+        ajeno_id, prod_id = str(ajeno.id), str(sin_clave.id)
+    finally:
+        db.close()
+
+    lineas = [{"producto_id": prod_id, "cantidad_solicitada": 2, "precio_unitario": 10}]
+    # El mismo producto, en el cliente que SÍ va a SAE: ahí el aviso se enciende.
+    rem_sae = _rem(client, h, env, su_pedido="9941", lineas=lineas)
+    assert client.get(f"/api/v1/remisiones/{rem_sae['id']}", headers=h).json()["sin_clave_sae"] == 1
+
+    # Y en el que no va a SAE, calla — en el detalle y en la lista.
+    rem_mudo = _rem(client, h, env, su_pedido="9942",
+                    cliente_facturacion_id=ajeno_id, lineas=lineas)
+    assert client.get(f"/api/v1/remisiones/{rem_mudo['id']}", headers=h).json()["sin_clave_sae"] is None
+    filas = client.get("/api/v1/remisiones", headers=h,
+                       params={"q": rem_mudo["folio_interno"]}).json()["items"]
+    assert next(f for f in filas if f["id"] == rem_mudo["id"])["sin_clave_sae"] is None
+
+
 def test_clave_base_del_producto_ampara_sin_catalogo_del_cliente(client, env, auth_as):
     """La clave vive en el PRODUCTO y es la misma en todas las empresas de SAE
     (decisión del dueño, 18-sep-2026): un producto con `clave_sae` ya no está
