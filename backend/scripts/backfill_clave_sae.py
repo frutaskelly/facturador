@@ -33,6 +33,7 @@ from collections import defaultdict
 from decimal import Decimal
 
 import psycopg2
+from psycopg2.extras import execute_values
 
 RAIZ_ENV = "/Users/michelzarate/Documents/Claude/Facturador/.env.prod"
 TENANT = "cristian-gerardo-zarate-orozco"
@@ -126,13 +127,16 @@ def main() -> int:
 
     escritos = 0
     if args.aplicar:
-        for pid, cod in ganadora.items():
-            cur.execute(
-                "update productos set clave_sae = %s, updated_at = now()"
-                " where id = %s and coalesce(clave_sae,'') <> %s",
-                (cod, pid, cod),
-            )
-            escritos += cur.rowcount
+        # Un UPDATE por producto eran 1,019 viajes al pooler (más de dos
+        # minutos). Un solo statement con VALUES hace lo mismo de un jalón.
+        execute_values(
+            cur,
+            "update productos p set clave_sae = v.cod, updated_at = now()"
+            " from (values %s) as v(pid, cod)"
+            " where p.id = v.pid::uuid and coalesce(p.clave_sae,'') <> v.cod",
+            [(str(pid), cod) for pid, cod in ganadora.items()],
+        )
+        escritos = cur.rowcount
         print(f"→ clave_sae escrita en {escritos} productos")
 
     # ── Poda 1: filas que repiten la base (duplicación pura) ──
@@ -163,15 +167,56 @@ def main() -> int:
     print(f"  · otra clave de la MISMA convención, sin decidir: {len(sin_decidir)}"
           f" en {len({f[2] for f in sin_decidir})} productos (no se tocan)")
 
+    # Antes de limpiar nada: si a Balles y Jubran se les quita su clave, van a
+    # exportar con la base. Si la empresa 02 no la conoce, esa partida la
+    # descarta al importar y la factura sale incompleta (el caso FRESADOMOPZ).
+    # Mismo criterio que el candado del masivo; sin espejo no se opina.
+    if perdedora:
+        cur.execute(
+            "select upper(btrim(clave)), activa from claves_sae"
+            " join tenants t on t.id = claves_sae.tenant_id"
+            " where t.slug = %(tenant)s and empresa = '02'",
+            {"tenant": args.tenant},
+        )
+        espejo = dict(cur.fetchall())
+        if not espejo:
+            print("  ! sin espejo de la empresa 02: no se puede verificar la base")
+        else:
+            desconocidas = sorted({
+                (ganadora[f[2]], nombres.get(f[2], "?")) for f in perdedora
+                if espejo.get(ganadora[f[2]]) is None
+            })
+            de_baja = sorted({
+                (ganadora[f[2]], nombres.get(f[2], "?")) for f in perdedora
+                if espejo.get(ganadora[f[2]]) is False
+            })
+            print(f"  · de esas, su base NO está en la empresa 02 : {len(desconocidas)}")
+            for cod, nom in desconocidas[:15]:
+                print(f"      {cod}  ({nom})")
+            print(f"  · de esas, su base está de BAJA en la 02    : {len(de_baja)}")
+            for cod, nom in de_baja[:15]:
+                print(f"      {cod}  ({nom})")
+            # No se aborta todo por 13: se aplica la decisión donde es segura y
+            # esas filas se quedan EXACTAMENTE como están hoy (su clave vieja,
+            # que sí factura). Cuando esas claves existan en SAE, se vuelve a
+            # correr y se limpian solas.
+            malas = {c for c, _ in desconocidas} | {c for c, _ in de_baja}
+            if malas:
+                antes = len(perdedora)
+                perdedora = [f for f in perdedora if ganadora[f[2]] not in malas]
+                print(f"  → se SALTAN {antes - len(perdedora)} filas: se quedan con su clave"
+                      f" actual hasta que la 02 tenga la base")
+
     def limpiar(lote, etiqueta):
         vacias = [f[0] for f in lote if not (f[3] or "").strip() and not (f[4] or "").strip()]
         resto = [f[0] for f in lote if f[0] not in set(vacias)]
         if vacias:
-            cur.execute("delete from producto_clientes where id = any(%s)", (vacias,))
+            cur.execute("delete from producto_clientes where id = any(%s::uuid[])",
+                        ([str(x) for x in vacias],))
         if resto:
             cur.execute(
                 "update producto_clientes set codigo_cliente = null, updated_at = now()"
-                " where id = any(%s)", (resto,),
+                " where id = any(%s::uuid[])", ([str(x) for x in resto],),
             )
         print(f"→ {etiqueta}: {len(vacias)} filas borradas (no decían nada más),"
               f" {len(resto)} conservadas sin código")
