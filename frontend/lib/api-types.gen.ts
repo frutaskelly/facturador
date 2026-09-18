@@ -3759,6 +3759,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reportes/cartera": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cartera
+         * @description Cuentas por cobrar: una fila por proyecto, cliente o plaza, más la
+         *     antigüedad global por meses.
+         *
+         *     Vencido y cubetas usan la fecha de vencimiento (fecha + días de crédito del
+         *     cliente), el mismo criterio del estado de cuenta.
+         */
+        get: operations["cartera_api_v1_reportes_cartera_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reportes/ventas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ventas
+         * @description Facturación: el detalle diario, el mes a mes, y el corte contra el
+         *     periodo anterior.
+         *
+         *     La comparación es contra el MISMO tramo del periodo pasado (los días
+         *     transcurridos de la semana contra esos mismos días de la semana anterior,
+         *     y del mes contra el mes anterior). Comparar una semana a medias contra una
+         *     semana completa siempre pinta una caída que no existe.
+         */
+        get: operations["ventas_api_v1_reportes_ventas_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/roles": {
         parameters: {
             query?: never;
@@ -18225,6 +18275,76 @@ export interface operations {
             path: {
                 rem_id: string;
             };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cartera_api_v1_reportes_cartera_get: {
+        parameters: {
+            query?: {
+                agrupar?: "proyecto" | "cliente" | "sucursal";
+                incluir_en_cancelacion?: boolean;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ventas_api_v1_reportes_ventas_get: {
+        parameters: {
+            query?: {
+                /** @description Días del detalle diario */
+                dias?: number;
+                /** @description Meses de la serie mensual */
+                meses?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;

@@ -34780,6 +34780,165 @@
     ]
    }
   },
+  "/api/v1/reportes/cartera": {
+   "get": {
+    "description": "Cuentas por cobrar: una fila por proyecto, cliente o plaza, más la\nantigüedad global por meses.\n\nVencido y cubetas usan la fecha de vencimiento (fecha + días de crédito del\ncliente), el mismo criterio del estado de cuenta.",
+    "operationId": "cartera_api_v1_reportes_cartera_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "agrupar",
+      "required": false,
+      "schema": {
+       "default": "proyecto",
+       "enum": [
+        "proyecto",
+        "cliente",
+        "sucursal"
+       ],
+       "title": "Agrupar",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "incluir_en_cancelacion",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Incluir En Cancelacion",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cartera",
+    "tags": [
+     "reportes"
+    ]
+   }
+  },
+  "/api/v1/reportes/ventas": {
+   "get": {
+    "description": "Facturación: el detalle diario, el mes a mes, y el corte contra el\nperiodo anterior.\n\nLa comparación es contra el MISMO tramo del periodo pasado (los días\ntranscurridos de la semana contra esos mismos días de la semana anterior,\ny del mes contra el mes anterior). Comparar una semana a medias contra una\nsemana completa siempre pinta una caída que no existe.",
+    "operationId": "ventas_api_v1_reportes_ventas_get",
+    "parameters": [
+     {
+      "description": "Días del detalle diario",
+      "in": "query",
+      "name": "dias",
+      "required": false,
+      "schema": {
+       "default": 30,
+       "description": "Días del detalle diario",
+       "maximum": 180,
+       "minimum": 7,
+       "title": "Dias",
+       "type": "integer"
+      }
+     },
+     {
+      "description": "Meses de la serie mensual",
+      "in": "query",
+      "name": "meses",
+      "required": false,
+      "schema": {
+       "default": 6,
+       "description": "Meses de la serie mensual",
+       "maximum": 24,
+       "minimum": 3,
+       "title": "Meses",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Ventas",
+    "tags": [
+     "reportes"
+    ]
+   }
+  },
   "/api/v1/roles": {
    "get": {
     "operationId": "list_roles_api_v1_roles_get",
