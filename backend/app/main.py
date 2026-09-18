@@ -35,6 +35,7 @@ from .api.v1 import (
     proyectos,
     registro,
     remisiones,
+    reportes,
     roles,
     sat,
     series,
@@ -115,6 +116,7 @@ app.include_router(listas_precios.router_asignaciones, prefix="/api/v1")
 app.include_router(clientes.router, prefix="/api/v1")
 app.include_router(proyectos.router, prefix="/api/v1")
 app.include_router(cobranza.router, prefix="/api/v1")
+app.include_router(reportes.router, prefix="/api/v1")
 # Phase 4 — operaciones
 app.include_router(proveedores.router, prefix="/api/v1")
 app.include_router(almacenes.router, prefix="/api/v1")
