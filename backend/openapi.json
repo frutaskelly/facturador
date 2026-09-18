@@ -8442,6 +8442,28 @@
       ],
       "title": "Cantidad Surtida"
      },
+     "clave_de_baja_en_sae": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave De Baja En Sae"
+     },
+     "clave_no_en_sae": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave No En Sae"
+     },
      "id": {
       "format": "uuid",
       "title": "Id",
@@ -15020,6 +15042,17 @@
       "title": "Canal",
       "type": "string"
      },
+     "clave_no_en_sae": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave No En Sae"
+     },
      "cliente_facturacion_id": {
       "format": "uuid",
       "title": "Cliente Facturacion Id",
@@ -15041,6 +15074,17 @@
       },
       "title": "Devoluciones",
       "type": "array"
+     },
+     "empresa_sae": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Empresa Sae"
      },
      "estado": {
       "title": "Estado",
@@ -15372,6 +15416,17 @@
       "title": "Canal",
       "type": "string"
      },
+     "clave_no_en_sae": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave No En Sae"
+     },
      "cliente_facturacion_id": {
       "format": "uuid",
       "title": "Cliente Facturacion Id",
@@ -15385,6 +15440,17 @@
      "descuento": {
       "title": "Descuento",
       "type": "string"
+     },
+     "empresa_sae": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Empresa Sae"
      },
      "estado": {
       "title": "Estado",

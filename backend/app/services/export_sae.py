@@ -359,6 +359,75 @@ def lineas_sin_clave(db: Session, tenant_id: UUID, rems: list) -> dict:
     return out
 
 
+def lineas_clave_no_facturable(db: Session, tenant_id: UUID, rems: list) -> dict:
+    """{remision_id: {producto_id: (clave, de_baja)}} de partidas cuya clave SÍ
+    está resuelta pero la empresa de SAE de esa plaza NO la factura.
+
+    Es el otro candado del masivo (el del espejo) traído al preflight. Sin él una
+    remisión se ve limpia —todas sus partidas con clave— y se detiene igual al
+    generar, porque la clave existe en la empresa de OTRA plaza: `LIMO-FRUT-270`
+    vive en la 02 y la 03 no la conoce, así que el LIMON de Tabasco pasaba el
+    aviso y moría en el export (18-sep-2026).
+
+    `de_baja=True` es el otro caso: la clave EXISTE en esa empresa pero está dada
+    de baja, así que tampoco factura — y se dice distinto porque el arreglo es
+    otro (darla de alta de nuevo, no cambiarla). Sin espejo de esa empresa no se
+    opina (mismo fail-open que el export).
+    """
+    if not rems:
+        return {}
+    por_rem = {r.id: r for r in rems}
+    filas = (
+        db.query(
+            LineaRemision.remision_id,
+            LineaRemision.producto_id,
+            LineaRemision.cantidad_solicitada,
+        )
+        .filter(LineaRemision.remision_id.in_(list(por_rem)))
+        .all()
+    )
+    if not filas:
+        return {}
+    cliente_ids = {r.cliente_facturacion_id for r in rems}
+    codigos = _codigos_cliente(
+        db, tenant_id, cliente_ids, producto_ids={f.producto_id for f in filas},
+    )
+    pares = _claves_sae_de_clientes(db, tenant_id, cliente_ids)
+    # La empresa que le toca a cada remisión, y su espejo cargado una sola vez.
+    empresa_de: dict = {}
+    for r in rems:
+        suyos = pares.get(r.cliente_facturacion_id)
+        if not suyos:
+            continue
+        par, _conflicto = _clave_para_remision(suyos, r.sucursal_id)
+        if par is not None:
+            empresa_de[r.id] = par[0]
+    catalogos: dict = {}
+    out: dict = {}
+    for rem_id, producto_id, cantidad in filas:
+        if Decimal(str(cantidad or 0)) <= 0:
+            continue
+        empresa = empresa_de.get(rem_id)
+        if empresa is None:
+            continue
+        if empresa not in catalogos:
+            catalogos[empresa] = catalogo_sae(db, tenant_id, empresa)
+        cat = catalogos[empresa]
+        if not cat:                       # sin espejo: no se promete nada
+            continue
+        rem = por_rem[rem_id]
+        clave = codigo_cliente_de(
+            codigos, rem.cliente_facturacion_id, producto_id, rem.sucursal_id
+        )
+        if clave is None:
+            continue                      # eso lo reporta lineas_sin_clave
+        estado = cat.get(clave.strip().upper())
+        if estado is None or estado is False:
+            # `None` = esa empresa no la tiene; `False` = la tiene DADA DE BAJA.
+            out.setdefault(rem_id, {})[producto_id] = (clave, estado is False)
+    return out
+
+
 def _num(v) -> float:
     """Decimal → float para xlwt (SAE lee la celda numérica tal cual)."""
     return float(Decimal(str(v or 0)))
