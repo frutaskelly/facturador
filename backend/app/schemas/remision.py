@@ -201,3 +201,62 @@ class ConfirmarRemisionIn(BaseModel):
     # Permite confirmar aunque no haya existencia suficiente; el inventario
     # disponible queda en negativo (venta sin stock / sobregiro autorizado).
     permitir_negativos: bool = False
+
+
+class CruzarLineaIn(BaseModel):
+    """Cambiar la partida por OTRO producto del catálogo, sin re-capturar.
+
+    Nace del aviso «N partidas sin clave SAE del cliente»: la partida cruzó a un
+    producto que ese cliente no tiene en SAE, y el arreglo real no siempre es
+    darle de alta una clave — casi siempre es que la partida va al producto que
+    el cliente SÍ conoce. Esto la re-apunta ahí conservando la línea (su id, su
+    número, su nota y su devolución), que es justo lo que perdería re-mandar
+    todas las líneas por el PATCH.
+    """
+    producto_id: uuid.UUID
+    # Vacías = se conservan las de la partida (la presentación, si el producto
+    # nuevo la tiene; si no, su default).
+    presentacion: Optional[str] = Field(default=None, max_length=20)
+    cantidad_solicitada: Optional[Decimal] = Field(default=None, gt=0)
+    # "mantener" = el precio con el que entró la partida (el del documento, que
+    # es lo pactado); "lista" = re-cotizar el producto nuevo con el contexto de
+    # la remisión. Nunca se decide solo: cambiar el producto no autoriza a
+    # cambiar lo que se cobra.
+    precio: Literal["mantener", "lista"] = "mantener"
+    # El texto tal como venía en la orden. Con él, el cruce se aprende y la
+    # próxima orden que lo diga ya no vuelve a caer en el producto equivocado.
+    aprender_texto: Optional[str] = Field(default=None, max_length=254)
+    # Hasta dónde llega lo aprendido. Por default SOLO este cliente: el motivo
+    # del cruce suele ser el catálogo de ESE cliente en SAE, no una verdad del
+    # vocabulario (un global mal puesto ya mandó 24 remisiones equivocadas).
+    aprender_alcance: Literal["cliente", "plaza", "global"] = "cliente"
+    # Sobregiro al re-descontar inventario de una CONFIRMADA (misma política
+    # que confirmar/facturar/editar).
+    permitir_negativos: bool = False
+
+
+class ClaveSaeSugerida(BaseModel):
+    """Una clave del espejo de SAE (INVE##) tal como la conoce la empresa que
+    le toca a esta remisión."""
+    clave: str
+    descripcion: Optional[str] = None
+    # False = existe en SAE pero está dada de BAJA: no factura.
+    activa: bool = True
+    # Si ESE cliente ya usa la clave para otro producto, se dice: dos productos
+    # con la misma CVE_ART mandan a SAE la misma línea dos veces.
+    producto_id: Optional[uuid.UUID] = None
+    producto_nombre: Optional[str] = None
+
+
+class ClavesSaeOut(BaseModel):
+    """El espejo buscable para UNA remisión: la empresa SAE que le toca y las
+    claves que esa empresa conoce.
+
+    `espejo=False` no significa "no hay claves" sino "no sabemos": quien no
+    corre el bot no tiene espejo. Ahí la captura sigue siendo libre y la
+    pantalla no puede prometer nada — el mismo fail-open del export.
+    """
+    empresa: Optional[str] = None
+    espejo: bool = False
+    motivo: Optional[str] = None
+    claves: list[ClaveSaeSugerida] = []

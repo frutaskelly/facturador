@@ -38,6 +38,8 @@ export function ProductoCombobox({
   onCrear,
   aliasTexto,
   conPrecio,
+  claves,
+  aprenderAlias = true,
 }: {
   label?: string;
   onSelect: (p: ProductoPick | null, texto: string) => void;
@@ -63,6 +65,15 @@ export function ProductoCombobox({
    * Se consulta en memoria — cero costo por tecleo. null = aún sin contexto,
    * no se marca nada (mejor callar que marcar mal). */
   conPrecio?: Set<string> | null;
+  /** {producto_id → clave del cliente en SAE} ya resuelta para la plaza del
+   * documento. Con esto el buscador dice, antes de elegir, cuál de los
+   * candidatos SAE sí conoce — que es justo lo que decide el cruce. null = no
+   * se consultó: no se marca nada. */
+  claves?: Map<string, string> | null;
+  /** Aprender el alias solo con elegir. Se apaga donde el alcance de lo
+   * aprendido lo decide la pantalla (cruzar una partida lo guarda del cliente,
+   * no del negocio entero) y el alias se escribe ahí, no aquí. */
+  aprenderAlias?: boolean;
 }) {
   const [q, setQ] = useState(label ?? "");
   const [open, setOpen] = useState(false);
@@ -159,7 +170,9 @@ export function ProductoCombobox({
     // Con `aliasTexto` (Match IA) el origen habla de LO BUSCADO, no del texto del
     // cliente: buscar "manzana amarilla" da un match exacto y aun así hay que
     // aprender que "MANZANA GOLDEN SIN PICADURAS…" es ese producto.
-    const aprender = aliasTexto
+    const aprender = !aprenderAlias
+      ? false
+      : aliasTexto
       ? !!texto && texto.toLowerCase() !== c.nombre.toLowerCase()
       : c.origen !== "exacto" && !!texto && texto.toLowerCase() !== c.nombre.toLowerCase();
     if (aprender) {
@@ -248,6 +261,18 @@ export function ProductoCombobox({
                       {c.origen === "ia" ? "IA" : c.origen === "alias" ? "alias" : `${c.score}%`}
                     </span>
                   )}
+                  {claves && (claves.get(c.producto_id) ? (
+                    <span
+                      className="rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success"
+                      title="Clave de este cliente en SAE"
+                    >
+                      {claves.get(c.producto_id)}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-warning" title="El cliente no tiene clave de este producto en SAE: el export se seguiría deteniendo">
+                      sin clave
+                    </span>
+                  ))}
                   {conPrecio && (conPrecio.has(c.producto_id) ? (
                     <span className="text-xs font-semibold text-success" title="Con precio en el catálogo del cliente">$</span>
                   ) : (

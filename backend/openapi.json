@@ -1516,6 +1516,59 @@
     "title": "ClaveSaeItem",
     "type": "object"
    },
+   "ClaveSaeSugerida": {
+    "description": "Una clave del espejo de SAE (INVE##) tal como la conoce la empresa que\nle toca a esta remisión.",
+    "properties": {
+     "activa": {
+      "default": true,
+      "title": "Activa",
+      "type": "boolean"
+     },
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "descripcion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Descripcion"
+     },
+     "producto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
+     },
+     "producto_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Nombre"
+     }
+    },
+    "required": [
+     "clave"
+    ],
+    "title": "ClaveSaeSugerida",
+    "type": "object"
+   },
    "ClavesSaeIn": {
     "properties": {
      "claves": {
@@ -1544,6 +1597,48 @@
      "claves"
     ],
     "title": "ClavesSaeIn",
+    "type": "object"
+   },
+   "ClavesSaeOut": {
+    "description": "El espejo buscable para UNA remisión: la empresa SAE que le toca y las\nclaves que esa empresa conoce.\n\n`espejo=False` no significa \"no hay claves\" sino \"no sabemos\": quien no\ncorre el bot no tiene espejo. Ahí la captura sigue siendo libre y la\npantalla no puede prometer nada — el mismo fail-open del export.",
+    "properties": {
+     "claves": {
+      "default": [],
+      "items": {
+       "$ref": "#/components/schemas/ClaveSaeSugerida"
+      },
+      "title": "Claves",
+      "type": "array"
+     },
+     "empresa": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Empresa"
+     },
+     "espejo": {
+      "default": false,
+      "title": "Espejo",
+      "type": "boolean"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     }
+    },
+    "title": "ClavesSaeOut",
     "type": "object"
    },
    "ClavesSaeResult": {
@@ -3874,6 +3969,84 @@
      "role_id"
     ],
     "title": "CrearUsuarioIn",
+    "type": "object"
+   },
+   "CruzarLineaIn": {
+    "description": "Cambiar la partida por OTRO producto del catálogo, sin re-capturar.\n\nNace del aviso «N partidas sin clave SAE del cliente»: la partida cruzó a un\nproducto que ese cliente no tiene en SAE, y el arreglo real no siempre es\ndarle de alta una clave — casi siempre es que la partida va al producto que\nel cliente SÍ conoce. Esto la re-apunta ahí conservando la línea (su id, su\nnúmero, su nota y su devolución), que es justo lo que perdería re-mandar\ntodas las líneas por el PATCH.",
+    "properties": {
+     "aprender_alcance": {
+      "default": "cliente",
+      "enum": [
+       "cliente",
+       "plaza",
+       "global"
+      ],
+      "title": "Aprender Alcance",
+      "type": "string"
+     },
+     "aprender_texto": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Aprender Texto"
+     },
+     "cantidad_solicitada": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cantidad Solicitada"
+     },
+     "permitir_negativos": {
+      "default": false,
+      "title": "Permitir Negativos",
+      "type": "boolean"
+     },
+     "precio": {
+      "default": "mantener",
+      "enum": [
+       "mantener",
+       "lista"
+      ],
+      "title": "Precio",
+      "type": "string"
+     },
+     "presentacion": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "producto_id"
+    ],
+    "title": "CruzarLineaIn",
     "type": "object"
    },
    "DevolucionIn": {
@@ -33855,6 +34028,82 @@
     ]
    }
   },
+  "/api/v1/remisiones/{rem_id}/claves-sae": {
+   "get": {
+    "description": "El catálogo de artículos de SAE, buscable, para la empresa de ESTA remisión.\n\nEs la otra mitad del aviso «sin clave SAE»: cuando el producto de verdad es\nnuevo para el cliente hay que capturarle su clave, y teclearla de memoria es\njusto como salió la FRESADOMOPZ que SAE no conocía (14-sep-2026). Aquí se\nbusca por descripción sobre el espejo que deposita el bot y se elige una que\nexiste, en la empresa que le toca a la plaza de la remisión.\n\nSin espejo (o sin equivalencia SAE del cliente) contesta `espejo=False` con\nel motivo: la captura sigue siendo libre y la pantalla no promete nada —\nel mismo fail-open que el export.",
+    "operationId": "claves_sae_de_remision_api_v1_remisiones__rem_id__claves_sae_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rem_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Rem Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "default": "",
+       "maxLength": 80,
+       "title": "Q",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ClavesSaeOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Claves Sae De Remision",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
   "/api/v1/remisiones/{rem_id}/confirmar": {
    "post": {
     "operationId": "confirmar_remision_api_v1_remisiones__rem_id__confirmar_post",
@@ -34085,6 +34334,91 @@
      }
     ],
     "summary": "Enviar Remision",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
+  "/api/v1/remisiones/{rem_id}/lineas/{linea_id}/cruzar": {
+   "post": {
+    "description": "Re-apunta UNA partida a otro producto del catálogo, sin re-capturar.\n\nEl caso que lo pide: el aviso «N partidas sin clave SAE del cliente». La\npartida cruzó a un producto que ese cliente no tiene en su inventario de\nSAE, y el arreglo no siempre es inventarle una clave —eso es dar de alta un\nartículo en SAE por la puerta de atrás—: casi siempre la partida va al\nproducto que el cliente SÍ conoce, y lo que falla es el cruce.\n\nSe edita la línea EN SU SITIO (mismo id, mismo número, su nota y su\ndevolución intactas) en vez de reenviar todas por el PATCH, que las borra y\nlas vuelve a insertar: ahí se perdían las notas de «qué revisar» y una\npartida devuelta al 100% (cantidad 0) ni siquiera podía viajar de vuelta.\n\nLo que NO decide solo: el precio. Cambiar el producto no autoriza a cambiar\nlo que se cobra, así que por default se conserva el de la partida y tomar el\nde la lista es una elección explícita de quien cruza.",
+    "operationId": "cruzar_linea_api_v1_remisiones__rem_id__lineas__linea_id__cruzar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rem_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Rem Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "linea_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Linea Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CruzarLineaIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RemisionDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cruzar Linea",
     "tags": [
      "remisiones"
     ]

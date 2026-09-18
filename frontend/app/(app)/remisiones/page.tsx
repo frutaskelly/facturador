@@ -7,6 +7,7 @@ import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, RefreshCw
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
 import { CrearProductoModal, type ProductoCreado } from "@/components/CrearProductoModal";
+import { PartidaSinClaveDialog, type ModoPartida } from "@/components/PartidaSinClaveDialog";
 import { CambioOCPanel } from "./CambioOCPanel";
 import { AprenderPreciosDialog, divergentes, type PrecioDivergente } from "@/components/AprenderPreciosDialog";
 import { NuevaPresentacionDialog } from "@/components/NuevaPresentacionDialog";
@@ -81,6 +82,16 @@ const FACTURA_TONE: Record<string, "success" | "warning" | "danger"> = {
 
 // Facturable: borrador/confirmada y sin factura vigente (sin factura o con la
 // última CANCELADA → refacturación).
+// ¿Se le pueden tocar las líneas? Mismo criterio que la acción «Editar» y que
+// el backend: una FACTURADA/CANCELADA no, y tampoco una que esté por detrás de
+// una factura viva.
+function puedeEditarse(r: Remision): boolean {
+  return (
+    (r.estado === "BORRADOR" || r.estado === "RESERVADO" || r.estado === "CONFIRMADA") &&
+    (!r.factura_id || r.factura_estado === "CANCELADA")
+  );
+}
+
 function puedeFacturar(r: Remision): boolean {
   return (
     (r.estado === "BORRADOR" || r.estado === "CONFIRMADA") &&
@@ -1045,6 +1056,8 @@ export default function RemisionesPage() {
   // no se lee). Solo a quien puede tocar precios.
   const puedePrecios = can(me, "lista_precios:gestionar");
   const puedeProductos = can(me, "producto:gestionar");
+  // Capturar la clave de un producto escribe en el catálogo del cliente.
+  const puedeCatalogo = can(me, "cliente:gestionar");
   const [aprender, setAprender] = useState<PrecioDivergente[] | null>(null);
   // Qué sigue después del diálogo de precios divergentes: el flujo normal de
   // Guardar, o guardar+confirmar (botón «Confirmar pedido» de la edición).
@@ -1174,6 +1187,10 @@ export default function RemisionesPage() {
   // Detalle por fila: se carga bajo demanda al expandir la fila (slide-down).
   const [detalles, setDetalles] = useState<Record<string, RemisionDetail>>({});
   const [detalleLoading, setDetalleLoading] = useState<Set<string>>(new Set());
+  // Partida del aviso «sin clave SAE» que se está resolviendo, y por cuál de
+  // las dos salidas se abrió (cruzarla, o capturarle su clave).
+  const [partidaSinClave, setPartidaSinClave] =
+    useState<{ rem: RemisionDetail; linea: LineaRemision; modo: ModoPartida } | null>(null);
   const [toConfirm, setToConfirm] = useState<Remision | null>(null);
   const [toCancel, setToCancel] = useState<Remision | null>(null);
   // Diálogo de elección al guardar el alta: Borrador vs Confirmar salida.
@@ -1304,15 +1321,37 @@ export default function RemisionesPage() {
             </div>
             <p className="mb-2 text-xs text-muted">
               SAE rechaza claves que no están en su inventario, así que la exportación se va a
-              detener con este mismo conteo. Asígnales su código en Clientes →{" "}
+              detener con este mismo conteo. Hay dos salidas: si el producto de verdad es nuevo
+              para el cliente, asígnale su código en Clientes →{" "}
               {cliName[d.cliente_facturacion_id] ?? "el cliente"} → Catálogo (si la plaza usa clave
-              propia, captúrala con su sucursal).
+              propia, captúrala con su sucursal); si la partida debía ir a un producto que el
+              cliente ya tiene, <b>crúzala</b> aquí mismo.
             </p>
             <ul className="space-y-0.5">
               {d.lineas.filter((l) => l.sin_clave_sae).map((l) => (
-                <li key={l.id} className="tabular-nums">
-                  <span className="text-muted">{l.numero_linea}.</span>{" "}
-                  {l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id}
+                <li key={l.id} className="flex flex-wrap items-center gap-2 tabular-nums">
+                  <span>
+                    <span className="text-muted">{l.numero_linea}.</span>{" "}
+                    {l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id}
+                  </span>
+                  {canWrite && puedeEditarse(d) ? (
+                    <button
+                      onClick={() => setPartidaSinClave({ rem: d, linea: l, modo: "cruzar" })}
+                      className="text-xs text-accent underline hover:no-underline"
+                      title="Mandarla al producto que el cliente sí tiene en SAE"
+                    >
+                      cruzar con otro producto
+                    </button>
+                  ) : null}
+                  {puedeCatalogo ? (
+                    <button
+                      onClick={() => setPartidaSinClave({ rem: d, linea: l, modo: "clave" })}
+                      className="text-xs text-accent underline hover:no-underline"
+                      title="Es un producto nuevo para el cliente: captúrale su clave de SAE"
+                    >
+                      capturarle su clave
+                    </button>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -2930,6 +2969,23 @@ export default function RemisionesPage() {
           nombreInicial={lineaCrear?.texto ?? ""}
           unidadBaseInicial={unidadBaseDesde(lineaCrear?.presPegada)}
           onCreated={aplicarProductoCreado}
+        />
+
+        <PartidaSinClaveDialog
+          open={partidaSinClave !== null}
+          modoInicial={partidaSinClave?.modo}
+          remision={partidaSinClave?.rem ?? null}
+          linea={partidaSinClave?.linea ?? null}
+          clienteNombre={cliName[partidaSinClave?.rem.cliente_facturacion_id ?? ""] ?? "el cliente"}
+          plazaNombre={sucNombre[partidaSinClave?.rem.sucursal_id ?? ""]}
+          puedeCatalogo={puedeCatalogo}
+          onClose={() => setPartidaSinClave(null)}
+          onListo={() => {
+            const id = partidaSinClave?.rem.id;
+            setPartidaSinClave(null);
+            if (id) invalidarDetalles([id]);
+            reload();
+          }}
         />
 
         <NuevaPresentacionDialog
