@@ -8,6 +8,7 @@ import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobo
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
 import { CrearProductoModal, type ProductoCreado } from "@/components/CrearProductoModal";
 import { PartidaSinClaveDialog, type ModoPartida } from "@/components/PartidaSinClaveDialog";
+import { ClaveSaeInline } from "@/components/ClaveSaeInline";
 import { CambioOCPanel } from "./CambioOCPanel";
 import { AprenderPreciosDialog, divergentes, type PrecioDivergente } from "@/components/AprenderPreciosDialog";
 import { NuevaPresentacionDialog } from "@/components/NuevaPresentacionDialog";
@@ -1321,35 +1322,44 @@ export default function RemisionesPage() {
             </div>
             <p className="mb-2 text-xs text-muted">
               SAE rechaza claves que no están en su inventario, así que la exportación se va a
-              detener con este mismo conteo. Hay dos salidas: si el producto de verdad es nuevo
-              para el cliente, asígnale su código en Clientes →{" "}
-              {cliName[d.cliente_facturacion_id] ?? "el cliente"} → Catálogo (si la plaza usa clave
-              propia, captúrala con su sucursal); si la partida debía ir a un producto que el
-              cliente ya tiene, <b>crúzala</b> aquí mismo.
+              detener con este mismo conteo. Búscale su clave aquí mismo — el desplegable abre con
+              las que <b>ese producto ya usa en otro lado</b>, que casi siempre son la respuesta, y
+              deja escribir una a mano. Si la partida en realidad iba a otro producto, el cruce
+              está al lado.
             </p>
             <ul className="space-y-0.5">
               {d.lineas.filter((l) => l.sin_clave_sae).map((l) => (
                 <li key={l.id} className="flex flex-wrap items-center gap-2 tabular-nums">
-                  <span>
+                  <span className="min-w-56">
                     <span className="text-muted">{l.numero_linea}.</span>{" "}
                     {l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id}
                   </span>
+                  {puedeProductos ? (
+                    // La clave se elige aquí mismo: con siete partidas, abrir un
+                    // popup por cada una son catorce clics y siete diálogos.
+                    <ClaveSaeInline
+                      remisionId={d.id}
+                      productoId={l.producto_id}
+                      productoNombre={l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? ""}
+                      onGuardada={() => { invalidarDetalles([d.id]); reload(); }}
+                    />
+                  ) : null}
                   {canWrite && puedeEditarse(d) ? (
                     <button
                       onClick={() => setPartidaSinClave({ rem: d, linea: l, modo: "cruzar" })}
-                      className="text-xs text-accent underline hover:no-underline"
-                      title="Mandarla al producto que el cliente sí tiene en SAE"
+                      className="text-xs text-muted underline hover:text-foreground"
+                      title="La partida va a OTRO producto: el cruce falló"
                     >
-                      cruzar con otro producto
+                      va a otro producto
                     </button>
                   ) : null}
-                  {puedeCatalogo || puedeProductos ? (
+                  {puedeCatalogo ? (
                     <button
                       onClick={() => setPartidaSinClave({ rem: d, linea: l, modo: "clave" })}
-                      className="text-xs text-accent underline hover:no-underline"
-                      title="Es un producto nuevo para el cliente: captúrale su clave de SAE"
+                      className="text-xs text-muted underline hover:text-foreground"
+                      title="Cuando ESTE cliente usa una clave distinta a la del producto"
                     >
-                      capturarle su clave
+                      clave sólo para este cliente
                     </button>
                   ) : null}
                 </li>

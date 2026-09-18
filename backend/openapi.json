@@ -1484,6 +1484,47 @@
     "title": "ClaveNuevaOut",
     "type": "object"
    },
+   "ClaveSaeEnUso": {
+    "description": "Una clave que ESTE producto ya trae puesta en algún lado — el catálogo de\notro cliente, la fila de otra plaza, o su propia clave base.\n\nEs lo primero que hay que ver al resolver un «sin clave»: casi nunca falta\nla clave, está guardada donde no ampara (el CILANTRO de EHMO tenía\nCILANTROKG amarrado a Tabasco y la remisión era de Pachuca).",
+    "properties": {
+     "activa": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Activa"
+     },
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "de_donde": {
+      "title": "De Donde",
+      "type": "string"
+     },
+     "descripcion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Descripcion"
+     }
+    },
+    "required": [
+     "clave",
+     "de_donde"
+    ],
+    "title": "ClaveSaeEnUso",
+    "type": "object"
+   },
    "ClaveSaeItem": {
     "properties": {
      "activa": {
@@ -1636,6 +1677,14 @@
        }
       ],
       "title": "Motivo"
+     },
+     "ya_usa": {
+      "default": [],
+      "items": {
+       "$ref": "#/components/schemas/ClaveSaeEnUso"
+      },
+      "title": "Ya Usa",
+      "type": "array"
      }
     },
     "title": "ClavesSaeOut",
@@ -34088,6 +34137,23 @@
        "maxLength": 80,
        "title": "Q",
        "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "producto_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Producto Id"
       }
      },
      {

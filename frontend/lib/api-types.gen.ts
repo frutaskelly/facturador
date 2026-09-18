@@ -4658,6 +4658,25 @@ export interface components {
             /** Instruccion Whatsapp */
             instruccion_whatsapp: string;
         };
+        /**
+         * ClaveSaeEnUso
+         * @description Una clave que ESTE producto ya trae puesta en algún lado — el catálogo de
+         *     otro cliente, la fila de otra plaza, o su propia clave base.
+         *
+         *     Es lo primero que hay que ver al resolver un «sin clave»: casi nunca falta
+         *     la clave, está guardada donde no ampara (el CILANTRO de EHMO tenía
+         *     CILANTROKG amarrado a Tabasco y la remisión era de Pachuca).
+         */
+        ClaveSaeEnUso: {
+            /** Activa */
+            activa?: boolean | null;
+            /** Clave */
+            clave: string;
+            /** De Donde */
+            de_donde: string;
+            /** Descripcion */
+            descripcion?: string | null;
+        };
         /** ClaveSaeItem */
         ClaveSaeItem: {
             /**
@@ -4726,6 +4745,11 @@ export interface components {
             espejo: boolean;
             /** Motivo */
             motivo?: string | null;
+            /**
+             * Ya Usa
+             * @default []
+             */
+            ya_usa: components["schemas"]["ClaveSaeEnUso"][];
         };
         /** ClavesSaeResult */
         ClavesSaeResult: {
@@ -17940,6 +17964,7 @@ export interface operations {
         parameters: {
             query?: {
                 q?: string;
+                producto_id?: string | null;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
