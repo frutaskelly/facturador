@@ -14,6 +14,7 @@ from app.core.db import SessionLocal
 from app.main import app
 from .conftest import crear_sucursal
 from app.models import (
+    ClaveSae,
     Cliente,
     ClienteExterno,
     Membership,
@@ -675,6 +676,59 @@ def test_cruzar_partida_sin_clave_por_un_producto_del_catalogo(client, env, auth
         json={"producto_id": bueno_id},
     )
     assert r.status_code == 409, r.text
+
+
+def test_claves_sae_buscables_desde_la_remision(client, env, auth_as):
+    """La otra mitad del aviso: cuando el producto SÍ es nuevo para el cliente,
+    su clave se elige del espejo de SAE —en la empresa que le toca a la plaza—
+    en vez de teclearla de memoria (así salió la FRESADOMOPZ que SAE no tenía).
+    Y dice cuáles ya son de otro producto de ese mismo cliente."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        db.add_all([
+            ClaveSae(tenant_id=env["tenant"], empresa="02", clave="ESPI-KG",
+                     descripcion="ESPINACA KILO"),
+            ClaveSae(tenant_id=env["tenant"], empresa="02", clave="ESPI-VIEJA",
+                     descripcion="ESPINACA MANOJO (BAJA)", activa=False),
+            # La que el cliente YA usa para el producto del fixture.
+            ClaveSae(tenant_id=env["tenant"], empresa="02", clave="ACEI-ACEI-639",
+                     descripcion="ACEITE 20 LT"),
+            # Otra empresa: no debe asomarse.
+            ClaveSae(tenant_id=env["tenant"], empresa="03", clave="ESPI-TAB",
+                     descripcion="ESPINACA TABASCO"),
+        ])
+        db.commit()
+    finally:
+        db.close()
+    rem = _rem(client, h, env)
+
+    r = client.get(f"/api/v1/remisiones/{rem['id']}/claves-sae", headers=h,
+                   params={"q": "espinaca"})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["empresa"] == "02" and out["espejo"] is True
+    claves = [c["clave"] for c in out["claves"]]
+    assert claves == ["ESPI-KG", "ESPI-VIEJA"]      # la viva primero, la 03 fuera
+    assert out["claves"][1]["activa"] is False
+
+    # La que ya es de otro producto de este cliente viene señalada.
+    out = client.get(f"/api/v1/remisiones/{rem['id']}/claves-sae", headers=h,
+                     params={"q": "aceite"}).json()
+    assert out["claves"][0]["producto_id"] == env["prod"]
+    assert out["claves"][0]["producto_nombre"] == "ACEITE 20 LT"
+
+
+def test_claves_sae_sin_espejo_no_promete_nada(client, env, auth_as):
+    """Sin espejo del catálogo la pantalla no puede validar nada: lo dice y deja
+    capturar libre (mismo fail-open que el export)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem = _rem(client, h, env)
+    out = client.get(f"/api/v1/remisiones/{rem['id']}/claves-sae", headers=h).json()
+    assert out["espejo"] is False
+    assert out["empresa"] == "02"
+    assert "espejo" in (out["motivo"] or "")
+    assert out["claves"] == []
 
 
 def test_cruzar_partida_valida_presentacion_y_precio_de_lista(client, env, auth_as):

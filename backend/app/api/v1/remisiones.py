@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session, joinedload
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
     Almacen,
+    ClaveSae,
     Cliente,
     Devolucion,
     EsquemaImpuesto,
@@ -73,6 +74,8 @@ from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ...services.sucursales import es_sucursal_de
 from ...schemas.common import Page
 from ...schemas.remision import (
+    ClaveSaeSugerida,
+    ClavesSaeOut,
     ConfirmarRemisionIn,
     CruzarLineaIn,
     RemisionCreate,
@@ -840,6 +843,102 @@ def update_remision(
     db.flush()
     db.refresh(rem)
     return rem
+
+
+@router.get("/{rem_id}/claves-sae", response_model=ClavesSaeOut)
+def claves_sae_de_remision(
+    rem_id: UUID,
+    q: str = Query("", max_length=80),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """El catálogo de artículos de SAE, buscable, para la empresa de ESTA remisión.
+
+    Es la otra mitad del aviso «sin clave SAE»: cuando el producto de verdad es
+    nuevo para el cliente hay que capturarle su clave, y teclearla de memoria es
+    justo como salió la FRESADOMOPZ que SAE no conocía (14-sep-2026). Aquí se
+    busca por descripción sobre el espejo que deposita el bot y se elige una que
+    existe, en la empresa que le toca a la plaza de la remisión.
+
+    Sin espejo (o sin equivalencia SAE del cliente) contesta `espejo=False` con
+    el motivo: la captura sigue siendo libre y la pantalla no promete nada —
+    el mismo fail-open que el export.
+    """
+    from ...models.clave_sae import norm_clave
+    from ...services.export_sae import _clave_para_remision, _claves_sae_de_clientes
+
+    rem = get_or_404(db, Remision, rem_id)
+    if not ctx.cliente_permitido(rem.cliente_facturacion_id):
+        raise HTTPException(status_code=404, detail="Remisión no encontrada")
+
+    pares = _claves_sae_de_clientes(
+        db, ctx.tenant_id, {rem.cliente_facturacion_id}
+    ).get(rem.cliente_facturacion_id, [])
+    if not pares:
+        return ClavesSaeOut(motivo="Este cliente no tiene equivalencia con SAE todavía")
+    par, conflicto = _clave_para_remision(pares, rem.sucursal_id)
+    if par is None:
+        return ClavesSaeOut(
+            motivo=(
+                "El cliente vive en las empresas SAE "
+                + " y ".join(conflicto or [])
+                + ", y la plaza de la remisión no decide cuál"
+            ),
+        )
+    empresa = par[0]
+
+    base = db.query(ClaveSae).filter(
+        ClaveSae.tenant_id == ctx.tenant_id, ClaveSae.empresa == empresa
+    )
+    if not db.query(base.exists()).scalar():
+        return ClavesSaeOut(
+            empresa=empresa,
+            motivo=f"No hay espejo del catálogo de la empresa {empresa}",
+        )
+
+    texto = q.strip()
+    filas_q = base
+    if texto:
+        like = f"%{texto}%"
+        filas_q = filas_q.filter(
+            or_(ClaveSae.clave.ilike(like), ClaveSae.descripcion.ilike(like))
+        )
+    # Las vivas primero: una clave de baja EXISTE pero no factura, y ofrecerla
+    # arriba sería ofrecer el siguiente problema.
+    filas = filas_q.order_by(ClaveSae.activa.desc(), ClaveSae.descripcion).limit(20).all()
+
+    # ¿Alguna ya es de otro producto de ESTE cliente? Dos productos con la misma
+    # CVE_ART mandan a SAE la misma línea dos veces.
+    normalizadas = {norm_clave(f.clave) for f in filas}
+    usadas: dict[str, tuple] = {}
+    if normalizadas:
+        for pc, nombre in (
+            db.query(ProductoCliente, Producto.nombre)
+            .join(Producto, Producto.id == ProductoCliente.producto_id)
+            .filter(
+                ProductoCliente.cliente_id == rem.cliente_facturacion_id,
+                ProductoCliente.codigo_cliente.isnot(None),
+            )
+            .all()
+        ):
+            clave = norm_clave(pc.codigo_cliente)
+            if clave in normalizadas:
+                usadas.setdefault(clave, (pc.producto_id, nombre))
+
+    return ClavesSaeOut(
+        empresa=empresa,
+        espejo=True,
+        claves=[
+            ClaveSaeSugerida(
+                clave=f.clave,
+                descripcion=f.descripcion,
+                activa=bool(f.activa),
+                producto_id=usadas.get(norm_clave(f.clave), (None, None))[0],
+                producto_nombre=usadas.get(norm_clave(f.clave), (None, None))[1],
+            )
+            for f in filas
+        ],
+    )
 
 
 @router.post("/{rem_id}/lineas/{linea_id}/cruzar", response_model=RemisionDetailOut)

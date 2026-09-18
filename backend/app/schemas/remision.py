@@ -233,3 +233,30 @@ class CruzarLineaIn(BaseModel):
     # Sobregiro al re-descontar inventario de una CONFIRMADA (misma política
     # que confirmar/facturar/editar).
     permitir_negativos: bool = False
+
+
+class ClaveSaeSugerida(BaseModel):
+    """Una clave del espejo de SAE (INVE##) tal como la conoce la empresa que
+    le toca a esta remisión."""
+    clave: str
+    descripcion: Optional[str] = None
+    # False = existe en SAE pero está dada de BAJA: no factura.
+    activa: bool = True
+    # Si ESE cliente ya usa la clave para otro producto, se dice: dos productos
+    # con la misma CVE_ART mandan a SAE la misma línea dos veces.
+    producto_id: Optional[uuid.UUID] = None
+    producto_nombre: Optional[str] = None
+
+
+class ClavesSaeOut(BaseModel):
+    """El espejo buscable para UNA remisión: la empresa SAE que le toca y las
+    claves que esa empresa conoce.
+
+    `espejo=False` no significa "no hay claves" sino "no sabemos": quien no
+    corre el bot no tiene espejo. Ahí la captura sigue siendo libre y la
+    pantalla no puede prometer nada — el mismo fail-open del export.
+    """
+    empresa: Optional[str] = None
+    espejo: bool = False
+    motivo: Optional[str] = None
+    claves: list[ClaveSaeSugerida] = []

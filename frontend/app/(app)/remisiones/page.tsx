@@ -7,7 +7,7 @@ import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, RefreshCw
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
 import { CrearProductoModal, type ProductoCreado } from "@/components/CrearProductoModal";
-import { CruzarProductoDialog } from "@/components/CruzarProductoDialog";
+import { PartidaSinClaveDialog, type ModoPartida } from "@/components/PartidaSinClaveDialog";
 import { CambioOCPanel } from "./CambioOCPanel";
 import { AprenderPreciosDialog, divergentes, type PrecioDivergente } from "@/components/AprenderPreciosDialog";
 import { NuevaPresentacionDialog } from "@/components/NuevaPresentacionDialog";
@@ -1056,6 +1056,8 @@ export default function RemisionesPage() {
   // no se lee). Solo a quien puede tocar precios.
   const puedePrecios = can(me, "lista_precios:gestionar");
   const puedeProductos = can(me, "producto:gestionar");
+  // Capturar la clave de un producto escribe en el catálogo del cliente.
+  const puedeCatalogo = can(me, "cliente:gestionar");
   const [aprender, setAprender] = useState<PrecioDivergente[] | null>(null);
   // Qué sigue después del diálogo de precios divergentes: el flujo normal de
   // Guardar, o guardar+confirmar (botón «Confirmar pedido» de la edición).
@@ -1185,8 +1187,10 @@ export default function RemisionesPage() {
   // Detalle por fila: se carga bajo demanda al expandir la fila (slide-down).
   const [detalles, setDetalles] = useState<Record<string, RemisionDetail>>({});
   const [detalleLoading, setDetalleLoading] = useState<Set<string>>(new Set());
-  // Partida que se está cruzando con otro producto (aviso «sin clave SAE»).
-  const [cruzarPartida, setCruzarPartida] = useState<{ rem: RemisionDetail; linea: LineaRemision } | null>(null);
+  // Partida del aviso «sin clave SAE» que se está resolviendo, y por cuál de
+  // las dos salidas se abrió (cruzarla, o capturarle su clave).
+  const [partidaSinClave, setPartidaSinClave] =
+    useState<{ rem: RemisionDetail; linea: LineaRemision; modo: ModoPartida } | null>(null);
   const [toConfirm, setToConfirm] = useState<Remision | null>(null);
   const [toCancel, setToCancel] = useState<Remision | null>(null);
   // Diálogo de elección al guardar el alta: Borrador vs Confirmar salida.
@@ -1332,11 +1336,20 @@ export default function RemisionesPage() {
                   </span>
                   {canWrite && puedeEditarse(d) ? (
                     <button
-                      onClick={() => setCruzarPartida({ rem: d, linea: l })}
+                      onClick={() => setPartidaSinClave({ rem: d, linea: l, modo: "cruzar" })}
                       className="text-xs text-accent underline hover:no-underline"
                       title="Mandarla al producto que el cliente sí tiene en SAE"
                     >
                       cruzar con otro producto
+                    </button>
+                  ) : null}
+                  {puedeCatalogo ? (
+                    <button
+                      onClick={() => setPartidaSinClave({ rem: d, linea: l, modo: "clave" })}
+                      className="text-xs text-accent underline hover:no-underline"
+                      title="Es un producto nuevo para el cliente: captúrale su clave de SAE"
+                    >
+                      capturarle su clave
                     </button>
                   ) : null}
                 </li>
@@ -2958,16 +2971,18 @@ export default function RemisionesPage() {
           onCreated={aplicarProductoCreado}
         />
 
-        <CruzarProductoDialog
-          open={cruzarPartida !== null}
-          remision={cruzarPartida?.rem ?? null}
-          linea={cruzarPartida?.linea ?? null}
-          clienteNombre={cliName[cruzarPartida?.rem.cliente_facturacion_id ?? ""] ?? "el cliente"}
-          plazaNombre={sucNombre[cruzarPartida?.rem.sucursal_id ?? ""]}
-          onClose={() => setCruzarPartida(null)}
-          onCruzado={() => {
-            const id = cruzarPartida?.rem.id;
-            setCruzarPartida(null);
+        <PartidaSinClaveDialog
+          open={partidaSinClave !== null}
+          modoInicial={partidaSinClave?.modo}
+          remision={partidaSinClave?.rem ?? null}
+          linea={partidaSinClave?.linea ?? null}
+          clienteNombre={cliName[partidaSinClave?.rem.cliente_facturacion_id ?? ""] ?? "el cliente"}
+          plazaNombre={sucNombre[partidaSinClave?.rem.sucursal_id ?? ""]}
+          puedeCatalogo={puedeCatalogo}
+          onClose={() => setPartidaSinClave(null)}
+          onListo={() => {
+            const id = partidaSinClave?.rem.id;
+            setPartidaSinClave(null);
             if (id) invalidarDetalles([id]);
             reload();
           }}

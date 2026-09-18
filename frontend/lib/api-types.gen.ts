@@ -3599,6 +3599,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/remisiones/{rem_id}/claves-sae": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Claves Sae De Remision
+         * @description El catálogo de artículos de SAE, buscable, para la empresa de ESTA remisión.
+         *
+         *     Es la otra mitad del aviso «sin clave SAE»: cuando el producto de verdad es
+         *     nuevo para el cliente hay que capturarle su clave, y teclearla de memoria es
+         *     justo como salió la FRESADOMOPZ que SAE no conocía (14-sep-2026). Aquí se
+         *     busca por descripción sobre el espejo que deposita el bot y se elige una que
+         *     existe, en la empresa que le toca a la plaza de la remisión.
+         *
+         *     Sin espejo (o sin equivalencia SAE del cliente) contesta `espejo=False` con
+         *     el motivo: la captura sigue siendo libre y la pantalla no promete nada —
+         *     el mismo fail-open que el export.
+         */
+        get: operations["claves_sae_de_remision_api_v1_remisiones__rem_id__claves_sae_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/remisiones/{rem_id}/confirmar": {
         parameters: {
             query?: never;
@@ -4640,6 +4670,26 @@ export interface components {
             /** Descripcion */
             descripcion?: string | null;
         };
+        /**
+         * ClaveSaeSugerida
+         * @description Una clave del espejo de SAE (INVE##) tal como la conoce la empresa que
+         *     le toca a esta remisión.
+         */
+        ClaveSaeSugerida: {
+            /**
+             * Activa
+             * @default true
+             */
+            activa: boolean;
+            /** Clave */
+            clave: string;
+            /** Descripcion */
+            descripcion?: string | null;
+            /** Producto Id */
+            producto_id?: string | null;
+            /** Producto Nombre */
+            producto_nombre?: string | null;
+        };
         /** ClavesSaeIn */
         ClavesSaeIn: {
             /** Claves */
@@ -4651,6 +4701,31 @@ export interface components {
              * @default false
              */
             forzar: boolean;
+        };
+        /**
+         * ClavesSaeOut
+         * @description El espejo buscable para UNA remisión: la empresa SAE que le toca y las
+         *     claves que esa empresa conoce.
+         *
+         *     `espejo=False` no significa "no hay claves" sino "no sabemos": quien no
+         *     corre el bot no tiene espejo. Ahí la captura sigue siendo libre y la
+         *     pantalla no puede prometer nada — el mismo fail-open del export.
+         */
+        ClavesSaeOut: {
+            /**
+             * Claves
+             * @default []
+             */
+            claves: components["schemas"]["ClaveSaeSugerida"][];
+            /** Empresa */
+            empresa?: string | null;
+            /**
+             * Espejo
+             * @default false
+             */
+            espejo: boolean;
+            /** Motivo */
+            motivo?: string | null;
         };
         /** ClavesSaeResult */
         ClavesSaeResult: {
@@ -17842,6 +17917,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RemisionDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    claves_sae_de_remision_api_v1_remisiones__rem_id__claves_sae_get: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                rem_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClavesSaeOut"];
                 };
             };
             /** @description Validation Error */
