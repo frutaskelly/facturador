@@ -411,6 +411,9 @@ export default function RemisionesPage() {
   // Clave de SAE por producto: lo que dijo el contexto, con lo que se haya
   // editado en esta captura encima (para no recargar el contexto por tecla).
   const [clavesEditadas, setClavesEditadas] = useState<Record<string, string>>({});
+  // Lo que se va tecleando en el buscador de la captura, antes de elegir: sin
+  // esto cada tecla sería un PATCH al producto.
+  const [clavesBorrador, setClavesBorrador] = useState<Record<string, string>>({});
   const clavesSae = useMemo(
     () => ({ ...(ctxPrecios?.claves_sae ?? {}), ...clavesEditadas }),
     [ctxPrecios, clavesEditadas],
@@ -2926,15 +2929,26 @@ export default function RemisionesPage() {
                           {clavesSae[l.producto_id]} · del cliente
                         </div>
                       ) : (
-                        <Input
-                          className="text-xs"
-                          placeholder="sin clave"
-                          defaultValue={clavesSae[l.producto_id] ?? ""}
-                          key={`${l.producto_id}:${clavesSae[l.producto_id] ?? ""}`}
-                          title="La clave del artículo en SAE. Se guarda en el producto: la próxima vez ya viene puesta."
-                          onBlur={(e) => { void guardarClaveSae(l.producto_id, e.target.value); }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+                        // Mismo buscador del aviso, con el catálogo de la
+                        // empresa de SAE que le toca a ESTE cliente y plaza.
+                        // Aquí guarda al elegir: la captura no recarga nada.
+                        <ClaveSaeInline
+                          compacto
+                          clienteId={clienteId || null}
+                          sucursalId={sucursalId || null}
+                          productoId={l.producto_id}
+                          productoNombre={l.label || l.texto}
+                          value={clavesBorrador[l.producto_id] ?? clavesSae[l.producto_id] ?? ""}
+                          onChange={(v) =>
+                            setClavesBorrador((m) => ({ ...m, [l.producto_id]: v }))
+                          }
+                          onElegir={(v) => {
+                            void guardarClaveSae(l.producto_id, v);
+                            setClavesBorrador((m) => {
+                              const copia = { ...m };
+                              delete copia[l.producto_id];
+                              return copia;
+                            });
                           }}
                         />
                       )

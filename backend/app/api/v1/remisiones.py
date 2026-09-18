@@ -846,61 +846,6 @@ def update_remision(
     return rem
 
 
-def _claves_que_ya_usa(db: Session, producto_id: Optional[UUID], empresa: Optional[str]) -> list:
-    """Las claves que ESE producto ya trae puestas: su clave base y las del
-    catálogo de cualquier cliente o plaza.
-
-    Va primero en el buscador porque casi nunca falta la clave — está guardada
-    donde no ampara. El CILANTRO de EHMO tenía CILANTROKG amarrado a Tabasco y
-    la remisión era de Pachuca; la clave existía, viva, en la empresa 02.
-    """
-    if producto_id is None:
-        return []
-    from ...models.clave_sae import norm_clave
-
-    prod = db.query(Producto).filter(Producto.id == producto_id).one_or_none()
-    if prod is None:
-        return []
-    usos: dict[str, str] = {}
-    if (prod.clave_sae or "").strip():
-        usos[norm_clave(prod.clave_sae)] = "clave del producto"
-    filas = (
-        db.query(ProductoCliente, Cliente.legal_name, Sucursal.nombre)
-        .join(Cliente, Cliente.id == ProductoCliente.cliente_id)
-        .outerjoin(Sucursal, Sucursal.id == ProductoCliente.sucursal_id)
-        .filter(
-            ProductoCliente.producto_id == producto_id,
-            ProductoCliente.codigo_cliente.isnot(None),
-        )
-        .all()
-    )
-    for pc, cliente, plaza in filas:
-        clave = norm_clave(pc.codigo_cliente)
-        if not clave:
-            continue
-        de_donde = cliente + (f" en {plaza}" if plaza else "")
-        usos[clave] = usos.get(clave) or de_donde
-        if usos[clave] != "clave del producto" and usos[clave] != de_donde:
-            usos[clave] = f"{usos[clave]} y otros"
-    espejo = {}
-    if empresa and usos:
-        espejo = {
-            norm_clave(c): (d, a)
-            for c, d, a in db.query(ClaveSae.clave, ClaveSae.descripcion, ClaveSae.activa)
-            .filter(ClaveSae.empresa == empresa, ClaveSae.clave.in_(list(usos)))
-            .all()
-        }
-    return [
-        ClaveSaeEnUso(
-            clave=clave,
-            descripcion=espejo.get(clave, (None, None))[0],
-            activa=espejo.get(clave, (None, None))[1] if clave in espejo else None,
-            de_donde=de_donde,
-        )
-        for clave, de_donde in sorted(usos.items())
-    ]
-
-
 @router.get("/{rem_id}/claves-sae", response_model=ClavesSaeOut)
 def claves_sae_de_remision(
     rem_id: UUID,
@@ -909,97 +854,16 @@ def claves_sae_de_remision(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    """El catálogo de artículos de SAE, buscable, para la empresa de ESTA remisión.
-
-    Es la otra mitad del aviso «sin clave SAE»: cuando el producto de verdad es
-    nuevo para el cliente hay que capturarle su clave, y teclearla de memoria es
-    justo como salió la FRESADOMOPZ que SAE no conocía (14-sep-2026). Aquí se
-    busca por descripción sobre el espejo que deposita el bot y se elige una que
-    existe, en la empresa que le toca a la plaza de la remisión.
-
-    Sin espejo (o sin equivalencia SAE del cliente) contesta `espejo=False` con
-    el motivo: la captura sigue siendo libre y la pantalla no promete nada —
-    el mismo fail-open que el export.
-    """
-    from ...models.clave_sae import norm_clave
-    from ...services.export_sae import _clave_para_remision, _claves_sae_de_clientes
+    """Las claves que conoce la empresa de SAE de ESTA remisión. La lógica vive
+    en services/claves_sae.py porque la captura pregunta lo mismo sin tener
+    todavía una remisión que consultar."""
+    from ...services.claves_sae import sugerencias_de_claves
 
     rem = get_or_404(db, Remision, rem_id)
     if not ctx.cliente_permitido(rem.cliente_facturacion_id):
         raise HTTPException(status_code=404, detail="Remisión no encontrada")
-
-    pares = _claves_sae_de_clientes(
-        db, ctx.tenant_id, {rem.cliente_facturacion_id}
-    ).get(rem.cliente_facturacion_id, [])
-    if not pares:
-        return ClavesSaeOut(
-            motivo="Este cliente no tiene equivalencia con SAE todavía",
-            ya_usa=_claves_que_ya_usa(db, producto_id, None),
-        )
-    par, conflicto = _clave_para_remision(pares, rem.sucursal_id)
-    if par is None:
-        return ClavesSaeOut(
-            motivo=(
-                "El cliente vive en las empresas SAE "
-                + " y ".join(conflicto or [])
-                + ", y la plaza de la remisión no decide cuál"
-            ),
-        )
-    empresa = par[0]
-
-    base = db.query(ClaveSae).filter(
-        ClaveSae.tenant_id == ctx.tenant_id, ClaveSae.empresa == empresa
-    )
-    if not db.query(base.exists()).scalar():
-        return ClavesSaeOut(
-            empresa=empresa,
-            motivo=f"No hay espejo del catálogo de la empresa {empresa}",
-            ya_usa=_claves_que_ya_usa(db, producto_id, empresa),
-        )
-
-    texto = q.strip()
-    filas_q = base
-    if texto:
-        like = f"%{texto}%"
-        filas_q = filas_q.filter(
-            or_(ClaveSae.clave.ilike(like), ClaveSae.descripcion.ilike(like))
-        )
-    # Las vivas primero: una clave de baja EXISTE pero no factura, y ofrecerla
-    # arriba sería ofrecer el siguiente problema.
-    filas = filas_q.order_by(ClaveSae.activa.desc(), ClaveSae.descripcion).limit(20).all()
-
-    # ¿Alguna ya es de otro producto de ESTE cliente? Dos productos con la misma
-    # CVE_ART mandan a SAE la misma línea dos veces.
-    normalizadas = {norm_clave(f.clave) for f in filas}
-    usadas: dict[str, tuple] = {}
-    if normalizadas:
-        for pc, nombre in (
-            db.query(ProductoCliente, Producto.nombre)
-            .join(Producto, Producto.id == ProductoCliente.producto_id)
-            .filter(
-                ProductoCliente.cliente_id == rem.cliente_facturacion_id,
-                ProductoCliente.codigo_cliente.isnot(None),
-            )
-            .all()
-        ):
-            clave = norm_clave(pc.codigo_cliente)
-            if clave in normalizadas:
-                usadas.setdefault(clave, (pc.producto_id, nombre))
-
-    return ClavesSaeOut(
-        empresa=empresa,
-        espejo=True,
-        ya_usa=_claves_que_ya_usa(db, producto_id, empresa),
-        claves=[
-            ClaveSaeSugerida(
-                clave=f.clave,
-                descripcion=f.descripcion,
-                activa=bool(f.activa),
-                producto_id=usadas.get(norm_clave(f.clave), (None, None))[0],
-                producto_nombre=usadas.get(norm_clave(f.clave), (None, None))[1],
-            )
-            for f in filas
-        ],
+    return sugerencias_de_claves(
+        db, ctx.tenant_id, rem.cliente_facturacion_id, rem.sucursal_id, q, producto_id
     )
 
 

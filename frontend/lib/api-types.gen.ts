@@ -342,6 +342,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clientes/{cliente_id}/claves-sae": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Claves Sae Del Cliente
+         * @description El catálogo de SAE buscable para este cliente en esta plaza.
+         *
+         *     Es el mismo servicio que usa el aviso de la remisión, pero sin exigir una
+         *     remisión: la CAPTURA lo necesita mientras se escribe el documento, cuando
+         *     todavía no hay nada guardado que consultar.
+         */
+        get: operations["claves_sae_del_cliente_api_v1_clientes__cliente_id__claves_sae_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cobranza/estado-cuenta/{cliente_id}": {
         parameters: {
             query?: never;
@@ -3608,17 +3632,9 @@ export interface paths {
         };
         /**
          * Claves Sae De Remision
-         * @description El catálogo de artículos de SAE, buscable, para la empresa de ESTA remisión.
-         *
-         *     Es la otra mitad del aviso «sin clave SAE»: cuando el producto de verdad es
-         *     nuevo para el cliente hay que capturarle su clave, y teclearla de memoria es
-         *     justo como salió la FRESADOMOPZ que SAE no conocía (14-sep-2026). Aquí se
-         *     busca por descripción sobre el espejo que deposita el bot y se elige una que
-         *     existe, en la empresa que le toca a la plaza de la remisión.
-         *
-         *     Sin espejo (o sin equivalencia SAE del cliente) contesta `espejo=False` con
-         *     el motivo: la captura sigue siendo libre y la pantalla no promete nada —
-         *     el mismo fail-open que el export.
+         * @description Las claves que conoce la empresa de SAE de ESTA remisión. La lógica vive
+         *     en services/claves_sae.py porque la captura pregunta lo mismo sin tener
+         *     todavía una remisión que consultar.
          */
         get: operations["claves_sae_de_remision_api_v1_remisiones__rem_id__claves_sae_get"];
         put?: never;
@@ -11223,6 +11239,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    claves_sae_del_cliente_api_v1_clientes__cliente_id__claves_sae_get: {
+        parameters: {
+            query?: {
+                sucursal_id?: string | null;
+                q?: string;
+                producto_id?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                cliente_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClavesSaeOut"];
+                };
             };
             /** @description Validation Error */
             422: {

@@ -19882,6 +19882,116 @@
     ]
    }
   },
+  "/api/v1/clientes/{cliente_id}/claves-sae": {
+   "get": {
+    "description": "El catálogo de SAE buscable para este cliente en esta plaza.\n\nEs el mismo servicio que usa el aviso de la remisión, pero sin exigir una\nremisión: la CAPTURA lo necesita mientras se escribe el documento, cuando\ntodavía no hay nada guardado que consultar.",
+    "operationId": "claves_sae_del_cliente_api_v1_clientes__cliente_id__claves_sae_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "sucursal_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Sucursal Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "default": "",
+       "maxLength": 80,
+       "title": "Q",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "producto_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Producto Id"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ClavesSaeOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Claves Sae Del Cliente",
+    "tags": [
+     "clientes"
+    ]
+   }
+  },
   "/api/v1/cobranza/estado-cuenta/{cliente_id}": {
    "get": {
     "description": "Estado de cuenta de un cliente: sus facturas PPD timbradas con saldo\npendiente + antigüedad de saldos por fecha de vencimiento.",
@@ -34130,7 +34240,7 @@
   },
   "/api/v1/remisiones/{rem_id}/claves-sae": {
    "get": {
-    "description": "El catálogo de artículos de SAE, buscable, para la empresa de ESTA remisión.\n\nEs la otra mitad del aviso «sin clave SAE»: cuando el producto de verdad es\nnuevo para el cliente hay que capturarle su clave, y teclearla de memoria es\njusto como salió la FRESADOMOPZ que SAE no conocía (14-sep-2026). Aquí se\nbusca por descripción sobre el espejo que deposita el bot y se elige una que\nexiste, en la empresa que le toca a la plaza de la remisión.\n\nSin espejo (o sin equivalencia SAE del cliente) contesta `espejo=False` con\nel motivo: la captura sigue siendo libre y la pantalla no promete nada —\nel mismo fail-open que el export.",
+    "description": "Las claves que conoce la empresa de SAE de ESTA remisión. La lógica vive\nen services/claves_sae.py porque la captura pregunta lo mismo sin tener\ntodavía una remisión que consultar.",
     "operationId": "claves_sae_de_remision_api_v1_remisiones__rem_id__claves_sae_get",
     "parameters": [
      {

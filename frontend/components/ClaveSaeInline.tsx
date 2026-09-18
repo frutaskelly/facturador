@@ -42,17 +42,31 @@ type Respuesta = {
 
 export function ClaveSaeInline({
   remisionId,
+  clienteId,
+  sucursalId,
   productoId,
   productoNombre,
   value,
   onChange,
+  onElegir,
+  compacto,
 }: {
-  remisionId: string;
+  /** Remisión ya guardada: de ella salen el cliente y la plaza. */
+  remisionId?: string;
+  /** La captura todavía no tiene remisión: pregunta por cliente y plaza. */
+  clienteId?: string | null;
+  sucursalId?: string | null;
   productoId: string;
   productoNombre: string;
   /** La clave elegida y todavía sin guardar. */
   value: string;
+  /** Cada tecleo (para que el recuadro muestre lo que se escribe). */
   onChange: (clave: string) => void;
+  /** Sólo al ELEGIR del desplegable o dar Enter: es el momento de guardar
+   *  donde la pantalla guarda al vuelo (la captura), sin un PATCH por tecla. */
+  onElegir?: (clave: string) => void;
+  /** Dentro de la tabla de captura, donde el ancho lo manda la columna. */
+  compacto?: boolean;
 }) {
   const [abierto, setAbierto] = useState(false);
   const [texto, setTexto] = useState(value);
@@ -79,12 +93,17 @@ export function ClaveSaeInline({
     const q = (texto.trim() || productoNombre).slice(0, 80);
     const t = setTimeout(() => {
       const p = new URLSearchParams({ q, producto_id: productoId });
-      apiFetch<Respuesta>(`/api/v1/remisiones/${remisionId}/claves-sae?${p.toString()}`)
+      if (!remisionId && sucursalId) p.set("sucursal_id", sucursalId);
+      const url = remisionId
+        ? `/api/v1/remisiones/${remisionId}/claves-sae?${p.toString()}`
+        : `/api/v1/clientes/${clienteId}/claves-sae?${p.toString()}`;
+      if (!remisionId && !clienteId) { setCargando(false); return; }
+      apiFetch<Respuesta>(url)
         .then((r) => { if (vivo) { setDatos(r); setCargando(false); } })
         .catch(() => { if (vivo) { setDatos(null); setCargando(false); } });
     }, 250);
     return () => { vivo = false; clearTimeout(t); };
-  }, [abierto, texto, productoId, productoNombre, remisionId]);
+  }, [abierto, texto, productoId, productoNombre, remisionId, clienteId, sucursalId]);
 
   const limpia = texto.trim().toUpperCase();
   const enLista = (datos?.claves ?? []).some((c) => c.clave.toUpperCase() === limpia);
@@ -94,6 +113,7 @@ export function ClaveSaeInline({
     setTexto(clave);
     onChange(clave);
     setAbierto(false);
+    onElegir?.(clave);
   }
 
   function Fila({
@@ -118,13 +138,13 @@ export function ClaveSaeInline({
   }
 
   return (
-    <div ref={caja} className="relative inline-block w-72 align-middle">
-      <div className={`flex items-center gap-1 rounded-lg border bg-background px-2 py-1 ${
-        value ? "border-accent" : "border-border"
-      }`}>
+    <div ref={caja} className={`relative align-middle ${compacto ? "block w-full" : "inline-block w-72"}`}>
+      <div className={`flex items-center gap-1 rounded-lg border bg-background px-2 ${
+        compacto ? "py-1.5" : "py-1"
+      } ${value ? "border-accent" : "border-border"}`}>
         <input
-          className="w-full bg-transparent text-sm outline-none"
-          placeholder="Clave SAE: buscar o escribir…"
+          className={`w-full bg-transparent outline-none ${compacto ? "text-xs" : "text-sm"}`}
+          placeholder={compacto ? "sin clave" : "Clave SAE: buscar o escribir…"}
           value={texto}
           onFocus={() => setAbierto(true)}
           onChange={(e) => { setTexto(e.target.value); onChange(e.target.value.trim().toUpperCase()); setAbierto(true); }}
@@ -137,7 +157,7 @@ export function ClaveSaeInline({
       </div>
 
       {abierto ? (
-        <div className="absolute z-30 mt-1 max-h-80 w-96 overflow-auto rounded-lg border border-border bg-surface shadow-lg">
+        <div className="absolute right-0 z-30 mt-1 max-h-80 w-96 overflow-auto rounded-lg border border-border bg-surface shadow-lg">
           {(datos?.ya_usa?.length ?? 0) > 0 ? (
             <>
               <div className="px-3 pt-2 text-[11px] uppercase tracking-wide text-muted">

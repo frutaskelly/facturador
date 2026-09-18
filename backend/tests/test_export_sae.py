@@ -833,6 +833,33 @@ def test_claves_sae_buscables_desde_la_remision(client, env, auth_as):
     assert out["claves"][0]["producto_nombre"] == "ACEITE 20 LT"
 
 
+def test_las_claves_se_buscan_tambien_sin_remision(client, env, auth_as):
+    """La CAPTURA pregunta lo mismo que el aviso, pero no tiene remisión que
+    consultar: el buscador por cliente contesta idéntico, con la empresa que le
+    toca a su plaza."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        db.add(ClaveSae(tenant_id=env["tenant"], empresa="02", clave="PEREJILKG",
+                        descripcion="PEREJIL"))
+        db.commit()
+    finally:
+        db.close()
+
+    por_cliente = client.get(f"/api/v1/clientes/{env['cli']}/claves-sae", headers=h,
+                             params={"q": "perejil"})
+    assert por_cliente.status_code == 200, por_cliente.text
+    out = por_cliente.json()
+    assert out["empresa"] == "02" and out["espejo"] is True
+    assert [c["clave"] for c in out["claves"]] == ["PEREJILKG"]
+
+    # Y lo mismo que contesta la remisión: es el mismo servicio.
+    rem = _rem(client, h, env)
+    igual = client.get(f"/api/v1/remisiones/{rem['id']}/claves-sae", headers=h,
+                       params={"q": "perejil"}).json()
+    assert igual["claves"] == out["claves"]
+
+
 def test_el_contexto_trae_la_clave_sae_por_producto(client, env, auth_as):
     """La captura enseña la clave por línea sin preguntar producto por producto:
     viaja con el contexto de precios, ya resuelta con la cascada del export. Y
