@@ -528,9 +528,24 @@ def upsert_catalogo_cliente(
     if payload.presentacion is not None:
         pc.presentacion = payload.presentacion.strip().upper() or None
     db.flush()
-    # El cruce de productos también aprende el nombre del cliente.
+    # El nombre con el que ESTE cliente conoce el producto también sirve para
+    # entenderle cuando lo escriba en una orden — pero sólo a él.
+    #
+    # Aprenderlo GLOBAL metía el vocabulario de salida de un cliente en el de
+    # entrada de todo el negocio: es el mecanismo por el que un alias mandó 24
+    # remisiones al producto equivocado (guajillo → chilaca, 16 ya facturadas).
+    # Y no es teórico: 777 alias globales tienen hoy el texto de un
+    # `nombre_cliente`, y en 131 ese mismo texto es, para otro cliente, otro
+    # producto.
+    #
+    # Lo aprendido hereda el alcance de la fila que lo capturó: la genérica vale
+    # para todas las plazas del cliente, la de una plaza sólo en esa.
     if nombre:
-        aprender_alias(db, ctx.tenant_id, nombre, producto_id, origen="MANUAL", user_id=ctx.user_id)
+        aprender_alias(
+            db, ctx.tenant_id, nombre, producto_id,
+            cliente_id=cliente_id, sucursal_id=payload.sucursal_id,
+            origen="MANUAL", user_id=ctx.user_id,
+        )
     return ProductoClienteOut(
         producto_id=producto_id,
         producto_sku=prod.sku,
