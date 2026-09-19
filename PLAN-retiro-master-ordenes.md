@@ -77,8 +77,8 @@ el plan exigía. Hay además un bloqueo operativo abierto en Pachuca.
   mirar esa fila y decidir si se reusa o se elimina. Después: reencender el interruptor de espejo en
   las dos series de factura, decidir el renombre (solo por SQL, la pantalla no cambia el código de
   una serie), cancelar con devolución para que las remisiones vuelvan a borrador, y revincular las
-  cinco listas de proyecto. El mapeo de esas listas no se perdió: se recupera del propio código de
-  cada una. Lo que sí hay que verificar es que sus precios no hayan divergido desde el 9-sep.
+  Las listas de proyecto no hay que tocarlas: el diagnóstico del 19-sep confirmó que siguen
+  vinculadas al SAE, así que la desvinculación del corte no está vigente.
 - **Se registra D24, tu giro.** El Facturador pasa a ser el origen del catálogo y los precios, y un
   aplicador junto al SAE los escribe allá. Esto obliga a reescribir la regla de diseño 4: el
   Facturador no escribe pedidos ni facturas en el SAE, eso sigue siendo Excel masivo; catálogo y
@@ -100,8 +100,8 @@ el plan exigía. Hay además un bloqueo operativo abierto en Pachuca.
   empresa» ya no describe nada, y el depósito de precios tiene que aceptar la clave nueva del
   producto antes de que el backfill siga podando la vieja. Son pocas líneas y hoy es una regresión
   que nadie ve.
-- **La puerta de la Etapa 3 sube, no baja.** Con la reversa vuelven las cinco listas de proyecto, así
-  que pasa de dos a siete. La empresa 04 entró al espejo de facturas, no al de precios: sus listas no
+- **La puerta de la Etapa 3 son siete listas, no dos.** Verificado contra producción el 19-sep:
+  siguen espejadas las 5 de proyecto, la de Balles y Jubran y la de Tabasco. La empresa 04 entró al espejo de facturas, no al de precios: sus listas no
   cuentan para la puerta mientras no se les capture su vínculo, y esa alta es trabajo aparte.
 - **D23 se recuenta y cambia de forma.** No son cinco comandos nacidos en el Master, son más de
   veinte, y varios no caben en el resumen ni en la hoja de armado: inventario de bodega por foto,
@@ -145,7 +145,7 @@ el bot acumuló más riesgo.
 | **Corte del SAE** (Fase 5) | Después de catálogo, por cliente, con checklist y comandos por chat | Pachuca se cortó el 9-sep por serie, no por cliente: EHMO y MAFAN nativos con FEHMOHOS/FMAFAN desde folio 1 (FEHMOHOS 1 timbrada el 10-sep); el candado bajó del cliente a la serie (migr 0070, seis candados con tests); se opera en pantalla (confirmar→facturar→enviar en /remisiones). Balles/Jubran y Tabasco siguen en SAE con espejo | ADELANTADO |
 | **La bandeja de órdenes** | Pantalla propia donde el operador procesa | Desapareció el 9-sep: la ingesta crea remisión directa (`OC_INGESTA_DIRECTA`), la orden con duda es fila REVISAR en /remisiones con «Procesar órdenes»; backlog drenado el 10-sep (quedaron ~43 órdenes con motivo: las filas REVISAR). La API de ingesta del bot quedó intacta, mismos estados | CAMBIÓ |
 | **P6 espejo de catálogo** | Precios + productos + espejo puntual | La mitad de precios existe: listas vinculadas (migr 0065), endpoints de depósito, botón «Sincronizar SAE» (migr 0064) con expiración (PR #109) y caché en el bot (~116→~2 escrituras). productos no: renglón sin cruce se reporta, no se crea; sin espejo puntual ni reevaluación | PARCIAL |
-| **Listas y D10** | El SAE manda; puerta de Etapa 3 = 7 listas iguales | El corte desvinculó las 5 listas de proyecto: esas ya las manda el Facturador. Quedan espejadas 2 (Balles/Jubran y Tabasco); la puerta baja de 7 a 2 | INVERTIDO EN PARTE |
+| **Listas y D10** | El SAE manda; puerta de Etapa 3 = 7 listas iguales | El corte desvinculó las 5 listas de proyecto: esas ya las manda el Facturador. Quedan espejadas 2 (Balles/Jubran y Tabasco); la puerta baja de 7 a 2. *Corregido el 19-sep contra prod: las 7 siguen vinculadas (02:3, 02:5-9, 03:4); esa desvinculación no está vigente y D10 NO se invirtió* | SIN CAMBIO |
 | **Estado de cuenta** | El comando se serviría del Facturador (P8, D12) | Excel formato SAE + semana automática + filtro por serie + crédito (11-sep); mezcla nativo y espejo. Al bot solo le falta el permiso de cobranza (`menu:facturas` no está en la clave) | CASI |
 | **OC que cambia tras remisionar** | P2 avisaría | Detector con diff, insignia «OC CAMBIÓ» y cierre con nota (migr 0072); se cierra solo si el documento vuelve a coincidir | HECHO |
 | **P1 · P2 · P3 · P4 · P10 · P9** | Por construir | Sin movimiento: ni fechas persistidas, ni propuestas, ni resumen, ni armado, ni eventos; `PERMISOS_CONEXION` idéntico byte por byte y `factura:espejo` sigue sin sembrar | IGUAL |
@@ -373,7 +373,7 @@ semanas diciendo cuál es el nuevo.
    retiran `crear pedido SAE`, `actualizar pedido` y la prefactura que sigue en el código: desde aquí
    pedidos y facturas llegan al SAE solo por el masivo (D9).
    *Comprobación*: las listas espejadas iguales renglón por renglón, SAE = Facturador. La puerta se
-   recalcula contra el censo del momento: con la reversa vuelven las 5 de proyecto (2 → 7) y las de
+   verifica contra el censo: hoy son 7 (02:3, 02:5-9, 03:4), confirmado contra prod el 19-sep, y las de
    la empresa 04 entran cuando se les capture su vínculo. Producto creado por el bot aparece antes
    del siguiente pedido; 2 masivos de pedido y 2 de factura importados sin error.
 4. **Apagar el Master por perfil** (3 semanas de calendario). Balles+Jubran → EHMO Pachuca →
