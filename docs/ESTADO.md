@@ -1,5 +1,9 @@
 # Estado del proyecto — 19/09/2026 (cierre: `562d798` — una remisión impresa ya no se reescribe sola)
 
+**Retiro del Master Órdenes:** el tema vive en `PLAN-retiro-master-ordenes.md`, que abre con
+una sección «Cómo retomar esto» con el estado, lo inmediato y las trampas. Lo pendiente hoy es
+aplicar `backend/scripts/reversa_pachuca_ehmo_mafan.sql`, cuyo diagnóstico ya corrió limpio.
+
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
 

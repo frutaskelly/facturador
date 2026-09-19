@@ -17,6 +17,68 @@ igual desde el teléfono; cambia dónde vive la verdad. Este plan es independien
 facturación del SAE, que sigue su propio calendario. El corte de Pachuca (9-sep) se está
 revirtiendo por decisión del dueño: el único cliente nativo es Río Libre.
 
+## Cómo retomar esto
+
+Sección de traspaso, escrita el 19 de septiembre de 2026 para quien retome el tema sin haber
+estado en las conversaciones anteriores. Todo lo que importa vive en este repositorio; nada
+depende de la memoria de una sesión.
+
+### Dónde está cada cosa
+
+| Archivo | Qué es |
+|---|---|
+| `PLAN-retiro-master-ordenes.md` (este) | La propuesta completa, con sus tres revisiones: 1, 12 y 19 de septiembre. Se lee de arriba abajo, pero las revisiones van primero a propósito: el Resumen y las secciones de más abajo describen el plan original y algunas de sus frases quedaron superadas, marcadas donde corresponde. |
+| `backend/scripts/reversa_pachuca_ehmo_mafan.sql` | La reversa del corte de Pachuca. **Arranca en modo diagnóstico** y aborta a propósito para no aplicar nada. |
+| `backend/scripts/corte_pachuca_ehmo_mafan.sql` | El corte del 9 de septiembre, que es lo que la reversa deshace. |
+| `PLAN-corte-pachuca-ehmo-mafan.md` | El plan de aquel corte, con su checklist. |
+| `docs/ESTADO.md` | El estado rodante del proyecto, día a día. Es el punto de entrada general. |
+
+El bot de WhatsApp vive en otro repositorio, `~/Documents/Claude/SmartSupply/bot`, y el agente de
+correo en `~/Documents/Claude/SmartSupply/email`.
+
+### Lo inmediato
+
+Aplicar la reversa de Pachuca. El diagnóstico se corrió contra producción el 19 de septiembre y
+salió limpio: haría cuatro cambios, ninguno delicado. Subir el contador de ZEHMOHOS de 39 a 912,
+absorber la fila vacía de FMAFAN mudando su referencia a ZMAFAN, y devolverles el nombre a las dos
+series de remisión. El candado de facturas vivas pasó, porque las 39 nativas de FEHMOHOS están
+todas canceladas. Falta poner `v_solo_diagnostico := false` y volver a correrlo.
+
+Para correrlo hace falta la cadena de conexión de producción, que sale de `.env.prod`. La forma que
+funciona es asignarla a una variable antes de usarla; extraerla en línea dentro de comillas dobles
+sale vacía y psql acaba buscando un servidor local que no existe.
+
+```bash
+U=$(grep -E '^ALEMBIC_DB_URL=' .env.prod | head -1 | cut -d= -f2- | tr -d '"' | sed 's/+psycopg2//')
+```
+
+### Lo que no está en ningún código y hay que saber
+
+- **El bot tiene miles de renglones sin commitear** y su rama principal está rota a medias: un
+  comando tiene el disparador subido y el motor no. Dentro de ese bulto está además el arreglo que
+  cierra el pendiente de las órdenes perdidas. Commitearlo es el primer paso de la Fase 0 y no
+  debería empezarse nada más sin eso.
+- **El agente de correo no está bajo control de versiones** y está en producción. Registra órdenes
+  en el Master y también en el Facturador, con identidad vacía.
+- **El bot escribe remisiones del Facturador cada hora** con la regla de que gana la más reciente.
+  Ya reescribió nueve remisiones firmadas. El Facturador le puso candado, pero solo protege las
+  partidas.
+- **No creer que un script del repositorio se aplicó.** El del corte desvincula cinco listas de
+  precios y en la base siguen vinculadas; esa suposición metió un error en este documento que hubo
+  que corregir. Verificar siempre contra la base.
+- **Hay dos inquilinos en producción con los mismos clientes.** El vivo es
+  `cristian-gerardo-zarate-orozco`. Toda consulta o arreglo manual debe acotarlo.
+- **El renombre de una serie solo se puede hacer por base de datos.** La pantalla no expone el
+  código de la serie.
+
+### En qué estado están las decisiones
+
+Decididas: D9 a D17 y D22. Por cerrar formalmente, resueltas en la práctica: D19 y D20. Abiertas:
+D18, el archivo original de cada orden; D21, las ocho remisiones de Tabasco; D23, los más de veinte
+comandos que nacieron en el Master; y D24, el giro que convierte al Facturador en el origen del
+catálogo y los precios. Las cuatro están explicadas en la revisión del 19 de septiembre y en la
+tabla de decisiones.
+
 ## Resumen
 
 - **El Master hace tres trabajos**: almacén de órdenes, estado de negocio (SIN CLAVE / SIN PRECIO /
