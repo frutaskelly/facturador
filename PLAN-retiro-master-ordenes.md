@@ -677,7 +677,7 @@ El dueño resolvió D9 a D17 y D22 el 2-sep-2026. Abiertas: D18 (OneDrive), D21 
 
 | Riesgo | Cobertura |
 |---|---|
-| Una orden se pierde al apagar el Master | Outbox + conciliación existen; interruptor solo con pendiente 10 cerrado y 5 días en cero; Master solo lectura 2 semanas |
+| Una orden se pierde al apagar el Master | **OJO, la cobertura es circular** (hallazgo del 19-sep): `facturador_conciliar.py` define «perdida» leyendo EL MASTER, así que la red que justifica el apagado se apaga con él. Hace falta un detector que no dependa de la hoja. Outbox + conciliación existen; interruptor solo con pendiente 10 cerrado y 5 días en cero; Master solo lectura 2 semanas |
 | El cruce del Facturador difiere del bot sin que nadie lo note | Etapa 1 compara reportes 5 días; diferencias se corrigen en datos |
 | Precio corregido en SAE y el Facturador cobra el viejo | Espejo puntual tras cada comando + pasada de 30 min; lo facturado no se reprecia |
 | La clave del bot gana permisos amplios | Permisos acotados (P9); catálogo se escribe por el espejo, no por endpoints de gestión |
