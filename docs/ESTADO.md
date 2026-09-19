@@ -1,32 +1,105 @@
-# Estado del proyecto — 01/09/2026 (cierre: `9021dfa` — tabla y menú en vivo, plan del retiro del Master dentro)
+# Estado del proyecto — 19/09/2026 (cierre: `562d798` — una remisión impresa ya no se reescribe sola)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
+
+> **Este archivo tiene un hueco declarado.** La cabecera y los pendientes están al día
+> (19-sep), y abajo hay una sección del incidente de esta semana. Pero las secciones
+> históricas siguientes terminan el **01-sep**: entre el 02 y el 19 entraron **91 PRs y 16
+> migraciones** de otras sesiones que nadie resumió aquí. Para ese tramo manda
+> `git log 9021dfa..main --oneline` y el índice de memoria, no este archivo.
 
 ## Git
 
 | | |
 |---|---|
-| Rama base | `main` en `9021dfa`, igual que `origin/main` |
+| Rama base | `main` en `562d798`, igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio en el padre |
-| Worktrees | Solo la de esta sesión (`remisiones-table-layout`), ya fusionada y borrable. El cierre removió `admiring-aryabhata`, `elastic-morse` y `facturador-migration-proposal` — las tres fusionadas y limpias — y podó sus ramas |
-| PRs abiertos | ninguno — #79 (docs), #80 (tabla + menú), #81 (traspaso) y #82 (plan del Master) fusionados en este cierre |
-| Migración head | `0063_export_pedido_rastro`, sin cambios: el trabajo de hoy es sólo frontend |
+| Worktrees | La de esta sesión (`qa-proceso-diseno-optimizacion`), más `eager-heisenberg-ac9797` y `modest-chandrasekhar-970f08` — **las dos nacieron durante el cierre: hay sesiones vivas trabajando en paralelo y no se tocaron** |
+| PRs abiertos | ninguno |
+| Migración head | `0078_autoria_productos` — **corre DESPUÉS de la `0079`** pese al número (ver abajo) |
 
 `Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
 
 **El push directo a `main` lo bloquea el clasificador de permisos.** El camino que sí funciona
-es `gh pr create --base main` y luego `gh pr merge N --merge`.
+es `gh pr create --base main` y luego `gh pr merge N --squash`.
 
 ## Deploy
 
-**En vivo en https://facturador.mx y al día con `7b6e6ca`** (lo posterior es sólo documentación). `./deploy.sh` reconstruyó frontend
-y backend (la imagen de landing se reusó de caché: su contexto no cambió) y los cinco
-contenedores quedaron sanos. Verificado contra los dominios reales: `facturador.mx` 200,
-`api.facturador.mx/health` 200, `admin.facturador.mx` 200 y `app.facturador.mx` 307 (redirige a
-login, que es lo correcto). Sin migración nueva que aplicar. Los cinco contenedores se
-construyen desde este checkout, ninguna worktree respalda el deploy.
+**En vivo en https://facturador.mx con `562d798`.** `./deploy.sh` aplicó la migración
+(`0079_clave_sae_producto → 0078_autoria_productos`) y recreó backend y frontend; los cinco
+contenedores quedaron sanos. Verificado contra los dominios reales (`facturador.mx` 200,
+`api.facturador.mx/health` 200) y **dentro del contenedor**, que es lo que de verdad prueba que
+la imagen es la nueva: la BD quedó en `0078_autoria_productos`, la tabla `import_productos_log`
+existe y `productos` tiene sus dos columnas de autoría.
+
+Los contenedores se construyen desde este checkout; ninguna worktree respalda el deploy
+(comprobable con `docker inspect facturador_backend --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'`).
+
+**El sello de tiempo del contenedor engaña.** El 19-sep parecía que producción iba cuatro PRs
+atrás porque `.Created` era anterior a los últimos merges. No lo estaba: comparar el
+**contenido** de los archivos que tocaron esos commits contra el contenedor los dio idénticos.
+Para saber si prod está al día, compara contenido o la versión de alembic — nunca la fecha.
+
+## El número de una migración no dice cuándo corre
+
+`0078_autoria_productos` (PR #161) nació colgando de `0076_claves_sae` y se quedó abierta dos
+días. En ese rato `main` encadenó `0078_remision_impresa` (PR #163) y `0079_clave_sae_producto`
+sobre **esa misma** `0076`. Mergearla así dejaba a alembic con **dos cabezas** y `upgrade head`
+truena. GitHub no lo ve: marca el PR `MERGEABLE/CLEAN` porque no hay choque de texto, sólo un
+grafo partido.
+
+Se repuntó a `0079_clave_sae_producto`, la cabeza real. El número quedó fuera de orden **a
+propósito**: alembic va por el grafo, no por el nombre, y renombrar la revisión rompería
+cualquier base que ya la tuviera estampada.
+
+**Regla para ramas que tardan:** antes de mergear una que traiga migración, recalcula la cabeza
+de `main` y repunta si hace falta. El conteo de cabezas se saca así:
+
+```bash
+python3 -c "
+import glob,re
+r={}
+for f in glob.glob('backend/migrations/versions/*.py'):
+    s=open(f).read()
+    a=re.search(r'^revision[^=]*= *\"([^\"]+)\"',s,re.M); b=re.search(r'^down_revision[^=]*= *\"([^\"]+)\"',s,re.M)
+    if a: r[a.group(1)]=b.group(1) if b else None
+p={v for v in r.values() if v}
+print(sorted(k for k in r if k not in p))"
+```
+
+## Una remisión impresa ya no la reescribe una sincronización (`562d798`, PRs #163 y #161)
+
+El **vigía** del bot (Master de Sheets → Facturador) corre cada hora de 7 a 19 h con
+`--aplicar` y, cuando cree que el Master se movió, **reescribe la remisión completa**. El 15 y
+el 16 de septiembre pasó por las remisiones de la semana 38 de EHMO Villahermosa que **ya se
+habían impreso, entregado y firmado** por el jefe de almacén del CEDIS (14-sep): les devolvió
+las cantidades del **pedido** encima de los pesos de **báscula** que bodega había capturado, y
+les volvió a meter partidas que el cliente no recibió.
+
+Nueve de once dejaron de cuadrar contra el papel firmado. Ocho cobraban **de menos**;
+RZEHMOVH177 cobraba **$408.36 de más** que la remisión que el cliente tiene sellada. Ninguna
+estaba facturada, por eso se pudo arreglar.
+
+**Restauradas** desde el PDF firmado con `~/Documents/Claude/scripts/restaurar_remisiones_sem38.py`
+(ensayo por default, valida cada folio contra el total del papel, escribe en una transacción).
+Las once suman hoy 129,190.41 = el papel. El runbook está junto al script.
+
+**El candado** (PR #163, migración `0078_remision_impresa`): `impresa_at` se estampa la primera
+vez que sale el PDF —desde los dos endpoints, y reimprimir no la mueve— y con esa marca
+`PATCH /remisiones/{id}` **rechaza con 409 los cambios de PARTIDAS que vengan de una conexión**.
+Fecha de entrega y notas siguen pasando. Una **persona** sí puede corregir: quien decide qué
+hacer con un documento firmado es el equipo, no una sincronización de cada hora.
+
+Tres cosas que costaron encontrar y conviene no volver a descubrir:
+
+- **El PDF suma exacto y redondea una sola vez al final.** Redondear renglón por renglón da uno
+  o dos centavos de más. El candado de suma del script atrapó justo eso antes de escribir.
+- **El PDF lo genera JavaScript con flotantes binarios**: a 23.265 le sale 23.26 y a 7.755 le
+  sale 7.76. Por eso la tolerancia del script es medio centavo, ni más ni menos.
+- **Parar el bot es `launchctl bootout`, no `stop`**: su plist tiene `KeepAlive: true` y un
+  `stop` lo revive en segundos.
 
 ## La tabla y el menú caben en la pantalla (`7b6e6ca`, PR #80)
 
@@ -363,7 +436,31 @@ es el `headRefOid` del PR contra el tip local, comparar el **contenido** de los 
 #42; se confirmó por contenido (los cinco marcadores que introducía están en `main`) antes de
 podarla.
 
-## Pendientes
+## Pendientes abiertos (19-sep)
+
+Éstos son los vivos. Los de más abajo son del cierre del 01-sep y **nadie los ha revisado
+desde entonces**: trátalos como historia, no como lista de trabajo.
+
+1. **Dos sesiones vivas sin cerrar.** `eager-heisenberg-ac9797`
+   (`claude/producto-sin-clave-sae-954fb9`, 2 commits adelante) y
+   `modest-chandrasekhar-970f08` (detached) nacieron durante el cierre del 19-sep. El
+   `/wrap-all` cerró todo lo que existía al empezar, pero **el proyecto no queda cerrado**.
+2. **El Master de Sheets sigue con los datos viejos de la semana 38.** La restauración arregló
+   el Facturador, no el Master. El vigía debería empujarlos hacia allá (dirección
+   Facturador→Master, la correcta), pero las **tres partidas borradas** —Chícharo limpio y Flor
+   de calabaza en RZEHMOVH177, Coliflor en RZEHMOVH178— quedarán como aviso de «sólo en el
+   Master» sin borrarse solas. Revisar tras la primera pasada.
+3. **Chile chilaca vs guajillo en RZEHMOVH169, 173 y 175.** El papel firmado dice
+   `CHILECHILACAKG`; la base tiene hoy `CHILEGUAJILLOSKG`, al mismo precio. El dinero no
+   cambia, **la clave que sale a SAE sí**. Parece la corrección del alias global, no daño del
+   vigía — decisión del dueño, la restauración no lo tocó.
+4. **El tramo 02–19 de septiembre no está resumido aquí** (91 PRs, 16 migraciones). Si alguien
+   va a retomar en frío, ese hueco es lo primero que le va a faltar.
+5. **La contraseña de la BD de producción se imprimió** en un mensaje de error de `psycopg2`
+   durante la sesión del 17-sep. El script ya no la expone, pero quedó en el transcript;
+   rotarla es decisión del dueño.
+
+## Pendientes del cierre del 01-sep (sin revisar desde entonces)
 
 0. ~~Mirar la tabla y el menú con datos reales~~ — **REVISADO por el dueño** el 1-sep al cierre:
    la tabla y el menú se vieron con sesión iniciada y quedaron aprobados. Con eso se cierra
