@@ -15,6 +15,32 @@ ejecutada. Tu encargo no es ejecutarla. Es auditarla.
 
 ---
 
+## Empieza por aquí: el hallazgo que puede tumbar la propuesta
+
+Al preparar este documento salió algo que conviene que sepas antes de leer nada más, porque cambia
+cómo hay que juzgar la propuesta entera.
+
+**La red de seguridad que justifica el apagado se apaga con él.**
+
+El plan cubre su riesgo más grave, «una orden se pierde al apagar el Master», con la frase «el
+outbox y la conciliación ya existen». Pero la conciliación **lee el Master**:
+`facturador_conciliar.py:12` define una orden perdida como el folio que está en la hoja y no tiene
+orden en el Facturador, y `folios_master_ehmo()` y `folios_master_balles()` abren la hoja para
+saberlo (líneas 47, 76 y 133). Sin Master no hay contra qué comparar. El detector de órdenes
+perdidas deja de funcionar el mismo día que se apaga aquello que debía vigilar.
+
+Lo mismo pasa con dos protecciones más, y estas cubren a los dos canales de entrada, WhatsApp y
+correo: la detección de una orden **duplicada** y la de una **versión vieja** de una orden también
+leen la hoja. Del lado del Facturador solo queda el ancla de idempotencia, que es más estrecha.
+
+Esto no decide el dictamen por ti. Lo que hace es mover la pregunta central: **ya no es si se puede
+escribir directo al Facturador**, porque eso ya se hace todos los días. Es **qué protecciones mueren
+con la hoja, cuáles tienen sustituto construido, y qué es irreversible**. Trátalo como hipótesis a
+verificar, no como conclusión: confírmalo tú con archivo y línea antes de apoyarte en él. Está
+desarrollado en la pregunta P4 del encargo, y el plan ya lleva el aviso en su tabla de riesgos.
+
+---
+
 ## Tu encargo
 
 ### El estado objetivo, en palabras del dueño (19 de septiembre de 2026)
