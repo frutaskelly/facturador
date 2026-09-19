@@ -19,7 +19,14 @@ sería peor que el hueco):
    salió, que es la pregunta que se hizo hoy.
 
 Revision ID: 0078_autoria_productos
-Revises: 0076_claves_sae
+Revises: 0079_clave_sae_producto
+
+OJO CON EL NÚMERO: esta nació colgando de la 0076 y se quedó abierta dos días,
+en los que `main` encadenó 0078_remision_impresa y 0079_clave_sae_producto sobre
+esa misma 0076. Dejarla donde nació le daba a alembic DOS cabezas y `upgrade
+head` truena — git no lo ve porque no hay choque de texto. Por eso corre DESPUÉS
+de la 0079 aunque se llame 0078: alembic va por el grafo, no por el nombre, y
+renombrar la revisión rompería cualquier base que ya la tuviera estampada.
 """
 from typing import Sequence, Union
 
@@ -28,7 +35,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0078_autoria_productos"
-down_revision: Union[str, None] = "0076_claves_sae"
+down_revision: Union[str, None] = "0079_clave_sae_producto"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
