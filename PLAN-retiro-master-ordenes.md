@@ -23,6 +23,10 @@ Sección de traspaso, escrita el 19 de septiembre de 2026 para quien retome el t
 estado en las conversaciones anteriores. Todo lo que importa vive en este repositorio; nada
 depende de la memoria de una sesión.
 
+**Si lo que vas a hacer es auditar esta propuesta**, empieza por
+`BRIEFING-AUDITORIA-RETIRO-MASTER.md`, en esta misma raíz: explica los tres sistemas desde
+cero y trae el mandato de auditoría.
+
 ### Dónde está cada cosa
 
 | Archivo | Qué es |

@@ -1,7 +1,8 @@
 # Estado del proyecto — 19/09/2026 (cierre: `562d798` — una remisión impresa ya no se reescribe sola)
 
 **Retiro del Master Órdenes:** el tema vive en `PLAN-retiro-master-ordenes.md`, que abre con
-una sección «Cómo retomar esto» con el estado, lo inmediato y las trampas. La reversa del corte de
+una sección «Cómo retomar esto» con el estado, lo inmediato y las trampas. Para auditarla desde cero está
+`BRIEFING-AUDITORIA-RETIRO-MASTER.md`. La reversa del corte de
 Pachuca **se aplicó el 19-sep** (`backend/scripts/reversa_pachuca_ehmo_mafan.sql`) y quedó
 verificada; lo pendiente es sacar por el masivo las 137 remisiones de Pachuca en borrador.
 
