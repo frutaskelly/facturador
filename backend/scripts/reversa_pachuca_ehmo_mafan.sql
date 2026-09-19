@@ -58,6 +58,10 @@ DECLARE
     v_vieja     record;
     v_choque    record;
     v_n         int;
+    v_sobra     uuid;
+    v_gana      uuid;
+    v_vieja_vacia boolean;
+    v_nueva_vacia boolean;
     v_max       int;
     v_cambios   int := 0;
 BEGIN
@@ -124,6 +128,14 @@ BEGIN
     END IF;
 
     -- ======================= APLICACIÓN =======================
+    -- Cuatro escenarios posibles por par, porque la reversa puede venir a medias:
+    --   A. solo existe la cortada            → se renombra.
+    --   B. existen las dos y la NUEVA está sin usar (la sembró el PR #173)
+    --                                        → se absorbe la nueva y se renombra.
+    --   C. existen las dos y la CORTADA está sin usar (sobrante de una reversa
+    --      hecha a mano)                     → se absorbe la cortada; gana la nueva.
+    --   D. existen las dos y ambas con folios → ABORTA: lo decide una persona.
+    -- Al final, la que sobreviva queda con espejo encendido y el contador sano.
     FOR par IN
         SELECT * FROM (VALUES
             ('FEHMOHOS',  'ZEHMOHOS',  'FACTURA'),
@@ -138,82 +150,96 @@ BEGIN
         END IF;
 
         SELECT id, codigo, espejo_sae, folio_actual INTO v_vieja
-          FROM series
-         WHERE tenant_id = t_id AND tipo_documento = par.tipo AND codigo = par.viejo;
+          FROM series WHERE tenant_id = t_id AND tipo_documento = par.tipo AND codigo = par.viejo;
+        SELECT id, codigo, espejo_sae, folio_actual INTO v_choque
+          FROM series WHERE tenant_id = t_id AND tipo_documento = par.tipo AND codigo = par.nuevo;
 
-        IF v_vieja.id IS NULL THEN
-            SELECT id, espejo_sae INTO v_choque
-              FROM series
-             WHERE tenant_id = t_id AND tipo_documento = par.tipo AND codigo = par.nuevo;
-            IF v_choque.id IS NOT NULL THEN
-                RAISE NOTICE '[%] no existe; % ya está en su sitio (espejo_sae=%) — nada que hacer',
-                    par.viejo, par.nuevo, v_choque.espejo_sae;
-            ELSE
-                RAISE NOTICE '[%] no existe y % tampoco — revísalo a mano', par.viejo, par.nuevo;
-            END IF;
+        v_sobra := NULL; v_gana := NULL;
+
+        IF v_vieja.id IS NULL AND v_choque.id IS NULL THEN
+            RAISE NOTICE '[%] no existe ni % — revísalo a mano', par.viejo, par.nuevo;
             CONTINUE;
-        END IF;
 
-        -- (1) Interruptor del espejo ANTES del renombre. Solo en FACTURA: las
-        --     series de remisión nunca tuvieron esta bandera (migración 0070).
-        IF par.tipo = 'FACTURA' AND NOT v_vieja.espejo_sae THEN
-            UPDATE series SET espejo_sae = true WHERE id = v_vieja.id;
-            RAISE NOTICE '[%] espejo_sae → true (vuelve a ser espejo del SAE; masivo desbloqueado)', par.viejo;
-        END IF;
+        ELSIF v_vieja.id IS NULL THEN
+            v_gana := v_choque.id;
+            RAISE NOTICE '[%] ya renombrada: % está en su sitio', par.viejo, par.nuevo;
 
-        -- (2) Colisión con la fila sembrada el 18-sep.
-        SELECT id, folio_actual INTO v_choque
-          FROM series
-         WHERE tenant_id = t_id AND tipo_documento = par.tipo AND codigo = par.nuevo;
+        ELSIF v_choque.id IS NULL THEN
+            v_gana := v_vieja.id;
 
-        IF v_choque.id IS NOT NULL THEN
-            IF v_choque.folio_actual > 0 THEN
+        ELSE
+            -- Las dos existen. ¿Cuál está sin usar? Contador en cero y, en FACTURA,
+            -- sin una sola NATIVA emitida por ella. Solo se cuentan las nativas: los
+            -- reflejos del espejo guardan el código como texto y llegan con el folio
+            -- que les puso SAE, sin pasar por el contador de la fila.
+            SELECT count(*) INTO v_n FROM facturas
+             WHERE tenant_id = t_id AND serie = par.viejo AND origen = 'NATIVA';
+            v_vieja_vacia := (v_vieja.folio_actual = 0)
+                         AND (par.tipo <> 'FACTURA' OR v_n = 0);
+            SELECT count(*) INTO v_n FROM facturas
+             WHERE tenant_id = t_id AND serie = par.nuevo AND origen = 'NATIVA';
+            v_nueva_vacia := (v_choque.folio_actual = 0)
+                         AND (par.tipo <> 'FACTURA' OR v_n = 0);
+
+            IF v_nueva_vacia THEN
+                v_sobra := v_choque.id; v_gana := v_vieja.id;
+                RAISE NOTICE '[%] % existe pero está sin usar: la absorbo', par.viejo, par.nuevo;
+            ELSIF v_vieja_vacia THEN
+                v_sobra := v_vieja.id; v_gana := v_choque.id;
+                RAISE NOTICE '[%] sobrante sin usar y % ya en su sitio: la absorbo', par.viejo, par.nuevo;
+            ELSE
                 RAISE EXCEPTION
-                    'Colisión en %: ya existe una serie % (%) con folio_actual=% — tiene folios '
-                    'consumidos y no la borro por mi cuenta. Decide cuál sobrevive antes de seguir.',
-                    par.tipo, par.nuevo, v_choque.id, v_choque.folio_actual;
+                    'Colisión en %: % (folio %) y % (folio %) están las DOS en uso. '
+                    'Decide cuál sobrevive antes de seguir.',
+                    par.tipo, par.viejo, v_vieja.folio_actual, par.nuevo, v_choque.folio_actual;
             END IF;
-
-            -- Fila sin usar: le mudamos las referencias a la original y la borramos.
-            -- Sin esto, el DELETE se llevaría en cascada el abanico de series del
-            -- vínculo y las asignaciones de precios que apunten a ella.
-            UPDATE cliente_sucursales SET serie_factura_id  = v_vieja.id
-             WHERE tenant_id = t_id AND serie_factura_id  = v_choque.id;
-            UPDATE cliente_sucursales SET serie_remision_id = v_vieja.id
-             WHERE tenant_id = t_id AND serie_remision_id = v_choque.id;
-            UPDATE remisiones          SET serie_id = v_vieja.id
-             WHERE tenant_id = t_id AND serie_id = v_choque.id;
-            UPDATE lista_asignaciones  SET serie_id = v_vieja.id
-             WHERE tenant_id = t_id AND serie_id = v_choque.id;
-            -- El abanico tiene único (vínculo, serie): primero los que no chocan…
-            UPDATE cliente_sucursal_series css SET serie_id = v_vieja.id
-             WHERE css.tenant_id = t_id AND css.serie_id = v_choque.id
-               AND NOT EXISTS (
-                   SELECT 1 FROM cliente_sucursal_series otro
-                    WHERE otro.cliente_sucursal_id = css.cliente_sucursal_id
-                      AND otro.serie_id = v_vieja.id);
-            -- …y los que sí (el vínculo ya ofrecía la original) sobran.
-            DELETE FROM cliente_sucursal_series
-             WHERE tenant_id = t_id AND serie_id = v_choque.id;
-
-            DELETE FROM series WHERE id = v_choque.id;
-            RAISE NOTICE '[%] fila duplicada % (sin usar) absorbida y borrada', par.viejo, par.nuevo;
         END IF;
 
-        -- (3) Renombre.
-        UPDATE series SET codigo = par.nuevo WHERE id = v_vieja.id;
-        v_cambios := v_cambios + 1;
-        RAISE NOTICE '[%] renombrada → %', par.viejo, par.nuevo;
+        -- Absorber la sobrante: mudar sus referencias a la que gana y borrarla.
+        -- Sin este repunte el DELETE se llevaría en cascada el abanico del vínculo
+        -- y las asignaciones de precios que apunten a ella (series no tiene borrado lógico).
+        IF v_sobra IS NOT NULL THEN
+            UPDATE cliente_sucursales SET serie_factura_id  = v_gana
+             WHERE tenant_id = t_id AND serie_factura_id  = v_sobra;
+            UPDATE cliente_sucursales SET serie_remision_id = v_gana
+             WHERE tenant_id = t_id AND serie_remision_id = v_sobra;
+            UPDATE remisiones         SET serie_id = v_gana
+             WHERE tenant_id = t_id AND serie_id = v_sobra;
+            UPDATE lista_asignaciones SET serie_id = v_gana
+             WHERE tenant_id = t_id AND serie_id = v_sobra;
+            UPDATE cliente_sucursal_series css SET serie_id = v_gana
+             WHERE css.tenant_id = t_id AND css.serie_id = v_sobra
+               AND NOT EXISTS (SELECT 1 FROM cliente_sucursal_series otro
+                                WHERE otro.cliente_sucursal_id = css.cliente_sucursal_id
+                                  AND otro.serie_id = v_gana);
+            DELETE FROM cliente_sucursal_series WHERE tenant_id = t_id AND serie_id = v_sobra;
+            DELETE FROM series WHERE id = v_sobra;
+            v_cambios := v_cambios + 1;
+            RAISE NOTICE '    referencias mudadas y fila sobrante borrada';
+        END IF;
 
-        -- (4) El contador, al último folio realmente emitido con el código nuevo.
-        --     En FACTURA eso incluye los del espejo (los de SAE). Nunca baja.
+        -- Renombrar, si la que gana todavía carga el nombre cortado.
+        IF v_gana = v_vieja.id THEN
+            UPDATE series SET codigo = par.nuevo WHERE id = v_gana;
+            v_cambios := v_cambios + 1;
+            RAISE NOTICE '[%] renombrada → %', par.viejo, par.nuevo;
+        END IF;
+
+        -- Interruptor del espejo y contador sano, solo en FACTURA.
         IF par.tipo = 'FACTURA' THEN
+            UPDATE series SET espejo_sae = true WHERE id = v_gana AND NOT espejo_sae;
+            IF FOUND THEN
+                RAISE NOTICE '[%] espejo_sae → true (masivo desbloqueado; nativo prohibido)', par.nuevo;
+            END IF;
             SELECT COALESCE(MAX(folio), 0) INTO v_max
               FROM facturas WHERE tenant_id = t_id AND serie = par.nuevo;
-            UPDATE series SET folio_actual = GREATEST(folio_actual, v_max)
-             WHERE id = v_vieja.id;
-            RAISE NOTICE '[%] folio_actual → % (último emitido con ese código)',
-                par.nuevo, GREATEST(v_vieja.folio_actual, v_max);
+            SELECT folio_actual INTO v_n FROM series WHERE id = v_gana;
+            IF v_max > v_n THEN
+                UPDATE series SET folio_actual = v_max WHERE id = v_gana;
+                v_cambios := v_cambios + 1;
+                RAISE NOTICE '[%] folio_actual % → % (último emitido con ese código; por debajo, '
+                             'apagar el espejo generaría folios repetidos)', par.nuevo, v_n, v_max;
+            END IF;
         END IF;
     END LOOP;
 
