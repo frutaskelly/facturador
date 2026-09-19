@@ -782,6 +782,9 @@ export default function ImportarProductosPage() {
         body: JSON.stringify({
           guardar_precios: conPrecios,
           lista_nombre: conPrecios ? listaNombre.trim() || null : null,
+          // Solo para la bitácora: el archivo no se sube aquí, pero su nombre
+          // es con lo que después se reconoce de qué lista salió cada producto.
+          archivo_nombre: archivo?.name ?? null,
           // Las categorías nuevas se crean con el nombre del archivo cuando el
           // usuario dejó "crear nueva" para esa categoría.
           crear_categorias: true,
@@ -849,7 +852,11 @@ export default function ImportarProductosPage() {
           "/api/v1/productos/catalogo-cliente-batch",
           {
             method: "POST",
-            body: JSON.stringify({ cliente_ids: clienteIds, items: resultado.productos }),
+            body: JSON.stringify({
+              cliente_ids: clienteIds,
+              items: resultado.productos,
+              archivo_nombre: archivo?.name ?? null,
+            }),
           }
         );
         hechos.push(`Catálogo guardado para ${r.clientes} cliente(s)`);

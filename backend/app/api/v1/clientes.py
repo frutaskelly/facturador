@@ -545,12 +545,14 @@ def upsert_catalogo_cliente(
             cliente_id=cliente_id,
             producto_id=producto_id,
             sucursal_id=payload.sucursal_id,
+            created_by=ctx.user_id,
         )
         db.add(pc)
     pc.codigo_cliente = codigo
     pc.nombre_cliente = nombre
     if payload.presentacion is not None:
         pc.presentacion = payload.presentacion.strip().upper() or None
+    pc.updated_by = ctx.user_id
     db.flush()
     # El nombre con el que ESTE cliente conoce el producto también sirve para
     # entenderle cuando lo escriba en una orden — pero sólo a él.

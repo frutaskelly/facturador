@@ -333,6 +333,9 @@ class ImportIn(BaseModel):
     crear_categorias: bool = False
     # Pregunta 4: esquema de impuesto para las filas que no traen uno.
     esquema_default_id: Optional[uuid.UUID] = None
+    # Solo para la bitácora: el archivo no se guarda, pero su nombre es con lo
+    # que el usuario reconoce de qué lista salió cada producto.
+    archivo_nombre: Optional[str] = Field(default=None, max_length=254)
     filas: list[ImportFilaIn] = Field(min_length=1, max_length=2000)
 
 
@@ -415,6 +418,8 @@ class CatalogoClienteBatchIn(BaseModel):
     clientes para una lista de productos (el último paso de la importación)."""
     cliente_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
     items: list[ImportProductoResultado] = Field(min_length=1, max_length=2000)
+    # Para la bitácora: liga este paso con la pasada de /importar que lo generó.
+    archivo_nombre: Optional[str] = Field(default=None, max_length=254)
 
 
 class CatalogoClienteBatchOut(BaseModel):

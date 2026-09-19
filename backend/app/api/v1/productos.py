@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ...core.ratelimit import enforce
@@ -26,6 +26,7 @@ from ...models import (
     CategoriaProducto,
     Cliente,
     EsquemaImpuesto,
+    ImportProductosLog,
     ListaAsignacion,
     ListaPrecios,
     Precio,
@@ -1187,6 +1188,39 @@ def importar_productos(
         return _ejecutar_import(db, ctx, payload, aislar_filas=True)
 
 
+def _bitacora_import(
+    db: Session,
+    ctx: AuthContext,
+    *,
+    origen: str,
+    archivo_nombre: Optional[str],
+    cliente_ids: list,
+    detalle: dict,
+    **numeros: int,
+) -> None:
+    """Deja el renglón de quién importó qué (ver `models/import_productos_log`).
+
+    Va en su propio savepoint y se traga sus errores a propósito: la bitácora
+    existe para contestar una pregunta forense, no para tumbar un alta que sí
+    funcionó. Si se cae, se pierde el renglón y queda el aviso en el log del
+    servidor — nunca el import.
+    """
+    try:
+        with db.begin_nested():
+            db.add(ImportProductosLog(
+                id=uuid4(),
+                tenant_id=ctx.tenant_id,
+                origen=origen,
+                user_id=ctx.user_id,
+                archivo_nombre=(archivo_nombre or "").strip()[:254] or None,
+                cliente_ids=[str(c) for c in cliente_ids],
+                detalle=detalle,
+                **numeros,
+            ))
+    except SQLAlchemyError:
+        logger.warning("no se pudo escribir la bitácora de importación", exc_info=True)
+
+
 def _lista_global_de(db: Session, cliente_id):
     """La lista asignada al cliente «para todo el país»: sin sucursal, sin serie
     y sin proyecto. Es la que el wizard de importación considera «su lista»."""
@@ -1463,6 +1497,8 @@ def _ejecutar_import(
                         presentacion_default=unidad_base,
                         codigo_barras=(fila.codigo_barras or "").strip() or None,
                         activo=fila.activo,
+                        created_by=ctx.user_id,
+                        updated_by=ctx.user_id,
                     )
                     _nuevo(prod, nuevos_prods)
                     creados += 1
@@ -1480,11 +1516,13 @@ def _ejecutar_import(
                             pc = ProductoCliente(
                                 id=uuid4(), tenant_id=ctx.tenant_id,
                                 cliente_id=cliente.id, producto_id=prod.id,
+                                created_by=ctx.user_id,
                             )
                             _nuevo(pc, nuevos_deps)
                             pc_previos[clave_pc] = pc
                         pc.codigo_cliente = codigo_c
                         pc.nombre_cliente = nombre_c
+                        pc.updated_by = ctx.user_id
                         if unidad_fila:
                             pc.presentacion = unidad_fila
                         alias_guardados += 1
@@ -1548,6 +1586,30 @@ def _ejecutar_import(
             if fase:
                 db.add_all(fase)
             db.flush()
+
+    # Quién corrió esta pasada, con qué archivo y para qué clientes. Es lo que
+    # faltó el 16-sep-2026 para atribuir un producto recién importado.
+    _bitacora_import(
+        db, ctx,
+        origen="IMPORT",
+        archivo_nombre=payload.archivo_nombre,
+        cliente_ids=ids_clientes,
+        filas_enviadas=len(payload.filas),
+        productos_creados=creados,
+        productos_vinculados=vinculados,
+        catalogo_guardado=alias_guardados,
+        precios_guardados=precios_guardados,
+        filas_con_error=len(errores),
+        detalle={
+            "omitidos": omitidos,
+            "categorias_creadas": categorias_creadas,
+            "presentaciones_agregadas": presentaciones_agregadas,
+            "lista_id": str(lista_id) if lista_id else None,
+            "lista_nombre": lista_nombre_out,
+            # El lote chocó y se rehizo fila por fila (ver `importar_productos`).
+            "aislado": aislar_filas,
+        },
+    )
 
     return ImportResultOut(
         creados=creados, vinculados=vinculados, alias_guardados=alias_guardados,
@@ -1616,11 +1678,13 @@ def catalogo_cliente_batch(
                 pc = ProductoCliente(
                     id=uuid4(), tenant_id=ctx.tenant_id,
                     cliente_id=cliente.id, producto_id=item.producto_id,
+                    created_by=ctx.user_id,
                 )
                 nuevos.append(pc)
                 previos[clave] = pc
             pc.codigo_cliente = codigo
             pc.nombre_cliente = nombre
+            pc.updated_by = ctx.user_id
             if item.presentacion:
                 pc.presentacion = item.presentacion
             guardados += 1
@@ -1652,6 +1716,18 @@ def catalogo_cliente_batch(
     if nuevos:
         db.add_all(nuevos)
     db.flush()
+    # Este paso —no el de /importar— es donde el wizard elige de QUIÉN es la
+    # lista, así que es el único renglón que puede contestar "a qué clientes se
+    # les escribió el catálogo".
+    _bitacora_import(
+        db, ctx,
+        origen="CATALOGO",
+        archivo_nombre=payload.archivo_nombre,
+        cliente_ids=payload.cliente_ids,
+        filas_enviadas=len(payload.items),
+        catalogo_guardado=guardados,
+        detalle={"productos": len(validos)},
+    )
     return CatalogoClienteBatchOut(
         clientes=len(clientes), productos=len(validos), guardados=guardados
     )
@@ -1726,7 +1802,10 @@ def create_producto(
                 },
             )
 
-    obj = Producto(**data, tenant_id=ctx.tenant_id)
+    obj = Producto(
+        **data, tenant_id=ctx.tenant_id,
+        created_by=ctx.user_id, updated_by=ctx.user_id,
+    )
     db.add(obj)
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)
@@ -1840,6 +1919,7 @@ def update_producto(
         ensure_fk(db, EsquemaImpuesto, data["esquema_impuesto_id"], "esquema_impuesto_id")
     for key, value in data.items():
         setattr(obj, key, value)
+    obj.updated_by = ctx.user_id
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)
     return obj
@@ -1878,6 +1958,7 @@ def agregar_presentacion(
         **(obj.presentaciones or {}),
         nombre: {"factor": float(payload.factor), "sat": sat},
     }
+    obj.updated_by = ctx.user_id
     db.flush()
     db.refresh(obj)
     return obj
@@ -1891,5 +1972,6 @@ def delete_producto(
 ):
     obj = get_or_404(db, Producto, producto_id)
     obj.deleted_at = func.now()
+    obj.updated_by = ctx.user_id   # quién lo dio de baja, no solo cuándo
     db.flush()
     return None

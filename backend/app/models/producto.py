@@ -95,5 +95,10 @@ class Producto(Base, TimestampMixin, SoftDeleteMixin):
     activo = Column(Boolean, nullable=False, server_default="true")
     custom_fields = Column(JSONB, nullable=False, server_default="{}")
 
+    # Autoría, como en remisiones. Nullable porque el seed y los scripts dan de
+    # alta sin usuario, y una conexión del bot no tiene persona a quién atribuir.
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+
     categoria = relationship("CategoriaProducto")
     esquema_impuesto = relationship("EsquemaImpuesto")
