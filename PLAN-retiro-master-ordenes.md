@@ -38,11 +38,16 @@ correo en `~/Documents/Claude/SmartSupply/email`.
 
 ### Lo inmediato
 
-Aplicar la reversa de Pachuca. El diagnóstico se corrió contra producción el 19 de septiembre y
-salió limpio: haría cuatro cambios, ninguno delicado. Subir el contador de ZEHMOHOS de 39 a 912,
-absorber la fila vacía de FMAFAN mudando su referencia a ZMAFAN, y devolverles el nombre a las dos
-series de remisión. El candado de facturas vivas pasó, porque las 39 nativas de FEHMOHOS están
-todas canceladas. Falta poner `v_solo_diagnostico := false` y volver a correrlo.
+**La reversa ya se aplicó**, el 19 de septiembre. Las series quedaron ZEHMOHOS y ZMAFAN con el
+espejo encendido, la primera con su contador corregido a 912; la fila vacía de FMAFAN se absorbió
+y su referencia pasó a ZMAFAN; y las dos series de remisión recuperaron su nombre. Verificado
+después: ninguna serie conserva el nombre del corte y no quedó una sola referencia rota. Río Libre
+sigue siendo el único cliente nativo.
+
+Lo siguiente es **sacar por el masivo las 137 remisiones de Pachuca que están en borrador sin
+factura** para que el SAE las facture y el espejo las traiga de vuelta. Ojo con el detalle
+cosmético: las remisiones anteriores al renombre conservan su folio impreso con el prefijo viejo,
+así que el histórico se lee partido entre los dos prefijos. Es esperado y no afecta nada.
 
 Para correrlo hace falta la cadena de conexión de producción, que sale de `.env.prod`. La forma que
 funciona es asignarla a una variable antes de usarla; extraerla en línea dentro de comillas dobles
