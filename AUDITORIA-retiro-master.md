@@ -426,7 +426,8 @@ Todas las opciones comparten **una migración**: sembrar `factura:espejo` en el 
 | 19 | «7,294 comandos en 30 días» (`PLAN:101`) | **REFUTADA** | `logs/router_decisions.jsonl`: 2–31 ago → **7,153**; todo agosto → 7,448. Ninguna ventana da 7,294. Y `ver_producto` es **1,243**, no 1,296 | No |
 | 20 | El PLAN sobre su propia reversa | **SE CONTRADICE TRES VECES** | `PLAN:35` («arranca en diagnóstico y aborta»), `PLAN:45` («la reversa ya se aplicó») y `PLAN:133` («**no hay script de reversa**», en la revisión más reciente, la del 19-sep) | Sí: quien retome no sabe cuál creer |
 | 21 | `registrarAccion` existe y nadie la llama | **CONFIRMADA** | `agente_db.js:142` (definición), `:171` (export), **cero** sitios de llamada | Sí: es la medida que el plan usa para las fases siguientes |
-| 22 | El agendador del espejo de catálogo falla siempre | **CONFIRMADA** | `com.frutaskelly.claves-sae.plist` apunta a un script **fuera del repositorio**; `logs/claves_sae.launchd.err` termina en `PermissionError: Operation not permitted` | Sí |
+| 22 | El agendador del espejo de catálogo falla siempre | **CONFIRMADA en la letra, REFUTADA en la consecuencia** | Termina con excepción, sí: `logs/claves_sae.launchd.err` acaba en `PermissionError` al abrir su bitácora (TCC de macOS sobre `~/Documents`). **Pero el trabajo sí se hace**: muere en la línea 57, *después* del `os.chdir` (`:48`) y del bucle de empresas (`:52-56`). Verificado contra producción: `claves_sae` tiene 2,043 claves de la 02, 1,067 de la 03 y 1,075 de la 04, **las tres sincronizadas hoy a las 05:30**. Lo que se pierde es el **reporte por empresa**, que solo se vuelca a ese log | Sí, pero al revés de lo que parecía: el riesgo es de **visibilidad**, no de validación. Si una empresa empezara a fallar, nadie se enteraría |
+| 23 | **La empresa 05 no tiene una sola clave espejada** | **HALLAZGO NUEVO** | `claves_sae` en producción solo tiene filas de 02, 03 y 04. Para la 05, `catalogo_sae` devuelve vacío y `export_sae.py` **se salta la validación de claves entera** (`if cat:`, comentario en `:263`): no bloquea, exporta, y el SAE rechaza después en silencio | **Sí**: el dueño pidió alta de producto en las cuatro empresas. Para la 05, el espejo de claves va **antes** que el alta |
 
 ### 7.2 Del BRIEFING (el encargo también se equivoca)
 
@@ -575,7 +576,7 @@ Precondiciones no negociables antes del primer cambio que toque el Master.
 | 6 | El interruptor `master.activo` por perfil | `grep -rn 'master.activo' bot/` devuelve algo |
 | 7 | La conciliación lee `res["errores"]` | `index.js` consulta `r.errores` además de `r.error` (hoy solo `:6969`) |
 | 8 | Guarda sobre `export_sae_at` | `grep -n export_sae_at remisiones.py` devuelve una guarda |
-| 9 | **El agendador del espejo de claves corre** | `logs/claves_sae.launchd.err` sin `PermissionError` en su última corrida. **Hoy falla en todas**, y sin él el masivo se salta su validación en silencio (`export_sae.py:263`) |
+| 9 | **El espejo de claves cubre todas las empresas en alcance, y su reporte se puede leer** | `SELECT empresa, max(sincronizado_at) FROM claves_sae` devuelve una fila **por cada empresa en alcance** con fecha de hoy. Hoy cubre 02, 03 y 04 y están al día; **la 05 no tiene ninguna**. Además, `logs/claves_sae.launchd.err` sin `PermissionError`: mientras falle, el reporte por empresa se pierde y una empresa que empiece a fallar no se nota |
 | 10 | **Las 7 listas desvinculadas y `espejar_precios` apagado**, junto con el cambio de fuente de la ficha | `GET /listas-precios/espejo/vinculadas` devuelve vacío, y los 5 sitios de la ficha ya no consultan `PRECIO_X_PROD`. Los dos a la vez: si se separan, queda la ventana donde el chat cotiza un precio y el documento cobra otro |
 
 ---
@@ -633,12 +634,28 @@ aplicó», esta vez dentro del script mismo.
 | **D21** | **A mano, después**: las 8 remisiones de Tabasco se corrigen en el SAE manualmente | No se regeneran masivos. Pero **nada impide que vuelva a pasar**: `export_sae_at` sigue sin guarda (§6.2) |
 | **7** | **Las notas de crédito entran al Facturador**, con menú para crearlas y ver el histórico | **Obra nueva**: no hay modelo, migración, servicio, endpoint ni UI. Y hay un hallazgo urgente que no depende de construirlo: §12.2 |
 
+### La primera acción del dictamen: **EJECUTADA el 20-sep**
+
+La pregunta 1 quedó autorizada y cumplida. El bulto del bot está congelado en
+`claude/fase0-bulto-bot` (`9f378f5`) de `frutaskelly/smartsupply-whatsapp-bot`, **sin mergear**:
+`main` sigue en `8e075ff` y el árbol de trabajo quedó intacto, así que producción —que se construye
+de disco— no se enteró. Los 6,730 renglones dejaron de existir en un solo disco.
+
+- **Puerta corrida antes de commitear, toda en verde:** `node --check index.js`, `py_compile` de los
+  cinco motores, y `probar.py` → **16 casos sin cambios**.
+- **Dentro va el arreglo del pendiente 10**, precondición del apagado: `_rechazada_append` y el
+  registro `logs/facturador_rechazadas.jsonl` para las OC rechazadas por payload (4xx), el caso de
+  las fechas `DD/MM/AAAA` contra un campo `date`.
+- **Fuera a propósito, y sigue sin rastrear:** la sesión de WhatsApp `auth.baneada-20260907-172511/`
+  (el `.gitignore` cubre `auth/` pero **no** ese nombre — hueco que conviene cerrar), los
+  `__pycache__/*.pyc` y `err1.txt`.
+
 ### Lo que sigue abierto
 
 | # | Pregunta | Por qué sigue abierta |
 |---|---|---|
-| **1** | ¿Se commitea el bulto del bot (6,730 renglones) en rama con nombre, sin mergear? | **Bloquea todo lo demás.** El auditor no la da por autorizada: implica escribir en un repositorio que el propio encargo prohibió tocar |
 | **2** | ¿El canal de correo entra al alcance? | Si entra: git + identidad propia antes de tocar la hoja. Si no: hay que apagarlo el día del retiro, porque el interruptor por perfil no lo alcanza |
+| **nueva** | La empresa 05: ¿cuál es la regla de desempate cuando un cliente tiene clave en dos empresas? | Es lo que dejó a la 05 fuera (`facturador_espejo.py:57-59`). Sin esa regla no se puede espejar su catálogo, y sin catálogo espejado el masivo de la 05 exporta sin validar nada |
 
 ### 12.1 — Lo que cambia con D24, medido
 
@@ -671,11 +688,18 @@ el masivo lo reconozca (`export_sae.py:268-269`). Dos huecos:
 
 1. **No hay camino de escritura para 04 y 05.** Solo existe alta para 02 (`sheets_push.py:7889`) y 03
    (`ehmo_pedidos.py:11320`). El dueño pidió alta automática en las cuatro.
-2. **La validación falla hacia el lado inseguro.** Sin espejo del catálogo para esa empresa,
-   `export_sae.py` **se salta la validación entera** (`if cat:`, comentario en `:263`): no bloquea,
-   exporta, y el SAE rechaza después en silencio — el precedente FRESADOMOPZ del 14-sep. Y el espejo
-   de claves lo alimenta `sync_claves_sae.py`, cuyo agendador **falla en todas sus corridas**
-   (`PermissionError` en `logs/claves_sae.launchd.err`). **Está roto hoy, y no espera a ninguna decisión.**
+2. **La validación falla hacia el lado inseguro, y la 05 está justo en ese hueco.** Sin espejo del
+   catálogo para esa empresa, `export_sae.py` **se salta la validación entera** (`if cat:`, comentario
+   en `:263`): no bloquea, exporta, y el SAE rechaza después en silencio — el precedente FRESADOMOPZ
+   del 14-sep. Verificado contra producción: **`claves_sae` solo tiene 02, 03 y 04; de la 05 no hay
+   una sola fila.** Así que si se le da de alta un producto a la 05 sin espejar antes su catálogo, el
+   masivo exportará sin validar nada.
+   **Corrección declarada:** una versión anterior de este documento decía que el espejo de claves no
+   corría. Es falso. El agendador termina con excepción al escribir su bitácora (TCC de macOS sobre
+   `~/Documents`), pero **muere después de sincronizar**: las tres empresas tienen sus claves al día
+   (02: 2,043 · 03: 1,067 · 04: 1,075, todas del 20-sep 05:30). Lo que se pierde es el reporte por
+   empresa, no el trabajo. El arreglo es una línea —mover la bitácora fuera de `~/Documents`— o
+   envolverlo en node como ya hace el agente de correo con `lanzador.js`.
 
 **Choque que el dueño debe resolver antes de incluir la empresa 05:** está excluida a propósito, y el
 motivo está escrito en el código — *«La 05 se queda fuera a propósito: CODISEL tiene clave en las dos
