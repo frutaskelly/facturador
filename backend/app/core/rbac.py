@@ -52,8 +52,17 @@ _OWNER_ROLE = "OWNER"
 #     migración 28-ago-2026): SOLO el endpoint /facturas/espejo, que jamás
 #     toca al PAC. No es factura:gestionar — la conexión sigue sin poder
 #     crear, timbrar ni cancelar facturas nativas.
+#   - CONSULTAR precios (menu:cotizador, 20-sep-2026): el dueño decidió que las
+#     listas de precios viven aquí y que WhatsApp le pregunte el precio al
+#     Facturador en vez de leer PRECIO_X_PROD del SAE. Es el mismo permiso que
+#     trae el rol PORTAL CLIENTE, o sea el alcance pensado para un consumidor
+#     externo, y abre SOLO lectura: /precios/cotizar, /contexto,
+#     /productos-cotizables, /listas-del-cliente, /cotizar-documento,
+#     /cotizar-requisicion y /cotizacion-pdf. Las escrituras de ese router
+#     (/precios/overrides) cuelgan de `lista_precios:gestionar` y NO entran.
 # Fuera, deliberadamente: cualquier cosa de CFDI nativo, borrar, usuarios,
-# series, y `producto:gestionar` (reapuntar un alias afecta a todo el catálogo).
+# series, `producto:gestionar` (reapuntar un alias afecta a todo el catálogo) y
+# `lista_precios:gestionar` (la conexión consulta precios, no los fija).
 PERMISOS_CONEXION = frozenset({
     "menu:oc",            # la bandeja de órdenes es SU puerta de entrada
     "menu:remisiones",
@@ -61,6 +70,7 @@ PERMISOS_CONEXION = frozenset({
     "menu:clientes",
     "menu:productos",
     "factura:espejo",
+    "menu:cotizador",     # consultar precios; NUNCA fijarlos
 })
 
 
