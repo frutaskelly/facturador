@@ -53,6 +53,84 @@ completos.
 
 ---
 
+## 0-bis. LO EJECUTADO — 20 de septiembre de 2026
+
+> Esta sección se agrega DESPUÉS del dictamen y no lo modifica: el dictamen se
+> emitió sobre el estado del 19-sep y así se conserva. Aquí queda lo que el dueño
+> autorizó y se ejecutó el mismo día, con su verificación.
+
+### Meta 2 — CERRADA
+
+«WhatsApp pide precios al Facturador» quedó completa, en lectura y en escritura.
+
+| Paso | Evidencia |
+|---|---|
+| La conexión puede consultar precios | PR #188 · `menu:cotizador`, solo lectura, con 2 pruebas que fijan la frontera |
+| El cruce encuentra por clave del SAE | PR #190 · `clave_sae` entró al índice; antes «ACEI-ACEI-614» daba cero candidatos |
+| La ficha lee del Facturador | `sheets_push.py` · con respaldo en SAE, apagable sin redesplegar |
+| El chat deposita el precio aquí | PR #191 · permiso acotado `precio:depositar`, **sembrado en el catálogo** |
+| Los dos motores escriben doble | `sheets_push` (lista por perfil) y `ehmo_pedidos` (lista por proyecto) |
+| **Las 7 listas desvinculadas de SAE** | Verificado: **0 vinculadas, 1,503 precios intactos**, el espejo reporta `listas: 0` |
+
+**Paridad medida antes de cambiar la fuente**, sobre 120 claves al azar de la lista 3:
+**79% con precio idéntico al peso y CERO diferencias**. El 20% que no cruza es hueco
+de catálogo (P6b), no fallo del cruce: SAE tiene el mismo producto dos veces en la
+empresa 02 (`FRESAKG` y `FRES-FRUT-2616`, ambos activos, ambos «FRESA»).
+
+**Orden que se respetó, y por qué importa:** desvincular ANTES de redirigir las
+escrituras habría dejado ~292 cambios de precio al mes escribiendo solo en SAE,
+invisibles para la ficha que ya lee del Facturador — el mismo síntoma que se
+acababa de eliminar, en espejo. Primero la escritura, después el desvinculado.
+
+### La red — CONSTRUIDA Y VALIDADA
+
+`facturador_huecos.py`: el detector de órdenes que no llegaron, **sin leer la hoja**.
+Usa la tabla `mensajes` que el bot ya llenaba por su cuenta (`agente_db.js:66`).
+
+Validación: a 30 días reporta 3 días mudos de `balles-pachuca` que suman **9
+documentos**; el comentario de `index.js:6988-6990` documenta el incidente del
+3-sep — «**9 órdenes** de Balles/Jubran fuera de la bandeja sin que nadie se
+enterara». Redescubre una pérdida real y documentada desde un universo
+independiente.
+
+**No está cableado a ningún temporizador a propósito**: primero hay que medir su
+tasa de acierto en uso real. Una alarma que grita de más se empieza a ignorar, y
+eso ya pasó aquí.
+
+### Higiene y canal de correo
+
+- Bulto del bot **congelado**: rama `claude/fase0-bulto-bot`, con `probar.py` en verde.
+- `main` del bot **ya arranca completo**: el motor de `uneremision` está commiteado.
+- `.gitignore` del bot: `auth.*` y `__pycache__/` — la sesión de WhatsApp estaba a
+  un `git add -A` de publicarse.
+- **El agente de correo bajo git**, con secretos excluidos y verificados uno por uno.
+- **Identidad propia del correo**: `EMAIL:<remitente>:<folio>` en vez de
+  `WA:sin-jid:<folio>`. La colisión de folios entre clientes quedó cerrada.
+- **Equivalencia por CORREO** (PR #189), como sistema que identifica.
+- El agendador del espejo de claves **arreglado**: su bitácora salió de `~/Documents`
+  (TCC) y por primera vez termina en `exit=0`.
+- `pytest -rs` (PR #187): una corrida verde ya no puede esconder 531 saltos.
+
+### Correcciones al propio dictamen, verificadas contra producción
+
+| Afirmación del documento | Corrección |
+|---|---|
+| El espejo de claves no corre | **Falso.** Corre y sincroniza; solo perdía su bitácora. 02/03/04 al día |
+| La cartera de la 04 está inflada por notas de crédito | **Falso.** `CUEN_M04` solo tiene cargos y `CUEN_DET04` solo abonos: **no hay una sola NC** |
+| `GET /reportes/ventas` sobreestimado con certeza | **Matizado.** El hueco de código existe, pero no hay NC que restar |
+| La ficha de EHMO está en `ehmo_pedidos.py:2041, 4491…` | **Falso.** Es `_ficha_sae` (`:11080`) |
+
+### Lo que sigue abierto, y es decisión del dueño
+
+1. **La empresa 05**: regla de desempate para un cliente con clave en dos empresas.
+   Sin ella no se puede espejar su catálogo, y `claves_sae` **no tiene ni una fila**
+   de la 05 — así que el masivo de esa empresa exportaría sin validar nada.
+2. **El remoto del repositorio de correo**: sigue local.
+3. **Meta 4**: 131 lecturas y 11 escrituras directas al SAE, más 86 `runSheets`. Es
+   proyecto, no sesión.
+
+---
+
 ## 1. DICTAMEN
 
 **NO RETIRAR TODAVÍA.** El Master no es hoy un almacén redundante: es el único término de
