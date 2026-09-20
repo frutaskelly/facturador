@@ -237,3 +237,46 @@ def test_email_bound_to_other_auth_user_is_rejected(db_engine):
         assert db.query(User).filter(User.id == user_id).one().auth_user_id == "sub-original"
     finally:
         _cleanup(db, tenant_id, user_id, membership_id)
+
+
+# ---------------------------------------------------------------- conexiones
+# La frontera de la clave del bot es FIJA y vive en código, no en el catálogo de
+# roles, para que nadie la amplíe desde la UI por accidente. Esta prueba es el
+# candado: si alguien agrega un permiso de ESCRITURA a PERMISOS_CONEXION, falla.
+
+def test_conexion_consulta_precios_pero_no_los_fija():
+    """20-sep-2026: la conexión gana `menu:cotizador` para que WhatsApp le pida
+    el precio al Facturador en vez de leer PRECIO_X_PROD del SAE. Es lectura."""
+    from app.core.rbac import PERMISOS_CONEXION
+
+    assert "menu:cotizador" in PERMISOS_CONEXION, (
+        "sin este permiso el bot no puede consultar precios y la ficha del chat "
+        "se queda leyendo el SAE"
+    )
+    # Lo que ese permiso NO debe arrastrar: fijar precios ni tocar el catálogo.
+    assert "lista_precios:gestionar" not in PERMISOS_CONEXION
+    assert "producto:gestionar" not in PERMISOS_CONEXION
+
+
+def test_la_conexion_nunca_gana_escrituras_peligrosas():
+    """Candado de la frontera completa: CFDI nativo, borrados, usuarios, series.
+
+    Si esta prueba falla, alguien amplió el alcance de la clave del bot: que lo
+    justifique aquí mismo antes de cambiar la lista.
+    """
+    from app.core.rbac import PERMISOS_CONEXION
+
+    prohibidos = {
+        "factura:gestionar",      # timbrar o cancelar CFDI nativo
+        "factura:cancelar",
+        "factura:eliminar",
+        "producto:gestionar",     # reapuntar un alias afecta a todo el catálogo
+        "producto:eliminar",
+        "lista_precios:gestionar",
+        "remision:eliminar",
+        "menu:ajustes.usuarios",
+        "menu:ajustes.roles",
+        "menu:series",
+    }
+    filtrados = prohibidos & set(PERMISOS_CONEXION)
+    assert not filtrados, f"la clave del bot ganó permisos de escritura: {sorted(filtrados)}"
