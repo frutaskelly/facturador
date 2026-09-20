@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from ..core.db import Base
 from .base import tenant_fk, uuid_pk
 
-SISTEMAS = ("RFC", "SAE", "PROYECTO", "NOMBRE", "UBICACION", "WHATSAPP")
+SISTEMAS = ("RFC", "SAE", "PROYECTO", "NOMBRE", "UBICACION", "WHATSAPP", "CORREO")
 
 
 # Sistemas que dan CONTEXTO en vez de identificar: su clave puede repetirse
