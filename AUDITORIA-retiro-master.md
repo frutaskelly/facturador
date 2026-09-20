@@ -224,6 +224,18 @@ de la bandeja sin que nadie se enterara (`index.js:6984-6990`). «Existe el dete
 «alguien se entera». Y las 14 órdenes perdidas las narra el propio código: «así se perdieron TODAS
 las OCs de Balles/Jubran del envío en vivo» (`facturador_client.py:391-396`).
 
+**La búsqueda del sustituto, agotada.** `grep -rn 'conciliar|faltante|perdida'` sobre
+`backend/app` devuelve 21 coincidencias y **ninguna es un detector de ingesta faltante**: son merma
+de inventario (`schemas/factura.py:59-60`), precios faltantes de remisión (`remisiones.py:149-168`) y
+reconciliación de timbrados muertos (`services/cfdi.py:202`, `services/facturama.py:227`). Además
+**el backend no tiene ningún planificador**: `APScheduler|BackgroundScheduler|celery|@repeat_every`
+→ cero resultados. Y el único rastro que sobreviviría, `logs/facturador_rechazadas.jsonl`, solo
+aparece en quien lo escribe (`facturador_client.py:232`): **no tiene lector**.
+
+**Un detalle que empeora el 4xx:** el acuse dice «NO SE PUDO ENCOLAR — reenviar a mano»
+(`index.js:3496-3498`) porque en un 4xx no viene el campo `encolada`. El texto es engañoso: la orden
+**sí** quedó registrada, en un archivo que nadie lee.
+
 ---
 
 ## 5. RELOJ DEL SISTEMA (W4)
@@ -295,6 +307,26 @@ De los 20 comandos: **9 escriben**, 11 son de solo lectura; **5** requieren el c
 - **Sin candado optimista:** 0 hits de `If-Match`/`version`/`etag` en `remisiones.py`. En el triángulo
   vigía + persona + WhatsApp, **gana el último que escribe**. El único `flock` del bot está en el
   espejo (`facturador_espejo.py:98`), no en el vigía.
+- **El doble export al masivo NO es un candado**, es un aviso: `export_sae.py:558-566` escribe en
+  `res.avisos` (no `res.errores`) y **sin `continue`**; la prueba que lo cubre lo certifica como aviso
+  — `test_export_repetido_avisa_pero_no_bloquea` espera **200** (`tests/test_export_sae.py:314-330`).
+- **«Sin revisar no se exporta a SAE»** (`export_sae.py:527-535`) es **vigente pero sin red**:
+  `revision_pendiente` no aparece en `tests/test_export_sae.py`.
+
+### 6.4 Un hallazgo nuevo: la carrera del folio de pedido en el SAE
+
+El encargo pedía verificar que los consecutivos salen de `TBLCONTROL02` y no de `MAX+1`. La respuesta
+es **las dos cosas, y la peligrosa es la del documento**:
+
+- Los consecutivos **internos** de `TBLCONTROL02` sí son atómicos (`SET @var = ULT_CVE = ULT_CVE + 1`).
+- Pero el **folio del documento** sale de `MAX(TRY_CAST(...))+1` (`docs/sae/crear_pedido_SAE.sql:24`)
+  **fuera de la transacción**: el `BEGIN TRAN` está 58 líneas después (`:82`), sin hint de bloqueo y
+  **sin `IF EXISTS` sobre el folio calculado**.
+- La prefactura **sí** tiene esa guarda (`IF EXISTS … RAISERROR('folio ya existe')`,
+  `sheets_push.py:8770`). **El pedido no.**
+
+Dos pedidos creados a la vez pueden tomar el mismo folio. Y `_sae_exec_sql` **no reintenta**
+(`sheets_push.py:3068`) — lo cual aquí protege, porque un reintento duplicaría.
 
 ### 6.3 Permisos
 
@@ -306,9 +338,19 @@ código**: `permissions=set(PERMISOS_CONEXION)` (`rbac.py:276`), sin pasar por e
 `factura:eliminar` y `factura:gestionar`, pero **no** `factura:espejo`. Funciona igual gracias a
 `rbac.py:276`. Cualquier pantalla que intente asignarlo a un rol humano no lo encontrará.
 
-**Permisos nuevos por opción:** A → al menos 1 (`menu:facturas` para estado de cuenta) y
-probablemente más para armado/resumen. B → los mismos, escalonados. **C, D, E, F → cero.**
-Cero es el mejor resultado y hoy solo lo consiguen las opciones que no amplían el alcance del bot.
+**Permisos nuevos por opción** (contados contra los decoradores reales de cada endpoint):
+
+| Opción | Permisos nuevos | Cuáles |
+|---|---|---|
+| **A · retiro directo** | **3** (4 si no se funden las dos escrituras) | `precio:leer`, `catalogo:espejo` (fusión de catálogo + precios de lista), `cobranza:leer` |
+| **B · por etapas** | **3 en total, escalonados** | Etapa 1 = **0** (órdenes, remisiones, cruce, masivos y pendientes caben enteros en los seis actuales); luego uno por etapa |
+| **C, D, E, F** | **0** | — (E sube a 3 solo si además contesta precios; F sube si arranca por P6) |
+
+Todas las opciones comparten **una migración**: sembrar `factura:espejo` en el catálogo.
+
+**Dos falsos huecos, verificados:** «editar partidas con propuesta» (P2) cae en `remision:gestionar`
+(`remisiones.py:682`, `oc_recibidas.py:958`) y el «folio sugerido» (P7/P9) también
+(`remisiones.py:1886`, `:1905`). **Cuestan cero permisos** — el contrato P2 no amplía la frontera.
 
 ---
 
@@ -324,13 +366,23 @@ Cero es el mejor resultado y hoy solo lo consiguen las opciones que no amplían 
 | 4 | 2,989 / 6,671 renglones sin commitear | **REFUTADA (creció)** | Hoy: 11 archivos, **6,730** inserciones, 315 borrados | Sí: la Fase 0 sigue empeorando |
 | 5 | P6a (precios) hecho | **REFUTADA** | `clave_sae` es columna **nueva y distinta** de `sku` (migr `0079:44`); el depósito **no la menciona ni una vez** (grep = 0): cruza por `sku` o por el código viejo por cliente (`listas_precios.py:248-249`) | Sí: regresión silenciosa viva |
 | 6 | Las 7 listas espejadas | **CONFIRMADA contra producción** | Exactamente 7: 02:3, 02:5, 02:6, 02:7, 02:8, 02:9, 03:4 | No |
-| 7 | El corte desvinculó 5 listas de precios | **REFUTADA contra producción** | Las 5 (SAE5–SAE9) **siguen vinculadas** | Sí: el script de reversa parte de una premisa falsa |
+| 7 | El corte desvinculó 5 listas de precios | **REFUTADA en vigencia, con una lectura peor** | Las 5 (SAE5–SAE9) **siguen vinculadas** hoy, con 6 asignaciones vivas. Pero el corte **sí corrió**: es un único `DO $$` atómico (`corte_pachuca_ehmo_mafan.sql:64-71`, con `IF n <> 5 THEN RAISE EXCEPTION`), y `PLAN:45` describe la fila FMAFAN absorbida. La única lectura que sobrevive a las dos evidencias: **el corte se aplicó y algo revinculó las 5 listas después, sin quedar registrado en el repositorio** | Sí: hay un cambio de estado en producción que nadie registró, y el script de reversa afirma como vigente lo contrario (`:34-38`) |
 | 8 | «Outbox + conciliación» cubren la pérdida de órdenes | **REFUTADA** | La conciliación lee el Master (`facturador_conciliar.py:12,47,76`) | **Sí: es el corazón del dictamen** |
-| 9 | La reversa se aplicó; Río Libre único nativo | **CONFIRMADA contra producción** | ZEHMOHOS espejo=true folio 912; ZMAFAN espejo=true folio 188; sin FEHMOHOS/FMAFAN; única serie fiscal nativa con folios = RIO (44) | No |
-| 10 | 137 remisiones de Pachuca en borrador sin factura | **REFUTADA** | Hoy, por plaza Pachuca: **157**. Acotado a las series revertidas: **10**. Ninguna acotación da 137 (Tabasco: 183) | Sí: el pendiente inmediato es mayor de lo escrito |
+| 9 | La reversa se aplicó | **CONFIRMADA contra producción** | ZEHMOHOS espejo=true folio 912; ZMAFAN espejo=true folio 188; sin FEHMOHOS/FMAFAN; sin referencias rotas | No |
+| 9b | Río Libre es el único cliente nativo | **REFUTADA** | Con `tipo_documento='FACTURA'` hay **dos** series con `espejo_sae=false`: `RIO` (Río Libre, folio 44) y `GZ` (folio 0, nunca usada), apuntada por `clientes.serie_factura_id` de **CLI-010 GERARDO ALEJANDRO ZARATE ALVAREZ**, que además trae `clientes.espejo_sae=false` | Sí: rompe el criterio de salida de la Fase 5 tal como está escrito |
+| 10 | 137 remisiones de Pachuca en borrador sin factura | **REFUTADA (156)** | Acotado a la sucursal Pachuca viva y a `deleted_at IS NULL`: **156** (EHMO 120, MAFAN 23, Balles 11, Río Libre 1, Jubran 1). Ningún subconjunto razonable da 137, y **no es desfase temporal**: ninguna se creó después del 18-sep | Sí: son 19 remisiones más de las presupuestadas para el masivo |
 | 11 | El `main` del bot no arranca limpio | **CONFIRMADA con precisión** | Disparador `runEhmo(['uneremision'])` **sí** está en `HEAD:index.js:1639`; el motor `cmd_une_remisiones_ehmo` **no** está en HEAD y sí en disco (`ehmo_pedidos.py:9513`) | Sí: refuerza la puerta de higiene |
 | 12 | `npm test` es `echo Error && exit 1` | **CONFIRMADA** | `package.json:7` | Sí |
-| 13 | Los días (21–29 / 27–34) siguen vigentes | **REFUTADA** | Escritos el 1-sep; el árbol cambió (ver §9) | Sí |
+| 13 | Los días (21–29 / 27–34) siguen vigentes | **REFUTADA, y el PLAN se contradice consigo mismo** | La tabla de `PLAN:115-120` suma Facturador **22–29**, no 21–29; y la otra tabla del mismo documento, «Las siete fases» (`PLAN:511-516`), da al bot **30–38**, no 27–34. Dos tablas incompatibles | Sí: es la cifra con la que se decide |
+| 14 | **46 comandos en dos motores** | **REFUTADA en las dos mitades** | 46 es el total de **un solo** motor: `ehmo_pedidos.py:11531-11539` despacha 46 verbos; `sheets_push.py` despacha **75**. Y los motores son **cuatro**, no dos (el propio PLAN lo admite en `:505`, `:517`). Además hay **27** `cmd_` nuevos sin commitear | **Sí, es el que más lo mueve**: el censo de comandos está a menos de la mitad del real, y la Fase 4 («cero referencias a Sheets») se estimó sobre un objeto mal medido |
+| 15 | Redirigir las 86 llamadas apaga Sheets | **REFUTADA** | Hay una **cuarta tubería** fuera de `index.js`: `email_watcher.py:93,303` con **12 llamadas propias** a `run_sheets`; y `facturador_conciliar.py:52` abre el libro por su cuenta | Sí: falta censar una tubería entera, que además no está en git |
+| 16 | Once estados `pending*` (1 Map + 10 variables) | **REFUTADA: hoy son 15** | 1 Map (`index.js:368`) + 14 `let` (`:401,403,405,407,409,414,987,992,993,994,995,996,998,1045`) | Sí: +4 estados a convertir |
+| 17 | «>27,000 líneas en tres archivos» (`PLAN:640`) | **REFUTADA** | 10,635 + 11,038 + 11,754 = **33,427** | Sí, al alza |
+| 18 | «73 `.bak` de código» (`PLAN:529`) | **REFUTADA** | **93** en la raíz del bot (los 33 de `data/` sí son exactos) | No |
+| 19 | «7,294 comandos en 30 días» (`PLAN:101`) | **REFUTADA** | `logs/router_decisions.jsonl`: 2–31 ago → **7,153**; todo agosto → 7,448. Ninguna ventana da 7,294. Y `ver_producto` es **1,243**, no 1,296 | No |
+| 20 | El PLAN sobre su propia reversa | **SE CONTRADICE TRES VECES** | `PLAN:35` («arranca en diagnóstico y aborta»), `PLAN:45` («la reversa ya se aplicó») y `PLAN:133` («**no hay script de reversa**», en la revisión más reciente, la del 19-sep) | Sí: quien retome no sabe cuál creer |
+| 21 | `registrarAccion` existe y nadie la llama | **CONFIRMADA** | `agente_db.js:142` (definición), `:171` (export), **cero** sitios de llamada | Sí: es la medida que el plan usa para las fases siguientes |
+| 22 | El agendador del espejo de catálogo falla siempre | **CONFIRMADA** | `com.frutaskelly.claves-sae.plist` apunta a un script **fuera del repositorio**; `logs/claves_sae.launchd.err` termina en `PermissionError: Operation not permitted` | Sí |
 
 ### 7.2 Del BRIEFING (el encargo también se equivoca)
 
@@ -338,7 +390,8 @@ Cero es el mejor resultado y hoy solo lo consiguen las opciones que no amplían 
 |---|---|---|
 | «`grep -c 'runSheets('` da 87» → implica 87 llamadas | **IMPRECISA** | Son 87 coincidencias pero **86 llamadas**: la 87ª es la definición (`index.js:3798`). El PLAN («86») tenía razón y el briefing lo reporta como errata del plan |
 | «`git diff --shortstat` da 9 archivos y 6,648 inserciones» | **DESACTUALIZADA** | Hoy: 11 archivos, 6,730 inserciones |
-| «Una corrida verde puede estar saltada porque el fixture hace `pytest.skip`» | **REFUTADA HOY** | `conftest.py:13-16` hace `setdefault` de `DATABASE_URL` al **5434 local**, que está arriba. Corrida real: **639 pruebas, 0 saltadas, exit 0**. El propio `conftest.py:9-12` documenta que ese era el bug y que se arregló |
+| «Una corrida verde puede estar saltada porque el fixture hace `pytest.skip`» | **CONFIRMADA, y condicional** | Medido dos veces. Con el contenedor del 5434 **arriba**: 639 pruebas, **0 saltadas**, exit 0. Con la base **inalcanzable** (puerto muerto): **108 passed, 531 skipped, exit 0 — verde**. Es decir, el 83.1 % se salta en silencio. Agravante: `pytest.ini:4` fija `addopts = -q` y la línea de resumen **no se imprime**, así que la señal que delata el falso verde es exactamente la que no se ve. El disparador ya no es el default (`conftest.py:13-16` apunta al 5434), pero sí lo es **que el contenedor no esté arriba** |
+| «La base de pruebas corre como superusuario con la RLS apagada» | **REFUTADA** | `rbac.py:367-378` (`get_tenant_db`) hace `SET LOCAL ROLE app_user` + GUC de inquilino dentro de la transacción; en el 5434 `relrowsecurity = t` en `oc_recibidas`, `remisiones`, `clientes` y `productos`. El rol baja a no-superusuario |
 | Las líneas citadas (`index.js:6965-7017`, `:10291-10350`, `sheets_push.py:1113-1275`) | **DESFASADAS** | El árbol creció; las reales están en este documento |
 | «`su_pedido` HO-34VIL-MIE ya rompió producción» | **NO VERIFICABLE DESDE EL CÓDIGO** | Sin mención en el PLAN ni en `docs/ESTADO.md`; solo un comentario en `oc_recibidas.py:1131-1141` |
 
@@ -346,22 +399,39 @@ Cero es el mejor resultado y hoy solo lo consiguen las opciones que no amplían 
 
 ```
 --- PLAN-retiro-master-ordenes.md
-1. Línea 44-46 («lo inmediato»): «las 137 remisiones de Pachuca» →
-   «las 157 remisiones de la plaza Pachuca en borrador sin factura (verificado
-   contra producción el 20-sep-2026; Tabasco tiene además 183)».
-2. Sección «Timers cambian de fuente» y toda mención a «espejo cada 30 min» →
-   «cada 15 min (`index.js:6930`); los comentarios que dicen 30 están desfasados».
-3. Línea 137 y tabla de riesgos: añadir «`export_sae_at` sigue sin guarda
-   (`remisiones.py`, grep sin resultados); el candado de impresa cubre solo
-   partidas y solo frente a una conexión».
-4. P6a: «hecho» → «REABIERTO: el depósito de precios no usa `productos.clave_sae`
-   (grep en `listas_precios.py` = 0); cruza por `sku` y por el código viejo por
-   cliente (`listas_precios.py:248-249`)».
-5. Riesgos: la fila de la cobertura circular ya está bien; añadir que la
-   conciliación no solo enmudece — al leer una carpeta sin Master **crea un libro
-   nuevo vacío** (`ehmo_pedidos.py:2884`, `sheets_push.py:158-161`).
-6. Fase 0: «6,671 renglones» → «6,730 al 20-sep»; y precisar que en `main` el
-   disparador `uneremision` está commiteado (`index.js:1639`) y el motor no.
+ 1. Línea 51 («lo inmediato»): «las 137 remisiones de Pachuca» →
+    «las 156 remisiones de la plaza Pachuca en borrador sin factura (verificado
+    contra producción el 20-sep-2026: EHMO 120, MAFAN 23, Balles 11, Río Libre 1,
+    Jubran 1). Tabasco tiene además 183».
+ 2. Líneas 100, 105 y 291: «46 comandos vivos en dos motores» →
+    «121 verbos despachados en cuatro motores (75 en sheets_push.py, 46 en
+    ehmo_pedidos.py), más 27 cmd_ nuevos sin commitear».
+ 3. Toda mención a «espejo cada 30 min» (:340, :682, y corte_pachuca…sql:13-14) →
+    «cada 15 min (index.js:6930); los comentarios que dicen 30 están desfasados».
+ 4. Línea 553: «once estados pending*» → «quince (1 Map + 14 variables)».
+ 5. Línea 640: «>27,000 líneas en tres archivos» → «33,427».
+ 6. Línea 529: «73 .bak de código» → «93».
+ 7. Línea 101: «7,294 comandos en 30 días» → «7,153 en la ventana 2–31 ago»;
+    y :250/:310 «ver_producto 1,296» → «1,243».
+ 8. Líneas 573-574: las líneas citadas de cmd_pedido_sae y cmd_prefactura_sae
+    están desfasadas +185. Reales: :9175, :8648, :8928.
+ 9. Resolver la contradicción de la reversa: :35 dice que aborta, :45 que ya se
+    aplicó, :133 que «no hay script de reversa». Las tres no pueden ser ciertas.
+10. Línea 47: «el único cliente nativo es Río Libre» → «son dos: Río Libre (RIO)
+    y CLI-010 vía la serie GZ, sin usar (folio 0)».
+11. P6a: «hecho» → «REABIERTO: el depósito de precios no usa productos.clave_sae
+    (grep en listas_precios.py = 0); cruza por sku y por el código viejo por
+    cliente (listas_precios.py:249). La docstring de :198 está desfasada».
+12. Riesgos: la fila de la cobertura circular ya está bien; añadir que la
+    conciliación no solo enmudece — al leer una carpeta sin Master **crea un libro
+    nuevo vacío** (ehmo_pedidos.py:2884, sheets_push.py:158-161).
+13. Fase 0: «6,671 renglones» → «6,730 al 20-sep»; y precisar que en `main` el
+    disparador `uneremision` está commiteado (index.js:1639) y el motor no.
+14. Línea 174/219: registrar que las 5 listas del corte están HOY revinculadas
+    sin que el repositorio lo explique, y corregir reversa…sql:34-38, que afirma
+    lo contrario.
+15. Líneas 115-120 vs 511-516: las dos tablas de días son incompatibles
+    (22–29 / 27–34 contra 30–38). Elegir una.
 ```
 
 ---
@@ -418,13 +488,22 @@ plan**: se recuentan contra el código de hoy.
 
 | Concepto | Camino del dueño (A) | Camino por etapas (B) | Diferencia |
 |---|---|---|---|
-| Sitios de llamada a redirigir | 86 `runSheets` + ~42 sitios de hoja en EHMO | Los mismos, en 4 tandas | 0 |
+| Sitios de llamada a redirigir | 86 `runSheets` + ~42 sitios de hoja en EHMO + **12 propios del correo** + `facturador_conciliar.py:52` | Los mismos, en 4 tandas | 0 |
+| **Comandos a cubrir** | **121 verbos despachados** (75 en `sheets_push.py` + 46 en `ehmo_pedidos.py`), no 46 | Los mismos | 0 |
+| Comandos nuevos sin commitear | **27** `cmd_` que el censo del plan no conoce | Los mismos | 0 |
 | Endpoints que faltan | 6 (propuesta/aplicar, unión de remisiones, armado, resumen, sin-precio agregado, fechas por lote) | Los mismos + comparador | +1 |
 | Piezas P1–P12 exigidas | P1, P2, P5 mínimo | P1–P12 | +7 |
-| Migraciones nuevas | ≥3 (reparto, tipo de partida, nota externa) | ≥3 | 0 |
-| Estados `pending*` a convertir | 11 (1 Map + 10 variables) | 11 | 0 |
+| Migraciones nuevas | ≥3 (reparto, tipo de partida, nota externa) + 1 (sembrar `factura:espejo`) | Las mismas | 0 |
+| Estados `pending*` a convertir | **15** (1 Map + 14 variables), no 11 | 15 | 0 |
+| Permisos nuevos | **3** | 3, escalonados (la primera etapa: 0) | 0 en total, ≠ en secuencia |
 | Motores afectados | 4 (uno fuera de git) | 4 | 0 |
 | **Trabajo previo no negociable** | el mismo de F | el mismo de F | 0 |
+
+**El hallazgo que más mueve el costeo:** el plan dice «46 comandos en dos motores». El despacho real
+es de **121 verbos en cuatro motores**, más 27 comandos nuevos que nadie ha commiteado. El criterio de
+salida de la Fase 4 («cero referencias a Sheets en los cuatro motores») se estimó sobre un objeto
+medido a menos de la mitad de su tamaño. **Los días del plan no se citan aquí porque no se pueden
+recontar sobre una base que resultó ser el doble.**
 
 **Rango, no promedio.** Dos recuentos difieren: contando solo lo que el estado objetivo exige
 literalmente, **A es menor que B en piezas** (no pide P3/P4/P6/P10). Contando lo que hace falta para
@@ -440,6 +519,7 @@ Precondiciones no negociables antes del primer cambio que toque el Master.
 
 | # | Precondición | Cómo se comprueba (sin producción) |
 |---|---|---|
+| 0 | **La suite declara su conteo de saltadas** | `pytest -q -rs` (o `-v`); hoy `pytest.ini:4` fija `-q` y el resumen no se imprime, así que un verde con 531 saltadas es indistinguible de uno con 639 pasadas. Sin esto, ninguna puerta de abajo es verificable |
 | 1 | El bot commiteado, con `probar.py` cableado como `npm test` real | `git -C bot status --short` vacío; `npm test` sale 0 y corre `node --check` + `py_compile` + `probar.py` |
 | 2 | `main` del bot arranca completo | `git show HEAD:ehmo_pedidos.py \| grep -c cmd_une_remisiones_ehmo` > 0 |
 | 3 | El agente de correo bajo git, con marca de canal propia | `git -C email rev-parse --git-dir` responde; y la ingesta recibe `canal="EMAIL"` (hoy `sheets_push.py:1233` manda `"WHATSAPP"`) |
@@ -509,9 +589,15 @@ aplicó», esta vez dentro del script mismo.
 6. **D21 — las 8 remisiones de Tabasco que divergen: ¿se regeneran los masivos o se corrige a mano en el SAE?**
 7. **Notas de crédito de la empresa 04: ¿se quedan en el SAE hasta el corte (y el espejo debe leerlas para no inflar la cartera), o entran al Facturador?**
 
-> Fuera de lista, por seguridad y no por alcance: `docs/ESTADO.md` (pendiente 5 del 19-sep) registra
-> que la contraseña de la base de producción quedó impresa en un transcript el 17-sep. Rotarla es
-> decisión tuya y no depende de este dictamen.
+> **Fuera de lista, por seguridad y no por alcance** — dos cosas que aparecieron auditando y que no
+> se pueden callar, ninguna depende de este dictamen y ninguna se tocó:
+>
+> 1. `docs/ESTADO.md` (pendiente 5 del 19-sep) registra que la contraseña de la base de producción
+>    quedó impresa en un transcript el 17-sep. Rotarla es decisión tuya.
+> 2. La tabla `public.respaldo_codigo_sae_20260917` (42 filas, respaldo del backfill de clave SAE)
+>    está **sin Row Level Security** en producción — legible y escribible con la llave anon. Todas
+>    las demás tablas la tienen activa. La remediación es un `ALTER TABLE … ENABLE ROW LEVEL
+>    SECURITY`, pero activarla sin políticas corta todo acceso: es decisión tuya, y no apliqué nada.
 
 ---
 
@@ -536,15 +622,25 @@ la ausencia del contrato de propuesta (0 hits en modelos y migraciones) — todo
 
 ## Apéndice — cómo se hizo
 
-Ocho flujos con lentes en paralelo y verificación adversarial por flujo: censo de tuberías (5 lentes
-+ verificador independiente que rehizo los conteos), inventario de pérdida (3 lentes + refutador que
-bajó 4 veredictos MIGRA), simulacro de apagón (9 escenarios), reloj del sistema (4 lentes), contrato
-y candados, aserciones (confirmadora y refutadora a ciegas sobre la misma lista + lecturas de
-producción), y reversa/pruebas/higiene. Las lentes que el límite de gasto dejó sin correr
-(árbitro de W3, cierre de W4, concurrencia de W5, conciliadora de W6 y verificadora de W7) las
-ejecutó el auditor principal directamente, con los mismos greps y las mismas reglas de evidencia;
-se indica en cada sección cuando el dato es de verificación propia.
+Ocho flujos con lentes en paralelo y verificación adversarial por flujo: **38 agentes**, todos
+completados. Censo de tuberías (5 lentes + verificador independiente que rehizo los conteos con greps
+propios), inventario de pérdida (3 lentes + refutador que bajó 4 veredictos MIGRA), simulacro de
+apagón (9 escenarios + árbitro que rechazó las conclusiones sin cita), reloj del sistema (4 lentes +
+cierre), contrato/candados/permisos/concurrencia (4 lentes + verificador), aserciones (confirmadora y
+refutadora **a ciegas sobre la misma lista**, más una lente de base de producción, más una
+conciliadora que solo aceptó el veredicto con evidencia), y reversa/pruebas/higiene.
 
-La suite del backend se corrió una sola vez, contra la base **local** del 5434: **639 pruebas,
-0 saltadas, exit 0**. No se corrió nada contra producción; las lecturas de producción fueron
-`SELECT` acotados al inquilino vivo.
+El límite de gasto cortó el workflow cuatro veces. Mientras tanto, el auditor principal ejecutó
+directamente varias de las lentes pendientes; al completarse el workflow, **sus resultados se
+contrastaron contra los míos y las lentes corrigieron tres conclusiones mías**, que quedaron
+incorporadas: el veredicto de la suite de pruebas (yo la declaré refutada; es **condicional**), la
+inferencia sobre el corte de Pachuca (no es que el script no corriera: **algo revinculó las listas
+después**) y el conteo de remisiones de Pachuca (156, no 157). Donde hubo discrepancia, gana la
+evidencia con `archivo:línea`.
+
+La suite del backend se corrió **dos veces**, siempre contra la base **local** del 5434 y nunca
+contra producción: con la base arriba, **639 pruebas, 0 saltadas, exit 0**; con la base inalcanzable,
+**108 pasadas, 531 saltadas, exit 0**. Las lecturas de producción fueron `SELECT` de una sentencia,
+acotados al inquilino vivo, sobre el proyecto `qwffsaxoeehwwdzaytqb` de la organización de Frutas
+Kelly; no se tocaron los proyectos Mini Conta ni smart_supply, ni se usó ninguna herramienta de
+escritura.
