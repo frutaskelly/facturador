@@ -70,7 +70,8 @@ PERMISOS_CONEXION = frozenset({
     "menu:clientes",
     "menu:productos",
     "factura:espejo",
-    "menu:cotizador",     # consultar precios; NUNCA fijarlos
+    "menu:cotizador",     # consultar precios
+    "precio:depositar",   # y fijarlos SOLO en listas que ya existen
 })
 
 

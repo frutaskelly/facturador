@@ -66,6 +66,27 @@ router = APIRouter(prefix="/listas-precios", tags=["listas de precios"])
 
 _READ = "menu:listas_precios"
 _WRITE = "lista_precios:gestionar"
+# Depositar un PRECIO en una lista que ya existe es mucho menos que administrar
+# listas: no crea, no copia, no asigna a proyectos, no importa y —sobre todo— no
+# toca `sae_empresa`/`sae_lista`, que es re-encender el espejo. El chat cambia
+# precios ~292 veces al mes (20-sep-2026, al mudarse las listas al Facturador) y
+# para eso le basta esto.
+_WRITE_PRECIO = "precio:depositar"
+
+
+def _ctx_escribe_precios(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    """Quien administra listas, o quien solo puede depositar precios en ellas.
+
+    `require_permission` exige TODOS los permisos que recibe, así que una
+    alternativa se expresa aquí. Ningún rol existente pierde nada:
+    `lista_precios:gestionar` sigue pasando igual que antes.
+    """
+    if ctx.is_owner or ctx.has(_WRITE) or ctx.has(_WRITE_PRECIO):
+        return ctx
+    raise HTTPException(
+        status_code=403,
+        detail=f"Falta permiso: {_WRITE} o {_WRITE_PRECIO}",
+    )
 _DUP_LISTA = "Ya existe una lista de precios con ese código"
 _DUP_PRECIO = "Ya existe un precio para ese producto/presentación/cantidad en la lista"
 
@@ -412,7 +433,7 @@ def create_precio(
     lista_id: UUID,
     payload: PrecioCreate,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(_ctx_escribe_precios),
 ):
     get_or_404(db, ListaPrecios, lista_id)
     ensure_fk(db, Producto, payload.producto_id, "producto_id")
@@ -436,7 +457,7 @@ def bulk_upsert_precios(
     lista_id: UUID,
     payload: PrecioBulkRequest,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(_ctx_escribe_precios),
 ):
     """Upsert many precios at once.
 
@@ -491,7 +512,7 @@ def update_precio(
     precio_id: UUID,
     payload: PrecioUpdate,
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
+    ctx: AuthContext = Depends(_ctx_escribe_precios),
 ):
     obj = (
         db.query(Precio)

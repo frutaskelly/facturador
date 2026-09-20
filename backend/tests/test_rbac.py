@@ -313,3 +313,45 @@ def test_la_direccion_de_correo_no_se_destroza_al_normalizar():
     assert (normalizar_clave("CORREO", "PEDIDOS@x.mx")
             == normalizar_clave("CORREO", "pedidos@x.mx"))
     assert normalizar_clave("CORREO", "a@b.com") != normalizar_clave("CORREO", "a.b@com")
+
+
+def test_la_conexion_deposita_precios_pero_no_administra_listas():
+    """20-sep-2026: con las listas de precios viviendo en el Facturador, el chat
+    necesita poder FIJAR un precio. Se le da un permiso acotado, no el de
+    administrar listas — que además abre re-vincularlas a SAE, o sea reencender
+    el espejo que se acaba de apagar."""
+    from app.core.rbac import PERMISOS_CONEXION
+
+    assert "precio:depositar" in PERMISOS_CONEXION
+    assert "lista_precios:gestionar" not in PERMISOS_CONEXION, (
+        "con este permiso la clave del bot podría crear listas, asignarlas a "
+        "proyectos y reescribir sae_empresa/sae_lista"
+    )
+
+
+def test_los_endpoints_de_precio_aceptan_cualquiera_de_los_dos_permisos():
+    """Ningún rol existente pierde acceso: `lista_precios:gestionar` sigue
+    pasando, y el permiso acotado también."""
+    import uuid
+
+    from fastapi import HTTPException
+
+    from app.api.v1.listas_precios import _ctx_escribe_precios
+    from app.core.rbac import AuthContext
+
+    def _ctx(perms):
+        return AuthContext(
+            user_id=None, auth_user_id="t", email=None, tenant_id=uuid.uuid4(),
+            role_id=None, role_name="t", is_owner=False, permissions=set(perms),
+            memberships=[], conexion_id=None,
+        )
+
+    assert _ctx_escribe_precios(_ctx({"lista_precios:gestionar"})) is not None
+    assert _ctx_escribe_precios(_ctx({"precio:depositar"})) is not None
+    for malo in ({"menu:listas_precios"}, {"menu:cotizador"}, set()):
+        try:
+            _ctx_escribe_precios(_ctx(malo))
+        except HTTPException as e:
+            assert e.status_code == 403
+        else:
+            raise AssertionError(f"{malo or 'sin permisos'} no debería poder escribir precios")
