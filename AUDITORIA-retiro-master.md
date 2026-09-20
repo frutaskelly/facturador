@@ -492,7 +492,10 @@ plan**: se recuentan contra el código de hoy.
 | **Comandos a cubrir** | **121 verbos despachados** (75 en `sheets_push.py` + 46 en `ehmo_pedidos.py`), no 46 | Los mismos | 0 |
 | Comandos nuevos sin commitear | **27** `cmd_` que el censo del plan no conoce | Los mismos | 0 |
 | Endpoints que faltan | 6 (propuesta/aplicar, unión de remisiones, armado, resumen, sin-precio agregado, fechas por lote) | Los mismos + comparador | +1 |
-| Piezas P1–P12 exigidas | P1, P2, P5 mínimo | P1–P12 | +7 |
+| Piezas P1–P12 exigidas | P1, P2, P5 mínimo. **P12 sale** (D18 = link) | P1–P12 menos P12 | +6 |
+| Aplicador de precios (D24) | **0** — cancelado por la decisión del dueño del 20-sep | 0 | 0 |
+| Alta de producto en SAE 04 y 05 | **por construir** (hoy solo 02 y 03) | La misma | 0 |
+| Notas de crédito + menú + histórico | **obra nueva** (modelo, migración, PAC, UI, espejo) | La misma | 0 |
 | Migraciones nuevas | ≥3 (reparto, tipo de partida, nota externa) + 1 (sembrar `factura:espejo`) | Las mismas | 0 |
 | Estados `pending*` a convertir | **15** (1 Map + 14 variables), no 11 | 15 | 0 |
 | Permisos nuevos | **3** | 3, escalonados (la primera etapa: 0) | 0 en total, ≠ en secuencia |
@@ -528,6 +531,8 @@ Precondiciones no negociables antes del primer cambio que toque el Master.
 | 6 | El interruptor `master.activo` por perfil | `grep -rn 'master.activo' bot/` devuelve algo |
 | 7 | La conciliación lee `res["errores"]` | `index.js` consulta `r.errores` además de `r.error` (hoy solo `:6969`) |
 | 8 | Guarda sobre `export_sae_at` | `grep -n export_sae_at remisiones.py` devuelve una guarda |
+| 9 | **El agendador del espejo de claves corre** | `logs/claves_sae.launchd.err` sin `PermissionError` en su última corrida. **Hoy falla en todas**, y sin él el masivo se salta su validación en silencio (`export_sae.py:263`) |
+| 10 | **Las 7 listas desvinculadas y `espejar_precios` apagado**, junto con el cambio de fuente de la ficha | `GET /listas-precios/espejo/vinculadas` devuelve vacío, y los 5 sitios de la ficha ya no consultan `PRECIO_X_PROD`. Los dos a la vez: si se separan, queda la ventana donde el chat cotiza un precio y el documento cobra otro |
 
 ---
 
@@ -568,7 +573,88 @@ aplicó», esta vez dentro del script mismo.
 
 ---
 
-## 12. PREGUNTAS PARA EL DUEÑO (7, sí o no)
+## 12. PREGUNTAS PARA EL DUEÑO — **CONTESTADAS el 20-sep-2026**
+
+> Las respuestas del dueño están abajo, con sus palabras. Cinco de las siete quedaron cerradas; las
+> dos que bloquean el primer paso (1 y 2) siguen abiertas. **Este es el registro que sustituye a la
+> lista de preguntas: lo que sigue es lo decidido, no lo propuesto.**
+
+### Lo decidido
+
+| # | Decisión del dueño | Consecuencia verificada |
+|---|---|---|
+| **3** | **Aceptar la pérdida** de «Requisición Folio» y del descuento por línea | Cero trabajo. Queda como pérdida aceptada por escrito, que era el requisito del criterio 1 |
+| **D24** | **Aprobada, con mecanismo propio**: «las listas de precios viven en el Facturador. El SAE es responsable de los códigos SAT únicamente». El Facturador es dueño de los precios **porque genera el Excel masivo con ellos**; el masivo solo fija el precio *del documento*, no la lista de SAE; y **puede asignar cualquier producto sin importar la lista SAE del cliente** | **Mata el aplicador de precios** que D24 implicaba (≈400 líneas): si el masivo no necesita la lista de SAE, esa lista deja de importar y basta **dejar de leerla**. Ver §12.1 |
+| **D18** | **LINK**: Drive queda como dependencia permanente; el Facturador no guarda el original | **P12 sale del alcance.** Riesgo heredado: las 183 órdenes sin link siguen sin él, y un link roto no tiene respaldo |
+| **D21** | **A mano, después**: las 8 remisiones de Tabasco se corrigen en el SAE manualmente | No se regeneran masivos. Pero **nada impide que vuelva a pasar**: `export_sae_at` sigue sin guarda (§6.2) |
+| **7** | **Las notas de crédito entran al Facturador**, con menú para crearlas y ver el histórico | **Obra nueva**: no hay modelo, migración, servicio, endpoint ni UI. Y hay un hallazgo urgente que no depende de construirlo: §12.2 |
+
+### Lo que sigue abierto
+
+| # | Pregunta | Por qué sigue abierta |
+|---|---|---|
+| **1** | ¿Se commitea el bulto del bot (6,730 renglones) en rama con nombre, sin mergear? | **Bloquea todo lo demás.** El auditor no la da por autorizada: implica escribir en un repositorio que el propio encargo prohibió tocar |
+| **2** | ¿El canal de correo entra al alcance? | Si entra: git + identidad propia antes de tocar la hoja. Si no: hay que apagarlo el día del retiro, porque el interruptor por perfil no lo alcanza |
+
+### 12.1 — Lo que cambia con D24, medido
+
+La decisión del dueño **abarata** su propia opción. Trabajo real para que las listas vivan en el Facturador:
+
+| Paso | Costo | Evidencia |
+|---|---|---|
+| Desvincular las 7 listas | **0 líneas** | `PATCH /listas-precios/{id}` con `sae_empresa`/`sae_lista` en null ya existe (`listas_precios.py:117-139`) y **la pantalla ya lo manda** (`frontend/app/(app)/listas-precios/page.tsx:87-91`) |
+| Apagar `espejar_precios` | ~6 líneas | `facturador_espejo.py:530-537`. Sin esto, cualquiera revincula desde esa misma pantalla — **la explicación más probable del misterio de las 5 listas revinculadas** |
+| Cambiar la fuente de la ficha del chat | 5 sitios | `sheets_push.py:8101` y `ehmo_pedidos.py:2041, 4491, 4772, 6232`. **Va en el mismo paso**: si no, el chat cotiza el precio viejo del SAE mientras el documento cobra el nuevo — el incidente «ZMAFAN 168» |
+| Retirar `cmd_precio_sae` | borrado | `sheets_push.py:8216-8219`: escribiría en una lista que ya nadie lee |
+| ~~Aplicador de precios Facturador→SAE~~ | ~~≈400 líneas~~ | **CANCELADO** por la decisión del dueño |
+
+**El riesgo mientras tanto, y es de hoy:** el depósito del espejo **pisa** el precio del Facturador
+sin avisar (`listas_precios.py:267-274`; docstring `:188` «SAE manda»). La caché de huellas solo
+retrasa (TTL 6 h, y la huella es de lo que manda SAE, no de lo que tiene el Facturador,
+`facturador_espejo.py:438-445`), y **el botón «Sincronizar SAE» la ignora** (`facturador_espejo.py:512`):
+quien lo apriete borra los precios del Facturador de todas las listas vinculadas, de inmediato y sin
+saberlo. Único sobreviviente: un precio que en SAE esté en $0 (`:242-244`).
+
+### 12.2 — El camino crítico real: el viaje redondo del producto
+
+El dueño precisó que **todo entra por el masivo, nadie captura a mano en Aspel**, y que el masivo usa
+el catálogo completo del SAE de esa empresa. Eso reordena las prioridades: los precios salen casi
+gratis y **el producto es el camino crítico**.
+
+Un producto nacido en el Facturador necesita ir y volver: nace → se crea en `INVE` de su empresa
+(**SAE rechaza claves que no existen**, `export_sae.py:25`) → regresa por el espejo de claves para que
+el masivo lo reconozca (`export_sae.py:268-269`). Dos huecos:
+
+1. **No hay camino de escritura para 04 y 05.** Solo existe alta para 02 (`sheets_push.py:7889`) y 03
+   (`ehmo_pedidos.py:11320`). El dueño pidió alta automática en las cuatro.
+2. **La validación falla hacia el lado inseguro.** Sin espejo del catálogo para esa empresa,
+   `export_sae.py` **se salta la validación entera** (`if cat:`, comentario en `:263`): no bloquea,
+   exporta, y el SAE rechaza después en silencio — el precedente FRESADOMOPZ del 14-sep. Y el espejo
+   de claves lo alimenta `sync_claves_sae.py`, cuyo agendador **falla en todas sus corridas**
+   (`PermissionError` en `logs/claves_sae.launchd.err`). **Está roto hoy, y no espera a ninguna decisión.**
+
+**Choque que el dueño debe resolver antes de incluir la empresa 05:** está excluida a propósito, y el
+motivo está escrito en el código — *«La 05 se queda fuera a propósito: CODISEL tiene clave en las dos
+empresas y colgarlas de la misma plaza detiene el masivo»* (`facturador_espejo.py:57-59`).
+
+### 12.3 — Notas de crédito: lo urgente no es construirlas
+
+El Facturador no puede emitirlas (sin modelo, migración, servicio, endpoint ni UI; solo una columna de
+tipo de comprobante clavada en `"I"`). Pero antes que eso:
+
+- **El espejo las ignora.** Lee solo `FACTF04`; las notas de crédito viven en otra tabla
+  (`FACTD04`/`FACTG04`) que **ningún archivo del bot consulta jamás**.
+- **`GET /reportes/ventas` está sobreestimado con certeza** (`reportes.py:179-187`): suma totales de
+  facturas sin restar una sola nota de crédito. Eso es hoy, no es hipótesis.
+- **Si la cartera de la 04 está inflada** depende de cómo el SAE registre la aplicación de la NC en
+  `CUEN_DET04`: si es abono (`TIPO_MOV='A'`) el saldo ya viene neteado; con otra convención, la
+  cartera está inflada por el monto exacto de las notas de crédito. **NO VERIFICABLE DESDE EL CÓDIGO** —
+  lo decide un `SELECT` contra el SAE, pendiente de autorización. Precedente de cuánto escala un
+  descuadre así: `MSJ_CANC`, ~$1.5M cobrados de más (`models/factura.py:96-99`).
+
+---
+
+## 12-bis. Las preguntas, como se formularon
 
 **Bloquean el primer paso:**
 
