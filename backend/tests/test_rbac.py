@@ -280,3 +280,36 @@ def test_la_conexion_nunca_gana_escrituras_peligrosas():
     }
     filtrados = prohibidos & set(PERMISOS_CONEXION)
     assert not filtrados, f"la clave del bot ganó permisos de escritura: {sorted(filtrados)}"
+# ------------------------------------------------------- equivalencia CORREO
+# El canal de correo entró al alcance el 20-sep-2026. Una dirección IDENTIFICA a
+# un cliente (a diferencia del grupo de WhatsApp, que da contexto: por el de
+# Hidalgo entran Balles y Jubran). Estas pruebas fijan las dos cosas que se
+# pueden romper sin que nadie lo note: que siga identificando, y que la
+# dirección no se destroce al normalizarla.
+
+def test_correo_identifica_y_no_es_contexto():
+    from app.models.cliente_externo import SISTEMAS, SISTEMAS_CONTEXTO
+    from app.services.cliente_match import PRIORIDAD
+
+    assert "CORREO" in SISTEMAS
+    assert "CORREO" not in SISTEMAS_CONTEXTO, (
+        "una dirección de correo es de UN cliente; si pasa a contexto, dos "
+        "clientes podrían reclamar el mismo remitente"
+    )
+    assert "CORREO" in PRIORIDAD
+    # Manda menos que la identidad fiscal y la del SAE, y más que lo que se
+    # adivina del texto del documento.
+    assert PRIORIDAD.index("CORREO") > PRIORIDAD.index("RFC")
+    assert PRIORIDAD.index("CORREO") < PRIORIDAD.index("NOMBRE")
+
+
+def test_la_direccion_de_correo_no_se_destroza_al_normalizar():
+    """El normalizador genérico volvía «Compras@ClienteA.com» en
+    «compras clientea com», que junta direcciones distintas."""
+    from app.services.cliente_match import normalizar_clave
+
+    assert normalizar_clave("CORREO", "  Compras@ClienteA.com ") == "compras@clientea.com"
+    # Mayúsculas y espacios no distinguen; el resto de la dirección sí.
+    assert (normalizar_clave("CORREO", "PEDIDOS@x.mx")
+            == normalizar_clave("CORREO", "pedidos@x.mx"))
+    assert normalizar_clave("CORREO", "a@b.com") != normalizar_clave("CORREO", "a.b@com")

@@ -43,7 +43,14 @@ from .producto_match import normalizar
 
 # Sistemas que IDENTIFICAN al cliente, de mayor a menor especificidad. El
 # resolutor recorre esta lista en orden.
-PRIORIDAD = ("RFC", "SAE", "PROYECTO", "NOMBRE")
+# CORREO va después del RFC y del SAE —que son la identidad fiscal y la del
+# sistema administrativo— y antes de PROYECTO y NOMBRE, que se adivinan del
+# texto del documento. La dirección de quien manda el pedido es un dato duro:
+# no se parsea, viene del sobre del correo (20-sep-2026, al entrar el canal de
+# correo al alcance). A diferencia de WHATSAPP, IDENTIFICA en vez de dar
+# contexto: un grupo puede ser de dos clientes (Balles y Jubran comparten el de
+# Hidalgo), pero una dirección de correo es de uno.
+PRIORIDAD = ("RFC", "SAE", "CORREO", "PROYECTO", "NOMBRE")
 
 # Centinela: "no me pasaron sucursal_id" ≠ "me pasaron None". Sin esto, aprender
 # el grupo al asignar una orden borraba la sucursal por defecto de ese grupo.
@@ -68,6 +75,12 @@ def normalizar_clave(sistema: str, clave: str) -> str:
         return ""
     if sistema.upper() in _SOLO_ALNUM:
         return "".join(ch for ch in s.upper() if ch.isalnum())[:254]
+    if sistema.upper() == "CORREO":
+        # Una dirección se normaliza en minúsculas y nada más: el normalizador
+        # genérico convierte «Compras@ClienteA.com» en «compras clientea com»,
+        # que además de ilegible junta direcciones distintas («a@b.com» y
+        # «a.b@com» caen en la misma clave). El `@` y los puntos SON la dirección.
+        return s.lower()[:254]
     return normalizar(s)[:254]
 
 
