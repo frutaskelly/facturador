@@ -11,18 +11,62 @@
 
 ---
 
+## 0. EL OBJETIVO DE REFERENCIA
+
+> Formulado por el dueño el 20 de septiembre de 2026. **Sustituye a la frase del encargo** («todo debe
+> funcionar de la misma manera; únicamente se quita el Master y la sincronización») como objetivo
+> contra el que se mide esta auditoría, por decisión suya. Es más preciso: las cinco metas son
+> verificables una por una.
+
+1. **Sustituir el Master de órdenes que vive en Google Sheets por el Facturador.**
+2. **WhatsApp pide precios al Facturador.**
+3. **WhatsApp puede modificar remisiones en el Facturador, y se ven en vivo.**
+4. **WhatsApp se comunica únicamente con el Facturador.**
+5. **Creación de productos en SAE: WhatsApp se lo pide al Facturador, y el Facturador pide la
+   creación en el Facturador y en el SAE.**
+
+### El hueco de cada meta, medido
+
+| Meta | ¿Existe hoy? | Lo que falta | Evidencia |
+|---|---|---|---|
+| **1** | A medias: la ingesta ya crea la remisión en el mismo request | La **red** (detector de órdenes perdidas que no lea la hoja), el estado de negocio (P1) y los reportes (P3, P4) | `config.py:93`, `oc_recibidas.py:432`; §4 y §3 |
+| **2** | **No.** Lee `PRECIO_X_PROD` del SAE | Cambiar la fuente en 5 sitios + desvincular las 7 listas | `sheets_push.py:8101`; `ehmo_pedidos.py:2041, 4491, 4772, 6232` |
+| **3** | **Sí, ya funciona**, y «en vivo» ya es cierto: el `PATCH` es síncrono | El **contrato** (P2). Hoy escribe sin él, y por eso reescribió nueve remisiones firmadas | `remisiones.py:677`; `docs/ESTADO.md:78-95` |
+| **4** | **No.** El bot habla con Sheets, con el SAE y con Drive | **131 lecturas** y **11 escrituras** directas al SAE, más 86 `runSheets`, ~42 sitios de hoja en EHMO y 12 llamadas propias del correo | 96 + 37 `_sae_query`; 9 + 2 `_sae_exec`; `index.js:3798`; `email_watcher.py:303` |
+| **5** | **No.** El bot escribe `INVE` directo, y solo en 02 y 03 | Un **aplicador del lado del Facturador** + alta de producto en 04 y 05 | `sheets_push.py:7889`; `ehmo_pedidos.py:11320` |
+
+**Lo que esta tabla revela y el plan no tenía contado:** la meta 4 es la más cara de las cinco. El
+plan mide el retiro en «86 llamadas a la hoja»; pero «hablar únicamente con el Facturador» obliga a
+mover además **131 lecturas al SAE** que nadie había censado — la ficha de producto, las listas, los
+folios, las facturas, la conciliación. Ese es el tamaño real de «cliente delgado».
+
+**El orden sale de las metas mismas: la 2 y la 5 son precondición de la 4.** No se pueden cortar las
+lecturas al SAE hasta que el Facturador sepa contestar precios (meta 2) y hasta que el catálogo esté
+completo en las cuatro empresas (meta 5). Al revés, el chat se queda mudo.
+
+**Corrección declarada sobre el aplicador:** la decisión del dueño sobre precios (§12.1) **canceló** el
+aplicador para precios, y eso sigue en pie. Pero **la meta 5 lo resucita para productos**: «el
+Facturador pide la creación en el SAE» es exactamente un aplicador, y no se puede evitar porque el
+masivo rechaza claves que no existen en `INVE` (`export_sae.py:25`). La diferencia con lo que el plan
+proponía es que ahora tiene un solo caso de uso — el alta de producto — en vez de catálogo y precios
+completos.
+
+---
+
 ## 1. DICTAMEN
 
 **NO RETIRAR TODAVÍA.** El Master no es hoy un almacén redundante: es el único término de
 comparación de la red que detectaría una orden perdida, y esa red no falla ruidosamente al
 apagarlo — **se pone verde**.
 
-**Me aparto de lo que pidió el dueño, y digo en qué.** Su estado objetivo dice «todo debe funcionar
-de la misma manera; únicamente se quita el Master y la sincronización». Eso no se cumple hoy en una
-frase concreta: **«de la misma manera» es imposible porque tres funciones que hoy hace la hoja no
-existen en el Facturador** — el detector de órdenes perdidas (`facturador_conciliar.py:12`), el
-dedup de reenvíos (`sheets_push.py:488`) y la detección de versión vieja (`sheets_push.py:1169`).
-A cambio de no retirarlo aún, se conserva la única red que hoy avisa cuando una orden no llega.
+**Dónde me aparto, medido contra el objetivo de referencia del §0.** Las cinco metas del dueño son
+correctas y alcanzables; no discuto ninguna. Me aparto en **el orden**, que su formulación no fija:
+**la meta 1 no puede ir primero.** Las metas 2 y 5 son precondición de la 4, y ninguna de las cinco
+nombra la pieza que las sostiene — **la red**: el detector de órdenes perdidas
+(`facturador_conciliar.py:12`), el dedup de reenvíos (`sheets_push.py:488`) y la detección de versión
+vieja (`sheets_push.py:1169`) viven hoy en la hoja y no tienen sustituto. Poner la meta 1 antes que su
+red es el único punto en el que esta auditoría contradice al dueño. A cambio de no retirarlo aún, se
+conserva la única red que hoy avisa cuando una orden no llega.
 
 **Opción recomendada como próxima acción: F (otra cosa primero)**, acotada a cuatro entregables
 que son precondición de cualquiera de las otras cinco. **Mejor destino a un año: A, la del dueño** —
