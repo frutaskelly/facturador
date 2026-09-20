@@ -30,7 +30,7 @@
 | Meta | ¿Existe hoy? | Lo que falta | Evidencia |
 |---|---|---|---|
 | **1** | A medias: la ingesta ya crea la remisión en el mismo request | La **red** (detector de órdenes perdidas que no lea la hoja), el estado de negocio (P1) y los reportes (P3, P4) | `config.py:93`, `oc_recibidas.py:432`; §4 y §3 |
-| **2** | **No.** Lee `PRECIO_X_PROD` del SAE | Cambiar la fuente en 5 sitios + desvincular las 7 listas | `sheets_push.py:8101`; `ehmo_pedidos.py:2041, 4491, 4772, 6232` |
+| **2** | **No.** Lee `PRECIO_X_PROD` del SAE | Cambiar la fuente de las **dos fichas** + desvincular las 7 listas | `sheets_push.py:8084` (`cmd_ver_producto`, consultas en `:8093-8102`) y `ehmo_pedidos.py:11080` (`_ficha_sae`) + `:11059` (`_precios_del_producto`). **Corregido el 20-sep:** una versión anterior citaba `ehmo_pedidos.py:2041, 4491, 4772, 6232`; esas líneas sí leen `PRECIO_X_PROD`, pero **ninguna es la ficha** |
 | **3** | **Sí, ya funciona**, y «en vivo» ya es cierto: el `PATCH` es síncrono | El **contrato** (P2). Hoy escribe sin él, y por eso reescribió nueve remisiones firmadas | `remisiones.py:677`; `docs/ESTADO.md:78-95` |
 | **4** | **No.** El bot habla con Sheets, con el SAE y con Drive | **131 lecturas** y **11 escrituras** directas al SAE, más 86 `runSheets`, ~42 sitios de hoja en EHMO y 12 llamadas propias del correo | 96 + 37 `_sae_query`; 9 + 2 `_sae_exec`; `index.js:3798`; `email_watcher.py:303` |
 | **5** | **No.** El bot escribe `INVE` directo, y solo en 02 y 03 | Un **aplicador del lado del Facturador** + alta de producto en 04 y 05 | `sheets_push.py:7889`; `ehmo_pedidos.py:11320` |
