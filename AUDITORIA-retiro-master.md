@@ -122,12 +122,35 @@ eso ya pasó aquí.
 
 ### Lo que sigue abierto, y es decisión del dueño
 
-1. **La empresa 05**: regla de desempate para un cliente con clave en dos empresas.
-   Sin ella no se puede espejar su catálogo, y `claves_sae` **no tiene ni una fila**
-   de la 05 — así que el masivo de esa empresa exportaría sin validar nada.
-2. **El remoto del repositorio de correo**: sigue local.
+1. ~~**La empresa 05**~~ — **RESUELTA el 20-sep.** El dueño fijó la regla: *manda la
+   plaza*. Y resulta que **ya estaba implementada**: `_clave_para_remision`
+   (`export_sae.py:207-217`) dice «la de SU sucursal gana; si no hay, caen las
+   genéricas». Verificado además contra producción: el único cliente con claves en
+   varias empresas es EHMO, y sus tres equivalencias ya están bien capturadas
+   (`03:1`→Tabasco, `04:1`→Chiapas, `02:5` genérica = Pachuca). **La 05 queda fuera
+   de alcance por decisión del dueño: no se está usando y no tiene clientes
+   activos** — confirmado en base, cero equivalencias `05:` y CODISEL no existe
+   como cliente. Con eso desaparece el riesgo que este documento señalaba («el
+   masivo de la 05 exportaría sin validar»): era exclusivo de esa empresa, y 02,
+   03 y 04 sí tienen su catálogo espejado.
+2. ~~**El remoto del repositorio de correo**~~ — **HECHO**:
+   `frutaskelly/smartsupply-email`, privado, con los cuatro archivos de
+   credenciales excluidos y verificados uno por uno antes de publicar.
 3. **Meta 4**: 131 lecturas y 11 escrituras directas al SAE, más 86 `runSheets`. Es
    proyecto, no sesión.
+
+### Lo que queda de la meta 5, con la 05 fuera
+
+| Empresa | Espejo de claves | Camino de escritura | Grupos de WhatsApp |
+|---|---|---|---|
+| 02 | ✅ 2,043 claves | ✅ `sheets_push` | activos |
+| 03 | ✅ 1,067 | ✅ `ehmo_pedidos` | activo (Tabasco) |
+| 04 | ✅ 1,075 | ❌ ninguno | los cinco **apagados** |
+| ~~05~~ | — | — | fuera de alcance |
+
+Es más chico de lo que este documento estimaba: falta el **aplicador** que mueva la
+escritura del bot al Facturador para 02 y 03. La 04 no urge — sus cinco grupos
+están apagados, así que hoy nadie puede dar de alta un producto ahí desde el chat.
 
 ---
 
