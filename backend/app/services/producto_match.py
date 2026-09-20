@@ -198,13 +198,14 @@ def normalizar_catalogo(prods: list[Producto]) -> dict[UUID, tuple[str, str, lis
     preview. Precalculado una vez, el cruce masivo pasa de decenas de segundos
     a menos de uno.
     """
-    out: dict[UUID, tuple[str, str, list[str]]] = {}
+    out: dict[UUID, tuple[str, str, list[str], str]] = {}
     for p in prods:
         nombre = normalizar(p.nombre)
         out[p.id] = (
             nombre,
             normalizar(p.sku),
             [nombre] + [normalizar(s) for s in (p.sinonimos or [])],
+            normalizar(p.clave_sae or ""),
         )
     return out
 
@@ -250,9 +251,17 @@ def buscar(
     #    Clave para evitar duplicados: si ya existen "SANDIA", "Sandía", "Sandia"
     #    (todas normalizan igual), deben aparecer las tres para que el usuario las vea.
     for p in prods:
-        nombre_n, sku_n, _ = (norms or {}).get(p.id) or (
-            normalizar(p.nombre), normalizar(p.sku), [])
-        if nombre_n in variantes or sku_n in variantes:
+        idx = (norms or {}).get(p.id) or (
+            normalizar(p.nombre), normalizar(p.sku), [], normalizar(p.clave_sae or ""))
+        nombre_n, sku_n = idx[0], idx[1]
+        # La clave del SAE cruza EXACTO igual que el sku. Se añadió con la
+        # migración 0079 (una sola clave por producto, la misma en todas las
+        # empresas) y ningún consumidor se actualizó: el cruce seguía mirando
+        # solo nombre y sku, así que «precio de ACEI-ACEI-614» no encontraba
+        # nada aunque el producto existiera con esa clave_sae. Verificado el
+        # 20-sep-2026 contra producción: 1,081 de 1,361 productos la tienen.
+        clave_sae_n = idx[3] if len(idx) > 3 else normalizar(p.clave_sae or "")
+        if nombre_n in variantes or sku_n in variantes or (clave_sae_n and clave_sae_n in variantes):
             out.append(_cand(p, 100, "exacto"))
             seen.add(p.id)
 
