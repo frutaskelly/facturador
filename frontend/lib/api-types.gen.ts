@@ -3704,6 +3704,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/remisiones/{rem_id}/liberar-pedido": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Liberar Pedido
+         * @description La llave del candado de PEDIDO (decisión del dueño, 21-sep-2026).
+         *
+         *     Una remisión que salió en un archivo de export se congela. Para el export de
+         *     FACTURA la llave ya existía: el espejo limpia `export_sae_at` cuando SAE
+         *     cancela esa factura. Para el de PEDIDO no la limpiaba nadie — cinco
+         *     remisiones quedaron congeladas sin salida — y un candado sin llave es una
+         *     trampa. Esta es la llave: una PERSONA declara que aquel archivo no se
+         *     importó (o que el pedido se canceló allá), deja el motivo por escrito, y la
+         *     remisión vuelve a ser editable.
+         *
+         *     Solo personas: una conexión no tiene con qué saber qué pasó con un archivo
+         *     dentro de Aspel. Es el mismo reparto que el candado de la impresión.
+         */
+        post: operations["liberar_pedido_api_v1_remisiones__rem_id__liberar_pedido_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/remisiones/{rem_id}/lineas/{linea_id}/cruzar": {
         parameters: {
             query?: never;
@@ -6993,6 +7024,18 @@ export interface components {
             vinculados: number;
         };
         /**
+         * LiberarPedidoIn
+         * @description Quitarle a una remisión el congelamiento del export de PEDIDO.
+         *
+         *     El motivo es obligatorio a propósito: liberar significa afirmar que aquel
+         *     archivo no se importó en Aspel (o que el pedido se canceló allá), y esa
+         *     afirmación tiene dueño. Queda anotada en las notas del documento.
+         */
+        LiberarPedidoIn: {
+            /** Motivo */
+            motivo: string;
+        };
+        /**
          * LineaAutoOut
          * @description Una partida ya resuelta por vía determinista, lista para el clic.
          */
@@ -7189,6 +7232,8 @@ export interface components {
             cantidad: number | string;
             /** Clave */
             clave?: string | null;
+            /** Desc Pct */
+            desc_pct?: number | string | null;
             /** Descripcion */
             descripcion: string;
             /** Notas */
@@ -7206,6 +7251,8 @@ export interface components {
             cantidad: string;
             /** Clave */
             clave?: string | null;
+            /** Desc Pct */
+            desc_pct?: string | null;
             /** Descripcion */
             descripcion: string;
             /** Notas */
@@ -7871,6 +7918,10 @@ export interface components {
             fecha_entrega?: string | null;
             /** Folio Externo */
             folio_externo?: string | null;
+            /** Ieps */
+            ieps?: number | string | null;
+            /** Iva */
+            iva?: number | string | null;
             /** Jid */
             jid?: string | null;
             /** Lineas */
@@ -7883,12 +7934,22 @@ export interface components {
             origen_externo: string;
             /** Perfil */
             perfil?: string | null;
+            /** Proveedor Nombre */
+            proveedor_nombre?: string | null;
+            /** Proveedor Rfc */
+            proveedor_rfc?: string | null;
             /** Proyecto */
             proyecto?: string | null;
             /** Remitente */
             remitente?: string | null;
+            /** Requisicion Folio */
+            requisicion_folio?: string | null;
             /** Rfc */
             rfc?: string | null;
+            /** Subtotal */
+            subtotal?: number | string | null;
+            /** Total */
+            total?: number | string | null;
             /** Ubicacion */
             ubicacion?: string | null;
         };
@@ -9422,6 +9483,12 @@ export interface components {
             empresa_sae?: string | null;
             /** Estado */
             estado: string;
+            /** Export Pedido At */
+            export_pedido_at?: string | null;
+            /** Export Pedido Folio */
+            export_pedido_folio?: string | null;
+            /** Export Sae At */
+            export_sae_at?: string | null;
             /** Factura Estado */
             factura_estado?: string | null;
             /** Factura Folio */
@@ -9540,6 +9607,12 @@ export interface components {
             empresa_sae?: string | null;
             /** Estado */
             estado: string;
+            /** Export Pedido At */
+            export_pedido_at?: string | null;
+            /** Export Pedido Folio */
+            export_pedido_folio?: string | null;
+            /** Export Sae At */
+            export_sae_at?: string | null;
             /** Factura Estado */
             factura_estado?: string | null;
             /** Factura Folio */
@@ -18219,6 +18292,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    liberar_pedido_api_v1_remisiones__rem_id__liberar_pedido_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                rem_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiberarPedidoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemisionDetailOut"];
                 };
             };
             /** @description Validation Error */

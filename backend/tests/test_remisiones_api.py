@@ -809,3 +809,74 @@ def test_exportada_deja_pasar_solo_el_acuse_de_sae(client, env, auth_as):
     r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
                      json={"factura_sae": "ZHGO 901", "notas": "colado"})
     assert r.status_code == 409, r.text
+
+
+def test_liberar_pedido_es_la_llave_del_candado(client, env, auth_as):
+    """El candado de PEDIDO no tenía llave: `export_pedido_at` no lo limpia
+    nadie (el de factura lo limpia el espejo cuando SAE cancela). Liberar exige
+    una PERSONA y un motivo, deja rastro en las notas, y la remisión vuelve a
+    ser editable."""
+    from app.core.rbac import get_auth_context
+    from app.models.remision import Remision
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    rem = _create_rem(client, h, env, "4", "9").json()
+    with SessionLocal() as s:
+        r = s.query(Remision).filter(Remision.id == uuid.UUID(rem["id"])).one()
+        r.export_pedido_at = datetime.now(timezone.utc)
+        r.export_pedido_folio = "77"
+        s.commit()
+
+    # Congelada: ni una nota pasa.
+    assert client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                        json={"notas": "x"}).status_code == 409
+
+    # Sin motivo no hay liberación.
+    assert client.post(f"/api/v1/remisiones/{rem['id']}/liberar-pedido", headers=h,
+                       json={}).status_code == 422
+
+    # Una conexión no puede: no tiene con qué saber qué pasó con el archivo.
+    app.dependency_overrides[get_auth_context] = (
+        lambda: _ctx_de_conexion(env["admin_a"]["tenant_id"]))
+    try:
+        r2 = client.post(f"/api/v1/remisiones/{rem['id']}/liberar-pedido", headers=h,
+                         json={"motivo": "el archivo nunca se importó"})
+        assert r2.status_code == 403, r2.text
+    finally:
+        app.dependency_overrides.pop(get_auth_context, None)
+
+    # Una persona sí, y queda el rastro.
+    r3 = client.post(f"/api/v1/remisiones/{rem['id']}/liberar-pedido", headers=h,
+                     json={"motivo": "el archivo nunca se importó en Aspel"})
+    assert r3.status_code == 200, r3.text
+    det = r3.json()
+    assert det["export_pedido_at"] is None and det["export_pedido_folio"] is None
+    assert "Liberada del pedido 77" in (det["notas"] or "")
+    assert "nunca se importó" in det["notas"]
+
+    # Y la remisión vuelve a ser editable.
+    assert client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                        json={"notas": det["notas"] + "\neditada"}).status_code == 200
+
+    # Liberar dos veces no tiene sentido: ya no está congelada.
+    assert client.post(f"/api/v1/remisiones/{rem['id']}/liberar-pedido", headers=h,
+                       json={"motivo": "otra vez"}).status_code == 409
+
+
+def test_liberar_pedido_no_abre_el_candado_de_factura(client, env, auth_as):
+    """Si además salió en el masivo de FACTURA, esta llave no aplica: esa se
+    libera cancelando en SAE. Abrirla por aquí dejaría un CFDI exportado con la
+    remisión editable debajo."""
+    from app.models.remision import Remision
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    rem = _create_rem(client, h, env, "2", "5").json()
+    with SessionLocal() as s:
+        r = s.query(Remision).filter(Remision.id == uuid.UUID(rem["id"])).one()
+        r.export_pedido_at = datetime.now(timezone.utc)
+        r.export_sae_at = datetime.now(timezone.utc)
+        s.commit()
+    r2 = client.post(f"/api/v1/remisiones/{rem['id']}/liberar-pedido", headers=h,
+                     json={"motivo": "x y z"})
+    assert r2.status_code == 409
+    assert "cancelando en SAE" in r2.json()["detail"]

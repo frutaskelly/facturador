@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, RefreshCw, Sparkles, Trash2, Undo2, Upload, Wand2, X, FileSearch } from "lucide-react";
+import { Check, ClipboardPaste, FileText, LockOpen, Mail, Pencil, Plus, Printer, RefreshCw, Sparkles, Trash2, Undo2, Upload, Wand2, X, FileSearch } from "lucide-react";
 
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
@@ -1716,6 +1716,25 @@ export default function RemisionesPage() {
       toast.error(e instanceof ApiError ? e.message : "No se pudo confirmar");
     }
   }
+  // «Liberar del pedido»: la llave del candado de export (21-sep-2026). El
+  // motivo es obligatorio porque liberar es AFIRMAR que aquel archivo no se
+  // importó en Aspel, y esa afirmación tiene dueño — queda en las notas.
+  const [toLiberar, setToLiberar] = useState<Remision | null>(null);
+  const [motivoLiberar, setMotivoLiberar] = useState("");
+  async function liberarPedido() {
+    if (!toLiberar || motivoLiberar.trim().length < 3) return;
+    try {
+      await post(`/api/v1/remisiones/${toLiberar.id}/liberar-pedido`,
+                 { motivo: motivoLiberar.trim() });
+      toast.success(`${toLiberar.folio_interno} liberada del pedido: vuelve a ser editable`);
+      setToLiberar(null); setMotivoLiberar("");
+      invalidarDetalles([toLiberar.id]);
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo liberar");
+    }
+  }
+
   async function cancelar() {
     if (!toCancel) return;
     try {
@@ -2753,6 +2772,12 @@ export default function RemisionesPage() {
       disabled: (r) => r.estado === "CANCELADA" ? "Ya está cancelada"
         : r.estado === "FACTURADA" ? "Está facturada — cancela primero la factura"
         : false },
+    { id: "liberar-pedido", label: "Liberar del pedido", icon: <LockOpen size={15} />,
+      onClick: (r) => { setMotivoLiberar(""); setToLiberar(r); },
+      hidden: () => !canWrite,
+      disabled: (r) => !r.export_pedido_at ? "No está congelada por un export de pedido"
+        : r.export_sae_at ? "También salió en el masivo de factura: esa se libera cancelando en SAE"
+        : false },
     { id: "devolucion", label: "Devolución", icon: <Undo2 size={15} />,
       onClick: (r) => { void filaRef.current.abrirDevolucion(r); },
       hidden: () => !canWrite,
@@ -3492,6 +3517,26 @@ export default function RemisionesPage() {
         message={`¿Cancelar ${toCancel?.folio_interno}? Se liberará el inventario reservado.`}
         confirmLabel="Sí, cancelar la remisión" cancelLabel="Volver" confirmVariant="danger"
         onConfirm={cancelar} onClose={() => setToCancel(null)} loading={saving} />
+      <Modal open={toLiberar !== null} onClose={() => setToLiberar(null)}
+        title={`Liberar ${toLiberar?.folio_interno ?? ""} del pedido`}
+        footer={<>
+          <Button variant="ghost" onClick={() => setToLiberar(null)}>Volver</Button>
+          <Button variant="danger" onClick={() => void liberarPedido()}
+            disabled={saving || motivoLiberar.trim().length < 3}>
+            Liberar: aquel archivo no se importó
+          </Button>
+        </>}>
+        <p className="text-sm text-muted">
+          Salió en el pedido {toLiberar?.export_pedido_folio || "s/folio"} el{" "}
+          {toLiberar?.export_pedido_at ? fmtDate(toLiberar.export_pedido_at) : "—"} y por eso
+          está congelada. Liberarla es afirmar que ese archivo <b>no se importó en Aspel</b>{" "}
+          (o que el pedido se canceló allá). El motivo queda en las notas del documento.
+        </p>
+        <Field label="Motivo" required>
+          <Textarea value={motivoLiberar} onChange={(e) => setMotivoLiberar(e.target.value)}
+            rows={3} placeholder="p. ej. el archivo de la semana 38 nunca se subió a Aspel" />
+        </Field>
+      </Modal>
       <ConfirmDialog open={facturarSobregiro !== null} title="Existencia insuficiente"
         message={`${facturarSobregiro?.grupos.length ?? 0} factura(s) no tienen existencia suficiente para el/los borrador(es). ¿Facturar de todas formas? El inventario quedará en negativo (sobregiro).`}
         confirmLabel="Facturar con sobregiro" confirmVariant="danger"

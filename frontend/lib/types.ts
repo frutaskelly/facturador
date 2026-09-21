@@ -342,6 +342,13 @@ export type Remision = {
   factura_sae?: string | null;
   // Orden de compra del cliente ("su pedido").
   su_pedido?: string | null;
+  // El rastro del export a SAE: con cualquiera de las dos puesta, la remisión
+  // está CONGELADA (candado del 21-sep-2026). La de pedido tiene su llave en
+  // «Liberar del pedido»; la de factura se libera cancelando en SAE.
+  export_sae_at?: string | null;
+  export_pedido_at?: string | null;
+  export_pedido_folio?: string | null;
+  impresa_at?: string | null;
   // La OC original en la bandeja de órdenes y su documento.
   oc_id?: string | null;
   oc_archivo_url?: string | null;

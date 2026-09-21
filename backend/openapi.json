@@ -7621,6 +7621,22 @@
     "title": "ImportResultOut",
     "type": "object"
    },
+   "LiberarPedidoIn": {
+    "description": "Quitarle a una remisión el congelamiento del export de PEDIDO.\n\nEl motivo es obligatorio a propósito: liberar significa afirmar que aquel\narchivo no se importó en Aspel (o que el pedido se canceló allá), y esa\nafirmación tiene dueño. Queda anotada en las notas del documento.",
+    "properties": {
+     "motivo": {
+      "maxLength": 300,
+      "minLength": 3,
+      "title": "Motivo",
+      "type": "string"
+     }
+    },
+    "required": [
+     "motivo"
+    ],
+    "title": "LiberarPedidoIn",
+    "type": "object"
+   },
    "LineaAutoOut": {
     "description": "Una partida ya resuelta por vía determinista, lista para el clic.",
     "properties": {
@@ -8212,6 +8228,22 @@
       ],
       "title": "Clave"
      },
+     "desc_pct": {
+      "anyOf": [
+       {
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Desc Pct"
+     },
      "descripcion": {
       "maxLength": 500,
       "minLength": 1,
@@ -8287,6 +8319,17 @@
        }
       ],
       "title": "Clave"
+     },
+     "desc_pct": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Desc Pct"
      },
      "descripcion": {
       "title": "Descripcion",
@@ -10373,6 +10416,36 @@
       ],
       "title": "Folio Externo"
      },
+     "ieps": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ieps"
+     },
+     "iva": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Iva"
+     },
      "jid": {
       "anyOf": [
        {
@@ -10433,6 +10506,30 @@
       ],
       "title": "Perfil"
      },
+     "proveedor_nombre": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proveedor Nombre"
+     },
+     "proveedor_rfc": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proveedor Rfc"
+     },
      "proyecto": {
       "anyOf": [
        {
@@ -10457,6 +10554,18 @@
       ],
       "title": "Remitente"
      },
+     "requisicion_folio": {
+      "anyOf": [
+       {
+        "maxLength": 60,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Requisicion Folio"
+     },
      "rfc": {
       "anyOf": [
        {
@@ -10468,6 +10577,36 @@
        }
       ],
       "title": "Rfc"
+     },
+     "subtotal": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Subtotal"
+     },
+     "total": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Total"
      },
      "ubicacion": {
       "anyOf": [
@@ -15114,6 +15253,41 @@
       "title": "Estado",
       "type": "string"
      },
+     "export_pedido_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Export Pedido At"
+     },
+     "export_pedido_folio": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Export Pedido Folio"
+     },
+     "export_sae_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Export Sae At"
+     },
      "factura_estado": {
       "anyOf": [
        {
@@ -15479,6 +15653,41 @@
      "estado": {
       "title": "Estado",
       "type": "string"
+     },
+     "export_pedido_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Export Pedido At"
+     },
+     "export_pedido_folio": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Export Pedido Folio"
+     },
+     "export_sae_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Export Sae At"
      },
      "factura_estado": {
       "anyOf": [
@@ -34651,6 +34860,81 @@
      }
     ],
     "summary": "Enviar Remision",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
+  "/api/v1/remisiones/{rem_id}/liberar-pedido": {
+   "post": {
+    "description": "La llave del candado de PEDIDO (decisión del dueño, 21-sep-2026).\n\nUna remisión que salió en un archivo de export se congela. Para el export de\nFACTURA la llave ya existía: el espejo limpia `export_sae_at` cuando SAE\ncancela esa factura. Para el de PEDIDO no la limpiaba nadie — cinco\nremisiones quedaron congeladas sin salida — y un candado sin llave es una\ntrampa. Esta es la llave: una PERSONA declara que aquel archivo no se\nimportó (o que el pedido se canceló allá), deja el motivo por escrito, y la\nremisión vuelve a ser editable.\n\nSolo personas: una conexión no tiene con qué saber qué pasó con un archivo\ndentro de Aspel. Es el mismo reparto que el candado de la impresión.",
+    "operationId": "liberar_pedido_api_v1_remisiones__rem_id__liberar_pedido_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rem_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Rem Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LiberarPedidoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RemisionDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Liberar Pedido",
     "tags": [
      "remisiones"
     ]

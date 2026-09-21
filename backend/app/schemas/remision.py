@@ -148,6 +148,15 @@ class RemisionOut(ORMModel):
     # Ya salió en papel: el cliente puede tener este documento firmado y sus
     # partidas dejaron de sincronizarse solas desde WhatsApp.
     impresa_at: Optional[datetime] = None
+    # El rastro del export a SAE (21-sep-2026). Desde el candado del mismo día,
+    # una remisión que salió en un archivo se CONGELA — y la pantalla necesita
+    # saberlo para explicarlo antes del 409, y para ofrecer «liberar del pedido»
+    # donde aplica: `export_pedido_at` no lo limpia nadie más (el de factura lo
+    # limpia el espejo cuando SAE cancela), así que sin ese botón cinco
+    # remisiones quedaron congeladas sin salida.
+    export_sae_at: Optional[datetime] = None
+    export_pedido_at: Optional[datetime] = None
+    export_pedido_folio: Optional[str] = None
     # La OC original en la bandeja de órdenes: su id y el documento con el que
     # llegó, para abrirlo desde la lista sin ir a buscarlo.
     oc_id: Optional[uuid.UUID] = None
@@ -203,6 +212,15 @@ class PesoLinea(BaseModel):
     linea_id: uuid.UUID
     # Peso/medida real en UNIDADES BASE (catch-weight) para esta línea.
     cantidad_base: Decimal = Field(gt=0)
+
+
+class LiberarPedidoIn(BaseModel):
+    """Quitarle a una remisión el congelamiento del export de PEDIDO.
+
+    El motivo es obligatorio a propósito: liberar significa afirmar que aquel
+    archivo no se importó en Aspel (o que el pedido se canceló allá), y esa
+    afirmación tiene dueño. Queda anotada en las notas del documento."""
+    motivo: str = Field(min_length=3, max_length=300)
 
 
 class ConfirmarRemisionIn(BaseModel):
