@@ -18,7 +18,7 @@ import html as html_mod
 import re
 import unicodedata
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -79,6 +79,7 @@ from ...schemas.remision import (
     ClavesSaeOut,
     ConfirmarRemisionIn,
     CruzarLineaIn,
+    LiberarPedidoIn,
     RemisionCreate,
     RemisionDetailOut,
     RemisionOut,
@@ -610,6 +611,82 @@ def _decorar_detalle(db: Session, ctx: AuthContext, rem: Remision) -> Remision:
             par, _c = _clave_para_remision(pares, rem.sucursal_id) if pares else (None, None)
             rem.empresa_sae = par[0] if par else None
     return rem
+
+
+# OJO con el orden: esta ruta va ANTES de GET /{rem_id} — FastAPI casa en
+# orden de declaración y "reporte-compras" parsearía como UUID (422).
+@router.get("/reporte-compras")
+def reporte_compras(
+    fechas: str = Query(..., description="Fechas de ENTREGA, ISO, separadas por coma"),
+    perfil: Optional[str] = Query(default=None, max_length=40),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """La materia prima de la lista de compras (21-sep-2026, meta 1).
+
+    El comando de WhatsApp «lista de compras <días>» hoy pivotea el Master de
+    Google Sheets. Este endpoint entrega LO MISMO desde las remisiones vivas:
+    cuánto se pide de cada producto+presentación por fecha de entrega. La
+    agregación por día y el pivote los sigue haciendo el bot — aquí solo viven
+    los datos, para que el reporte no dependa de la hoja.
+
+    `perfil` acota al universo del Master de ese perfil: las remisiones cuya OC
+    entró con ancla EHMO:<perfil>:. Sin perfil van todas las remisiones con
+    entrega en esas fechas — más de lo que el Master ve, no menos.
+
+    La UNIDAD que viaja es lineas_remision.presentacion, que ya es canónica
+    (KILO/PIEZA/...): la regla del dueño de nunca mezclar unidades se cumple
+    aguas abajo agrupando por ella.
+    """
+    try:
+        dias = sorted({date.fromisoformat(f.strip()) for f in fechas.split(",") if f.strip()})
+    except ValueError:
+        raise HTTPException(status_code=422, detail="fechas: ISO yyyy-mm-dd separadas por coma")
+    if not dias or len(dias) > 14:
+        raise HTTPException(status_code=422, detail="entre 1 y 14 fechas")
+
+    q = (
+        db.query(
+            Producto.clave_sae,
+            Producto.nombre,
+            LineaRemision.presentacion,
+            Remision.fecha_entrega,
+            func.sum(LineaRemision.cantidad_solicitada).label("cantidad"),
+            func.array_agg(func.distinct(func.coalesce(Remision.nota_entrega, ""))).label("hospitales"),
+            func.count(func.distinct(Remision.id)).label("remisiones"),
+            func.count().label("partidas"),
+        )
+        .join(LineaRemision, LineaRemision.remision_id == Remision.id)
+        .join(Producto, Producto.id == LineaRemision.producto_id)
+        .filter(
+            Remision.deleted_at.is_(None),
+            Remision.estado != "CANCELADA",
+            Remision.fecha_entrega.in_(dias),
+            LineaRemision.cantidad_solicitada > 0,
+        )
+    )
+    if perfil:
+        q = q.join(OCRecibida, OCRecibida.remision_id == Remision.id).filter(
+            OCRecibida.origen_externo.like(f"EHMO:{perfil}:%")
+        )
+    q = q.group_by(Producto.clave_sae, Producto.nombre,
+                   LineaRemision.presentacion, Remision.fecha_entrega)
+
+    filas = [
+        {
+            "clave": r.clave_sae,
+            "descripcion": r.nombre,
+            "unidad": r.presentacion,
+            "fecha": r.fecha_entrega.isoformat(),
+            "cantidad": str(r.cantidad),
+            "hospitales": sorted(h for h in (r.hospitales or []) if h),
+            "remisiones": r.remisiones,
+            "partidas": r.partidas,
+        }
+        for r in q.all()
+    ]
+    return {"filas": filas, "fechas": [d.isoformat() for d in dias],
+            "remisiones": sum(f["remisiones"] for f in filas)}
 
 
 @router.get("/{rem_id}", response_model=RemisionDetailOut)
@@ -1233,6 +1310,58 @@ def confirmar_remision(
     permitir_negativos = bool(payload.permitir_negativos) if payload else False
 
     reservar_stock_remision(db, ctx, rem, permitir_negativos=permitir_negativos, pesos=pesos)
+    db.flush()
+    db.refresh(rem)
+    return rem
+
+
+@router.post("/{rem_id}/liberar-pedido", response_model=RemisionDetailOut)
+def liberar_pedido(
+    rem_id: UUID,
+    payload: LiberarPedidoIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """La llave del candado de PEDIDO (decisión del dueño, 21-sep-2026).
+
+    Una remisión que salió en un archivo de export se congela. Para el export de
+    FACTURA la llave ya existía: el espejo limpia `export_sae_at` cuando SAE
+    cancela esa factura. Para el de PEDIDO no la limpiaba nadie — cinco
+    remisiones quedaron congeladas sin salida — y un candado sin llave es una
+    trampa. Esta es la llave: una PERSONA declara que aquel archivo no se
+    importó (o que el pedido se canceló allá), deja el motivo por escrito, y la
+    remisión vuelve a ser editable.
+
+    Solo personas: una conexión no tiene con qué saber qué pasó con un archivo
+    dentro de Aspel. Es el mismo reparto que el candado de la impresión.
+    """
+    rem = get_or_404(db, Remision, rem_id)
+    if ctx.conexion_id is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="Liberar del pedido lo hace una persona: hay que saber qué "
+                   "pasó con el archivo en Aspel, y una conexión no puede saberlo",
+        )
+    if rem.export_pedido_at is None:
+        raise HTTPException(status_code=409, detail="La remisión no está congelada por un pedido")
+    if rem.export_sae_at is not None:
+        # El candado de FACTURA tiene su propia llave (cancelar en SAE) y abrirlo
+        # por aquí dejaría un CFDI exportado con la remisión editable debajo.
+        raise HTTPException(
+            status_code=409,
+            detail="También salió en el masivo de FACTURA: esa se libera cancelando en SAE",
+        )
+
+    marca = f"{rem.export_pedido_at:%d/%m/%Y %H:%M}"
+    folio = rem.export_pedido_folio or "s/folio"
+    rem.export_pedido_at = None
+    rem.export_pedido_folio = None
+    # El rastro va en las notas del documento, que es donde el equipo lee: quién
+    # la liberó, de qué archivo venía y por qué. No se borra historia: se anota.
+    sello = (f"[{datetime.now(timezone.utc):%d/%m/%Y %H:%M} UTC] Liberada del pedido "
+             f"{folio} (exportado {marca}): {payload.motivo.strip()}")
+    rem.notas = f"{rem.notas}\n{sello}" if rem.notas else sello
+    rem.updated_by = ctx.user_id
     db.flush()
     db.refresh(rem)
     return rem
