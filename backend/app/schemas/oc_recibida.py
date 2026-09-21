@@ -20,6 +20,13 @@ class LineaOCRecibidaIn(BaseModel):
     clave: Optional[str] = Field(default=None, max_length=60)   # clave del cliente / SAE
     precio: Optional[Decimal] = Field(default=None, ge=0)
     notas: Optional[str] = None
+    # Descuento por partida declarado por el DOCUMENTO (21-sep-2026). Era uno de
+    # los tres datos que solo vivían en la hoja: sin él, la bandeja no es el
+    # registro completo de la orden y el Master no se puede archivar. El bot lo
+    # manda SOLO cuando es distinto de cero — así los payloads sin descuento
+    # quedan byte-idénticos a los de antes y la detección de cambios no despierta
+    # incidencias falsas sobre las órdenes ya guardadas.
+    desc_pct: Optional[Decimal] = Field(default=None, ge=0, le=100)
 
 
 class OCRecibidaIn(BaseModel):
@@ -47,6 +54,20 @@ class OCRecibidaIn(BaseModel):
     clave_sae: Optional[str] = Field(default=None, max_length=60)
     jid: Optional[str] = Field(default=None, max_length=120)
     perfil: Optional[str] = Field(default=None, max_length=40)
+
+    # Lo que el DOCUMENTO declara de sí mismo (21-sep-2026): los impuestos y
+    # totales impresos en la OC, y quién la emitió. Hasta hoy solo vivían en el
+    # Summary de la hoja — el comparativo «lo que la OC dice contra lo que se
+    # facturó» era imposible desde la bandeja. Son evidencia del papel, no
+    # cálculo: NO entran en la huella de cambios (los totales se derivan de las
+    # partidas, que ya se comparan) y nadie los recalcula aquí.
+    subtotal: Optional[Decimal] = Field(default=None, ge=0)
+    ieps: Optional[Decimal] = Field(default=None, ge=0)
+    iva: Optional[Decimal] = Field(default=None, ge=0)
+    total: Optional[Decimal] = Field(default=None, ge=0)
+    proveedor_rfc: Optional[str] = Field(default=None, max_length=20)
+    proveedor_nombre: Optional[str] = Field(default=None, max_length=254)
+    requisicion_folio: Optional[str] = Field(default=None, max_length=60)
 
     lineas: list[LineaOCRecibidaIn] = Field(default_factory=list)
 
@@ -94,6 +115,10 @@ class LineaOCRecibidaOut(BaseModel):
     clave: Optional[str] = None
     precio: Optional[Decimal] = None
     notas: Optional[str] = None
+    # El descuento que declara el documento; None en las órdenes de antes del
+    # 21-sep-2026 y en las partidas sin descuento (el bot solo lo manda cuando
+    # es distinto de cero).
+    desc_pct: Optional[Decimal] = None
     # La unidad del documento ya traducida a presentación del catálogo
     # ("KILOGR AMO" → KILO); si el documento no dice, la habitual del cliente
     # para el producto sugerido. None = no se reconoció: que decida el humano.
