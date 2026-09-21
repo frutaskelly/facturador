@@ -972,6 +972,131 @@ def reporte_armado(
     }
 
 
+@router.get("/reporte-sin-precio")
+def reporte_sin_precio(
+    fechas: Optional[str] = Query(default=None, description="Fechas de ENTREGA, ISO, separadas por coma"),
+    dias: int = Query(default=14, ge=1, le=90, description="Si no hay fechas: últimos N días de remisión"),
+    origen: Optional[str] = Query(default=None, max_length=200),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Lo que hoy NO se puede facturar bien: sin clave en SAE, o sin precio.
+
+    Es el cuarto reporte que sale del Master (21-sep-2026, meta 1). El de la
+    hoja resuelve cada producto contra el catálogo de SAE en vivo; este contesta
+    con lo que el Facturador ya sabe: el espejo de claves (`claves_sae`, las
+    cuatro empresas) y el precio con el que se capturó la partida.
+
+    Cuatro motivos, y se separan porque el arreglo de cada uno es distinto:
+      · SIN CLAVE — la partida no cruzó con ningún producto, o el producto no
+        tiene clave: hay que cruzarla o darla de alta.
+      · CLAVE NO EN SAE — la clave existe aquí pero la empresa de esa plaza no
+        la conoce (la 02 la tiene, la 03 no): hay que darla de alta ALLÁ.
+      · CLAVE DE BAJA — existe en esa empresa pero dada de baja: se reactiva.
+      · SIN PRECIO — la partida se capturó en $0: hay que ponerle precio.
+
+    Un producto puede tener dos motivos a la vez; se reporta una vez por motivo,
+    porque son dos trabajos distintos para dos personas distintas.
+    """
+    base = [Remision.deleted_at.is_(None), Remision.estado != "CANCELADA"]
+    prefijos = [x.strip() for x in (origen or "").split(",") if x.strip()]
+    if prefijos:
+        base.append(
+            db.query(OCRecibida.id)
+            .filter(OCRecibida.remision_id == Remision.id,
+                    or_(*[OCRecibida.origen_externo.like(pf.replace("%", "") + "%")
+                          for pf in prefijos]))
+            .correlate(Remision)
+            .exists()
+        )
+    if fechas and fechas.strip():
+        try:
+            dset = sorted({date.fromisoformat(f.strip()) for f in fechas.split(",") if f.strip()})
+        except ValueError:
+            raise HTTPException(status_code=422, detail="fechas: ISO yyyy-mm-dd separadas por coma")
+        if not dset or len(dset) > 31:
+            raise HTTPException(status_code=422, detail="entre 1 y 31 fechas")
+        base.append(Remision.fecha_entrega.in_(dset))
+        ventana = {"fechas": [d.isoformat() for d in dset]}
+    else:
+        desde = date.today() - timedelta(days=dias)
+        base.append(Remision.fecha_remision >= desde)
+        ventana = {"desde": desde.isoformat(), "dias": dias}
+
+    rems = db.query(Remision).filter(*base).all()
+    if not rems:
+        return {"productos": [], "remisiones": 0, "sin_clave": 0, "sin_precio": 0, **ventana}
+
+    from ...services.export_sae import lineas_clave_no_facturable
+
+    no_fact = lineas_clave_no_facturable(db, ctx.tenant_id, rems)
+    por_id = {r.id: r for r in rems}
+    filas = (
+        db.query(LineaRemision, Producto)
+        .outerjoin(Producto, Producto.id == LineaRemision.producto_id)
+        .filter(LineaRemision.remision_id.in_(list(por_id)),
+                LineaRemision.cantidad_solicitada > 0)
+        .all()
+    )
+
+    # agrupado por (motivo, producto): el reporte es una lista de TRABAJOS, no de
+    # renglones — el mismo producto en diez entregas es un solo trabajo.
+    acc: dict = {}
+
+    def anota(motivo, clave, descripcion, unidad, cantidad, folio):
+        k = (motivo, (clave or "").upper(), (descripcion or "").upper())
+        d = acc.setdefault(k, {"motivo": motivo, "clave": clave or None,
+                               "descripcion": descripcion or "", "unidad": unidad or "",
+                               "cantidad": Decimal("0"), "folios": []})
+        d["cantidad"] += Decimal(str(cantidad or 0))
+        if folio and folio not in d["folios"]:
+            d["folios"].append(folio)
+
+    for ln, prod in filas:
+        rem = por_id.get(ln.remision_id)
+        folio = (normalizar_folio(rem.su_pedido) if rem and rem.su_pedido
+                 else (rem.folio_interno if rem else None))
+        desc = (prod.nombre if prod else None) or (ln.notas or "").strip() or "PARTIDA SIN PRODUCTO"
+        clave = (prod.clave_sae or "").strip() if prod else ""
+        if not clave:
+            anota("SIN CLAVE", None, desc, ln.presentacion, ln.cantidad_solicitada, folio)
+        else:
+            dato = (no_fact.get(ln.remision_id) or {}).get(ln.producto_id)
+            if dato:
+                _c, de_baja = dato
+                anota("CLAVE DE BAJA" if de_baja else "CLAVE NO EN SAE", clave, desc,
+                      ln.presentacion, ln.cantidad_solicitada, folio)
+        if Decimal(str(ln.precio_unitario or 0)) <= 0:
+            anota("SIN PRECIO", clave or None, desc, ln.presentacion,
+                  ln.cantidad_solicitada, folio)
+
+    # Las partidas que NUNCA cruzaron no son líneas: viven en la remisión como
+    # pendientes de cruce, y son las que más duelen (nadie las ve hasta facturar).
+    for r in rems:
+        for p in (r.partidas_por_cruzar or []):
+            if not isinstance(p, dict):
+                continue
+            anota("SIN CLAVE", (p.get("clave") or "").strip() or None,
+                  (p.get("descripcion") or "").strip() or "PARTIDA SIN CRUZAR",
+                  (p.get("unidad") or "").strip(), p.get("cantidad") or 0,
+                  normalizar_folio(r.su_pedido) if r.su_pedido else r.folio_interno)
+
+    productos = sorted(
+        ({**d, "cantidad": str(d["cantidad"]), "n_folios": len(d["folios"]),
+          "folios": d["folios"][:6]} for d in acc.values()),
+        key=lambda x: (x["motivo"], -x["n_folios"], x["descripcion"]),
+    )
+    return {
+        "productos": productos,
+        "remisiones": len(rems),
+        "sin_clave": sum(1 for p in productos if p["motivo"].startswith("SIN CLAVE")),
+        "sin_precio": sum(1 for p in productos if p["motivo"] == "SIN PRECIO"),
+        "clave_fuera_de_sae": sum(1 for p in productos
+                                  if p["motivo"] in ("CLAVE NO EN SAE", "CLAVE DE BAJA")),
+        **ventana,
+    }
+
+
 @router.get("/{rem_id}", response_model=RemisionDetailOut)
 def get_remision(
     rem_id: UUID,

@@ -1160,3 +1160,85 @@ def test_reporte_armado_avisa_las_oc_sin_remision(client, env, auth_as):
     # por lista de OC no hay aviso por fecha: lo que se pidió es explícito
     r3 = client.get("/api/v1/remisiones/reporte-armado?folios=25900", headers=h)
     assert r3.json()["sin_remision"] == []
+
+
+def test_reporte_sin_precio_separa_los_cuatro_trabajos(client, env, auth_as):
+    """Lo que hoy no se puede facturar bien, agrupado por TRABAJO: sin clave,
+    clave que esa empresa de SAE no conoce, clave de baja y sin precio. Se
+    separan porque el arreglo de cada uno lo hace una persona distinta."""
+    from app.models import ClaveSae, ClienteExterno, Producto
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    # el producto de siempre: con clave que SAE sí conoce, y con precio
+    with SessionLocal() as s:
+        s.query(Producto).filter(Producto.id == uuid.UUID(env["prod_a"])).update(
+            {"clave_sae": "AJOKG"})
+        s.add(ClaveSae(tenant_id=env["admin_a"]["tenant_id"], empresa="02",
+                       clave="AJOKG", activa=True))
+        s.add(ClienteExterno(tenant_id=env["admin_a"]["tenant_id"],
+                             cliente_id=uuid.UUID(env["cli_a"]), sistema="SAE",
+                             clave="02:8", clave_normalizada="02 8",
+                             confianza="CONFIRMADA"))
+        s.commit()
+
+    def rem(precio, *, por_cruzar=None, su_pedido="26000"):
+        body = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+                "su_pedido": su_pedido, "fecha_entrega": "2031-08-04",
+                "lineas": [{"producto_id": env["prod_a"], "presentacion": "KILO",
+                            "cantidad_solicitada": "4", "precio_unitario": precio}]}
+        r = client.post("/api/v1/remisiones", headers=h, json=body)
+        assert r.status_code == 201, r.text
+        if por_cruzar:
+            pc = client.patch(f"/api/v1/remisiones/{r.json()['id']}", headers=h,
+                              json={"partidas_por_cruzar": por_cruzar})
+            assert pc.status_code == 200, pc.text
+        return r.json()
+
+    rem("5")                                        # sana: no sale
+    rem("0", su_pedido="26001")                     # sin precio
+    rem("5", su_pedido="26002", por_cruzar=[
+        {"numero": 1, "descripcion": "SAL DE GRANO", "cantidad": "2", "unidad": "KILO"}])
+
+    r = client.get("/api/v1/remisiones/reporte-sin-precio?fechas=2031-08-04", headers=h)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    por_motivo = {p["motivo"]: p for p in out["productos"]}
+    assert "SIN PRECIO" in por_motivo, out
+    assert por_motivo["SIN PRECIO"]["folios"] == ["26001"]
+    assert "SIN CLAVE" in por_motivo, out
+    assert por_motivo["SIN CLAVE"]["descripcion"] == "SAL DE GRANO"
+    # el producto con clave viva y precio no aparece por ningún motivo
+    assert not [p for p in out["productos"]
+                if p["descripcion"] == "Prod R" and p["motivo"] != "SIN PRECIO"], out
+    assert out["sin_precio"] == 1 and out["sin_clave"] == 1
+
+
+def test_reporte_sin_precio_ve_la_clave_que_esa_empresa_no_conoce(client, env, auth_as):
+    """La clave existe aquí y en la 02, pero la remisión factura por la 03: esa
+    empresa no la conoce y el masivo moriría. Es un trabajo distinto de «no
+    tiene clave» — hay que darla de alta ALLÁ."""
+    from app.models import ClaveSae, ClienteExterno, Producto
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    with SessionLocal() as s:
+        s.query(Producto).filter(Producto.id == uuid.UUID(env["prod_a"])).update(
+            {"clave_sae": "LIMOKG"})
+        # el espejo de la 03 existe (así el fail-open no aplica) pero sin esa clave
+        s.add(ClaveSae(tenant_id=env["admin_a"]["tenant_id"], empresa="03",
+                       clave="OTRACOSA", activa=True))
+        s.add(ClienteExterno(tenant_id=env["admin_a"]["tenant_id"],
+                             cliente_id=uuid.UUID(env["cli_a"]), sistema="SAE",
+                             clave="03:9", clave_normalizada="03 9",
+                             confianza="CONFIRMADA"))
+        s.commit()
+    body = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+            "su_pedido": "26100", "fecha_entrega": "2031-08-05",
+            "lineas": [{"producto_id": env["prod_a"], "presentacion": "KILO",
+                        "cantidad_solicitada": "4", "precio_unitario": "5"}]}
+    assert client.post("/api/v1/remisiones", headers=h, json=body).status_code == 201
+
+    out = client.get("/api/v1/remisiones/reporte-sin-precio?fechas=2031-08-05",
+                     headers=h).json()
+    motivos = {p["motivo"] for p in out["productos"]}
+    assert "CLAVE NO EN SAE" in motivos, out
+    assert out["clave_fuera_de_sae"] == 1
