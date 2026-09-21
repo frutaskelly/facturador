@@ -32,6 +32,7 @@ from .remision import LineaRemision, Remision
 from .role import Role
 from .role_permission import RolePermission
 from .serie import Serie
+from .solicitud_alta_sae import SolicitudAltaSae
 from .sucursal import ClienteSucursal, ClienteSucursalSerie, PrecioOverride, Sucursal
 from .tenant import Membership, Tenant, User
 
@@ -46,6 +47,7 @@ __all__ = [
     "CategoriaProducto",
     "EsquemaImpuesto",
     "EspejoSync",
+    "SolicitudAltaSae",
     "Producto",
     "ProductoAlias",
     "ProductoCliente",
