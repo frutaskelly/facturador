@@ -75,6 +75,7 @@ from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ...services.sucursales import es_sucursal_de
 from ...schemas.common import Page
 from ...schemas.remision import (
+    CancelarRemisionIn,
     ClaveSaeEnUso,
     ClaveSaeSugerida,
     ClavesSaeOut,
@@ -1778,9 +1779,17 @@ def liberar_pedido(
 @router.post("/{rem_id}/cancelar", response_model=RemisionDetailOut)
 def cancelar_remision(
     rem_id: UUID,
+    payload: Optional[CancelarRemisionIn] = Body(default=None),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
+    """Cancela la remisión y deja dicho por qué.
+
+    El motivo viaja AQUÍ y no en un PATCH previo a propósito: editar una
+    remisión que ya salió en un masivo devuelve 409 (`_exigir_no_exportada`),
+    así que el camino de dos llamadas fallaba justo donde la nota más importa —
+    y entre las dos quedaba una ventana con la nota escrita y la cancelación
+    no."""
     rem = get_or_404(db, Remision, rem_id)
     if rem.estado == "CANCELADA":
         raise HTTPException(status_code=409, detail="La remisión ya está cancelada")
@@ -1793,6 +1802,11 @@ def cancelar_remision(
     if rem.estado == "CONFIRMADA":
         _liberar_reservas(db, ctx, rem, motivo=f"Cancelación remisión {rem.folio_interno}")
 
+    motivo = ((payload.motivo if payload else None) or "").strip()
+    if motivo:
+        sello = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        nota = f"[{sello}] Cancelada: {motivo}"
+        rem.notas = f"{rem.notas} · {nota}" if (rem.notas or "").strip() else nota
     rem.estado = "CANCELADA"
     rem.updated_by = ctx.user_id
     db.flush()
