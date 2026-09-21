@@ -1836,6 +1836,11 @@ def create_producto(
 # hoy duele es justo el producto que quedó creado en una sola.
 _EMPRESAS_SAE = ("02", "03", "04", "05")
 
+# El permiso angosto de la conexión: pedir el alta y crear el producto que la
+# acompaña. Ver PERMISOS_CONEXION en core/rbac.py para por qué no es
+# `producto:gestionar`.
+_ALTA = "producto:alta_sae"
+
 # Una alta reclamada que nadie reporta: el conector corre cada pocos minutos y
 # una alta tarda segundos. A la hora se cierra como ERROR para que se vea, pero
 # NO se re-encola: si el INSERT alcanzó a entrar, encolarla otra vez duplica.
@@ -1844,12 +1849,16 @@ _ALTA_PENDIENTE_MAX = timedelta(hours=24)
 
 
 def _puede_pedir_alta(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
-    """Pedir el alta es trabajo de catálogo; el bot entra con su propia clave y
-    el permiso de catálogo, igual que para crear el producto."""
-    if ctx.is_owner or _WRITE in ctx.permissions:
+    """Quien administra el catálogo, o quien SOLO puede pedir altas.
+
+    La conexión del bot entra por la segunda puerta: `producto:alta_sae` crea el
+    producto nuevo que acompaña a la solicitud y la encola, y nada más. No trae
+    `producto:gestionar` a propósito — reapuntar un alias afecta a todo el
+    catálogo, y eso no se le presta a un mensaje de WhatsApp."""
+    if ctx.is_owner or _WRITE in ctx.permissions or _ALTA in ctx.permissions:
         return ctx
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Falta permiso: {_WRITE}")
+                        detail=f"Falta permiso: {_WRITE} o {_ALTA}")
 
 
 def _expirar_altas_muertas(db: Session, tenant_id) -> None:
@@ -1924,13 +1933,48 @@ def pedir_alta_sae(
                     "no hay que crearla, hay que ligarla al producto."),
         )
 
-    if payload.producto_id is not None:
-        ensure_fk(db, Producto, payload.producto_id, "producto_id")
+    producto_id = payload.producto_id
+    if producto_id is not None:
+        ensure_fk(db, Producto, producto_id, "producto_id")
+    else:
+        # El producto del catálogo nace AQUÍ, no en quien pide: así la conexión
+        # del bot puede dar de alta sin que se le preste `producto:gestionar`.
+        # Si ya hay uno con el mismo nombre exacto, se reusa — dos productos
+        # iguales son justo el problema que el catálogo existe para evitar. El
+        # parecido NO cuenta: ligar por difuso apuntaría el alta al producto
+        # equivocado.
+        nombre = payload.descripcion.strip()
+        existente = (db.query(Producto)
+                     .filter(Producto.tenant_id == ctx.tenant_id,
+                             Producto.deleted_at.is_(None),
+                             func.upper(func.btrim(Producto.nombre)) == nombre.upper())
+                     .first())
+        if existente is not None:
+            producto_id = existente.id
+        elif payload.crear_producto:
+            base = (payload.unidad or "KILO").strip().upper()
+            base = "KILO" if base in ("KG", "KILO", "KILOGRAMO") else base or "PIEZA"
+            prod = Producto(
+                tenant_id=ctx.tenant_id,
+                sku=_next_sku(db),
+                nombre=nombre[:254],
+                clave_sat=(payload.sat or "01010101").strip()[:8],
+                unidad_sat=(payload.sat_unidad or "H87").strip()[:3],
+                clave_sae=clave[:50],
+                unidad_base=base[:20],
+                presentaciones={base: 1},
+                presentacion_default=base[:20],
+                categoria_id=categoria_sin_categorizar(db, ctx.tenant_id).id,
+                created_by=ctx.user_id,
+            )
+            db.add(prod)
+            flush_or_conflict(db, detail=f"No pude crear el producto {nombre}")
+            producto_id = prod.id
 
     sol = SolicitudAltaSae(
         tenant_id=ctx.tenant_id,
         origen=(payload.origen or "UI").strip().upper()[:12],
-        producto_id=payload.producto_id,
+        producto_id=producto_id,
         clave=clave,
         datos={
             "descripcion": payload.descripcion.strip()[:60],
