@@ -743,6 +743,8 @@ def reporte_compras(
 def reporte_armado(
     fechas: Optional[str] = Query(default=None, description="Fechas de ENTREGA (bodega), ISO, separadas por coma"),
     folios: Optional[str] = Query(default=None, description="OC del cliente (su_pedido), separadas por coma"),
+    origen: Optional[str] = Query(default=None, max_length=200,
+                                  description="Prefijos de origen_externo (csv): WA:,EMAIL: = carril Balles/Jubrán; EHMO:<perfil>: = un Master de EHMO"),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
@@ -757,6 +759,13 @@ def reporte_armado(
 
     Dos filtros excluyentes, como el comando: por fecha de bodega
     (fecha_entrega) o por lista de OC (su_pedido); la lista de OC manda.
+
+    `origen` acota al CARRIL de un Master: el de Balles/Jubrán solo ve las OC
+    que entraron por WhatsApp/correo (WA:, EMAIL:) y el de EHMO las suyas —
+    sin él, la hoja de armado de un carril se llevaría las entregas del otro
+    (medido 21-sep-2026: 21 remisiones de hospitales dentro de la hoja de
+    Balles). Aplica al filtro por fecha y al aviso; la lista de OC ya es
+    explícita y no lo necesita.
 
     `sin_fecha` viaja siempre que se filtra por fecha: una remisión sin
     fecha_entrega no casa con NINGÚN día y se caería de la hoja en silencio —
@@ -778,7 +787,22 @@ def reporte_armado(
         if len(dias) > 14:
             raise HTTPException(status_code=422, detail="entre 1 y 14 fechas")
 
-    base = (Remision.deleted_at.is_(None), Remision.estado != "CANCELADA")
+    base = [Remision.deleted_at.is_(None), Remision.estado != "CANCELADA"]
+    prefijos = [x.strip() for x in (origen or "").split(",") if x.strip()]
+    if prefijos and not quiere:
+        # EXISTS y no JOIN: una remisión con más de una OC saldría doble
+        # `correlate(Remision)` explícito: sin él, la consulta de incidencias
+        # —que ya une OCRecibida— autocorrelaciona las dos tablas y el EXISTS
+        # se queda sin FROM (SQLAlchemy lanza InvalidRequestError).
+        base.append(
+            db.query(OCRecibida.id)
+            .filter(OCRecibida.remision_id == Remision.id,
+                    or_(*[OCRecibida.origen_externo.like(pf.replace("%", "") + "%")
+                          for pf in prefijos]))
+            .correlate(Remision)
+            .exists()
+        )
+    base = tuple(base)
     if quiere:
         # su_pedido se guarda como llegó en la OC (el bot ya manda el folio sin
         # ceros); las dos variantes cubren un cero a la izquierda colado.
@@ -795,6 +819,7 @@ def reporte_armado(
             Remision.su_pedido,
             Remision.folio_interno,
             Remision.fecha_entrega,
+            Remision.nota_entrega,
             Cliente.legal_name,
             Producto.clave_sae,
             Producto.nombre,
@@ -834,6 +859,8 @@ def reporte_armado(
             "folio": normalizar_folio(r.su_pedido) or r.folio_interno,
             "cliente": r.legal_name or "",
             "bodega": r.fecha_entrega.isoformat() if r.fecha_entrega else None,
+            # el punto de entrega (hospital en EHMO): columna del armado de ese carril
+            "hospital": r.nota_entrega or "",
             "documento_nuevo": r.id in pendientes,
             "lineas": [],
         })

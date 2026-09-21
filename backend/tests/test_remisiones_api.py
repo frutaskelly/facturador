@@ -1073,3 +1073,48 @@ def test_reporte_armado_usa_el_documento_nuevo_si_hay_incidencia(client, env, au
         {("AJO", "25"), ("SAL DE GRANO", "2")}
     assert [l["nota"] for l in fila["lineas"] if l["descripcion"] == "SAL DE GRANO"] == \
         ["grano grueso"]
+
+
+def test_reporte_armado_origen_acota_el_carril(client, env, auth_as):
+    """El Master de Balles/Jubrán no ve las entregas de EHMO y viceversa: el
+    filtro por fecha con `origen` solo trae remisiones cuya OC entró por ese
+    carril (medido 21-sep-2026: sin esto, 21 remisiones de hospitales caían
+    dentro de la hoja de Balles)."""
+    from app.models.oc_recibida import OCRecibida
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+
+    def rem(folio, origen):
+        body = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+                "su_pedido": folio, "fecha_entrega": "2031-06-02",
+                "lineas": [{"producto_id": env["prod_a"], "presentacion": "KILO",
+                            "cantidad_solicitada": "5", "precio_unitario": "5"}]}
+        r = client.post("/api/v1/remisiones", headers=h, json=body).json()
+        if origen:
+            with SessionLocal() as s:
+                s.add(OCRecibida(
+                    tenant_id=env["admin_a"]["tenant_id"], canal="WHATSAPP",
+                    origen_externo=f"{origen}{folio}", folio_externo=folio,
+                    estado="ASIGNADA", remision_id=uuid.UUID(r["id"]),
+                    payload={"lineas": []}))
+                s.commit()
+        return r
+
+    rem("24700", "WA:grupo@g.us:")
+    rem("24701", "EMAIL:compras@x.mx:")
+    rem("HO-39", "EHMO:ehmo:")
+    rem("R-MANUAL", None)                     # capturada a mano: sin OC
+
+    r = client.get("/api/v1/remisiones/reporte-armado"
+                   "?fechas=2031-06-02&origen=WA:,EMAIL:", headers=h)
+    assert r.status_code == 200, r.text
+    assert {x["folio"] for x in r.json()["remisiones"]} == {"24700", "24701"}
+
+    r2 = client.get("/api/v1/remisiones/reporte-armado"
+                    "?fechas=2031-06-02&origen=EHMO:ehmo:", headers=h)
+    assert {x["folio"] for x in r2.json()["remisiones"]} == {"HO-39"}
+    assert r2.json()["remisiones"][0]["hospital"] == ""
+
+    # sin origen: todas (incluida la manual) — más de lo que ve un Master, no menos
+    r3 = client.get("/api/v1/remisiones/reporte-armado?fechas=2031-06-02", headers=h)
+    assert len(r3.json()["remisiones"]) == 4
