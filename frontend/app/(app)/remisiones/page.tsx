@@ -2707,44 +2707,75 @@ export default function RemisionesPage() {
       icon: typeof icono === "function" ? (f: Fila) => (f.rem ? icono(f.rem) : null) : icono,
       onClick: (f) => { if (f.rem) a.onClick(f.rem); },
       hidden: (f) => !f.rem || (a.hidden?.(f.rem) ?? false),
+      disabled: a.disabled ? (f: Fila) => (f.rem ? a.disabled!(f.rem) : false) : undefined,
     };
   }
 
   const rowActions: RowAction<Fila>[] = useMemo(() => {
+  // Cada acción distingue DOS cosas distintas: `hidden` es «esta persona no
+  // tiene el permiso» (no hay nada que explicarle) y `disabled` es «aquí no se
+  // puede, y este es el porqué» — sale en gris dentro del menú ⋮ en vez de
+  // desaparecer. Antes se escondían las dos por igual y la lista cambiaba de
+  // renglón en renglón: quien activaba «Ver la OC original» arriba no
+  // entendía por qué en unas filas no estaba (no traen OC adjunta).
   const accionesRemision: RowAction<Remision>[] = [
     { id: "editar", label: "Editar", icon: <Pencil size={15} />, onClick: (r) => { void filaRef.current.openEdit(r); },
-      hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "RESERVADO" || r.estado === "CONFIRMADA")
-        && (!r.factura_id || r.factura_estado === "CANCELADA")) },
+      hidden: () => !canWrite,
+      disabled: (r) => puedeEditarse(r) ? false
+        : r.estado === "CANCELADA" ? "La remisión está cancelada"
+        : "Ya está facturada — cancela la factura para poder editarla" },
     { id: "confirmar", label: "Confirmar", icon: <Check size={15} />, tone: "success",
       onClick: (r) => setToConfirm(r),
-      hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "RESERVADO")) },
+      hidden: () => !canWrite,
+      disabled: (r) => (r.estado === "BORRADOR" || r.estado === "RESERVADO") ? false
+        : r.estado === "CANCELADA" ? "La remisión está cancelada"
+        : r.estado === "FACTURADA" ? "Ya está facturada"
+        : "Ya está confirmada" },
     // Facturar UNA remisión desde su fila (ticket 86bbynx5f): solo cuando de
     // verdad puede facturarse — sin factura vigente y ya revisada (el freno de
     // «por revisar» tiene su propia acción aquí mismo). Un BORRADOR se
     // auto-confirma al facturar (mismo criterio que el botón del lote).
     { id: "facturar", label: "Facturar", icon: <FileText size={15} />, tone: "success",
       onClick: (r) => { void filaRef.current.facturarUna(r); },
-      hidden: (r) => !(canWrite && puedeFacturar(r) && !r.revision_pendiente) },
+      hidden: () => !canWrite,
+      disabled: (r) => r.estado === "CANCELADA" ? "La remisión está cancelada"
+        : r.factura_id && r.factura_estado !== "CANCELADA" ? "Ya tiene una factura vigente"
+        : !puedeFacturar(r) ? "Solo se factura una remisión en borrador o confirmada"
+        : r.revision_pendiente ? "Primero hay que darla por revisada"
+        : false },
     { id: "revisada", label: "Dar por revisada", icon: <Check size={15} />, tone: "success",
       onClick: (r) => { void filaRef.current.darPorRevisada(r); },
-      hidden: (r) => !(canWrite && r.revision_pendiente) },
+      hidden: () => !canWrite,
+      disabled: (r) => r.revision_pendiente ? false : "Esta remisión ya está revisada" },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
-      onClick: (r) => setToCancel(r), hidden: (r) => !(canWrite && r.estado !== "CANCELADA" && r.estado !== "FACTURADA") },
+      onClick: (r) => setToCancel(r),
+      hidden: () => !canWrite,
+      disabled: (r) => r.estado === "CANCELADA" ? "Ya está cancelada"
+        : r.estado === "FACTURADA" ? "Está facturada — cancela primero la factura"
+        : false },
     { id: "devolucion", label: "Devolución", icon: <Undo2 size={15} />,
       onClick: (r) => { void filaRef.current.abrirDevolucion(r); },
-      hidden: (r) => !(canWrite && r.estado === "CONFIRMADA") },
+      hidden: () => !canWrite,
+      disabled: (r) => r.estado === "CONFIRMADA" ? false
+        : r.estado === "CANCELADA" ? "La remisión está cancelada"
+        : "Solo se hace devolución sobre una remisión confirmada" },
     { id: "oc", label: "Ver la OC original", icon: <FileSearch size={15} />,
-      // Solo cuando hay documento: la bandeja de órdenes ya no existe como
-      // pantalla, así que sin archivo no hay a dónde llevar a nadie.
-      onClick: (r) => { window.open(r.oc_archivo_url!, "_blank", "noopener"); },
-      hidden: (r) => !r.oc_archivo_url },
+      // Sin documento no hay a dónde llevar a nadie (la bandeja de órdenes ya
+      // no existe como pantalla), pero la opción se queda a la vista con el
+      // motivo: es la que más se busca por fila.
+      onClick: (r) => { if (r.oc_archivo_url) window.open(r.oc_archivo_url, "_blank", "noopener"); },
+      disabled: (r) => r.oc_archivo_url ? false : "Esta remisión no tiene una OC adjunta" },
     { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => { void filaRef.current.imprimirRemision(r); } },
     { id: "enviar-factura", label: "Enviar factura", icon: <Mail size={15} />,
       // La remisión ya facturada tiene DOS documentos: esta acción manda la
       // FACTURA timbrada (ticket 86bby3tx9); la de abajo sigue mandando la
       // remisión, con el nombre explícito para que nadie confunda cuál va.
       onClick: (r) => filaRef.current.abrirEnviarFactura(r.factura_id!, r.cliente_facturacion_id, r.factura_folio ?? "", r.proyecto_id),
-      hidden: (r) => !(canWrite && r.factura_id && r.factura_estado === "TIMBRADA") },
+      hidden: () => !canWrite,
+      disabled: (r) => !r.factura_id ? "Todavía no tiene factura"
+        : r.factura_estado === "TIMBRADA" ? false
+        : r.factura_estado === "CANCELADA" ? "Su factura está cancelada"
+        : "Su factura todavía no está timbrada" },
     { id: "enviar", label: "Enviar remisión por correo", icon: <Mail size={15} />,
       onClick: (r) => filaRef.current.enviarRemision(r),
       hidden: () => !canWrite },

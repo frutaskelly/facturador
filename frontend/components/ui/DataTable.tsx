@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, ChevronRight, ChevronsUpDown, Columns3, Download, Eye, EyeOff, GripVertical, MoreVertical, Filter } from "lucide-react";
 
 import { Alert } from "./Alert";
@@ -55,16 +56,33 @@ export type RowAction<T> = {
   tone?: "default" | "danger" | "success";
   /** Oculta la acción en filas concretas (cuando no aplica a esa fila). */
   hidden?: (row: T) => boolean;
+  /** MOTIVO por el que la acción no se puede usar en esta fila. Cuando devuelve
+   *  texto, la acción no sale como ícono suelto pero SÍ aparece en el menú ⋮:
+   *  en gris, sin clic y con el motivo debajo. Es la alternativa a `hidden`
+   *  cuando desaparecer confunde más que explicar — «Ver la OC original» no
+   *  está porque esa remisión no trae OC adjunta, no porque se haya perdido
+   *  la opción que se activó arriba. */
+  disabled?: (row: T) => string | false | null | undefined;
 };
 
-/** Menú ⋮ con las acciones que no caben como ícono suelto en la fila.
- *  Se dibuja en `position: fixed` porque el contenedor de la tabla tiene
- *  `overflow-x-auto` y recortaría un desplegable normal. */
+/** Menú ⋮ de la fila: lista TODAS las acciones que aplican a esa fila (las que
+ *  ya se ven como ícono suelto incluidas), en el orden configurado en el ⋮ del
+ *  encabezado. Así lo que se activa arriba siempre se puede usar por línea,
+ *  aunque solo quepan dos íconos sueltos (ticket: «solo se ven 4 opciones»).
+ *
+ *  Va en un PORTAL a <body>: dibujado dentro del `<td>`, que es
+ *  `position: sticky z-10`, el desplegable quedaba atrapado en el contexto de
+ *  apilamiento de esa celda y las celdas pegadas de las filas de abajo —
+ *  mismo z-index, pero posteriores en el DOM — lo tapaban a media altura. */
 function RowOverflowMenu<T>({ actions, row }: { actions: RowAction<T>[]; row: T }) {
   const [open, setOpen] = useState(false);
-  // `abajo` = el menú cuelga hacia abajo del botón; si la fila está al final de
-  // la pantalla se ancla al revés para no quedar cortado.
-  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number }>({ top: 0, right: 0 });
+  // `top`/`bottom`: el menú cuelga hacia abajo del botón; si la fila está al
+  // final de la pantalla se ancla al revés para no quedar cortado. `maxHeight`
+  // lo limita al hueco disponible y el resto se recorre con scroll: con diez
+  // acciones el menú ya no cabe entero en pantallas chicas.
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number; maxHeight: number }>(
+    { top: 0, right: 0, maxHeight: 400 },
+  );
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -83,16 +101,23 @@ function RowOverflowMenu<T>({ actions, row }: { actions: RowAction<T>[]; row: T 
     // Y el cierre por scroll perdona el primer instante: enfocar el botón
     // (pegado al borde del contenedor con overflow) provoca un micro-scroll
     // que cerraba el menú antes de verse — el «no abre» de pantallas chicas.
+    // También perdona el scroll DENTRO del propio menú (ahora puede tenerlo).
     const abiertoEn = Date.now();
-    const scrollLejos = () => { if (Date.now() - abiertoEn > 250) setOpen(false); };
+    const scrollLejos = (e: Event) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      if (Date.now() - abiertoEn > 250) setOpen(false);
+    };
     const close = () => setOpen(false);
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     window.addEventListener("scroll", scrollLejos, true);
     window.addEventListener("resize", close);
     document.addEventListener("mousedown", clicFuera);
+    document.addEventListener("keydown", esc);
     return () => {
       window.removeEventListener("scroll", scrollLejos, true);
       window.removeEventListener("resize", close);
       document.removeEventListener("mousedown", clicFuera);
+      document.removeEventListener("keydown", esc);
     };
   }, [open]);
 
@@ -109,31 +134,57 @@ function RowOverflowMenu<T>({ actions, row }: { actions: RowAction<T>[]; row: T 
           e.stopPropagation();
           const r = btnRef.current?.getBoundingClientRect();
           if (r) {
-            const alto = actions.length * 36 + 8; // alto aproximado del menú
-            const derecha = Math.max(8, window.innerWidth - r.right);
+            const margen = 8;
+            // Alto aproximado: 36 px por acción, 54 si lleva el motivo debajo.
+            const alto = actions.reduce((n, a) => n + (a.disabled?.(row) ? 54 : 36), 8);
+            const derecha = Math.max(margen, window.innerWidth - r.right);
+            const huecoAbajo = window.innerHeight - r.bottom - 4 - margen;
+            const huecoArriba = r.top - 4 - margen;
+            // Cuelga hacia abajo si cabe; si no, hacia el lado con más hueco.
             setPos(
-              r.bottom + 4 + alto > window.innerHeight - 8
-                ? { bottom: Math.max(8, window.innerHeight - r.top + 4), right: derecha }
-                : { top: r.bottom + 4, right: derecha },
+              alto <= huecoAbajo || huecoAbajo >= huecoArriba
+                ? { top: r.bottom + 4, right: derecha, maxHeight: Math.max(120, huecoAbajo) }
+                : { bottom: window.innerHeight - r.top + 4, right: derecha, maxHeight: Math.max(120, huecoArriba) },
             );
           }
           setOpen((v) => !v);
         }}
-        className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
+        className={`rounded-md p-1.5 ${open ? "bg-surface-2 text-foreground" : "text-muted hover:bg-surface-2 hover:text-foreground"}`}
       >
         <MoreVertical size={16} />
       </button>
-      {open && (
+      {open && typeof document !== "undefined" && createPortal(
         <div
           ref={menuRef}
           role="menu"
-          style={{ top: pos.top, bottom: pos.bottom, right: pos.right }}
+          style={{ top: pos.top, bottom: pos.bottom, right: pos.right, maxHeight: pos.maxHeight }}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
-          className="fixed z-50 w-56 overflow-hidden rounded-xl border border-border bg-background py-1 text-left shadow-xl"
+          className="fixed z-[100] w-max min-w-[15rem] max-w-[22rem] overflow-y-auto overscroll-contain rounded-xl border border-border bg-background py-1 text-left shadow-2xl ring-1 ring-black/5"
         >
           {actions.map((a) => {
             const icon = typeof a.icon === "function" ? a.icon(row) : a.icon;
+            const motivo = a.disabled?.(row);
+            // No se puede usar aquí: se queda a la vista, en gris y con el
+            // porqué debajo, para que la lista del menú sea siempre la misma
+            // que se configuró en el ⋮ del encabezado.
+            if (motivo) {
+              return (
+                <div
+                  key={a.id}
+                  role="menuitem"
+                  aria-disabled="true"
+                  title={motivo}
+                  className="flex w-full cursor-not-allowed items-start gap-2.5 px-3 py-2 text-sm text-muted opacity-70"
+                >
+                  <span className="mt-0.5 shrink-0">{icon}</span>
+                  <span className="min-w-0">
+                    <span className="block whitespace-nowrap">{a.label}</span>
+                    <span className="block whitespace-normal text-xs leading-snug">{motivo}</span>
+                  </span>
+                </div>
+              );
+            }
             const toneCls =
               a.tone === "danger" ? "text-danger"
               : a.tone === "success" ? "text-success"
@@ -144,14 +195,15 @@ function RowOverflowMenu<T>({ actions, row }: { actions: RowAction<T>[]; row: T 
                 type="button"
                 role="menuitem"
                 onClick={() => { setOpen(false); a.onClick(row); }}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-surface-2 ${toneCls}`}
+                className={`flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm hover:bg-surface-2 ${toneCls}`}
               >
                 <span className="shrink-0 text-muted">{icon}</span>
-                <span className="truncate">{a.label}</span>
+                <span>{a.label}</span>
               </button>
             );
           })}
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
@@ -1305,11 +1357,15 @@ export function DataTable<T>({
                         </td>
                       ))}
                       {hasActions && (() => {
-                        // Las que aplican a ESTA fila: las primeras van sueltas
-                        // como ícono, las demás al menú ⋮.
+                        // `aplican` = todo lo que el menú ⋮ va a listar: las
+                        // usables y las que solo se pueden explicar (en gris,
+                        // con su motivo). El menú las lista TODAS — íconos
+                        // sueltos incluidos — para que nada de lo activado en
+                        // el ⋮ del encabezado quede fuera de alcance.
+                        // Sueltas como ícono: solo las USABLES, y a lo más
+                        // `maxInlineActions`; un ícono en gris no vale el ancho.
                         const aplican = visibleActions.filter((a) => !a.hidden?.(row));
-                        const sueltas = aplican.slice(0, maxInlineActions);
-                        const enMenu = aplican.slice(maxInlineActions);
+                        const sueltas = aplican.filter((a) => !a.disabled?.(row)).slice(0, maxInlineActions);
                         return (
                           <td
                             className={`px-2 py-2.5 text-right ${stickyCellCls} ${isOpen ? "bg-surface-2" : "bg-surface group-hover:bg-surface-2"}`}
@@ -1335,7 +1391,7 @@ export function DataTable<T>({
                                   </button>
                                 );
                               })}
-                              {enMenu.length > 0 && <RowOverflowMenu actions={enMenu} row={row} />}
+                              {aplican.length > sueltas.length && <RowOverflowMenu actions={aplican} row={row} />}
                             </div>
                           </td>
                         );
