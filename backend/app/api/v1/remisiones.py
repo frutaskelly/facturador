@@ -665,6 +665,35 @@ def reporte_compras(
             LineaRemision.cantidad_solicitada > 0,
         )
     )
+    # LA VERSIÓN QUE MANDA ES LA DEL DOCUMENTO (21-sep-2026). Cuando una OC
+    # recibió una versión posterior que nadie ha aplicado (incidencia abierta),
+    # las líneas de la remisión son las VIEJAS — y una lista de compras armada
+    # con ellas compra de menos exactamente donde el cliente cambió el pedido.
+    # Medido el día que se escribió: 6 productos y ~11 partidas de diferencia
+    # contra el Master en una sola corrida de dos días. Para esas remisiones se
+    # usan las líneas del documento nuevo (texto, sin cruzar) y las capturadas
+    # se excluyen; el que arma el pivote ya agrupa por clave-o-nombre y
+    # canoniza unidades, así que las dos fuentes conviven.
+    con_cambio = (
+        db.query(OCRecibida.remision_id, OCRecibida.payload_nuevo, Remision.fecha_entrega,
+                 func.coalesce(Remision.nota_entrega, "").label("hospital"))
+        .join(Remision, Remision.id == OCRecibida.remision_id)
+        .filter(
+            Remision.deleted_at.is_(None),
+            Remision.estado != "CANCELADA",
+            Remision.fecha_entrega.in_(dias),
+            OCRecibida.cambio_detectado_at.isnot(None),
+            OCRecibida.cambio_resuelto_at.is_(None),
+            OCRecibida.payload_nuevo.isnot(None),
+        )
+    )
+    if perfil:
+        con_cambio = con_cambio.filter(OCRecibida.origen_externo.like(f"EHMO:{perfil}:%"))
+    pendientes = con_cambio.all()
+    ids_pendientes = {r.remision_id for r in pendientes}
+
+    if ids_pendientes:
+        q = q.filter(~Remision.id.in_(ids_pendientes))
     if perfil:
         q = q.join(OCRecibida, OCRecibida.remision_id == Remision.id).filter(
             OCRecibida.origen_externo.like(f"EHMO:{perfil}:%")
@@ -685,8 +714,28 @@ def reporte_compras(
         }
         for r in q.all()
     ]
+    for r in pendientes:
+        for ln in (r.payload_nuevo or {}).get("lineas") or []:
+            if not isinstance(ln, dict):
+                continue
+            filas.append({
+                "clave": (ln.get("clave") or "").strip() or None,
+                "descripcion": (ln.get("descripcion") or "").strip() or "PARTIDA",
+                # unidad del DOCUMENTO, texto del cliente: el bot la canoniza
+                "unidad": (ln.get("unidad") or "").strip() or "?",
+                "fecha": r.fecha_entrega.isoformat(),
+                "cantidad": str(ln.get("cantidad") or 0),
+                "hospitales": [r.hospital] if r.hospital else [],
+                "remisiones": 1,
+                "partidas": 1,
+                # La marca de honestidad: esta cantidad viene del documento que
+                # nadie ha aplicado, no de la captura. La incidencia sigue
+                # abierta y el reporte no la resuelve — solo no compra de menos.
+                "documento_nuevo": True,
+            })
     return {"filas": filas, "fechas": [d.isoformat() for d in dias],
-            "remisiones": sum(f["remisiones"] for f in filas)}
+            "remisiones": sum(f["remisiones"] for f in filas),
+            "con_cambio_abierto": len(pendientes)}
 
 
 @router.get("/{rem_id}", response_model=RemisionDetailOut)
