@@ -524,12 +524,23 @@ def remisiones_pdf_lote(
     )
 
 
+def _texto_producto(valor) -> str:
+    """La pareja (clave, nombre) como UN texto, para donde no hay columnas: el cuerpo
+    HTML del correo y el `producto_nombre` que viaja en la respuesta de la API."""
+    if isinstance(valor, (tuple, list)):
+        clave, nombre = (str(valor[0] or ""), str(valor[1] or ""))
+        return f"{clave} — {nombre}" if clave else nombre
+    return str(valor or "")
+
+
 def _nombres_para_pdf(db: Session, rems: list[Remision]) -> dict:
-    """{remision_id: {producto_id: texto impreso}} para PDFs y correos al cliente.
+    """{remision_id: {producto_id: (clave del cliente, nombre)}} para PDFs y correos.
 
     El documento que el cliente firma trae SU nombre y SU clave del producto
     (producto_clientes — la misma capa que ya usa el CFDI en services/cfdi.py),
-    con el nombre interno de respaldo. Formato: "CLAVE — NOMBRE DEL CLIENTE".
+    con el nombre interno de respaldo. Desde el 21-sep-2026 van SEPARADOS, no como
+    "CLAVE — NOMBRE": la clave es una columna propia de la remisión, la misma que
+    lleva la factura, y pegados en la descripción no se podían alinear.
     Todo precargado en dos consultas: un lote de 200 remisiones no puede hacer
     un SELECT por línea.
     """
@@ -564,7 +575,7 @@ def _nombres_para_pdf(db: Session, rems: list[Remision]) -> dict:
             base = (pc.nombre_cliente or "").strip() if pc else ""
             base = base or interno.get(ln.producto_id) or str(ln.producto_id)
             codigo = (pc.codigo_cliente or "").strip() if pc else ""
-            nombres[ln.producto_id] = f"{codigo} — {base}" if codigo else base
+            nombres[ln.producto_id] = (codigo, base)
         out[r.id] = nombres
     return out
 
@@ -2625,7 +2636,7 @@ def enviar_remision(
     # el interno de respaldo): el correo y su PDF los lee él, no el operador.
     names = _nombres_para_pdf(db, [rem])[rem.id]
     for ln in rem.lineas:
-        ln.producto_nombre = names.get(ln.producto_id)
+        ln.producto_nombre = _texto_producto(names.get(ln.producto_id))
 
     cliente_nombre = cliente.legal_name if cliente else ""
     mensaje_html = f"<p>{html_mod.escape(payload.mensaje)}</p>" if (payload and payload.mensaje) else ""
@@ -2710,7 +2721,7 @@ def enviar_remisiones_lote(
     por_rem = _nombres_para_pdf(db, rems)
     for r in rems:
         for ln in r.lineas:
-            ln.producto_nombre = por_rem[r.id].get(ln.producto_id)
+            ln.producto_nombre = _texto_producto(por_rem[r.id].get(ln.producto_id))
 
     cliente_nombre = cliente.legal_name if cliente else ""
     emisor_nombre = (tenant.trade_name or tenant.legal_name) if tenant else "Facturador"
