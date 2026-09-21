@@ -767,6 +767,9 @@ def reporte_armado(
     Balles). Aplica al filtro por fecha y al aviso; la lista de OC ya es
     explícita y no lo necesita.
 
+    Dos avisos viajan con el reporte, los dos por la misma razón: que nada se
+    caiga de la hoja en silencio. `sin_remision` son las OC de la bandeja que
+    ese día nunca se cruzaron (no hay qué armar aunque el cliente lo pidió), y
     `sin_fecha` viaja siempre que se filtra por fecha: una remisión sin
     fecha_entrega no casa con NINGÚN día y se caería de la hoja en silencio —
     el mismo hoyo que en la hoja vieja tuvo a la 24973 fuera con $50,633.78
@@ -804,12 +807,13 @@ def reporte_armado(
         )
     base = tuple(base)
     if quiere:
-        # su_pedido se guarda como llegó en la OC (el bot ya manda el folio sin
-        # ceros); las dos variantes cubren un cero a la izquierda colado.
-        variantes = set()
-        for f in quiere:
-            variantes.update({f, f.lstrip("0") or f})
-        filtro = (Remision.su_pedido.in_(variantes),)
+        # su_pedido se guarda COMO LLEGÓ, y llega relleno de ceros desde SAE
+        # ('0000025587' — medido 21-sep-2026, con el filtro comparando contra
+        # '25587' no casaba ni una). Se compara sin ceros de los dos lados; el
+        # folio con serie ('HO-39SAL-LUN') no tiene ceros que quitar y cae en la
+        # comparación literal.
+        filtro = (or_(func.ltrim(Remision.su_pedido, "0").in_(quiere),
+                      Remision.su_pedido.in_(quiere)),)
     else:
         filtro = (Remision.fecha_entrega.in_(dias),)
 
@@ -910,6 +914,37 @@ def reporte_armado(
                     "categoria": cat_por_clave.get(clave.upper()) if clave else None,
                 })
 
+    # EL HUECO QUE NO SE VE: una OC que entró a la bandeja y nunca se cruzó no
+    # tiene remisión, así que no está en ninguna consulta de arriba — y la hoja
+    # sale sin ella sin decir nada. Medido al migrar (21-sep-2026): 116 de las
+    # 224 órdenes del Master del periodo estaban así. Es el mismo modo de fallo
+    # que `sin_fecha`, una capa antes: ahí la remisión existe sin fecha, aquí no
+    # existe la remisión. La fecha de entrega del documento viaja en el payload
+    # en ISO (lo escribe el bot), así que se compara directo.
+    sin_remision = []
+    if dias:
+        q_sr = (
+            db.query(OCRecibida, Cliente.legal_name)
+            .outerjoin(Cliente, Cliente.id == OCRecibida.cliente_id)
+            .filter(
+                OCRecibida.remision_id.is_(None),
+                OCRecibida.estado != "DESCARTADA",
+                OCRecibida.payload["fecha_entrega"].astext.in_([d.isoformat() for d in dias]),
+            )
+        )
+        if prefijos:
+            q_sr = q_sr.filter(or_(*[OCRecibida.origen_externo.like(pf.replace("%", "") + "%")
+                                     for pf in prefijos]))
+        for oc, nombre in q_sr.all():
+            sin_remision.append({
+                "folio": normalizar_folio(oc.folio_externo) or "?",
+                "cliente": nombre or (oc.payload or {}).get("cliente_nombre") or "",
+                "estado": oc.estado,
+                "partidas": len([x for x in ((oc.payload or {}).get("lineas") or [])
+                                 if isinstance(x, dict)]),
+                "bodega": (oc.payload or {}).get("fecha_entrega"),
+            })
+
     sin_fecha = []
     if dias:
         for r in (
@@ -932,6 +967,7 @@ def reporte_armado(
     return {
         "remisiones": sorted(rems.values(), key=lambda x: x["folio"]),
         "sin_fecha": sorted(sin_fecha, key=lambda x: x["folio"]),
+        "sin_remision": sorted(sin_remision, key=lambda x: x["folio"]),
         "con_cambio_abierto": len(pendientes),
     }
 
