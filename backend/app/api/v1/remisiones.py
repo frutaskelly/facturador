@@ -677,6 +677,50 @@ def _exigir_editable(db: Session, rem: Remision) -> None:
                 detail="La remisión está ligada a una factura; cancélala o descártala antes de editar",
             )
 
+def _exigir_no_exportada(rem: Remision) -> None:
+    # LO QUE YA SALIÓ EN UN ARCHIVO DE SAE SE CONGELA (21-sep-2026, decisión del
+    # dueño: congela —no solo avisa—, el encabezado también, y vale para
+    # personas igual que para conexiones).
+    #
+    # Sin esto, una remisión exportada seguía siendo editable: pasaba el filtro
+    # de estado porque BORRADOR está en la lista blanca, pasaba el de factura
+    # porque `factura_id` es NULL, pasaba el de impresión porque `impresa_at` es
+    # NULL, y aterrizaba en el DELETE de todas las partidas. Medido ese día: 41
+    # remisiones alcanzables por $360,152. El hueco no se había ejercido —esto
+    # es prevención, no limpieza.
+    #
+    # Va aquí y no en el PATCH a propósito. (a) `_exigir_editable` la comparten
+    # editar y CRUZAR una partida, y repuntar una línea a otro producto
+    # desincroniza el archivo igual que reescribirla. (b) El candado de la
+    # impresión (más abajo) solo mira `lineas_in`, y por esa puerta se podía
+    # cambiar cliente, descuento y fechas de una remisión ya exportada sin tocar
+    # una sola línea — y el cliente y los importes son justo lo que viajó en el
+    # archivo (export_sae.py:553-554).
+    #
+    # LA EXCEPCIÓN, y es una sola: sellar `factura_sae`. Eso NO es editar el
+    # documento, es ACUSAR lo que SAE hizo con él — y es la única llave que
+    # existe: `export_sae_at` solo se limpia cuando el espejo confirma que SAE
+    # canceló esa factura (facturas.py:1467), y sin poder sellarla primero la
+    # remisión quedaría congelada para siempre, incluso las que sí tienen salida.
+    # Congelar el acuse convertiría el candado en una trampa. El PATCH la deja
+    # pasar cuando el cuerpo trae SOLO ese campo.
+    #
+    # Lo que sigue sin llave: `export_pedido_at` no se limpia en ningún lado.
+    # Cinco de las 41 congeladas hoy son solo-pedido y no tienen salida; eso
+    # necesita una regla del dueño y está reportado aparte.
+    marca = rem.export_sae_at or rem.export_pedido_at
+    if marca is not None:
+        cual = "el masivo de SAE" if rem.export_sae_at else "un pedido de SAE"
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"La remisión {rem.folio_interno} ya salió en {cual} "
+                f"({marca:%d/%m/%Y %H:%M}): su contenido quedó congelado para que el "
+                "archivo y el Facturador no cuenten dos historias de la misma venta. "
+                "Si de verdad cambió, cancela el documento en SAE."
+            ),
+        )
+
 
 @router.patch("/{rem_id}", response_model=RemisionDetailOut)
 def update_remision(
@@ -690,6 +734,12 @@ def update_remision(
     era_confirmada = rem.estado == "CONFIRMADA"
     almacen_anterior = rem.almacen_id           # para detectar cambio de almacén
     data = payload.model_dump(exclude_unset=True)
+    # El acuse de SAE pasa aunque esté congelada; cualquier otra cosa, no.
+    # `permitir_negativos` no es un campo del documento (es una autorización de
+    # sobregiro), así que no cuenta para decidir si esto es solo un acuse.
+    tocados = set(data) - {"permitir_negativos"}
+    if tocados != {"factura_sae"}:
+        _exigir_no_exportada(rem)
     lineas_in = data.pop("lineas", None)
     # UNA REMISIÓN IMPRESA NO LA REESCRIBE UNA SINCRONIZACIÓN (16-sep-2026).
     # El vigía del bot pisó nueve remisiones de la semana 38 que ya estaban
@@ -922,6 +972,9 @@ def cruzar_linea(
     if not ctx.cliente_permitido(rem.cliente_facturacion_id):
         raise HTTPException(status_code=404, detail="Remisión no encontrada")
     _exigir_editable(db, rem)
+    # Repuntar una partida a otro producto desincroniza el archivo igual que
+    # reescribirla: aquí no hay excepción de acuse que valga.
+    _exigir_no_exportada(rem)
 
     ln = next((x for x in rem.lineas if x.id == linea_id), None)
     if ln is None:
