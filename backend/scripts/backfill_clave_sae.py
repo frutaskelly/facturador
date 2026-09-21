@@ -117,6 +117,31 @@ def main() -> int:
         for pid in pids:
             ganadora.pop(pid, None)
 
+    # ── Y el choque contra lo YA ESCRITO (21-sep-2026) ──
+    # El bloque de arriba compara candidatos entre sí y nada más. Cuando esto se
+    # escribió no había una sola clave en `productos`, así que el caso no
+    # existía; hoy hay 1,081 —muchas puestas por este mismo script— y volver a
+    # correrlo reventaba con `uq_producto_clave_sae` en AJOKG: un producto
+    # quería una clave que otro ya tenía. Un script de catálogo que no se puede
+    # volver a correr no sirve, porque el catálogo crece.
+    #
+    # Es distinto del choque de arriba y por eso se reporta aparte: ahí dos
+    # candidatos se pelean una clave libre; aquí la clave ya tiene dueño, y el
+    # dueño gana sin discusión — quitársela sería desasignar un producto vivo.
+    cur.execute(
+        "select upper(btrim(clave_sae)), id, nombre from productos"
+        " where tenant_id = (select id from tenants where slug = %(tenant)s)"
+        "   and clave_sae is not null and deleted_at is null",
+        {"tenant": args.tenant},
+    )
+    dueno_actual = {c: (pid, nom) for c, pid, nom in cur.fetchall()}
+    ya_tomadas = {}
+    for pid, cod in list(ganadora.items()):
+        due = dueno_actual.get(cod)
+        if due and due[0] != pid:
+            ya_tomadas[cod] = (nombres.get(pid, str(pid)), due[1])
+            ganadora.pop(pid, None)
+
     print(f"productos con clave           : {len(por_prod)}")
     print(f"  · base elegida              : {len(ganadora)}")
     print(f"  · sólo tenían la perdedora  : {len(solo_perdedora)} (se respeta su clave)")
@@ -124,6 +149,9 @@ def main() -> int:
           f" en {len(choques)} clave(s)")
     for cod, pids in list(choques.items())[:10]:
         print(f"      {cod}: " + " | ".join(nombres[p] for p in pids))
+    print(f"  · la clave YA es de otro    : {len(ya_tomadas)} (gana quien la tiene)")
+    for cod, (quien, dueno) in list(ya_tomadas.items())[:10]:
+        print(f"      {cod}: {quien}  →  ya es de: {dueno}")
 
     escritos = 0
     if args.aplicar:
