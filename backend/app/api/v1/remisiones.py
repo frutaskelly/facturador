@@ -18,7 +18,7 @@ import html as html_mod
 import re
 import unicodedata
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session, joinedload
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
     Almacen,
+    CategoriaProducto,
     ClaveSae,
     Cliente,
     Devolucion,
@@ -736,6 +737,176 @@ def reporte_compras(
     return {"filas": filas, "fechas": [d.isoformat() for d in dias],
             "remisiones": sum(f["remisiones"] for f in filas),
             "con_cambio_abierto": len(pendientes)}
+
+
+@router.get("/reporte-armado")
+def reporte_armado(
+    fechas: Optional[str] = Query(default=None, description="Fechas de ENTREGA (bodega), ISO, separadas por coma"),
+    folios: Optional[str] = Query(default=None, description="OC del cliente (su_pedido), separadas por coma"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """La materia prima de la hoja de armado (21-sep-2026, meta 1).
+
+    El comando «hoja de armado» pivotea el Master de Google Sheets: filas =
+    producto (descripción · unidad · nota), columnas = OC del cliente, celdas =
+    suma de cantidad. Este endpoint entrega el detalle POR REMISIÓN — folio del
+    cliente, cliente, fecha de bodega y las líneas con su categoría — y el
+    pivote, el PDF y los bloques por categoría los sigue armando el bot, igual
+    que con la lista de compras.
+
+    Dos filtros excluyentes, como el comando: por fecha de bodega
+    (fecha_entrega) o por lista de OC (su_pedido); la lista de OC manda.
+
+    `sin_fecha` viaja siempre que se filtra por fecha: una remisión sin
+    fecha_entrega no casa con NINGÚN día y se caería de la hoja en silencio —
+    el mismo hoyo que en la hoja vieja tuvo a la 24973 fuera con $50,633.78
+    dentro (13-ago-2026). La ventana es de 35 días hacia atrás: el proxy más
+    honesto del «periodo activo» de la hoja, que aquí no existe.
+    """
+    quiere = {normalizar_folio(f) for f in (folios or "").split(",") if f.strip()}
+    if len(quiere) > 40:
+        raise HTTPException(status_code=422, detail="máximo 40 folios")
+    dias = []
+    if not quiere:
+        try:
+            dias = sorted({date.fromisoformat(f.strip()) for f in (fechas or "").split(",") if f.strip()})
+        except ValueError:
+            raise HTTPException(status_code=422, detail="fechas: ISO yyyy-mm-dd separadas por coma")
+        if not dias:
+            raise HTTPException(status_code=422, detail="hace falta `fechas` o `folios`")
+        if len(dias) > 14:
+            raise HTTPException(status_code=422, detail="entre 1 y 14 fechas")
+
+    base = (Remision.deleted_at.is_(None), Remision.estado != "CANCELADA")
+    if quiere:
+        # su_pedido se guarda como llegó en la OC (el bot ya manda el folio sin
+        # ceros); las dos variantes cubren un cero a la izquierda colado.
+        variantes = set()
+        for f in quiere:
+            variantes.update({f, f.lstrip("0") or f})
+        filtro = (Remision.su_pedido.in_(variantes),)
+    else:
+        filtro = (Remision.fecha_entrega.in_(dias),)
+
+    q = (
+        db.query(
+            Remision.id,
+            Remision.su_pedido,
+            Remision.folio_interno,
+            Remision.fecha_entrega,
+            Cliente.legal_name,
+            Producto.clave_sae,
+            Producto.nombre,
+            CategoriaProducto.nombre.label("categoria"),
+            LineaRemision.presentacion,
+            LineaRemision.notas,
+            LineaRemision.cantidad_solicitada,
+        )
+        .join(LineaRemision, LineaRemision.remision_id == Remision.id)
+        .join(Producto, Producto.id == LineaRemision.producto_id)
+        .join(Cliente, Cliente.id == Remision.cliente_facturacion_id)
+        .outerjoin(CategoriaProducto, CategoriaProducto.id == Producto.categoria_id)
+        .filter(*base, *filtro, LineaRemision.cantidad_solicitada > 0)
+    )
+
+    # LA VERSIÓN QUE MANDA ES LA DEL DOCUMENTO — misma regla que la lista de
+    # compras (21-sep-2026): con una incidencia de cambio abierta, las líneas
+    # capturadas son las VIEJAS, y una hoja de armado armada con ellas surte de
+    # menos justo donde el cliente cambió el pedido. Esas remisiones viajan con
+    # las líneas del documento nuevo, marcadas, y las capturadas se excluyen.
+    pendientes = {
+        r.remision_id: r.payload_nuevo
+        for r in db.query(OCRecibida.remision_id, OCRecibida.payload_nuevo)
+        .join(Remision, Remision.id == OCRecibida.remision_id)
+        .filter(
+            *base, *filtro,
+            OCRecibida.cambio_detectado_at.isnot(None),
+            OCRecibida.cambio_resuelto_at.is_(None),
+            OCRecibida.payload_nuevo.isnot(None),
+        )
+        .all()
+    }
+
+    rems: dict = {}
+    for r in q.all():
+        rem = rems.setdefault(r.id, {
+            "folio": normalizar_folio(r.su_pedido) or r.folio_interno,
+            "cliente": r.legal_name or "",
+            "bodega": r.fecha_entrega.isoformat() if r.fecha_entrega else None,
+            "documento_nuevo": r.id in pendientes,
+            "lineas": [],
+        })
+        if r.id in pendientes:
+            continue          # sus líneas salen del documento, abajo
+        rem["lineas"].append({
+            "clave": r.clave_sae,
+            "descripcion": r.nombre,
+            "unidad": r.presentacion,
+            "nota": r.notas or "",
+            "cantidad": str(r.cantidad_solicitada),
+            "categoria": r.categoria,
+        })
+
+    if pendientes:
+        # La categoría de una línea del documento se resuelve por su clave —
+        # si no trae o no casa, va sin categoría (cae al bloque RESTO del bot).
+        claves_doc = {
+            (ln.get("clave") or "").strip().upper()
+            for pn in pendientes.values() for ln in (pn or {}).get("lineas") or []
+            if isinstance(ln, dict) and (ln.get("clave") or "").strip()
+        }
+        cat_por_clave = {}
+        if claves_doc:
+            for p, cat in (
+                db.query(Producto, CategoriaProducto.nombre)
+                .outerjoin(CategoriaProducto, CategoriaProducto.id == Producto.categoria_id)
+                .filter(func.upper(Producto.clave_sae).in_(claves_doc))
+                .all()
+            ):
+                cat_por_clave[p.clave_sae.upper()] = cat
+        for rid, pn in pendientes.items():
+            rem = rems.get(rid)
+            if rem is None:
+                continue
+            for ln in (pn or {}).get("lineas") or []:
+                if not isinstance(ln, dict):
+                    continue
+                clave = (ln.get("clave") or "").strip() or None
+                rem["lineas"].append({
+                    "clave": clave,
+                    "descripcion": (ln.get("descripcion") or "").strip() or "PARTIDA",
+                    # unidad del DOCUMENTO, texto del cliente: el bot la canoniza
+                    "unidad": (ln.get("unidad") or "").strip() or "?",
+                    "nota": (ln.get("notas") or ln.get("nota") or "").strip(),
+                    "cantidad": str(ln.get("cantidad") or 0),
+                    "categoria": cat_por_clave.get(clave.upper()) if clave else None,
+                })
+
+    sin_fecha = []
+    if dias:
+        for r in (
+            db.query(Remision.su_pedido, Remision.folio_interno, Cliente.legal_name,
+                     Remision.total, func.count(LineaRemision.id).label("partidas"))
+            .join(Cliente, Cliente.id == Remision.cliente_facturacion_id)
+            .outerjoin(LineaRemision, LineaRemision.remision_id == Remision.id)
+            .filter(*base, Remision.fecha_entrega.is_(None),
+                    Remision.fecha_remision >= date.today() - timedelta(days=35))
+            .group_by(Remision.id, Cliente.legal_name)
+            .all()
+        ):
+            sin_fecha.append({
+                "folio": normalizar_folio(r.su_pedido) or r.folio_interno,
+                "cliente": r.legal_name or "",
+                "partidas": r.partidas,
+                "total": str(r.total or 0),
+            })
+
+    return {
+        "remisiones": sorted(rems.values(), key=lambda x: x["folio"]),
+        "sin_fecha": sorted(sin_fecha, key=lambda x: x["folio"]),
+        "con_cambio_abierto": len(pendientes),
+    }
 
 
 @router.get("/{rem_id}", response_model=RemisionDetailOut)

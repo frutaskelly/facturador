@@ -962,3 +962,114 @@ def test_reporte_compras_usa_el_documento_nuevo_si_hay_incidencia(client, env, a
     assert {(f["descripcion"], f["cantidad"]) for f in doc} == {("AJO", "25"), ("SAL DE GRANO", "2")}
     assert not [f for f in filas if not f.get("documento_nuevo")
                 and f["fecha"] == "2031-02-03"], filas
+
+
+def test_reporte_armado_por_fecha_con_categoria_y_sin_fecha(client, env, auth_as):
+    """La materia prima de la hoja de armado: detalle por remisión (folio del
+    cliente, cliente, bodega, líneas con categoría). Las canceladas no arman
+    nada, y una remisión SIN fecha de bodega viaja en `sin_fecha` — que se
+    caiga de la hoja en silencio es el hoyo de la 24973 ($50,633.78)."""
+    from app.models import CategoriaProducto, Producto
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    with SessionLocal() as s:
+        cat = CategoriaProducto(tenant_id=env["admin_a"]["tenant_id"],
+                                codigo="FRUTA2", nombre="FRUTAS Y VERDURAS")
+        s.add(cat); s.flush()
+        s.query(Producto).filter(Producto.id == uuid.UUID(env["prod_a"])).update(
+            {"categoria_id": cat.id})
+        s.commit()
+
+    def rem(qty, fecha, folio):
+        body = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+                "su_pedido": folio,
+                "lineas": [{"producto_id": env["prod_a"], "presentacion": "KILO",
+                            "cantidad_solicitada": qty, "precio_unitario": "5",
+                            "notas": "en malla"}]}
+        if fecha:
+            body["fecha_entrega"] = fecha
+        r = client.post("/api/v1/remisiones", headers=h, json=body)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    rem("10", "2031-03-02", "24610")
+    rem("7", "2031-03-02", "24611")
+    rem("3", "2031-03-03", "24612")          # otro día: fuera del filtro
+    cancelada = rem("99", "2031-03-02", "24613")
+    client.post(f"/api/v1/remisiones/{cancelada['id']}/cancelar", headers=h)
+    rem("4", None, "24973")                  # sin bodega: al aviso
+
+    r = client.get("/api/v1/remisiones/reporte-armado?fechas=2031-03-02", headers=h)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    por_folio = {x["folio"]: x for x in out["remisiones"]}
+    assert set(por_folio) == {"24610", "24611"}, out["remisiones"]
+    ln = por_folio["24610"]["lineas"][0]
+    assert ln["unidad"] == "KILO" and ln["nota"] == "en malla"
+    assert ln["categoria"] == "FRUTAS Y VERDURAS"
+    assert float(ln["cantidad"]) == 10.0
+    assert por_folio["24610"]["bodega"] == "2031-03-02"
+    assert "24973" in {x["folio"] for x in out["sin_fecha"]}, out["sin_fecha"]
+
+    # sin filtro no hay reporte; con fecha ilegible tampoco
+    assert client.get("/api/v1/remisiones/reporte-armado", headers=h).status_code == 422
+    assert client.get("/api/v1/remisiones/reporte-armado?fechas=lunes",
+                      headers=h).status_code == 422
+
+
+def test_reporte_armado_por_folios_ignora_fecha(client, env, auth_as):
+    """Con lista de OC la fecha no pinta (el comando manda igual), y el folio
+    casa aunque venga con ceros a la izquierda."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    body = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+            "su_pedido": "24620", "fecha_entrega": "2031-04-06",
+            "lineas": [{"producto_id": env["prod_a"], "presentacion": "KILO",
+                        "cantidad_solicitada": "6", "precio_unitario": "5"}]}
+    assert client.post("/api/v1/remisiones", headers=h, json=body).status_code == 201
+
+    r = client.get("/api/v1/remisiones/reporte-armado"
+                   "?folios=0024620&fechas=1999-01-01", headers=h)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert [x["folio"] for x in out["remisiones"]] == ["24620"]
+    # por folios no se filtra por fecha, y el aviso de sin_fecha no aplica
+    assert out["sin_fecha"] == []
+
+
+def test_reporte_armado_usa_el_documento_nuevo_si_hay_incidencia(client, env, auth_as):
+    """Misma regla que la lista de compras: con incidencia de cambio abierta,
+    la hoja arma con las líneas del DOCUMENTO nuevo (marcadas) y las capturadas
+    se excluyen — armar con la versión vieja surte de menos justo donde el
+    cliente cambió."""
+    from app.models.oc_recibida import OCRecibida
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    body = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+            "su_pedido": "24630", "fecha_entrega": "2031-05-04",
+            "lineas": [{"producto_id": env["prod_a"], "presentacion": "KILO",
+                        "cantidad_solicitada": "10", "precio_unitario": "5"}]}
+    rem = client.post("/api/v1/remisiones", headers=h, json=body).json()
+    with SessionLocal() as s:
+        s.add(OCRecibida(
+            tenant_id=env["admin_a"]["tenant_id"],
+            canal="WHATSAPP", origen_externo="WA:grupo:24630", folio_externo="24630",
+            estado="ASIGNADA", remision_id=uuid.UUID(rem["id"]),
+            payload={"lineas": [{"descripcion": "AJO", "cantidad": "10", "unidad": "KILO"}]},
+            payload_nuevo={"lineas": [{"descripcion": "AJO", "cantidad": "25",
+                                       "unidad": "KILO"},
+                                      {"descripcion": "SAL DE GRANO", "cantidad": "2",
+                                       "unidad": "KILO", "notas": "grano grueso"}]},
+            cambio_detectado_at=datetime.now(timezone.utc),
+        ))
+        s.commit()
+
+    r = client.get("/api/v1/remisiones/reporte-armado?folios=24630", headers=h)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["con_cambio_abierto"] == 1
+    (fila,) = out["remisiones"]
+    assert fila["documento_nuevo"] is True
+    assert {(l["descripcion"], l["cantidad"]) for l in fila["lineas"]} == \
+        {("AJO", "25"), ("SAL DE GRANO", "2")}
+    assert [l["nota"] for l in fila["lineas"] if l["descripcion"] == "SAL DE GRANO"] == \
+        ["grano grueso"]
