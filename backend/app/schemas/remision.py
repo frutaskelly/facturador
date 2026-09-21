@@ -214,6 +214,16 @@ class PesoLinea(BaseModel):
     cantidad_base: Decimal = Field(gt=0)
 
 
+class CancelarRemisionIn(BaseModel):
+    """El porqué de la cancelación, para dejarlo escrito en la remisión.
+
+    «Nada se elimina: se cancela y se deja nota» — y la nota tiene que viajar
+    EN la cancelación, no en un PATCH aparte: editar una remisión ya exportada
+    devuelve 409, justo en los casos donde saber por qué se canceló importa
+    más."""
+    motivo: Optional[str] = Field(default=None, max_length=300)
+
+
 class LiberarPedidoIn(BaseModel):
     """Quitarle a una remisión el congelamiento del export de PEDIDO.
 

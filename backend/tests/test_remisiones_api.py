@@ -1242,3 +1242,32 @@ def test_reporte_sin_precio_ve_la_clave_que_esa_empresa_no_conoce(client, env, a
     motivos = {p["motivo"] for p in out["productos"]}
     assert "CLAVE NO EN SAE" in motivos, out
     assert out["clave_fuera_de_sae"] == 1
+
+
+def test_cancelar_deja_dicho_por_que(client, env, auth_as):
+    """«Nada se elimina: se cancela y se deja nota». El motivo viaja en la
+    cancelación y no en un PATCH previo, porque editar una remisión exportada
+    devuelve 409 justo donde saber el porqué importa más."""
+    from app.models.remision import Remision
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    rem = _create_rem(client, h, env, "2", "5").json()
+    with SessionLocal() as s:
+        r = s.query(Remision).filter(Remision.id == uuid.UUID(rem["id"])).one()
+        r.export_pedido_at = datetime.now(timezone.utc)   # ya salió en un masivo
+        s.commit()
+    # el PATCH está cerrado para esta remisión…
+    assert client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                        json={"notas": "x"}).status_code == 409
+    # …y la cancelación con motivo sí pasa, y lo deja escrito
+    r2 = client.post(f"/api/v1/remisiones/{rem['id']}/cancelar", headers=h,
+                     json={"motivo": "el cliente ya no necesita el producto"})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["estado"] == "CANCELADA"
+    assert "el cliente ya no necesita el producto" in (r2.json()["notas"] or "")
+    assert "Cancelada:" in (r2.json()["notas"] or "")
+
+    # sin cuerpo sigue funcionando igual que siempre
+    otra = _create_rem(client, h, env, "1", "5").json()
+    assert client.post(f"/api/v1/remisiones/{otra['id']}/cancelar",
+                       headers=h).status_code == 200
