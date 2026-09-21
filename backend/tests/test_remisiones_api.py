@@ -1019,10 +1019,12 @@ def test_reporte_armado_por_fecha_con_categoria_y_sin_fecha(client, env, auth_as
 
 def test_reporte_armado_por_folios_ignora_fecha(client, env, auth_as):
     """Con lista de OC la fecha no pinta (el comando manda igual), y el folio
-    casa aunque venga con ceros a la izquierda."""
+    casa con ceros a la izquierda de CUALQUIERA de los dos lados: en la base
+    `su_pedido` llega relleno desde SAE ('0000024620' — con el filtro literal
+    no casaba ni una, medido 21-sep-2026)."""
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     body = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
-            "su_pedido": "24620", "fecha_entrega": "2031-04-06",
+            "su_pedido": "0000024620", "fecha_entrega": "2031-04-06",
             "lineas": [{"producto_id": env["prod_a"], "presentacion": "KILO",
                         "cantidad_solicitada": "6", "precio_unitario": "5"}]}
     assert client.post("/api/v1/remisiones", headers=h, json=body).status_code == 201
@@ -1118,3 +1120,43 @@ def test_reporte_armado_origen_acota_el_carril(client, env, auth_as):
     # sin origen: todas (incluida la manual) — más de lo que ve un Master, no menos
     r3 = client.get("/api/v1/remisiones/reporte-armado?fechas=2031-06-02", headers=h)
     assert len(r3.json()["remisiones"]) == 4
+
+
+def test_reporte_armado_avisa_las_oc_sin_remision(client, env, auth_as):
+    """La OC que entró a la bandeja y nunca se cruzó no tiene remisión, así que
+    no sale en ninguna consulta del reporte — y la hoja saldría sin ella sin
+    decir nada (116 de 224 órdenes del Master estaban así al migrar). Viaja en
+    `sin_remision`, acotada al mismo carril."""
+    from app.models.oc_recibida import OCRecibida
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    with SessionLocal() as s:
+        for folio, origen, estado, fecha in (
+            ("25900", "WA:g@g.us:", "PENDIENTE", "2031-07-07"),
+            ("25901", "EMAIL:c@x.mx:", "AMBIGUA", "2031-07-07"),
+            ("25902", "WA:g@g.us:", "DESCARTADA", "2031-07-07"),   # descartada: no se arma
+            ("25903", "WA:g@g.us:", "PENDIENTE", "2031-07-08"),    # otro día
+            ("HO-91", "EHMO:ehmo:", "PENDIENTE", "2031-07-07"),    # otro carril
+        ):
+            s.add(OCRecibida(
+                tenant_id=env["admin_a"]["tenant_id"], canal="WHATSAPP",
+                origen_externo=f"{origen}{folio}", folio_externo=folio, estado=estado,
+                payload={"fecha_entrega": fecha,
+                         "lineas": [{"descripcion": "AJO", "cantidad": "3"}]}))
+        s.commit()
+
+    r = client.get("/api/v1/remisiones/reporte-armado"
+                   "?fechas=2031-07-07&origen=WA:,EMAIL:", headers=h)
+    assert r.status_code == 200, r.text
+    sr = r.json()["sin_remision"]
+    assert {x["folio"] for x in sr} == {"25900", "25901"}, sr
+    assert sr[0]["partidas"] == 1 and sr[0]["bodega"] == "2031-07-07"
+
+    # el otro carril ve la suya y no las de Balles
+    r2 = client.get("/api/v1/remisiones/reporte-armado"
+                    "?fechas=2031-07-07&origen=EHMO:ehmo:", headers=h)
+    assert {x["folio"] for x in r2.json()["sin_remision"]} == {"HO-91"}
+
+    # por lista de OC no hay aviso por fecha: lo que se pidió es explícito
+    r3 = client.get("/api/v1/remisiones/reporte-armado?folios=25900", headers=h)
+    assert r3.json()["sin_remision"] == []
