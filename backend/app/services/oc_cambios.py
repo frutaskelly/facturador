@@ -63,18 +63,32 @@ def _clave_linea(ln: dict) -> str:
 def _valor_linea(ln: dict) -> tuple:
     return (_cantidad(ln.get("cantidad")),
             _norm(ln.get("unidad")),
-            _cantidad(ln.get("precio")) if ln.get("precio") is not None else "")
+            _cantidad(ln.get("precio")) if ln.get("precio") is not None else "",
+            # El descuento entra a la comparación con AUSENTE == CERO, a
+            # propósito (21-sep-2026): los 720 payloads anteriores no traen la
+            # llave —el bot no la mandaba— y los nuevos solo la traen cuando es
+            # distinta de cero. Compararlos literal habría despertado una
+            # incidencia falsa por cada reenvío de cada orden vieja. Un cambio
+            # de descuento REAL (0→5, 5→10) sí despierta, que es lo que se busca:
+            # el descuento cambia el importe igual que el precio.
+            _cantidad(ln.get("desc_pct") or 0))
 
 
 def _visible(ln: dict) -> dict:
     """La partida como se le enseña a una persona en el aviso y en la pantalla."""
-    return {
+    v = {
         "clave": _texto(ln.get("clave")) or None,
         "descripcion": _texto(ln.get("descripcion")) or None,
         "cantidad": _texto(ln.get("cantidad")) or None,
         "unidad": _texto(ln.get("unidad")) or None,
         "precio": _texto(ln.get("precio")) or None,
     }
+    # Solo cuando lo hay: si el descuento decide que dos versiones difieren, el
+    # aviso tiene que ENSEÑARLO — un diff donde antes y ahora se ven idénticos
+    # es peor que no avisar, porque nadie puede explicar qué cambió.
+    if ln.get("desc_pct"):
+        v["desc_pct"] = _texto(ln.get("desc_pct"))
+    return v
 
 
 def huella(payload: Optional[dict]) -> str:

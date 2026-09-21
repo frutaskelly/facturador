@@ -696,6 +696,9 @@ def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
             "clave": ln.get("clave"),
             "precio": ln.get("precio"),
             "notas": ln.get("notas"),
+            # El schema Out solo entrega lo que este literal arma: agregarlo al
+            # schema sin agregarlo aquí lo dejaría en None para siempre.
+            "desc_pct": ln.get("desc_pct"),
             "presentacion_sugerida": pres_sugerida,
             "presentacion_adivinada": pres_adivinada,
             "candidatos": [

@@ -118,3 +118,34 @@ def test_cantidad_no_numerica_se_compara_como_texto():
     b = _doc([{"clave": "X-Y-1", "descripcion": "X", "cantidad": "POR DEFINIR"}])
     assert oc_cambios.diff(a, b) is not None
     assert oc_cambios.diff(a, dict(a)) is None
+
+
+def test_desc_pct_ausente_y_cero_son_lo_mismo():
+    """Los 720 payloads de antes del 21-sep-2026 no traen desc_pct, y los nuevos
+    solo lo traen cuando es distinto de cero. Ausente y cero TIENEN que contar
+    como el mismo valor, o cada reenvío de cada orden vieja despertaría una
+    incidencia cuyo diff se ve idéntico en ambos lados."""
+    vieja = {"lineas": [{"clave": "AJOKG", "cantidad": "10", "unidad": "KILO",
+                         "precio": "25.00"}]}
+    nueva_sin = {"lineas": [{"clave": "AJOKG", "cantidad": "10", "unidad": "KILO",
+                             "precio": "25.00"}]}
+    nueva_cero = {"lineas": [{"clave": "AJOKG", "cantidad": "10", "unidad": "KILO",
+                              "precio": "25.00", "desc_pct": 0}]}
+    assert (oc_cambios.huella(vieja) == oc_cambios.huella(nueva_sin)
+            == oc_cambios.huella(nueva_cero))
+    assert oc_cambios.diff(vieja, nueva_cero) is None
+
+
+def test_desc_pct_real_si_despierta_y_se_ve():
+    """Un cambio de descuento de verdad (0→5) cambia el importe igual que un
+    cambio de precio: despierta la incidencia, y el diff lo ENSEÑA — un aviso
+    donde antes y ahora se ven idénticos es peor que no avisar."""
+    vieja = {"lineas": [{"clave": "AJOKG", "cantidad": "10", "unidad": "KILO",
+                         "precio": "25.00"}]}
+    nueva = {"lineas": [{"clave": "AJOKG", "cantidad": "10", "unidad": "KILO",
+                         "precio": "25.00", "desc_pct": "5"}]}
+    assert oc_cambios.huella(vieja) != oc_cambios.huella(nueva)
+    d = oc_cambios.diff(vieja, nueva)
+    assert d is not None and d["lineas"]["cambiadas"], d
+    ahora = d["lineas"]["cambiadas"][0]["ahora"][0]
+    assert ahora.get("desc_pct") == "5", ahora
