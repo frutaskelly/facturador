@@ -2,6 +2,7 @@
 stock, cancel releasing it, the almacén requirement, lifecycle guards, RBAC,
 and isolation."""
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import text
@@ -716,3 +717,95 @@ def test_sin_imprimir_el_sync_sigue_entrando(client, env, auth_as):
         assert float(r.json()["subtotal"]) == 51.5
     finally:
         app.dependency_overrides.pop(get_auth_context, None)
+
+
+def test_exportada_a_sae_se_congela_para_todos(client, env, auth_as):
+    """Lo que ya salió en un archivo de SAE no se reescribe (21-sep-2026).
+
+    Tres cosas que el candado de la impresión NO cubría y ésta sí: congela en
+    vez de avisar, congela el ENCABEZADO además de las partidas, y congela
+    también a las PERSONAS —no solo a la conexión—. El motivo es que el archivo
+    ya viajó: si aquí cambia el cliente o el importe, SAE y el Facturador
+    cuentan dos historias de la misma venta y nadie se entera.
+    """
+    from app.core.rbac import get_auth_context
+    from app.models.remision import Remision
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    rem = _create_rem(client, h, env, "10", "5").json()
+
+    partidas = {"lineas": [{"producto_id": env["prod_a"],
+                            "cantidad_solicitada": "99", "precio_unitario": "5"}]}
+
+    # Antes de exportar, todo pasa: el candado es por el archivo, no por el estado.
+    assert client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                        json=partidas).status_code == 200
+    assert client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                        json={"notas": "antes de exportar"}).status_code == 200
+
+    # Se marca como exportada, que es lo que hace export_sae.py al generar.
+    with SessionLocal() as s:
+        r = s.query(Remision).filter(Remision.id == uuid.UUID(rem["id"])).one()
+        r.export_sae_at = datetime.now(timezone.utc)
+        s.commit()
+
+    # La PERSONA tampoco: ésta es la diferencia con el candado de la impresión.
+    r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json=partidas)
+    assert r.status_code == 409, r.text
+    assert "ya salió en el masivo de SAE" in r.json()["detail"]
+
+    # Y el ENCABEZADO queda igual de congelado, sin tocar una sola línea.
+    for cuerpo in ({"notas": "después de exportar"},
+                   {"descuento": "10"},
+                   {"fecha_entrega": "2030-01-01"}):
+        r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json=cuerpo)
+        assert r.status_code == 409, f"{cuerpo} debería estar congelado: {r.text}"
+
+    # La conexión, igual.
+    app.dependency_overrides[get_auth_context] = (
+        lambda: _ctx_de_conexion(env["admin_a"]["tenant_id"]))
+    try:
+        r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json=partidas)
+        assert r.status_code == 409, r.text
+    finally:
+        app.dependency_overrides.pop(get_auth_context, None)
+
+    # Un pedido exportado congela igual: el archivo salió aunque no sea fiscal.
+    rem2 = _create_rem(client, h, env, "3", "7").json()
+    with SessionLocal() as s:
+        r2 = s.query(Remision).filter(Remision.id == uuid.UUID(rem2["id"])).one()
+        r2.export_pedido_at = datetime.now(timezone.utc)
+        s.commit()
+    r = client.patch(f"/api/v1/remisiones/{rem2['id']}", headers=h, json={"notas": "x"})
+    assert r.status_code == 409, r.text
+    assert "ya salió en un pedido de SAE" in r.json()["detail"]
+
+
+def test_exportada_deja_pasar_solo_el_acuse_de_sae(client, env, auth_as):
+    """La única excepción del congelamiento: sellar `factura_sae`.
+
+    Eso no edita el documento, acusa lo que SAE hizo con él — y es la llave que
+    después lo libera, porque `export_sae_at` solo se limpia cuando el espejo
+    confirma que esa factura se canceló en SAE. Congelar el acuse convertiría el
+    candado en una trampa sin salida.
+    """
+    from app.models.remision import Remision
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    rem = _create_rem(client, h, env, "4", "9").json()
+    with SessionLocal() as s:
+        r = s.query(Remision).filter(Remision.id == uuid.UUID(rem["id"])).one()
+        r.export_sae_at = datetime.now(timezone.utc)
+        s.commit()
+
+    # Solo el acuse: pasa.
+    r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                     json={"factura_sae": "ZHGO 900"})
+    assert r.status_code == 200, r.text
+    assert r.json()["factura_sae"] == "ZHGO 900"
+
+    # El acuse acompañado de cualquier otra cosa: NO. Si no, sería la puerta de
+    # atrás para editar el documento colando un sello.
+    r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                     json={"factura_sae": "ZHGO 901", "notas": "colado"})
+    assert r.status_code == 409, r.text
