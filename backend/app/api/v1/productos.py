@@ -14,16 +14,19 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
-from sqlalchemy import func
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ...core.ratelimit import enforce
 from rapidfuzz import fuzz
 
-from ...core.rbac import AuthContext, get_tenant_db, require_permission
+from ...core.rbac import AuthContext, get_auth_context, get_tenant_db, require_permission
 from ...models import (
     CategoriaProducto,
+    ClaveSae,
     Cliente,
     EsquemaImpuesto,
     ImportProductosLog,
@@ -35,13 +38,16 @@ from ...models import (
     ProductoCliente,
     SatClaveProdServ,
     SatClaveUnidad,
+    SolicitudAltaSae,
     Sucursal,
 )
 from ...schemas.producto import (
-    PresentacionCreate,
     AliasIn,
     AliasOut,
     AliasReapuntarIn,
+    AltaSaeIn,
+    AltaSaeOut,
+    AltaSaeReporteIn,
     CandidatoOut,
     CatalogoClienteBatchIn,
     CatalogoClienteBatchOut,
@@ -57,6 +63,7 @@ from ...schemas.producto import (
     MatchIn,
     MatchResultOut,
     ParsePegadoIn,
+    PresentacionCreate,
     ProductoCreate,
     ProductoOut,
     ProductoUpdate,
@@ -1810,6 +1817,242 @@ def create_producto(
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)
     return obj
+
+
+# OJO con el orden: estas rutas van ANTES de GET /{producto_id} — FastAPI casa
+# en orden de declaración y "alta-sae" parsearía como UUID (422).
+# ── Altas en SAE ─────────────────────────────────────────────────────────────
+# El backend NO ve SAE: quien lo escribe es el conector, con sqlcmd desde la
+# Mac. Así que dar de alta un producto allá funciona por SOLICITUD, igual que el
+# espejo de facturas: aquí queda pedida, el conector la reclama y reporta qué
+# creó en cada empresa.
+#
+# LA REGLA QUE MANDA EN TODO ESTE CAMINO: nunca se reintenta una escritura a
+# SAE. Un INSERT repetido duplica el producto. De ahí que reclamar sea un paso
+# aparte (marca EN_CURSO y nadie más la toma), que el resultado se guarde por
+# empresa, y que no exista ningún endpoint para «volver a intentar».
+
+# Las cuatro empresas de SAE. Vacío en la petición = las cuatro: el estado que
+# hoy duele es justo el producto que quedó creado en una sola.
+_EMPRESAS_SAE = ("02", "03", "04", "05")
+
+# Una alta reclamada que nadie reporta: el conector corre cada pocos minutos y
+# una alta tarda segundos. A la hora se cierra como ERROR para que se vea, pero
+# NO se re-encola: si el INSERT alcanzó a entrar, encolarla otra vez duplica.
+_ALTA_EN_CURSO_MAX = timedelta(hours=1)
+_ALTA_PENDIENTE_MAX = timedelta(hours=24)
+
+
+def _puede_pedir_alta(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    """Pedir el alta es trabajo de catálogo; el bot entra con su propia clave y
+    el permiso de catálogo, igual que para crear el producto."""
+    if ctx.is_owner or _WRITE in ctx.permissions:
+        return ctx
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Falta permiso: {_WRITE}")
+
+
+def _expirar_altas_muertas(db: Session, tenant_id) -> None:
+    """Cierra como ERROR las altas que ya nadie va a reportar, con el motivo
+    dicho: «se reclamó y nadie reportó» NO significa que no se haya creado en
+    SAE, y quien la lea tiene que saberlo antes de volver a pedirla."""
+    ahora = datetime.now(timezone.utc)
+    muertas = (db.query(SolicitudAltaSae)
+               .filter(SolicitudAltaSae.tenant_id == tenant_id,
+                       or_(and_(SolicitudAltaSae.estado == "PENDIENTE",
+                                SolicitudAltaSae.solicitada_at < ahora - _ALTA_PENDIENTE_MAX),
+                           and_(SolicitudAltaSae.estado == "EN_CURSO",
+                                func.coalesce(SolicitudAltaSae.iniciada_at,
+                                              SolicitudAltaSae.solicitada_at)
+                                < ahora - _ALTA_EN_CURSO_MAX)))
+               .all())
+    for m in muertas:
+        reclamada = m.estado == "EN_CURSO"
+        m.estado = "ERROR"
+        m.terminada_at = ahora
+        m.motivo = ("El conector la tomó y no reportó: REVISA EN SAE si la clave "
+                    "quedó creada antes de volver a pedirla."
+                    if reclamada else
+                    "Nadie la recogió en 24 h: el conector no corrió.")
+    if muertas:
+        db.flush()
+
+
+@router.post("/alta-sae", response_model=AltaSaeOut, status_code=status.HTTP_201_CREATED)
+def pedir_alta_sae(
+    payload: AltaSaeIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(_puede_pedir_alta),
+):
+    """Pide crear un producto en SAE, en las empresas que se indiquen.
+
+    Idempotente por clave, y eso es el candado, no una comodidad: dos «dale de
+    alta AJOKG» seguidos por WhatsApp tienen que devolver LA MISMA solicitud,
+    porque dos altas vivas insertarían dos veces el mismo artículo.
+
+    Si la clave ya está en el catálogo espejo de SAE (`claves_sae`, activa), no
+    se encola nada y se contesta 409: el producto ya existe allá y lo que hace
+    falta es ligarlo, no crearlo.
+    """
+    _expirar_altas_muertas(db, ctx.tenant_id)
+    clave = (payload.clave or "").strip().upper()
+    if not clave:
+        raise HTTPException(status_code=422, detail="La clave no puede ir vacía")
+    empresas = [e.strip() for e in (payload.empresas or []) if e.strip()] or list(_EMPRESAS_SAE)
+    fuera = [e for e in empresas if e not in _EMPRESAS_SAE]
+    if fuera:
+        raise HTTPException(status_code=422,
+                            detail=f"Empresa desconocida: {', '.join(fuera)}")
+
+    viva = (db.query(SolicitudAltaSae)
+            .filter(SolicitudAltaSae.tenant_id == ctx.tenant_id,
+                    func.upper(func.btrim(SolicitudAltaSae.clave)) == clave,
+                    SolicitudAltaSae.estado.in_(("PENDIENTE", "EN_CURSO")))
+            .order_by(SolicitudAltaSae.solicitada_at.asc()).first())
+    if viva is not None:
+        return viva
+
+    ya = (db.query(ClaveSae)
+          .filter(ClaveSae.tenant_id == ctx.tenant_id,
+                  func.upper(func.btrim(ClaveSae.clave)) == clave,
+                  ClaveSae.activa.is_(True))
+          .first())
+    if ya is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"La clave {clave} ya existe en SAE (empresa {ya.empresa}); "
+                    "no hay que crearla, hay que ligarla al producto."),
+        )
+
+    if payload.producto_id is not None:
+        ensure_fk(db, Producto, payload.producto_id, "producto_id")
+
+    sol = SolicitudAltaSae(
+        tenant_id=ctx.tenant_id,
+        origen=(payload.origen or "UI").strip().upper()[:12],
+        producto_id=payload.producto_id,
+        clave=clave,
+        datos={
+            "descripcion": payload.descripcion.strip()[:60],
+            "unidad": (payload.unidad or "PIEZA").strip().upper(),
+            "linea": (payload.linea or "").strip().upper() or None,
+            "esquema": payload.esquema,
+            "sat": (payload.sat or "").strip() or None,
+            "sat_unidad": (payload.sat_unidad or "").strip() or None,
+            "nota": (payload.nota or "").strip() or None,
+        },
+        empresas=empresas,
+        solicitada_por=ctx.user_id,
+    )
+    db.add(sol)
+    flush_or_conflict(db, detail="Ya hay un alta viva para esa clave")
+    db.refresh(sol)
+    return sol
+
+
+@router.get("/alta-sae", response_model=Page[AltaSaeOut])
+def listar_altas_sae(
+    estado: Optional[str] = Query(default=None, max_length=10),
+    clave: Optional[str] = Query(default=None, max_length=20),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Las altas pedidas, lo último primero. Es lo que sondea el bot para su
+    acuse y lo que la pantalla de catálogo pinta como «pendiente en SAE»."""
+    _expirar_altas_muertas(db, ctx.tenant_id)
+    q = db.query(SolicitudAltaSae).filter(SolicitudAltaSae.tenant_id == ctx.tenant_id)
+    if estado:
+        q = q.filter(SolicitudAltaSae.estado == estado.strip().upper())
+    if clave:
+        q = q.filter(func.upper(func.btrim(SolicitudAltaSae.clave)) == clave.strip().upper())
+    q = q.order_by(SolicitudAltaSae.solicitada_at.desc())
+    return paginate(q, AltaSaeOut, limit, offset)
+
+
+@router.get("/alta-sae/pendiente", response_model=Optional[AltaSaeOut])
+def reclamar_alta_sae(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("factura:espejo")),
+):
+    """El conector pregunta si hay una alta que aplicar. Reclamar la marca
+    EN_CURSO con `skip_locked`: dos conectores no pueden tomar la misma y
+    escribirla dos veces en SAE.
+
+    Reclama UNA a la vez a propósito: si el proceso muere a media alta, hay que
+    poder decir exactamente de qué clave hay que ir a ver en SAE.
+    """
+    sol = (db.query(SolicitudAltaSae)
+           .filter(SolicitudAltaSae.tenant_id == ctx.tenant_id,
+                   SolicitudAltaSae.estado == "PENDIENTE")
+           .order_by(SolicitudAltaSae.solicitada_at.asc())
+           .with_for_update(skip_locked=True).first())
+    if sol is None:
+        return None
+    sol.estado = "EN_CURSO"
+    sol.iniciada_at = datetime.now(timezone.utc)
+    db.flush()
+    db.refresh(sol)
+    return sol
+
+
+@router.post("/alta-sae/{solicitud_id}/reporte", response_model=AltaSaeOut)
+def reportar_alta_sae(
+    solicitud_id: UUID,
+    payload: AltaSaeReporteIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("factura:espejo")),
+):
+    """El conector reporta qué creó, por empresa. Esto CIERRA la solicitud: no
+    hay reintento, porque lo que ya entró a SAE no se puede volver a insertar.
+
+    El estado sale de lo reportado, no de un `ok` que alguien manda: todas las
+    empresas bien = OK, ninguna = ERROR, mezcla = PARCIAL (falta trabajo y algo
+    ya se creó: las dos cosas son verdad y una persona tiene que verlo).
+
+    La clave se estampa en el producto SOLO si alguna empresa la confirmó —
+    misma regla que con los folios de SAE: el Facturador no se apunta una clave
+    que SAE no haya confirmado.
+    """
+    sol = (db.query(SolicitudAltaSae)
+           .filter(SolicitudAltaSae.tenant_id == ctx.tenant_id,
+                   SolicitudAltaSae.id == solicitud_id)
+           .with_for_update().one_or_none())
+    if sol is None:
+        raise HTTPException(status_code=404, detail="Esa solicitud de alta no existe")
+    if sol.estado in ("OK", "PARCIAL", "ERROR"):
+        # Ya cerrada: reportar dos veces sería la puerta de atrás al reintento
+        raise HTTPException(
+            status_code=409,
+            detail=f"Esa alta ya está cerrada como {sol.estado}; no se reporta dos veces.",
+        )
+
+    por_empresa = {str(k): v for k, v in (payload.por_empresa or {}).items()
+                   if isinstance(v, dict)}
+    pedidas = [str(e) for e in (sol.empresas or [])]
+    creadas = [e for e in pedidas if (por_empresa.get(e) or {}).get("ok")]
+    sol.estado = ("OK" if creadas and len(creadas) == len(pedidas)
+                  else "PARCIAL" if creadas else "ERROR")
+    sol.resultado = por_empresa or None
+    sol.motivo = (payload.motivo or "").strip() or None
+    sol.terminada_at = datetime.now(timezone.utc)
+
+    if creadas and sol.producto_id:
+        prod = (db.query(Producto)
+                .filter(Producto.tenant_id == ctx.tenant_id,
+                        Producto.id == sol.producto_id,
+                        Producto.deleted_at.is_(None))
+                .one_or_none())
+        # No se pisa una clave que el producto ya traía: si son distintas, eso
+        # es un conflicto que decide una persona, no este reporte.
+        if prod is not None and not (prod.clave_sae or "").strip():
+            confirmada = next((por_empresa[e].get("clave") for e in creadas
+                               if (por_empresa[e].get("clave") or "").strip()), None)
+            prod.clave_sae = (confirmada or sol.clave).strip().upper()[:50]
+    db.flush()
+    db.refresh(sol)
+    return sol
 
 
 @router.get("/{producto_id}", response_model=ProductoOut)

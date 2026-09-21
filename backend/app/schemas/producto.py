@@ -447,3 +447,55 @@ class ProductoClienteUpsert(BaseModel):
     presentacion: Optional[str] = Field(default=None, max_length=20)
     # Omitida/None = upsert de la fila genérica; con valor, el de la plaza.
     sucursal_id: Optional[uuid.UUID] = None
+
+
+# ── Altas en SAE: la cola entre el Facturador y el conector ──────────────────
+# El backend no ve SAE; el conector sí. Mismo reparto que el espejo de facturas.
+
+class AltaSaeIn(BaseModel):
+    """Pide crear un producto en SAE. `clave` es la identidad de la alta (CVE_ART).
+
+    `empresas` son las de SAE donde debe nacer. Vacío = las cuatro: es lo que
+    pidió el dueño («las 4 empresas») y evita que un olvido cree el producto en
+    una sola, que es el estado que hoy duele.
+    """
+    clave: str = Field(min_length=1, max_length=20)
+    producto_id: Optional[uuid.UUID] = None
+    descripcion: str = Field(min_length=1, max_length=60)
+    unidad: str = Field(default="PIEZA", max_length=20)
+    # Línea y esquema de SAE (su categorización interna, no la del SAT) y las
+    # claves del SAT. Quien pide ya las resolvió; aquí se guardan tal cual.
+    linea: Optional[str] = Field(default=None, max_length=10)
+    esquema: Optional[int] = None
+    sat: Optional[str] = Field(default=None, max_length=20)
+    sat_unidad: Optional[str] = Field(default=None, max_length=10)
+    empresas: list[str] = Field(default_factory=list)
+    origen: str = Field(default="UI", max_length=12)
+    nota: Optional[str] = Field(default=None, max_length=300)
+
+
+class AltaSaeOut(ORMModel):
+    """Una alta pedida: en qué estado va y qué contestó SAE por empresa."""
+    id: uuid.UUID
+    estado: str            # PENDIENTE | EN_CURSO | OK | PARCIAL | ERROR
+    origen: str
+    clave: str
+    producto_id: Optional[uuid.UUID] = None
+    datos: dict = {}
+    empresas: list = []
+    solicitada_at: datetime
+    iniciada_at: Optional[datetime] = None
+    terminada_at: Optional[datetime] = None
+    resultado: Optional[dict] = None
+    motivo: Optional[str] = None
+
+
+class AltaSaeReporteIn(BaseModel):
+    """El conector reporta qué creó. `por_empresa` es la verdad de la alta:
+    {"02": {"ok": true, "clave": "AJOKG"}, "03": {"ok": false, "error": "..."}}.
+
+    No hay reintento: lo que aquí se reporte como creado no se vuelve a
+    intentar nunca, porque un INSERT repetido duplica el producto en SAE.
+    """
+    por_empresa: dict = Field(default_factory=dict)
+    motivo: Optional[str] = Field(default=None, max_length=300)

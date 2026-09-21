@@ -1,0 +1,240 @@
+"""Altas de producto en SAE — la cola entre el Facturador y el conector.
+
+El backend no ve SAE, así que crear un artículo allá funciona por solicitud
+(mismo reparto que el espejo de facturas). Lo que se prueba aquí es lo que hace
+SEGURA esa cola, porque **nunca se reintenta una escritura a SAE**: una sola
+alta viva por clave, reclamo excluyente, cierre único, y la clave estampada en
+el producto SOLO cuando SAE la confirmó.
+"""
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from sqlalchemy import text
+
+from app.core.auth import Principal, get_principal
+from app.core.db import SessionLocal
+from app.main import app
+from app.models import ClaveSae, Membership, Producto, Role, SolicitudAltaSae, Tenant, User
+
+_PURGE = ("solicitudes_alta_sae", "claves_sae", "producto_clientes", "productos")
+
+
+@pytest.fixture
+def env(db_engine):
+    suffix = uuid.uuid4().hex[:8]
+    db = SessionLocal()
+    created = {"memberships": [], "users": [], "tenants": []}
+    try:
+        t = Tenant(slug=f"alta-{suffix}", legal_name="Alta SA",
+                   rfc=f"AL{suffix.upper()}"[:13], regimen_fiscal_sat="601",
+                   domicilio_fiscal_cp="44100", tier="PRINCIPAL", status="ACTIVE")
+        db.add(t); db.flush(); created["tenants"].append(t.id)
+        admin_role = db.query(Role).filter(Role.nombre == "ADMIN", Role.es_preset.is_(True)).one()
+        tomador_role = db.query(Role).filter(Role.nombre == "TOMADOR", Role.es_preset.is_(True)).one()
+
+        def _user(role, label):
+            sub = f"sub-{label}-{suffix}"
+            u = User(email=f"{label}-{suffix}@t.test", auth_user_id=sub, full_name=label)
+            db.add(u); db.flush(); created["users"].append(u.id)
+            m = Membership(tenant_id=t.id, user_id=u.id, role_id=role.id)
+            db.add(m); db.flush(); created["memberships"].append(m.id)
+            return {"sub": sub, "email": u.email, "tenant_id": t.id}
+
+        admin = _user(admin_role, "admin")
+        tomador = _user(tomador_role, "tomador")
+        prod = Producto(tenant_id=t.id, sku="A-P", nombre="Ajo kilo",
+                        clave_sat="01010101", unidad_sat="KGM")
+        db.add(prod); db.flush()
+        db.commit()
+        yield {"admin": admin, "tomador": tomador, "tenant_id": t.id, "prod": str(prod.id)}
+    finally:
+        for table in _PURGE:
+            for tid in created["tenants"]:
+                db.execute(text(f"DELETE FROM {table} WHERE tenant_id = :tid"), {"tid": tid})
+        for mid in created["memberships"]:
+            db.query(Membership).filter(Membership.id == mid).delete()
+        for uid in created["users"]:
+            db.query(User).filter(User.id == uid).delete()
+        for tid in created["tenants"]:
+            db.query(Tenant).filter(Tenant.id == tid).delete()
+        db.commit(); db.close()
+
+
+@pytest.fixture
+def conector(env):
+    """El conector entra con alcance de conexión: `factura:espejo` no lo trae el
+    ADMIN preset (igual que en el espejo de facturas), así que reclamar y
+    reportar se prueban con un OWNER."""
+    db = SessionLocal()
+    suffix = uuid.uuid4().hex[:8]
+    try:
+        owner_role = db.query(Role).filter(
+            Role.nombre == "OWNER", Role.es_preset.is_(True)).one()
+        u = User(email=f"con-{suffix}@t.test", auth_user_id=f"sub-con-{suffix}",
+                 full_name="conector")
+        db.add(u); db.flush()
+        m = Membership(tenant_id=env["tenant_id"], user_id=u.id, role_id=owner_role.id)
+        db.add(m); db.flush()
+        db.commit()
+        yield {"sub": u.auth_user_id, "email": u.email, "tenant_id": env["tenant_id"]}
+    finally:
+        db.query(Membership).filter(Membership.id == m.id).delete()
+        db.query(User).filter(User.id == u.id).delete()
+        db.commit(); db.close()
+
+
+@pytest.fixture
+def auth_as():
+    def _set(user):
+        app.dependency_overrides[get_principal] = lambda: Principal(
+            auth_user_id=user["sub"], email=user["email"], role="authenticated",
+            claims={"sub": user["sub"]})
+    yield _set
+    app.dependency_overrides.pop(get_principal, None)
+
+
+def _hdr(u):
+    return {"X-Tenant-Id": str(u["tenant_id"])}
+
+
+def _pedir(client, h, **extra):
+    body = {"clave": "AJOKG", "descripcion": "AJO KILO", "unidad": "KILO",
+            "linea": "FRUVE", "esquema": 2, "sat": "50161509", "sat_unidad": "KGM"}
+    body.update(extra)
+    return client.post("/api/v1/productos/alta-sae", headers=h, json=body)
+
+
+def test_alta_se_pide_para_las_cuatro_empresas_por_defecto(client, env, auth_as):
+    """Sin lista de empresas van las CUATRO: el estado que hoy duele es el
+    producto que quedó creado en una sola."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = _pedir(client, h, producto_id=env["prod"], origen="WHATSAPP")
+    assert r.status_code == 201, r.text
+    sol = r.json()
+    assert sol["estado"] == "PENDIENTE" and sol["origen"] == "WHATSAPP"
+    assert sol["empresas"] == ["02", "03", "04", "05"]
+    assert sol["datos"]["descripcion"] == "AJO KILO" and sol["datos"]["linea"] == "FRUVE"
+
+    # una empresa desconocida no se encola
+    assert _pedir(client, h, clave="OTRA", empresas=["02", "99"],
+                  ).status_code == 422
+
+
+def test_alta_es_idempotente_por_clave(client, env, auth_as):
+    """Dos «dale de alta AJOKG» seguidos devuelven LA MISMA solicitud: dos
+    altas vivas insertarían dos veces el mismo artículo en SAE."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    a = _pedir(client, h).json()
+    b = _pedir(client, h, descripcion="AJO KILO CORREGIDO")
+    assert b.status_code == 201
+    assert b.json()["id"] == a["id"]
+    # y no se cuela por la caja de la clave ni por espacios
+    c = _pedir(client, h, clave="  ajokg ")
+    assert c.json()["id"] == a["id"]
+
+
+def test_alta_rechaza_clave_que_ya_existe_en_sae(client, env, auth_as):
+    """Si la clave ya está en el espejo de SAE, no hay que crearla: hay que
+    ligarla. Encolar un INSERT aquí lo duplicaría."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    with SessionLocal() as s:
+        s.add(ClaveSae(tenant_id=env["tenant_id"], empresa="02", clave="AJOKG",
+                       descripcion="AJO", activa=True))
+        s.commit()
+    r = _pedir(client, h)
+    assert r.status_code == 409
+    assert "ya existe en SAE" in r.json()["detail"]
+
+
+def test_reclamar_es_excluyente_y_reportar_cierra_una_sola_vez(client, env, auth_as, conector):
+    """El conector reclama (EN_CURSO) y reporta una vez. Un segundo reporte es
+    la puerta de atrás al reintento, así que se rechaza."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    sol = _pedir(client, h, producto_id=env["prod"]).json()
+
+    auth_as(conector)
+    r = client.get("/api/v1/productos/alta-sae/pendiente", headers=h)
+    assert r.status_code == 200 and r.json()["id"] == sol["id"]
+    assert r.json()["estado"] == "EN_CURSO"
+    # ya no hay pendientes: otro conector no la toma
+    assert client.get("/api/v1/productos/alta-sae/pendiente", headers=h).json() is None
+
+    rep = client.post(f"/api/v1/productos/alta-sae/{sol['id']}/reporte", headers=h,
+                      json={"por_empresa": {e: {"ok": True, "clave": "AJOKG"}
+                                            for e in ("02", "03", "04", "05")}})
+    assert rep.status_code == 200, rep.text
+    assert rep.json()["estado"] == "OK"
+    # la clave se estampó en el producto porque SAE la confirmó
+    auth_as(env["admin"])
+    assert client.get(f"/api/v1/productos/{env['prod']}",
+                      headers=h).json()["clave_sae"] == "AJOKG"
+    # segundo reporte: no
+    auth_as(conector)
+    assert client.post(f"/api/v1/productos/alta-sae/{sol['id']}/reporte", headers=h,
+                       json={"por_empresa": {}}).status_code == 409
+
+
+def test_alta_parcial_no_es_ok_ni_error(client, env, auth_as, conector):
+    """Una empresa creada y otra no: PARCIAL. No es OK (falta trabajo) ni ERROR
+    (algo ya se creó y eso no se puede repetir)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    sol = _pedir(client, h, producto_id=env["prod"], empresas=["02", "03"]).json()
+    auth_as(conector)
+    client.get("/api/v1/productos/alta-sae/pendiente", headers=h)
+    rep = client.post(f"/api/v1/productos/alta-sae/{sol['id']}/reporte", headers=h,
+                      json={"por_empresa": {"02": {"ok": True, "clave": "AJOKG"},
+                                            "03": {"ok": False, "error": "clave ocupada"}},
+                            "motivo": "en la 03 la clave ya era de otro artículo"})
+    assert rep.status_code == 200
+    out = rep.json()
+    assert out["estado"] == "PARCIAL"
+    assert out["resultado"]["03"]["error"] == "clave ocupada"
+    assert "03" in out["motivo"]
+    # con la 02 creada, la clave sí se estampa: allá ya existe
+    auth_as(env["admin"])
+    assert client.get(f"/api/v1/productos/{env['prod']}",
+                      headers=h).json()["clave_sae"] == "AJOKG"
+
+
+def test_alta_sin_confirmacion_no_estampa_la_clave(client, env, auth_as, conector):
+    """Ninguna empresa creada = ERROR y el producto se queda SIN clave: el
+    Facturador no se apunta una clave que SAE no confirmó."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    sol = _pedir(client, h, producto_id=env["prod"], empresas=["02"]).json()
+    auth_as(conector)
+    client.get("/api/v1/productos/alta-sae/pendiente", headers=h)
+    rep = client.post(f"/api/v1/productos/alta-sae/{sol['id']}/reporte", headers=h,
+                      json={"por_empresa": {"02": {"ok": False, "error": "SAE apagado"}}})
+    assert rep.json()["estado"] == "ERROR"
+    auth_as(env["admin"])
+    assert client.get(f"/api/v1/productos/{env['prod']}",
+                      headers=h).json()["clave_sae"] in (None, "")
+    # y como quedó cerrada, pedirla otra vez SÍ encola (nada se creó allá)
+    assert _pedir(client, h, empresas=["02"]).status_code == 201
+
+
+def test_alta_reclamada_sin_reporte_se_cierra_diciendo_que_hay_que_revisar(client, env, auth_as, conector):
+    """Una alta que el conector tomó y nunca reportó NO se re-encola: pudo
+    haber entrado a SAE. Se cierra como ERROR y el motivo manda a revisar."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    sol = _pedir(client, h).json()
+    auth_as(conector)
+    client.get("/api/v1/productos/alta-sae/pendiente", headers=h)
+    auth_as(env["admin"])
+    with SessionLocal() as s:
+        s.query(SolicitudAltaSae).filter(
+            SolicitudAltaSae.id == uuid.UUID(sol["id"])
+        ).update({"iniciada_at": datetime.now(timezone.utc) - timedelta(hours=2)})
+        s.commit()
+
+    lista = client.get("/api/v1/productos/alta-sae", headers=h).json()["items"]
+    cerrada = next(x for x in lista if x["id"] == sol["id"])
+    assert cerrada["estado"] == "ERROR"
+    assert "REVISA EN SAE" in cerrada["motivo"]
+
+
+def test_alta_exige_permiso_de_catalogo(client, env, auth_as):
+    """Pedir el alta es trabajo de catálogo: un tomador no la pide."""
+    auth_as(env["tomador"]); h = _hdr(env["tomador"])
+    assert _pedir(client, h).status_code == 403
