@@ -880,3 +880,45 @@ def test_liberar_pedido_no_abre_el_candado_de_factura(client, env, auth_as):
                      json={"motivo": "x y z"})
     assert r2.status_code == 409
     assert "cancelando en SAE" in r2.json()["detail"]
+
+
+def test_reporte_compras_pivotea_por_fecha_y_presentacion(client, env, auth_as):
+    """La materia prima de la lista de compras: cuánto se pide de cada
+    producto+presentación por fecha de entrega, desde remisiones vivas. La
+    canceladas no compran nada y la presentación nunca se mezcla."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+
+    def rem_con_fecha(qty, fecha):
+        body = {
+            "cliente_facturacion_id": env["cli_a"],
+            "almacen_id": env["alm_a"],
+            "fecha_entrega": fecha,
+            "lineas": [{"producto_id": env["prod_a"], "presentacion": "KILO",
+                        "cantidad_solicitada": qty, "precio_unitario": "5"}],
+        }
+        r = client.post("/api/v1/remisiones", headers=h, json=body)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    rem_con_fecha("10", "2031-01-06")
+    rem_con_fecha("7", "2031-01-06")      # mismo día: se suma
+    rem_con_fecha("3", "2031-01-07")      # otro día: otra fila
+    cancelada = rem_con_fecha("99", "2031-01-06")
+    client.post(f"/api/v1/remisiones/{cancelada['id']}/cancelar", headers=h)
+
+    r = client.get("/api/v1/remisiones/reporte-compras"
+                   "?fechas=2031-01-06,2031-01-07", headers=h)
+    assert r.status_code == 200, r.text
+    filas = r.json()["filas"]
+    por_fecha = {f["fecha"]: f for f in filas if f["unidad"] == "KILO"}
+    assert float(por_fecha["2031-01-06"]["cantidad"]) == 17.0, filas   # 10+7, sin la cancelada
+    assert float(por_fecha["2031-01-07"]["cantidad"]) == 3.0, filas
+
+    # fechas ilegibles no pasan
+    assert client.get("/api/v1/remisiones/reporte-compras?fechas=ayer",
+                      headers=h).status_code == 422
+
+    # con perfil, solo el universo de ese Master (aquí: ninguno → vacío)
+    r2 = client.get("/api/v1/remisiones/reporte-compras"
+                    "?fechas=2031-01-06&perfil=ehmo", headers=h)
+    assert r2.status_code == 200 and r2.json()["filas"] == []

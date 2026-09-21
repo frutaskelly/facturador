@@ -613,6 +613,82 @@ def _decorar_detalle(db: Session, ctx: AuthContext, rem: Remision) -> Remision:
     return rem
 
 
+# OJO con el orden: esta ruta va ANTES de GET /{rem_id} — FastAPI casa en
+# orden de declaración y "reporte-compras" parsearía como UUID (422).
+@router.get("/reporte-compras")
+def reporte_compras(
+    fechas: str = Query(..., description="Fechas de ENTREGA, ISO, separadas por coma"),
+    perfil: Optional[str] = Query(default=None, max_length=40),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """La materia prima de la lista de compras (21-sep-2026, meta 1).
+
+    El comando de WhatsApp «lista de compras <días>» hoy pivotea el Master de
+    Google Sheets. Este endpoint entrega LO MISMO desde las remisiones vivas:
+    cuánto se pide de cada producto+presentación por fecha de entrega. La
+    agregación por día y el pivote los sigue haciendo el bot — aquí solo viven
+    los datos, para que el reporte no dependa de la hoja.
+
+    `perfil` acota al universo del Master de ese perfil: las remisiones cuya OC
+    entró con ancla EHMO:<perfil>:. Sin perfil van todas las remisiones con
+    entrega en esas fechas — más de lo que el Master ve, no menos.
+
+    La UNIDAD que viaja es lineas_remision.presentacion, que ya es canónica
+    (KILO/PIEZA/...): la regla del dueño de nunca mezclar unidades se cumple
+    aguas abajo agrupando por ella.
+    """
+    try:
+        dias = sorted({date.fromisoformat(f.strip()) for f in fechas.split(",") if f.strip()})
+    except ValueError:
+        raise HTTPException(status_code=422, detail="fechas: ISO yyyy-mm-dd separadas por coma")
+    if not dias or len(dias) > 14:
+        raise HTTPException(status_code=422, detail="entre 1 y 14 fechas")
+
+    q = (
+        db.query(
+            Producto.clave_sae,
+            Producto.nombre,
+            LineaRemision.presentacion,
+            Remision.fecha_entrega,
+            func.sum(LineaRemision.cantidad_solicitada).label("cantidad"),
+            func.array_agg(func.distinct(func.coalesce(Remision.nota_entrega, ""))).label("hospitales"),
+            func.count(func.distinct(Remision.id)).label("remisiones"),
+            func.count().label("partidas"),
+        )
+        .join(LineaRemision, LineaRemision.remision_id == Remision.id)
+        .join(Producto, Producto.id == LineaRemision.producto_id)
+        .filter(
+            Remision.deleted_at.is_(None),
+            Remision.estado != "CANCELADA",
+            Remision.fecha_entrega.in_(dias),
+            LineaRemision.cantidad_solicitada > 0,
+        )
+    )
+    if perfil:
+        q = q.join(OCRecibida, OCRecibida.remision_id == Remision.id).filter(
+            OCRecibida.origen_externo.like(f"EHMO:{perfil}:%")
+        )
+    q = q.group_by(Producto.clave_sae, Producto.nombre,
+                   LineaRemision.presentacion, Remision.fecha_entrega)
+
+    filas = [
+        {
+            "clave": r.clave_sae,
+            "descripcion": r.nombre,
+            "unidad": r.presentacion,
+            "fecha": r.fecha_entrega.isoformat(),
+            "cantidad": str(r.cantidad),
+            "hospitales": sorted(h for h in (r.hospitales or []) if h),
+            "remisiones": r.remisiones,
+            "partidas": r.partidas,
+        }
+        for r in q.all()
+    ]
+    return {"filas": filas, "fechas": [d.isoformat() for d in dias],
+            "remisiones": sum(f["remisiones"] for f in filas)}
+
+
 @router.get("/{rem_id}", response_model=RemisionDetailOut)
 def get_remision(
     rem_id: UUID,
