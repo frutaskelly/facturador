@@ -922,3 +922,43 @@ def test_reporte_compras_pivotea_por_fecha_y_presentacion(client, env, auth_as):
     r2 = client.get("/api/v1/remisiones/reporte-compras"
                     "?fechas=2031-01-06&perfil=ehmo", headers=h)
     assert r2.status_code == 200 and r2.json()["filas"] == []
+
+
+def test_reporte_compras_usa_el_documento_nuevo_si_hay_incidencia(client, env, auth_as):
+    """Cuando la OC recibió una versión posterior sin aplicar, la lista de
+    compras usa las líneas del DOCUMENTO nuevo y excluye las capturadas: comprar
+    con la versión vieja compra de menos justo donde el cliente cambió."""
+    from app.models.oc_recibida import OCRecibida
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    body = {
+        "cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+        "fecha_entrega": "2031-02-03",
+        "lineas": [{"producto_id": env["prod_a"], "presentacion": "KILO",
+                    "cantidad_solicitada": "10", "precio_unitario": "5"}],
+    }
+    rem = client.post("/api/v1/remisiones", headers=h, json=body).json()
+    with SessionLocal() as s:
+        s.add(OCRecibida(
+            tenant_id=env["admin_a"]["tenant_id"],
+            canal="WHATSAPP", origen_externo="EHMO:prueba:X-1", folio_externo="X-1",
+            estado="ASIGNADA", remision_id=uuid.UUID(rem["id"]),
+            payload={"lineas": [{"descripcion": "AJO", "cantidad": "10", "unidad": "KILO"}]},
+            payload_nuevo={"lineas": [{"descripcion": "AJO", "cantidad": "25",
+                                       "unidad": "KILO", "clave": "AJOKG"},
+                                      {"descripcion": "SAL DE GRANO", "cantidad": "2",
+                                       "unidad": "KILO"}]},
+            cambio_detectado_at=datetime.now(timezone.utc),
+        ))
+        s.commit()
+
+    r = client.get("/api/v1/remisiones/reporte-compras?fechas=2031-02-03", headers=h)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["con_cambio_abierto"] == 1
+    filas = out["filas"]
+    # las capturadas (10 KILO del producto) NO están; las del documento sí
+    doc = [f for f in filas if f.get("documento_nuevo")]
+    assert {(f["descripcion"], f["cantidad"]) for f in doc} == {("AJO", "25"), ("SAL DE GRANO", "2")}
+    assert not [f for f in filas if not f.get("documento_nuevo")
+                and f["fecha"] == "2031-02-03"], filas
