@@ -472,6 +472,10 @@ class AltaSaeIn(BaseModel):
     empresas: list[str] = Field(default_factory=list)
     origen: str = Field(default="UI", max_length=12)
     nota: Optional[str] = Field(default=None, max_length=300)
+    # Sin `producto_id`, el alta crea el producto del catálogo con estos mismos
+    # datos (o reusa el del mismo nombre exacto). En `False` la solicitud se
+    # encola suelta: útil cuando la clave se va a ligar a mano después.
+    crear_producto: bool = True
 
 
 class AltaSaeOut(ORMModel):

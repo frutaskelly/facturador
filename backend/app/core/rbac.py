@@ -60,6 +60,11 @@ _OWNER_ROLE = "OWNER"
 #     /productos-cotizables, /listas-del-cliente, /cotizar-documento,
 #     /cotizar-requisicion y /cotizacion-pdf. Las escrituras de ese router
 #     (/precios/overrides) cuelgan de `lista_precios:gestionar` y NO entran.
+#   - PEDIR el alta de un producto en SAE (producto:alta_sae, 21-sep-2026): la
+#     meta del dueño es que el alta vaya «WhatsApp → Facturador → SAE», y para
+#     eso la conexión tiene que poder encolar la solicitud y crear el producto
+#     nuevo que la acompaña. Es angosto a propósito, como precio:depositar: crea
+#     lo que no existía y encola; NO edita, NO reapunta alias, NO da de baja.
 # Fuera, deliberadamente: cualquier cosa de CFDI nativo, borrar, usuarios,
 # series, `producto:gestionar` (reapuntar un alias afecta a todo el catálogo) y
 # `lista_precios:gestionar` (la conexión consulta precios, no los fija).
@@ -72,6 +77,7 @@ PERMISOS_CONEXION = frozenset({
     "factura:espejo",
     "menu:cotizador",     # consultar precios
     "precio:depositar",   # y fijarlos SOLO en listas que ya existen
+    "producto:alta_sae",  # pedir el alta en SAE, sin poder tocar lo que existe
 })
 
 

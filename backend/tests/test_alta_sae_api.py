@@ -238,3 +238,67 @@ def test_alta_exige_permiso_de_catalogo(client, env, auth_as):
     """Pedir el alta es trabajo de catálogo: un tomador no la pide."""
     auth_as(env["tomador"]); h = _hdr(env["tomador"])
     assert _pedir(client, h).status_code == 403
+
+
+def test_alta_crea_el_producto_del_catalogo_o_reusa_el_del_mismo_nombre(client, env, auth_as):
+    """El producto nace AQUÍ, no en quien pide: así la conexión del bot puede
+    dar de alta sin que se le preste `producto:gestionar`. Y si ya hay uno con
+    el mismo nombre exacto, se reusa — dos productos iguales son justo lo que el
+    catálogo existe para evitar."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    r = _pedir(client, h, clave="PERANUEVA", descripcion="PERA DE AGUA")
+    assert r.status_code == 201, r.text
+    pid = r.json()["producto_id"]
+    assert pid, r.json()
+    prod = client.get(f"/api/v1/productos/{pid}", headers=h).json()
+    assert prod["nombre"] == "PERA DE AGUA" and prod["clave_sae"] == "PERANUEVA"
+    assert prod["unidad_base"] == "KILO" and prod["clave_sat"] == "50161509"
+
+    # el mismo nombre no crea otro producto: se reusa (aunque la clave difiera)
+    r2 = _pedir(client, h, clave="PERAOTRA", descripcion="  pera de agua ")
+    assert r2.status_code == 201
+    assert r2.json()["producto_id"] == pid
+
+    # crear_producto=False deja la solicitud suelta, para ligarla a mano
+    r3 = _pedir(client, h, clave="SUELTA", descripcion="MANGO SUELTO",
+                crear_producto=False)
+    assert r3.status_code == 201 and r3.json()["producto_id"] is None
+
+
+def test_el_permiso_angosto_alcanza_para_pedir_el_alta(client, env, auth_as):
+    """`producto:alta_sae` es el permiso de la conexión del bot: encola y crea
+    el producto nuevo, sin abrirle el resto del catálogo."""
+    from app.models import Permission, Role, RolePermission
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    suffix = uuid.uuid4().hex[:8]
+    db = SessionLocal()
+    try:
+        assert db.query(Permission).filter(
+            Permission.id == "producto:alta_sae").one_or_none() is not None, \
+            "el permiso tiene que estar sembrado en el catálogo (migración 0082)"
+        rol = Role(tenant_id=env["tenant_id"], nombre=f"SOLO-ALTA-{suffix}",
+                   descripcion="solo pedir altas")
+        db.add(rol); db.flush()
+        for pid in ("menu:productos", "producto:alta_sae"):
+            db.add(RolePermission(role_id=rol.id, permission_id=pid))
+        u = User(email=f"alta-{suffix}@t.test", auth_user_id=f"sub-alta-{suffix}",
+                 full_name="solo alta")
+        db.add(u); db.flush()
+        m = Membership(tenant_id=env["tenant_id"], user_id=u.id, role_id=rol.id)
+        db.add(m); db.flush(); db.commit()
+        quien = {"sub": u.auth_user_id, "email": u.email, "tenant_id": env["tenant_id"]}
+
+        auth_as(quien)
+        r = _pedir(client, _hdr(quien), clave="CHILEALTA", descripcion="CHILE NUEVO")
+        assert r.status_code == 201, r.text
+        assert r.json()["producto_id"], "con este permiso también nace el producto"
+        # …y nada más: editar el catálogo sigue cerrado
+        assert client.patch(f"/api/v1/productos/{r.json()['producto_id']}",
+                            headers=_hdr(quien), json={"nombre": "OTRO"}).status_code == 403
+    finally:
+        db.query(Membership).filter(Membership.id == m.id).delete()
+        db.query(User).filter(User.id == u.id).delete()
+        db.query(RolePermission).filter(RolePermission.role_id == rol.id).delete()
+        db.query(Role).filter(Role.id == rol.id).delete()
+        db.commit(); db.close()
