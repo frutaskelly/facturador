@@ -495,16 +495,19 @@ def listar(
             OCRecibida.cambio_resuelto_at.is_(None),
         )
     if q:
-        like = f"%{q}%"
-        # También el punto de entrega y las observaciones del documento: es
-        # donde vive "el pedido que decía tal cosa" cuando el folio no se sabe.
-        query = query.filter(
-            OCRecibida.folio_externo.ilike(like)
-            | OCRecibida.remitente.ilike(like)
-            | OCRecibida.archivo_nombre.ilike(like)
-            | OCRecibida.punto_entrega.ilike(like)
-            | OCRecibida.payload["observaciones"].astext.ilike(like)
-        )
+        # Por PALABRAS, igual que el buscador de remisiones (comparten la misma
+        # tabla): "VH-39 LUN" tiene que traer la OC "VH-39SAL-LUN".
+        for termino in q.split():
+            like = f"%{termino}%"
+            # También el punto de entrega y las observaciones del documento: es
+            # donde vive "el pedido que decía tal cosa" cuando el folio no se sabe.
+            query = query.filter(
+                OCRecibida.folio_externo.ilike(like)
+                | OCRecibida.remitente.ilike(like)
+                | OCRecibida.archivo_nombre.ilike(like)
+                | OCRecibida.punto_entrega.ilike(like)
+                | OCRecibida.payload["observaciones"].astext.ilike(like)
+            )
     if fecha_desde:
         query = query.filter(OCRecibida.recibida_at >= fecha_desde)
     if fecha_hasta:

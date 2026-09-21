@@ -310,23 +310,27 @@ def list_remisiones(
     if fecha_hasta:
         query = query.filter(Remision.fecha_remision <= fecha_hasta)
     if q and q.strip():
-        termino = q.strip()
-        variantes = {termino}
-        # SAE muestra los folios rellenos de ceros ("ZHGO 0000588") pero aquí
-        # se guardan sin ellos (regla del proyecto): se busca también la
-        # variante con los ceros a la izquierda de cada número quitados.
-        variantes.add(re.sub(r"(?<!\d)0+(?=\d)", "", termino))
-        condiciones = []
-        for v in variantes:
-            like = f"%{v}%"
-            condiciones += [
-                Remision.folio_interno.ilike(like),
-                Remision.su_pedido.ilike(like),
-                Remision.factura_sae.ilike(like),
-                # "ZHGO 588" y "ZHGO588" son la misma factura para quien pregunta.
-                func.replace(Remision.factura_sae, " ", "").ilike(like.replace(" ", "")),
-            ]
-        query = query.filter(or_(*condiciones))
+        # Se busca por PALABRAS, no por la frase exacta: la OC se captura
+        # "VH-39SAL-LUN" pero quien pregunta teclea "VH-39 LUN". Cada palabra
+        # debe aparecer en alguno de los campos (Y entre palabras, O entre
+        # campos); con la frase completa esa búsqueda no devolvía nada.
+        for termino in q.split():
+            variantes = {termino}
+            # SAE muestra los folios rellenos de ceros ("ZHGO 0000588") pero aquí
+            # se guardan sin ellos (regla del proyecto): se busca también la
+            # variante con los ceros a la izquierda de cada número quitados.
+            variantes.add(re.sub(r"(?<!\d)0+(?=\d)", "", termino))
+            condiciones = []
+            for v in variantes:
+                like = f"%{v}%"
+                condiciones += [
+                    Remision.folio_interno.ilike(like),
+                    Remision.su_pedido.ilike(like),
+                    Remision.factura_sae.ilike(like),
+                    # "ZHGO 588" y "ZHGO588" son la misma factura para quien pregunta.
+                    func.replace(Remision.factura_sae, " ", "").ilike(like),
+                ]
+            query = query.filter(or_(*condiciones))
     query = query.order_by(
         Remision.fecha_remision.desc(),
         _FOLIO_PREFIJO.desc(),

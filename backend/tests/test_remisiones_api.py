@@ -619,6 +619,7 @@ def test_busqueda_q_folio_pedido_factura_sae(client, env, auth_as):
 
     con_pedido = _crear(su_pedido=f"HO-34-{tag}")
     con_sae = _crear(factura_sae=f"Z{tag} 588")
+    con_oc = _crear(su_pedido=f"VH-{tag}SAL-LUN")
     _crear()  # ruido: no debe aparecer en las búsquedas
 
     def _ids(q):
@@ -633,6 +634,8 @@ def test_busqueda_q_folio_pedido_factura_sae(client, env, auth_as):
     assert _ids(f"Z{tag} 588") == {con_sae["id"]}
     assert _ids(f"Z{tag}588") == {con_sae["id"]}
     assert _ids(f"Z{tag} 0000588") == {con_sae["id"]}
+    # Por PALABRAS: la OC va pegada ("VH-…SAL-LUN") y se teclea separada.
+    assert _ids(f"VH-{tag} LUN") == {con_oc["id"]}
     assert _ids(f"sin-coincidencias-{tag}") == set()
 
 
