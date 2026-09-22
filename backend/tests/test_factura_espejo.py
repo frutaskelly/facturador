@@ -989,6 +989,9 @@ def test_el_resumen_del_espejo_contesta_por_la_oc_y_con_detalle(client, env, aut
     f = out["folios"][0]
     assert f["observaciones"] == "ENTREGA SEM 38 · OC 24610"
     assert f["uuid"] and float(f["iva"]) == 100.0 and float(f["ieps"]) == 25.0
+    # de quién es y si está timbrada, sin tener que pedir el cliente aparte
+    assert f["cliente"], f
+    assert "fecha_timbrado" in f and "fecha_cancelacion" in f
 
     # por serie+folio, con y sin espacio
     for termino in ("ZHGO 7002", "ZHGO7002"):
