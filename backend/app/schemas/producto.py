@@ -449,6 +449,33 @@ class ProductoClienteUpsert(BaseModel):
     sucursal_id: Optional[uuid.UUID] = None
 
 
+class ImpuestosPorClaveIn(BaseModel):
+    """Claves de SAE (o SKU) de las que se quiere saber su fiscalidad."""
+    claves: list[str] = Field(min_length=1, max_length=500)
+
+
+class ImpuestoDeClaveOut(BaseModel):
+    """Lo que el bot necesita saber de un producto para decidir impuestos, en
+    una sola pregunta por lote. Antes lo resolvía contra SAE clave por clave
+    (INVE.CVE_ESQIMPU → IMPU.IMPUESTO4).
+
+    `iva` e `ieps` van como FRACCIÓN (0.16 = 16%), que es como el Facturador las
+    guarda — quien imprime un porcentaje multiplica, y así nadie tiene que
+    adivinar en qué unidad viene."""
+    clave: str
+    encontrado: bool = False
+    producto_id: Optional[uuid.UUID] = None
+    nombre: str = ""
+    esquema: str = ""
+    iva: Decimal = Decimal("0")
+    ieps: Decimal = Decimal("0")
+    tipo_ieps: str = "TASA"
+    ieps_cuota: Decimal = Decimal("0")
+    iva_exento: bool = False
+    objeto_imp: str = "02"
+    activo: bool = True
+
+
 # ── Altas en SAE: la cola entre el Facturador y el conector ──────────────────
 # El backend no ve SAE; el conector sí. Mismo reparto que el espejo de facturas.
 
