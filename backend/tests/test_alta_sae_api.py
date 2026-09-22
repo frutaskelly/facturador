@@ -7,6 +7,7 @@ alta viva por clave, reclamo excluyente, cierre único, y la clave estampada en
 el producto SOLO cuando SAE la confirmó.
 """
 import uuid
+from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -302,3 +303,35 @@ def test_el_permiso_angosto_alcanza_para_pedir_el_alta(client, env, auth_as):
         db.query(RolePermission).filter(RolePermission.role_id == rol.id).delete()
         db.query(Role).filter(Role.id == rol.id).delete()
         db.commit(); db.close()
+
+
+def test_impuestos_por_clave_contesta_por_lote_y_no_calla_lo_que_no_conoce(client, env, auth_as):
+    """El bot resuelve impuestos contra SAE clave por clave desde seis
+    funciones. Esto contesta lo mismo por lote — y una clave que no existe
+    vuelve con `encontrado: false` en vez de un 0% silencioso: «no lleva IVA» y
+    «no sé quién es» no son la misma respuesta."""
+    from app.models import EsquemaImpuesto, Producto
+
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    with SessionLocal() as s:
+        esq = EsquemaImpuesto(tenant_id=env["tenant_id"], codigo="IVA16",
+                              nombre="IVA 16%", iva_tasa=Decimal("0.16"))
+        s.add(esq); s.flush()
+        s.query(Producto).filter(Producto.id == uuid.UUID(env["prod"])).update(
+            {"clave_sae": "AJOKG", "esquema_impuesto_id": esq.id})
+        s.commit()
+
+    r = client.post("/api/v1/productos/impuestos", headers=h,
+                    json={"claves": ["AJOKG", "  ajokg ", "NOEXISTE"]})
+    assert r.status_code == 200, r.text
+    por = {x["clave"]: x for x in r.json()}
+    assert por["AJOKG"]["encontrado"] is True
+    assert float(por["AJOKG"]["iva"]) == 0.16 and por["AJOKG"]["esquema"] == "IVA16"
+    assert por["  ajokg "]["encontrado"] is True, "la clave casa sin importar caja ni espacios"
+    assert por["NOEXISTE"]["encontrado"] is False
+    assert float(por["NOEXISTE"]["iva"]) == 0.0
+
+    # también casa por SKU: el bot llama con lo que traiga el documento
+    sku = client.get(f"/api/v1/productos/{env['prod']}", headers=h).json()["sku"]
+    r2 = client.post("/api/v1/productos/impuestos", headers=h, json={"claves": [sku]})
+    assert r2.json()[0]["encontrado"] is True

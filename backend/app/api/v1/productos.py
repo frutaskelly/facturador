@@ -59,6 +59,8 @@ from ...schemas.producto import (
     ImportPreviewOut,
     ImportProductoResultado,
     ImportResultOut,
+    ImpuestoDeClaveOut,
+    ImpuestosPorClaveIn,
     LineaPegadaOut,
     MatchIn,
     MatchResultOut,
@@ -1817,6 +1819,69 @@ def create_producto(
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)
     return obj
+
+
+@router.post("/impuestos", response_model=list[ImpuestoDeClaveOut])
+def impuestos_por_clave(
+    payload: ImpuestosPorClaveIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """La fiscalidad de un lote de claves, en una sola pregunta.
+
+    El bot resuelve impuestos contra SAE clave por clave (INVE.CVE_ESQIMPU →
+    IMPU.IMPUESTO4) desde seis funciones distintas. Esto contesta lo mismo con
+    el esquema del producto, que es el único cerebro fiscal de este lado
+    (`services/fiscal.calcular_linea_producto` lee estos mismos campos).
+
+    La clave se busca por `clave_sae` y, si no cae, por `sku`: el bot llama con
+    lo que traiga el documento y no siempre es lo mismo.
+
+    Una clave que no existe aquí NO se calla: vuelve con `encontrado: false`.
+    Callarla sería contestar «0% de IVA» a un producto que nadie conoce, que es
+    la peor respuesta posible — el bot tiene que poder distinguir «no lleva
+    IVA» de «no sé quién es»."""
+    # Se devuelve la clave TAL COMO LLEGÓ, no normalizada: quien pregunta arma
+    # su diccionario con lo que mandó, y devolverle otra cosa lo obliga a
+    # normalizar igual que aquí para volver a encontrarla.
+    pedidas = [str(c) for c in payload.claves if str(c or "").strip()]
+    if not pedidas:
+        return []
+    arriba = {c.strip().upper() for c in pedidas}
+    q = (
+        db.query(Producto, EsquemaImpuesto)
+        .outerjoin(EsquemaImpuesto, EsquemaImpuesto.id == Producto.esquema_impuesto_id)
+        .filter(Producto.tenant_id == ctx.tenant_id, Producto.deleted_at.is_(None),
+                or_(func.upper(func.btrim(Producto.clave_sae)).in_(arriba),
+                    func.upper(func.btrim(Producto.sku)).in_(arriba)))
+    )
+    por_clave: dict = {}
+    for prod, esq in q.all():
+        for llave in ((prod.clave_sae or "").strip().upper(), (prod.sku or "").strip().upper()):
+            if llave and llave in arriba:
+                por_clave.setdefault(llave, (prod, esq))
+    out = []
+    for c in pedidas:
+        par = por_clave.get(c.strip().upper())
+        if par is None:
+            out.append(ImpuestoDeClaveOut(clave=c, encontrado=False))
+            continue
+        prod, esq = par
+        out.append(ImpuestoDeClaveOut(
+            clave=c, encontrado=True, producto_id=prod.id, nombre=prod.nombre,
+            esquema=(esq.codigo if esq else ""),
+            # sin esquema manda lo que trae el producto: es lo que hace el
+            # cálculo fiscal de este lado, y las dos respuestas tienen que ser
+            # la misma o el bot y la factura dirían cosas distintas
+            iva=(esq.iva_tasa if esq else (prod.iva_tasa or 0)),
+            ieps=(esq.ieps_tasa if esq else (prod.ieps_tasa or 0)),
+            tipo_ieps=(esq.tipo_ieps if esq else "TASA"),
+            ieps_cuota=(esq.ieps_cuota if esq else 0),
+            iva_exento=bool(esq.iva_exento) if esq else False,
+            objeto_imp=prod.objeto_imp or "02",
+            activo=bool(prod.activo),
+        ))
+    return out
 
 
 # OJO con el orden: estas rutas van ANTES de GET /{producto_id} — FastAPI casa
