@@ -836,6 +836,8 @@ def espejo_resumen(
     desde: Optional[date] = Query(default=None),
     q: Optional[str] = Query(default=None, max_length=120,
                              description="Busca en la observación, el UUID y serie+folio"),
+    folio: Optional[int] = Query(default=None, ge=1,
+                                 description="Folio EXACTO (con `serie`, devuelve una)"),
     detalle: bool = Query(default=False, description="Añade fecha, UUID, observación e impuestos"),
     lineas: bool = Query(default=False, description="Añade las partidas (exige serie o q)"),
     limit: int = Query(default=500, ge=1, le=2000),
@@ -868,6 +870,11 @@ def espejo_resumen(
     )
     if serie:
         base = base.filter(Factura.serie == serie.strip().upper())
+    if folio is not None:
+        # EXACTO, no como `q`: buscar «ZHGO 37» por texto casa también con la
+        # 370 y la 371 —es un prefijo— y quien pide una factura concreta
+        # recibía 22 y no sabía cuál era la suya.
+        base = base.filter(Factura.folio == folio)
     if desde:
         base = base.filter(Factura.fecha >= desde)
     if q and q.strip():
