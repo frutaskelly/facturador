@@ -15,9 +15,10 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
+from uuid import UUID
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
@@ -96,6 +97,9 @@ def _plaza_unica(db: Session, tenant_id) -> dict:
 def cartera(
     agrupar: Literal["proyecto", "cliente", "sucursal"] = Query(default="proyecto"),
     incluir_en_cancelacion: bool = Query(default=False),
+    desde: date | None = Query(default=None, description="Solo facturas emitidas desde esta fecha"),
+    hasta: date | None = Query(default=None, description="Solo facturas emitidas hasta esta fecha"),
+    cliente_id: UUID | None = Query(default=None, description="Acota el reporte a un cliente"),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
@@ -104,8 +108,16 @@ def cartera(
 
     Vencido y cubetas usan la fecha de vencimiento (fecha + días de crédito del
     cliente), el mismo criterio del estado de cuenta.
+
+    `desde`/`hasta` acotan por FECHA DE EMISIÓN de la factura, que es lo que
+    hace que los filtros globales del tablero muevan también la cartera. Ojo
+    con leerlo: el saldo y el vencido siguen siendo los de HOY —solo se mira un
+    subconjunto de facturas—, así que un rango corto no es "lo que me debían
+    entonces" sino "lo que me deben de lo que facturé en ese tramo".
     """
     hoy = datetime.now(timezone.utc).date()
+    if cliente_id is not None and not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
     serie_plaza = _serie_a_plaza(db, ctx.tenant_id) if agrupar == "sucursal" else {}
     plaza_unica = _plaza_unica(db, ctx.tenant_id) if agrupar == "sucursal" else {}
 
@@ -124,8 +136,14 @@ def cartera(
             Factura.saldo_insoluto > 0,
         )
     )
-    for f, nombre_cliente, dias_credito, cliente_id in q.all():
-        if not ctx.cliente_permitido(cliente_id):
+    if desde is not None:
+        q = q.filter(sa.cast(Factura.fecha, sa.Date) >= desde)
+    if hasta is not None:
+        q = q.filter(sa.cast(Factura.fecha, sa.Date) <= hasta)
+    if cliente_id is not None:
+        q = q.filter(Factura.cliente_id == cliente_id)
+    for f, nombre_cliente, dias_credito, fila_cliente_id in q.all():
+        if not ctx.cliente_permitido(fila_cliente_id):
             continue
         saldo = Decimal(f.saldo_insoluto)
         if _en_cancelacion(f.cancelacion_msj):
@@ -135,13 +153,13 @@ def cartera(
         if agrupar == "cliente":
             etiqueta = nombre_cliente
         elif agrupar == "sucursal":
-            etiqueta = serie_plaza.get(f.serie or "") or plaza_unica.get(cliente_id) or "Sin plaza"
+            etiqueta = serie_plaza.get(f.serie or "") or plaza_unica.get(fila_cliente_id) or "Sin plaza"
         else:
             etiqueta = _fila_de_reporte(f, nombre_cliente)
 
         fila = filas.setdefault(etiqueta, {
             "saldo": ZERO, "vencido": ZERO, "facturas": 0,
-            "cliente_id": str(cliente_id), "serie": f.serie,
+            "cliente_id": str(fila_cliente_id), "serie": f.serie,
         })
         fila["saldo"] += saldo
         fila["facturas"] += 1
@@ -156,12 +174,15 @@ def cartera(
         # cuenta acotado: el enlace se deja en blanco antes que llevar a otro lado.
         if fila["serie"] != f.serie:
             fila["serie"] = None
-        if fila["cliente_id"] != str(cliente_id):
+        if fila["cliente_id"] != str(fila_cliente_id):
             fila["cliente_id"] = None
 
     return {
         "corte": hoy,
         "agrupar": agrupar,
+        "desde": desde,
+        "hasta": hasta,
+        "cliente_id": cliente_id,
         "filas": [
             {"etiqueta": nombre, **datos}
             for nombre, datos in sorted(filas.items(), key=lambda kv: kv[1]["saldo"], reverse=True)
@@ -174,41 +195,118 @@ def cartera(
     }
 
 
-def _facturado(db: Session, ctx: AuthContext, desde: date, hasta: date) -> Decimal:
-    """Lo timbrado en un rango, ambos extremos incluidos."""
-    q = (
-        db.query(sa.func.coalesce(sa.func.sum(Factura.total), 0))
-        .filter(
-            Factura.deleted_at.is_(None),
-            Factura.estado == "TIMBRADA",
-            sa.cast(Factura.fecha, sa.Date) >= desde,
-            sa.cast(Factura.fecha, sa.Date) <= hasta,
-        )
-    )
+# ── Ventas ───────────────────────────────────────────────────────────────────
+#
+# Una sola serie de tiempo: el rango manda y la granularidad es el paso con que
+# se recorre. Antes eran dos gráficas fijas —30 días y 6 meses— que no se podían
+# mover; "el mes pasado", "los últimos 12 meses" o "esa semana de agosto" son
+# ahora el mismo endpoint con otro rango, y así los filtros del tablero mueven
+# todo a la vez en lugar de cada gráfica por su cuenta.
+
+_MAX_DIAS = 1827          # 5 años; tope para que un rango absurdo no arme mil cubetas
+_DIAS_DEFAULT = 30
+Granularidad = Literal["auto", "dia", "semana", "mes"]
+
+
+def _fin_de_mes(d: date) -> date:
+    return (d.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+
+
+def _sumar_meses(d: date, n: int) -> date:
+    """El mismo día n meses adelante o atrás, recortado al último del mes cuando
+    ese día no existe (31 de marzo − 1 mes = 28 o 29 de febrero)."""
+    indice = d.year * 12 + (d.month - 1) + n
+    primero = date(indice // 12, indice % 12 + 1, 1)
+    return primero.replace(day=min(d.day, _fin_de_mes(primero).day))
+
+
+def _inicio_de_cubeta(d: date, granularidad: str) -> date:
+    if granularidad == "dia":
+        return d
+    if granularidad == "semana":
+        return d - timedelta(days=d.weekday())   # lunes, como el resto del app
+    return d.replace(day=1)
+
+
+def _cubeta_siguiente(d: date, granularidad: str) -> date:
+    if granularidad == "dia":
+        return d + timedelta(days=1)
+    if granularidad == "semana":
+        return d + timedelta(days=7)
+    return _sumar_meses(d, 1)
+
+
+def _resolver_granularidad(desde: date, hasta: date, pedida: Granularidad) -> str:
+    """El paso que hace legible la gráfica cuando nadie lo eligió.
+
+    Los cortes son los que dejan la barra visible: por arriba de mes y medio,
+    una barra por día ya no se puede ni tocar con el dedo; por arriba de medio
+    año, ni las semanas caben.
+    """
+    if pedida != "auto":
+        return pedida
+    dias = (hasta - desde).days + 1
+    if dias <= 45:
+        return "dia"
+    if dias <= 180:
+        return "semana"
+    return "mes"
+
+
+def _rango_pedido(desde: date | None, hasta: date | None, hoy: date) -> tuple[date, date]:
+    """Normaliza el rango: por omisión, los últimos 30 días hasta hoy."""
+    if hasta is None:
+        hasta = hoy
+    if desde is None:
+        desde = hasta - timedelta(days=_DIAS_DEFAULT - 1)
+    if desde > hasta:
+        desde, hasta = hasta, desde
+    if (hasta - desde).days + 1 > _MAX_DIAS:
+        raise HTTPException(status_code=400, detail="El rango no puede pasar de 5 años")
+    return desde, hasta
+
+
+def _rango_anterior(desde: date, hasta: date) -> tuple[date, date]:
+    """El tramo con el que se compara: el equivalente inmediatamente anterior.
+
+    "Equivalente" no siempre es "los N días de antes". Un periodo a medias se
+    compara contra el MISMO tramo del periodo pasado —del 1 al 22 de septiembre
+    contra el 1 al 22 de agosto—, porque medirlo contra los 22 días corridos
+    previos partiría agosto por la mitad y el "vs mes pasado" dejaría de serlo.
+    Y un periodo completo retrocede por periodos enteros, no por días: febrero
+    contra enero, no contra los 28 días anteriores.
+    """
+    dias = (hasta - desde).days + 1
+    # Meses completos (uno o varios): se retrocede el mismo número de meses.
+    if desde.day == 1 and hasta == _fin_de_mes(hasta):
+        meses = (hasta.year - desde.year) * 12 + (hasta.month - desde.month) + 1
+        return _sumar_meses(desde, -meses), _fin_de_mes(_sumar_meses(desde, -1))
+    # Mes empezado: el mismo tramo del mes pasado, recortado si aquel fue más corto.
+    if desde.day == 1:
+        previo = _sumar_meses(desde, -1)
+        return previo, min(previo + timedelta(days=dias - 1), _fin_de_mes(previo))
+    # Semana empezada: el mismo tramo de la semana pasada.
+    if desde.weekday() == 0 and dias <= 7:
+        return desde - timedelta(days=7), hasta - timedelta(days=7)
+    # Cualquier otro rango: la ventana inmediata anterior, del mismo tamaño.
+    return desde - timedelta(days=dias), desde - timedelta(days=1)
+
+
+def _acotar(q, ctx: AuthContext, cliente_id: UUID | None):
+    """El candado del portal y el filtro global de cliente, en ese orden: el
+    filtro elige dentro de lo permitido, nunca lo ensancha."""
     if ctx.cliente_scope:
         q = q.filter(Factura.cliente_id.in_(ctx.cliente_scope))
-    return Decimal(q.scalar() or 0)
+    if cliente_id is not None:
+        q = q.filter(Factura.cliente_id == cliente_id)
+    return q
 
 
-@router.get("/ventas")
-def ventas(
-    dias: int = Query(default=30, ge=7, le=180, description="Días del detalle diario"),
-    meses: int = Query(default=6, ge=3, le=24, description="Meses de la serie mensual"),
-    db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_READ)),
-):
-    """Facturación: el detalle diario, el mes a mes, y el corte contra el
-    periodo anterior.
-
-    La comparación es contra el MISMO tramo del periodo pasado (los días
-    transcurridos de la semana contra esos mismos días de la semana anterior,
-    y del mes contra el mes anterior). Comparar una semana a medias contra una
-    semana completa siempre pinta una caída que no existe.
-    """
-    hoy = datetime.now(timezone.utc).date()
-
-    # ── detalle diario ──
-    desde = hoy - timedelta(days=dias - 1)
+def _timbradas_por_dia(
+    db: Session, ctx: AuthContext, desde: date, hasta: date, cliente_id: UUID | None,
+) -> dict[date, tuple[Decimal, int]]:
+    """{día: (facturado, facturas)} del rango. Solo los días CON facturas: el
+    relleno con ceros lo hace quien arma las cubetas."""
     q = (
         db.query(
             sa.cast(Factura.fecha, sa.Date).label("dia"),
@@ -219,88 +317,113 @@ def ventas(
             Factura.deleted_at.is_(None),
             Factura.estado == "TIMBRADA",
             sa.cast(Factura.fecha, sa.Date) >= desde,
+            sa.cast(Factura.fecha, sa.Date) <= hasta,
         )
         .group_by(sa.text("dia"))
     )
-    if ctx.cliente_scope:
-        q = q.filter(Factura.cliente_id.in_(ctx.cliente_scope))
-    por_dia = {r.dia: (Decimal(r.total or 0), r.facturas) for r in q.all()}
-    # Los días sin factura van con cero: una gráfica que salta del lunes al
-    # jueves miente sobre el ritmo.
-    diario = [
-        {
-            "fecha": desde + timedelta(days=i),
-            "total": por_dia.get(desde + timedelta(days=i), (ZERO, 0))[0],
-            "facturas": por_dia.get(desde + timedelta(days=i), (ZERO, 0))[1],
-        }
-        for i in range(dias)
-    ]
+    return {r.dia: (Decimal(r.total or 0), r.facturas) for r in _acotar(q, ctx, cliente_id).all()}
 
-    # ── semana en curso contra el mismo tramo de la anterior (lunes a hoy) ──
-    lunes = hoy - timedelta(days=hoy.weekday())
-    transcurridos = (hoy - lunes).days
-    semana_actual = _facturado(db, ctx, lunes, hoy)
-    lunes_previo = lunes - timedelta(days=7)
-    semana_previa = _facturado(db, ctx, lunes_previo, lunes_previo + timedelta(days=transcurridos))
-    semana_previa_total = _facturado(db, ctx, lunes_previo, lunes - timedelta(days=1))
 
-    # ── mes en curso contra el mismo tramo del anterior ──
-    primero = hoy.replace(day=1)
-    fin_mes_previo = primero - timedelta(days=1)
-    primero_previo = fin_mes_previo.replace(day=1)
-    mes_actual = _facturado(db, ctx, primero, hoy)
-    # Si el mes pasado es más corto, el tramo se recorta a su último día.
-    hasta_previo = min(primero_previo + timedelta(days=(hoy - primero).days), fin_mes_previo)
-    mes_previo = _facturado(db, ctx, primero_previo, hasta_previo)
-    mes_previo_total = _facturado(db, ctx, primero_previo, fin_mes_previo)
-
-    def variacion(actual: Decimal, previo: Decimal):
-        """Porcentaje de cambio. Sin base previa no hay porcentaje que dar:
-        None y que la pantalla diga "sin comparativo" en vez de un 100% falso."""
-        if previo == 0:
-            return None
-        return float(round((actual - previo) / previo * 100, 1))
-
-    # ── serie mensual ──
-    inicio = (primero - timedelta(days=1)).replace(day=1)
-    for _ in range(meses - 2):
-        inicio = (inicio - timedelta(days=1)).replace(day=1)
-    q2 = (
+def _facturado(
+    db: Session, ctx: AuthContext, desde: date, hasta: date, cliente_id: UUID | None = None,
+) -> tuple[Decimal, int]:
+    """(facturado, facturas) de un rango, ambos extremos incluidos."""
+    q = (
         db.query(
-            sa.func.date_trunc("month", Factura.fecha).label("mes"),
-            sa.func.sum(Factura.total).label("total"),
+            sa.func.coalesce(sa.func.sum(Factura.total), 0),
+            sa.func.count(),
         )
         .filter(
             Factura.deleted_at.is_(None),
             Factura.estado == "TIMBRADA",
-            sa.cast(Factura.fecha, sa.Date) >= inicio,
+            sa.cast(Factura.fecha, sa.Date) >= desde,
+            sa.cast(Factura.fecha, sa.Date) <= hasta,
         )
-        .group_by(sa.text("mes"))
-        .order_by(sa.text("mes"))
     )
-    if ctx.cliente_scope:
-        q2 = q2.filter(Factura.cliente_id.in_(ctx.cliente_scope))
-    mensual = [
-        {"mes": r.mes.date() if hasattr(r.mes, "date") else r.mes, "total": Decimal(r.total or 0)}
-        for r in q2.all()
-    ]
+    total, cuantas = _acotar(q, ctx, cliente_id).one()
+    return Decimal(total or 0), int(cuantas or 0)
+
+
+def _variacion(actual: Decimal, previo: Decimal) -> float | None:
+    """Porcentaje de cambio. Sin base previa no hay porcentaje que dar: None, y
+    que la pantalla diga "sin comparativo" en vez de un 100% falso."""
+    if previo == 0:
+        return None
+    return float(round((actual - previo) / previo * 100, 1))
+
+
+@router.get("/ventas")
+def ventas(
+    desde: date | None = Query(default=None, description="Inicio del rango (por omisión, hace 30 días)"),
+    hasta: date | None = Query(default=None, description="Fin del rango (por omisión, hoy)"),
+    granularidad: Granularidad = Query(default="auto", description="Paso de la serie"),
+    cliente_id: UUID | None = Query(default=None, description="Acota el reporte a un cliente"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Facturación del rango: la serie de tiempo y el corte contra el tramo
+    anterior del mismo tamaño.
+
+    Las cubetas de los extremos se RECORTAN al rango (si el rango empieza un
+    miércoles, esa primera semana son tres días): la barra vale lo que se
+    facturó dentro del filtro y no lo que se facturó el lunes anterior, que
+    quedó fuera de lo que el usuario pidió ver.
+    """
+    hoy = datetime.now(timezone.utc).date()
+    if cliente_id is not None and not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    desde, hasta = _rango_pedido(desde, hasta, hoy)
+    paso = _resolver_granularidad(desde, hasta, granularidad)
+
+    por_dia = _timbradas_por_dia(db, ctx, desde, hasta, cliente_id)
+
+    serie: list[dict] = []
+    cursor = _inicio_de_cubeta(desde, paso)
+    while cursor <= hasta:
+        fin_cubeta = min(_cubeta_siguiente(cursor, paso) - timedelta(days=1), hasta)
+        inicio = max(cursor, desde)
+        total = ZERO
+        facturas = 0
+        dia = inicio
+        while dia <= fin_cubeta:
+            monto, cuantas = por_dia.get(dia, (ZERO, 0))
+            total += monto
+            facturas += cuantas
+            dia += timedelta(days=1)
+        serie.append({"inicio": inicio, "fin": fin_cubeta, "total": total, "facturas": facturas})
+        cursor = _cubeta_siguiente(cursor, paso)
+
+    total_rango = sum((c["total"] for c in serie), ZERO)
+    facturas_rango = sum(c["facturas"] for c in serie)
+    dias = (hasta - desde).days + 1
+
+    previo_desde, previo_hasta = _rango_anterior(desde, hasta)
+    total_previo, facturas_previo = _facturado(db, ctx, previo_desde, previo_hasta, cliente_id)
+
+    mejor = max(serie, key=lambda c: c["total"], default=None)
+    hoy_total = por_dia.get(hoy, (ZERO, 0))[0] if desde <= hoy <= hasta else None
 
     return {
         "hoy": hoy,
-        "diario": diario,
-        "mensual": mensual,
-        "semana": {
-            "actual": semana_actual,
-            "previa_mismo_tramo": semana_previa,
-            "previa_completa": semana_previa_total,
-            "variacion": variacion(semana_actual, semana_previa),
-            "dias_transcurridos": transcurridos + 1,
-        },
-        "mes": {
-            "actual": mes_actual,
-            "previo_mismo_tramo": mes_previo,
-            "previo_completo": mes_previo_total,
-            "variacion": variacion(mes_actual, mes_previo),
-            "dias_transcurridos": (hoy - primero).days + 1,
+        "desde": desde,
+        "hasta": hasta,
+        "dias": dias,
+        "granularidad": paso,
+        "cliente_id": cliente_id,
+        "serie": serie,
+        "total": total_rango,
+        "facturas": facturas_rango,
+        # El ticket promedio con cero facturas es cero, no una división rota.
+        "ticket_promedio": (total_rango / facturas_rango) if facturas_rango else ZERO,
+        "promedio_dia": total_rango / dias,
+        "promedio_cubeta": (total_rango / len(serie)) if serie else ZERO,
+        "mejor": mejor if mejor and mejor["total"] > 0 else None,
+        "hoy_total": hoy_total,
+        "anterior": {
+            "desde": previo_desde,
+            "hasta": previo_hasta,
+            "total": total_previo,
+            "facturas": facturas_previo,
+            "variacion": _variacion(total_rango, total_previo),
         },
     }

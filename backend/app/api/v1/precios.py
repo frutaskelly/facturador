@@ -17,7 +17,7 @@ from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, 
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Cliente, Producto, PrecioOverride, Sucursal
+from ...models import CategoriaProducto, Cliente, Producto, PrecioOverride, Sucursal
 from ...schemas.common import Page
 from ...schemas.sucursal import (
     ContextoListaOut,
@@ -85,6 +85,75 @@ def productos_cotizables_endpoint(
             for p in filas
         ],
     }
+
+
+@router.get("/catalogo")
+def catalogo_con_precio(
+    cliente_id: UUID = Query(..., description="De quién es la lista que manda"),
+    sucursal_id: Optional[UUID] = Query(default=None),
+    proyecto_id: Optional[UUID] = Query(default=None),
+    solo_con_precio: bool = Query(default=False),
+    limit: int = Query(default=2000, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ_COTIZAR)),
+):
+    """El catálogo con el precio que le toca a un cliente, completo.
+
+    Existe para la meta «WhatsApp habla únicamente con el Facturador»
+    (22-sep-2026, decisión del dueño: *el Facturador manda en precios*). El bot
+    arma su catálogo leyendo INVE + PRECIO_X_PROD de SAE; esto contesta lo
+    mismo desde aquí, con la clave de SAE de cada producto para que el cruce
+    siga funcionando igual.
+
+    El precio sale de `resolver_precios_lote`, o sea de la MISMA cascada que
+    cotiza y que factura (override → asignación → lista base). Calcularlo de
+    otra forma sería fabricar un segundo precio que se parece al bueno, que es
+    exactamente lo que esta migración viene a quitar.
+
+    `precio: null` NO es «gratis»: es «este cliente no tiene precio para eso».
+    Quien lo lea tiene que poder distinguirlo, así que se devuelve nulo y no
+    cero — y `solo_con_precio` existe para pedir directamente los que sí.
+    """
+    from ...services.precios import resolver_precios_lote
+
+    if not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene acceso a ese cliente")
+    q = (
+        db.query(Producto, CategoriaProducto)
+        .outerjoin(CategoriaProducto, CategoriaProducto.id == Producto.categoria_id)
+        .filter(Producto.tenant_id == ctx.tenant_id,
+                Producto.deleted_at.is_(None), Producto.activo.is_(True))
+        .order_by(Producto.nombre)
+    )
+    total = q.count()
+    filas = q.limit(limit).offset(offset).all()
+    if not filas:
+        return {"items": [], "total": total, "limit": limit, "offset": offset}
+
+    precios = resolver_precios_lote(
+        db,
+        items=[{"producto_id": p.id, "presentacion": p.presentacion_default or p.unidad_base,
+                "cantidad": 1} for p, _c in filas],
+        cliente_id=cliente_id, sucursal_id=sucursal_id, proyecto_id=proyecto_id,
+    )
+    items = []
+    for (prod, cat), pr in zip(filas, precios):
+        precio = (pr or {}).get("precio") if pr else None
+        if solo_con_precio and precio is None:
+            continue
+        items.append({
+            "producto_id": str(prod.id),
+            "sku": prod.sku,
+            "clave_sae": (prod.clave_sae or "").strip() or None,
+            "nombre": prod.nombre,
+            "unidad": prod.presentacion_default or prod.unidad_base,
+            "categoria": cat.nombre if cat else None,
+            "categoria_codigo": cat.codigo if cat else None,
+            "precio": str(precio) if precio is not None else None,
+            "origen_precio": (pr or {}).get("origen") if pr else None,
+        })
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.post("/cotizar-documento")

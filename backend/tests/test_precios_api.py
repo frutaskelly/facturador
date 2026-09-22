@@ -696,3 +696,35 @@ def test_importar_excel_actualiza_sin_duplicar(client, env, auth_as):
     assert r.status_code == 200, r.text
     assert r.json()["eliminados"] == 1
     assert total() == antes - 1
+
+
+def test_catalogo_con_precio_usa_la_misma_cascada_que_cotiza(client, env, auth_as):
+    """El catálogo con el precio del cliente, completo — la materia prima para
+    que el bot deje de leer INVE + PRECIO_X_PROD de SAE. El precio sale de la
+    MISMA cascada que cotiza y factura: calcularlo de otra forma fabricaría un
+    segundo precio parecido al bueno, que es lo que la migración viene a quitar.
+
+    Y `precio: null` no es «gratis»: es «este cliente no tiene precio para
+    eso», y se devuelve nulo para que quien lo lea pueda distinguirlo."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+
+    r = client.get("/api/v1/precios/catalogo", headers=h,
+                   params={"cliente_id": env["cli1"]})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    por_sku = {x["sku"]: x for x in out["items"]}
+    assert por_sku, out
+
+    # lo que cotiza ese mismo producto tiene que ser lo mismo, al centavo
+    uno = out["items"][0]
+    cot = client.get("/api/v1/precios/cotizar", headers=h, params={
+        "producto_id": uno["producto_id"], "cliente_id": env["cli1"],
+        "presentacion": uno["unidad"], "cantidad": 1})
+    if cot.status_code == 200 and cot.json().get("precio_unitario") is not None:
+        assert uno["precio"] is not None
+        assert float(uno["precio"]) == float(cot.json()["precio_unitario"])
+
+    # solo_con_precio deja fuera los que no tienen
+    r2 = client.get("/api/v1/precios/catalogo", headers=h,
+                    params={"cliente_id": env["cli1"], "solo_con_precio": True})
+    assert all(x["precio"] is not None for x in r2.json()["items"])
