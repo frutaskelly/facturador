@@ -1271,3 +1271,24 @@ def test_cancelar_deja_dicho_por_que(client, env, auth_as):
     otra = _create_rem(client, h, env, "1", "5").json()
     assert client.post(f"/api/v1/remisiones/{otra['id']}/cancelar",
                        headers=h).status_code == 200
+
+
+def test_el_aviso_de_sin_fecha_no_incluye_facturadas(client, env, auth_as):
+    """El aviso existe para que una entrega no se caiga de una hoja que está
+    por armarse. Una remisión ya facturada no se va a armar: con ellas dentro
+    el aviso traía 131 renglones, y un aviso de 131 renglones no se lee."""
+    from app.models.remision import Remision
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    viva = _create_rem(client, h, env, "3", "5").json()          # sin fecha_entrega
+    facturada = _create_rem(client, h, env, "3", "5").json()
+    with SessionLocal() as s:
+        s.query(Remision).filter(Remision.id == uuid.UUID(facturada["id"])).update(
+            {"estado": "FACTURADA"})
+        s.commit()
+
+    out = client.get("/api/v1/remisiones/reporte-armado?fechas=2031-09-09",
+                     headers=h).json()
+    folios = {x["folio"] for x in out["sin_fecha"]}
+    assert viva["folio_interno"] in folios, out["sin_fecha"]
+    assert facturada["folio_interno"] not in folios, out["sin_fecha"]

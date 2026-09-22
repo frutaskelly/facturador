@@ -953,7 +953,13 @@ def reporte_armado(
                      Remision.total, func.count(LineaRemision.id).label("partidas"))
             .join(Cliente, Cliente.id == Remision.cliente_facturacion_id)
             .outerjoin(LineaRemision, LineaRemision.remision_id == Remision.id)
-            .filter(*base, Remision.fecha_entrega.is_(None),
+            # FACTURADA fuera: el aviso existe para que una entrega NO se caiga
+            # de una hoja que está por armarse, y una remisión ya facturada no
+            # se va a armar. Con ellas dentro el aviso traía 131 renglones —
+            # medido 22-sep-2026— y un aviso de 131 renglones es un aviso que
+            # nadie lee, que es peor que no avisar.
+            .filter(*base, Remision.estado != "FACTURADA",
+                    Remision.fecha_entrega.is_(None),
                     Remision.fecha_remision >= date.today() - timedelta(days=35))
             .group_by(Remision.id, Cliente.legal_name)
             .all()
