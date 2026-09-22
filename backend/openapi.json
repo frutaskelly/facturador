@@ -30381,6 +30381,138 @@
     ]
    }
   },
+  "/api/v1/precios/catalogo": {
+   "get": {
+    "description": "El catálogo con el precio que le toca a un cliente, completo.\n\nExiste para la meta «WhatsApp habla únicamente con el Facturador»\n(22-sep-2026, decisión del dueño: *el Facturador manda en precios*). El bot\narma su catálogo leyendo INVE + PRECIO_X_PROD de SAE; esto contesta lo\nmismo desde aquí, con la clave de SAE de cada producto para que el cruce\nsiga funcionando igual.\n\nEl precio sale de `resolver_precios_lote`, o sea de la MISMA cascada que\ncotiza y que factura (override → asignación → lista base). Calcularlo de\notra forma sería fabricar un segundo precio que se parece al bueno, que es\nexactamente lo que esta migración viene a quitar.\n\n`precio: null` NO es «gratis»: es «este cliente no tiene precio para eso».\nQuien lo lea tiene que poder distinguirlo, así que se devuelve nulo y no\ncero — y `solo_con_precio` existe para pedir directamente los que sí.",
+    "operationId": "catalogo_con_precio_api_v1_precios_catalogo_get",
+    "parameters": [
+     {
+      "description": "De quién es la lista que manda",
+      "in": "query",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "description": "De quién es la lista que manda",
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "sucursal_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Sucursal Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "proyecto_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Proyecto Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "solo_con_precio",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Solo Con Precio",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 2000,
+       "maximum": 5000,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Catalogo Con Precio",
+    "tags": [
+     "precios"
+    ]
+   }
+  },
   "/api/v1/precios/contexto": {
    "get": {
     "description": "El contexto de precios de un documento, en UNA llamada por cambio de\nencabezado: qué lista cobraría el resolutor (para decirlo ANTES de capturar,\nno descubrirlo línea a línea), si hay negociaciones por plaza que se están\nquedando fuera por venir sin sucursal, y qué productos tienen precio aquí\n(para que el buscador marque $ sin cotizar candidato por candidato).",

@@ -2718,6 +2718,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/precios/catalogo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Catalogo Con Precio
+         * @description El catálogo con el precio que le toca a un cliente, completo.
+         *
+         *     Existe para la meta «WhatsApp habla únicamente con el Facturador»
+         *     (22-sep-2026, decisión del dueño: *el Facturador manda en precios*). El bot
+         *     arma su catálogo leyendo INVE + PRECIO_X_PROD de SAE; esto contesta lo
+         *     mismo desde aquí, con la clave de SAE de cada producto para que el cruce
+         *     siga funcionando igual.
+         *
+         *     El precio sale de `resolver_precios_lote`, o sea de la MISMA cascada que
+         *     cotiza y que factura (override → asignación → lista base). Calcularlo de
+         *     otra forma sería fabricar un segundo precio que se parece al bueno, que es
+         *     exactamente lo que esta migración viene a quitar.
+         *
+         *     `precio: null` NO es «gratis»: es «este cliente no tiene precio para eso».
+         *     Quien lo lea tiene que poder distinguirlo, así que se devuelve nulo y no
+         *     cero — y `solo_con_precio` existe para pedir directamente los que sí.
+         */
+        get: operations["catalogo_con_precio_api_v1_precios_catalogo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/precios/contexto": {
         parameters: {
             query?: never;
@@ -16240,6 +16275,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RemisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    catalogo_con_precio_api_v1_precios_catalogo_get: {
+        parameters: {
+            query: {
+                /** @description De quién es la lista que manda */
+                cliente_id: string;
+                sucursal_id?: string | null;
+                proyecto_id?: string | null;
+                solo_con_precio?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
