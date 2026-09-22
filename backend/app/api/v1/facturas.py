@@ -838,6 +838,8 @@ def espejo_resumen(
                              description="Busca en la observación, el UUID y serie+folio"),
     folio: Optional[int] = Query(default=None, ge=1,
                                  description="Folio EXACTO (con `serie`, devuelve una)"),
+    cliente_sae: Optional[str] = Query(default=None, max_length=60,
+                                       description="Números de cliente EN SAE (csv), p. ej. «6,7»"),
     detalle: bool = Query(default=False, description="Añade fecha, UUID, observación e impuestos"),
     lineas: bool = Query(default=False, description="Añade las partidas (exige serie o q)"),
     limit: int = Query(default=500, ge=1, le=2000),
@@ -870,6 +872,23 @@ def espejo_resumen(
     )
     if serie:
         base = base.filter(Factura.serie == serie.strip().upper())
+    if cliente_sae:
+        # El bot habla en números de cliente de SAE («6 es Balles»), no en UUID.
+        # Se traduce con la MISMA equivalencia que usa el export y el depósito
+        # del espejo (cliente_externos, clave 'empresa:numero'), para que no
+        # aparezca una tercera forma de decir quién es quién.
+        numeros = {n.strip() for n in cliente_sae.split(",") if n.strip()}
+        claves = {f"{empresa.strip()}:{n}" for n in numeros}
+        ids = [eq.cliente_id for eq in db.query(ClienteExterno).filter(
+                   ClienteExterno.tenant_id == ctx.tenant_id,
+                   ClienteExterno.sistema == "SAE",
+                   ClienteExterno.clave.in_(claves)).all() if eq.cliente_id]
+        if not ids:
+            # vacío Y dicho: devolver «todas» porque no se encontró la
+            # equivalencia sería contestar de otros clientes
+            return {"empresa": empresa, "serie": None, "total_facturas": 0,
+                    "truncado": False, "folios": [], "sin_equivalencia": sorted(numeros)}
+        base = base.filter(Factura.cliente_id.in_(ids))
     if folio is not None:
         # EXACTO, no como `q`: buscar «ZHGO 37» por texto casa también con la
         # 370 y la 371 —es un prefijo— y quien pide una factura concreta
