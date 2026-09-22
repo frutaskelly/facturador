@@ -1306,8 +1306,7 @@ def test_la_logistica_si_se_toca_en_una_facturada(client, env, auth_as):
     rem = _create_rem(client, h, env, "3", "5").json()
     with SessionLocal() as s:
         s.query(Remision).filter(Remision.id == uuid.UUID(rem["id"])).update(
-            {"estado": "FACTURADA", "revision_pendiente": True,
-             "export_sae_at": datetime.now(timezone.utc)})
+            {"estado": "FACTURADA", "revision_pendiente": True})
         s.commit()
 
     r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
@@ -1332,3 +1331,14 @@ def test_la_logistica_si_se_toca_en_una_facturada(client, env, auth_as):
     # y la fecha no se movió con los intentos rechazados
     assert client.get(f"/api/v1/remisiones/{rem['id']}",
                       headers=h).json()["fecha_entrega"] == "2031-10-06"
+
+    # EL OTRO CANDADO SIGUE ENTERO. El dueño decidió las dos cosas y no se
+    # contradicen: lo que YA SALIÓ en un masivo de SAE se congela completo
+    # —encabezado incluido—, y para eso existe «liberar del pedido». Esto solo
+    # abre la logística de una facturada que nunca salió en uno.
+    with SessionLocal() as s:
+        s.query(Remision).filter(Remision.id == uuid.UUID(rem["id"])).update(
+            {"export_sae_at": datetime.now(timezone.utc)})
+        s.commit()
+    assert client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                        json={"fecha_entrega": "2031-11-11"}).status_code == 409

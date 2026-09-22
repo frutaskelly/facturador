@@ -1241,10 +1241,17 @@ def update_remision(
     # desaparece en silencio del día que le tocaba—, más una con el año mal
     # (2027-01-09) que hoy sale en la hoja de enero. Todo lo demás de una
     # facturada sigue cerrado igual que antes.
+    # OJO con el alcance: esto abre el candado del ESTADO (una facturada), NO el
+    # del masivo. El dueño decidió las dos cosas, y no se contradicen: «también
+    # el encabezado» congela lo que YA SALIÓ en un masivo de SAE —ahí el archivo
+    # ya viajó y el papel manda—, y esto permite la logística de una facturada
+    # que nunca salió en uno. De las 32 facturadas de septiembre sin fecha de
+    # bodega, 20 caen de este lado; las otras 12 se liberan del pedido primero
+    # (POST /liberar-pedido), que es la puerta que existe para eso.
     solo_logistica = bool(tocados) and tocados <= _CAMPOS_LOGISTICOS
     if not solo_logistica:
         _exigir_editable(db, rem)
-    if tocados != {"factura_sae"} and not solo_logistica:
+    if tocados != {"factura_sae"}:
         _exigir_no_exportada(rem)
     era_confirmada = rem.estado == "CONFIRMADA"
     almacen_anterior = rem.almacen_id           # para detectar cambio de almacén
