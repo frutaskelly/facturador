@@ -16,9 +16,11 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
-from app.models import ClaveSae, Membership, Producto, Role, SolicitudAltaSae, Tenant, User
+from app.models import (ClaveSae, EsquemaImpuesto, Membership, Producto, Role,
+                        SolicitudAltaSae, Tenant, User)
 
-_PURGE = ("solicitudes_alta_sae", "claves_sae", "producto_clientes", "productos")
+_PURGE = ("solicitudes_alta_sae", "claves_sae", "producto_clientes", "productos",
+          "esquemas_impuesto")
 
 
 @pytest.fixture
@@ -46,9 +48,13 @@ def env(db_engine):
         tomador = _user(tomador_role, "tomador")
         prod = Producto(tenant_id=t.id, sku="A-P", nombre="Ajo kilo",
                         clave_sat="01010101", unidad_sat="KGM")
-        db.add(prod); db.flush()
+        # el esquema "2" es el que el bot manda en el alta (los códigos de este
+        # tenant son los números de SAE)
+        esq2 = EsquemaImpuesto(tenant_id=t.id, codigo="2", nombre="0% IVA")
+        db.add_all([prod, esq2]); db.flush()
         db.commit()
-        yield {"admin": admin, "tomador": tomador, "tenant_id": t.id, "prod": str(prod.id)}
+        yield {"admin": admin, "tomador": tomador, "tenant_id": t.id,
+               "prod": str(prod.id), "esq2": esq2.id}
     finally:
         for table in _PURGE:
             for tid in created["tenants"]:
@@ -254,6 +260,9 @@ def test_alta_crea_el_producto_del_catalogo_o_reusa_el_del_mismo_nombre(client, 
     prod = client.get(f"/api/v1/productos/{pid}", headers=h).json()
     assert prod["nombre"] == "PERA DE AGUA" and prod["clave_sae"] == "PERANUEVA"
     assert prod["unidad_base"] == "KILO" and prod["clave_sat"] == "50161509"
+    # …y CON su esquema de impuesto: sin él el producto contestaría 0% de IVA
+    # por el respaldo, o sea un exento fabricado en silencio
+    assert prod["esquema_impuesto_id"] == str(env["esq2"]), prod
 
     # el mismo nombre no crea otro producto: se reusa (aunque la clave difiera)
     r2 = _pedir(client, h, clave="PERAOTRA", descripcion="  pera de agua ")

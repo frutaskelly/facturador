@@ -2019,6 +2019,20 @@ def pedir_alta_sae(
         elif payload.crear_producto:
             base = (payload.unidad or "KILO").strip().upper()
             base = "KILO" if base in ("KG", "KILO", "KILOGRAMO") else base or "PIEZA"
+            # EL ESQUEMA DE IMPUESTO SÍ VIAJA (22-sep-2026). Nacía sin él, y un
+            # producto sin esquema contesta 0% de IVA en /productos/impuestos
+            # —por el respaldo a producto.iva_tasa, que también nace en 0—,
+            # así que el alta fabricaba en silencio un producto exento. El bot
+            # ya manda el número de esquema de SAE y aquí se cruza por código,
+            # que es como están catalogados de este lado (1, 2, 4, 5, 7, 8).
+            esq_id = None
+            if payload.esquema is not None:
+                esq = (db.query(EsquemaImpuesto)
+                       .filter(EsquemaImpuesto.tenant_id == ctx.tenant_id,
+                               EsquemaImpuesto.deleted_at.is_(None),
+                               func.btrim(EsquemaImpuesto.codigo) == str(payload.esquema).strip())
+                       .first())
+                esq_id = esq.id if esq else None
             prod = Producto(
                 tenant_id=ctx.tenant_id,
                 sku=_next_sku(db),
@@ -2030,6 +2044,7 @@ def pedir_alta_sae(
                 presentaciones={base: 1},
                 presentacion_default=base[:20],
                 categoria_id=categoria_sin_categorizar(db, ctx.tenant_id).id,
+                esquema_impuesto_id=esq_id,
                 created_by=ctx.user_id,
             )
             db.add(prod)
