@@ -935,3 +935,35 @@ def test_reintento_respeta_tolerancia_y_borradores(client, env, auth_as, sin_ses
         "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
                     "precio_unitario": 836}]}).json()
     assert sin_cfdi["estado"] == "BORRADOR" and sin_cfdi["factura_sae"] is None
+
+
+def test_el_espejo_separa_iva_de_ieps(client, env, auth_as, sin_sesion):
+    """Antes el IVA del reflejo se derivaba como total - subtotal, que con IEPS
+    de por medio es la suma de los dos. Medido en SAE: 462 de las 2,684 facturas
+    de 2026 llevan IEPS ($121,887.20) y todas se reflejaban con ese dinero
+    contado como IVA. La ZEHMOHOS 588 es el caso claro: IVA $0.00, IEPS $4.08, y
+    el reflejo decía $4.09 de IVA."""
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+
+    def espejar(folio, **extra):
+        cuerpo = dict(_espejo())
+        cuerpo.update({"folio": folio, "subtotal": "14921.32", "total": "15719.79"})
+        cuerpo.update(extra)
+        r = client.post("/api/v1/facturas/espejo", headers=hk, json=cuerpo)
+        assert r.status_code in (200, 201), r.text
+        return r.json()
+
+    # con el desglose: cada impuesto en su lugar
+    f = espejar(9101, iva="335.42", ieps="463.05")
+    assert float(f["iva_trasladado"]) == 335.42
+    assert float(f["ieps_trasladado"]) == 463.05
+
+    # sin desglose (conector viejo): sigue derivando, como antes
+    g = espejar(9102)
+    assert float(g["iva_trasladado"]) == round(15719.79 - 14921.32, 2)
+    assert float(g["ieps_trasladado"]) == 0.0
+
+    # el CFDI que sustituye también viaja
+    s = espejar(9103, iva="0", ieps="0",
+                uuid_sustitucion="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    assert s["uuid_sustitucion"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
