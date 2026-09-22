@@ -993,6 +993,12 @@ def test_el_resumen_del_espejo_contesta_por_la_oc_y_con_detalle(client, env, aut
     assert f["cliente"], f
     assert "fecha_timbrado" in f and "fecha_cancelacion" in f
 
+    # por folio EXACTO: «7001» no debe traer la 70010 ni la 7001x
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=70011))
+    r0 = client.get("/api/v1/facturas/espejo/resumen", headers=hk,
+                    params={"empresa": "02", "serie": "ZHGO", "folio": 7001})
+    assert [x["folio"] for x in r0.json()["folios"]] == [7001], r0.json()
+
     # por serie+folio, con y sin espacio
     for termino in ("ZHGO 7002", "ZHGO7002"):
         r2 = client.get("/api/v1/facturas/espejo/resumen", headers=hk,
