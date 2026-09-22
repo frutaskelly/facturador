@@ -142,6 +142,11 @@ class LineaFactura(Base):
 
     clave_prod_serv = Column(String(8), nullable=False)
     clave_unidad = Column(String(3), nullable=False)
+    # La clave del artículo en SAE (CVE_ART) tal como venía en la factura
+    # reflejada. Se guarda aunque NO cruce con un producto —que es cuando más
+    # falta hace—: sin ella, las 7,227 partidas del espejo que no cruzaron eran
+    # una descripción suelta, y nadie podía decir de qué artículo hablaban.
+    clave_sae = Column(String(30))
     # La presentación con la que se capturó la línea (directa). clave_unidad y
     # cantidad_base se DERIVAN de ella al guardar; sin persistirla, la edición
     # del borrador no puede reconstruir qué eligió el usuario.
