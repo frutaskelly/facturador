@@ -1020,3 +1020,21 @@ def test_el_resumen_del_espejo_contesta_por_la_oc_y_con_detalle(client, env, aut
     r4 = client.get("/api/v1/facturas/espejo/resumen", headers=hk,
                     params={"empresa": "02", "serie": "ZHGO"})
     assert all({"folio", "total", "estado", "saldo"} <= set(x) for x in r4.json()["folios"])
+
+
+def test_el_resumen_filtra_por_cliente_de_sae(client, env, auth_as, sin_sesion):
+    """El bot habla en números de cliente de SAE («6 es Balles»), no en UUID. Se
+    traduce con la misma equivalencia que usa el export, para que no aparezca
+    una tercera forma de decir quién es quién."""
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=7301))
+
+    r = client.get("/api/v1/facturas/espejo/resumen", headers=hk,
+                   params={"empresa": "02", "cliente_sae": "6"})
+    assert r.status_code == 200, r.text
+    assert 7301 in [x["folio"] for x in r.json()["folios"]], r.json()
+
+    # un número que nadie reclama no devuelve «todas»: devuelve vacío y lo dice
+    r2 = client.get("/api/v1/facturas/espejo/resumen", headers=hk,
+                    params={"empresa": "02", "cliente_sae": "9999"})
+    assert r2.json()["folios"] == [] and r2.json()["sin_equivalencia"] == ["9999"]
