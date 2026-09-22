@@ -893,6 +893,15 @@ def espejo_resumen(
         base = base.options(selectinload(Factura.lineas))
 
     filas = base.order_by(Factura.serie, Factura.folio).limit(limit).all()
+    nombres: dict = {}
+    if (detalle or lineas) and filas:
+        nombres = {
+            c.id: c.legal_name
+            for c in db.query(Cliente).filter(
+                Cliente.tenant_id == ctx.tenant_id,
+                Cliente.id.in_({f.cliente_id for f in filas}),
+            ).all()
+        }
     out = []
     for f in filas:
         d = {"folio": f.folio, "serie": f.serie, "total": str(f.total or 0),
@@ -909,6 +918,12 @@ def espejo_resumen(
                 "cancelacion_msj": f.cancelacion_msj,
                 "uuid_sustitucion": f.uuid_sustitucion,
                 "cliente_id": str(f.cliente_id),
+                # Quien pregunta por una factura espera ver de QUIÉN es y si
+                # está timbrada, no un UUID de cliente: sin esto el bot tenía
+                # que pedir el cliente aparte para poder imprimir una línea.
+                "cliente": nombres.get(f.cliente_id) or "",
+                "fecha_timbrado": f.fecha_timbrado.isoformat() if f.fecha_timbrado else None,
+                "fecha_cancelacion": f.fecha_cancelacion.isoformat() if f.fecha_cancelacion else None,
             })
         if lineas:
             d["lineas"] = [
