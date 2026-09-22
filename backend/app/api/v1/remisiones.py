@@ -1148,6 +1148,11 @@ def _liberar_reservas(db: Session, ctx: AuthContext, rem: Remision, *, motivo: s
         ln.cantidad_surtida = None
 
 
+# Lo que se puede tocar de una remisión ya facturada: el día de la entrega y la
+# marca de revisada. Ninguno de los dos viaja al SAT ni mueve un peso.
+_CAMPOS_LOGISTICOS = frozenset({"fecha_entrega", "revision_pendiente"})
+
+
 def _exigir_editable(db: Session, rem: Remision) -> None:
     """Las dos puertas que comparten editar y cruzar una partida.
 
@@ -1222,16 +1227,27 @@ def update_remision(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     rem = get_or_404(db, Remision, rem_id)
-    _exigir_editable(db, rem)
-    era_confirmada = rem.estado == "CONFIRMADA"
-    almacen_anterior = rem.almacen_id           # para detectar cambio de almacén
     data = payload.model_dump(exclude_unset=True)
     # El acuse de SAE pasa aunque esté congelada; cualquier otra cosa, no.
     # `permitir_negativos` no es un campo del documento (es una autorización de
     # sobregiro), así que no cuenta para decidir si esto es solo un acuse.
     tocados = set(data) - {"permitir_negativos"}
-    if tocados != {"factura_sae"}:
+    # LA LOGÍSTICA NO ES FISCAL (22-sep-2026, autorizado por el dueño). La fecha
+    # de entrega en bodega y la marca de revisada no tocan el CFDI, ni los
+    # totales, ni el inventario: son el día que el camión llega y el control
+    # interno de quién ya miró el documento. Cerradas también en una FACTURADA,
+    # 22 remisiones de septiembre se quedaron sin fecha de bodega para siempre
+    # —y una remisión sin esa fecha no entra a NINGUNA hoja de armado, así que
+    # desaparece en silencio del día que le tocaba—, más una con el año mal
+    # (2027-01-09) que hoy sale en la hoja de enero. Todo lo demás de una
+    # facturada sigue cerrado igual que antes.
+    solo_logistica = bool(tocados) and tocados <= _CAMPOS_LOGISTICOS
+    if not solo_logistica:
+        _exigir_editable(db, rem)
+    if tocados != {"factura_sae"} and not solo_logistica:
         _exigir_no_exportada(rem)
+    era_confirmada = rem.estado == "CONFIRMADA"
+    almacen_anterior = rem.almacen_id           # para detectar cambio de almacén
     lineas_in = data.pop("lineas", None)
     # UNA REMISIÓN IMPRESA NO LA REESCRIBE UNA SINCRONIZACIÓN (16-sep-2026).
     # El vigía del bot pisó nueve remisiones de la semana 38 que ya estaban

@@ -1292,3 +1292,43 @@ def test_el_aviso_de_sin_fecha_no_incluye_facturadas(client, env, auth_as):
     folios = {x["folio"] for x in out["sin_fecha"]}
     assert viva["folio_interno"] in folios, out["sin_fecha"]
     assert facturada["folio_interno"] not in folios, out["sin_fecha"]
+
+
+def test_la_logistica_si_se_toca_en_una_facturada(client, env, auth_as):
+    """La fecha de entrega y la marca de revisada no son fiscales: no tocan el
+    CFDI, ni los totales, ni el inventario. Cerradas también en una FACTURADA,
+    22 remisiones se quedaron sin fecha de bodega para siempre — y sin esa fecha
+    una remisión no entra a NINGUNA hoja de armado, así que desaparece en
+    silencio del día que le tocaba. Todo lo demás sigue cerrado."""
+    from app.models.remision import Remision
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    rem = _create_rem(client, h, env, "3", "5").json()
+    with SessionLocal() as s:
+        s.query(Remision).filter(Remision.id == uuid.UUID(rem["id"])).update(
+            {"estado": "FACTURADA", "revision_pendiente": True,
+             "export_sae_at": datetime.now(timezone.utc)})
+        s.commit()
+
+    r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                     json={"fecha_entrega": "2031-10-06"})
+    assert r.status_code == 200, r.text
+    assert r.json()["fecha_entrega"] == "2031-10-06"
+    assert r.json()["estado"] == "FACTURADA", "la cancelación de estado no es cosa de esto"
+
+    r2 = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                      json={"revision_pendiente": False})
+    assert r2.status_code == 200 and r2.json()["revision_pendiente"] is False
+
+    # lo demás de una facturada sigue cerrado, con o sin la logística de compañía
+    assert client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                        json={"notas": "otra cosa"}).status_code == 409
+    assert client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                        json={"fecha_entrega": "2031-10-07",
+                              "notas": "colada"}).status_code == 409
+    assert client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={
+        "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "99",
+                    "precio_unitario": "1"}]}).status_code == 409
+    # y la fecha no se movió con los intentos rechazados
+    assert client.get(f"/api/v1/remisiones/{rem['id']}",
+                      headers=h).json()["fecha_entrega"] == "2031-10-06"
