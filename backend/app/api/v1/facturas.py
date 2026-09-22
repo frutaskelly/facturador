@@ -1340,7 +1340,18 @@ def factura_espejo(
     # si el SAT la negó, SAE limpia MSJ_CANC y la factura vuelve a ser cobrable.
     factura.cancelacion_msj = (payload.cancelacion_msj or "").strip() or None
     factura.subtotal = subtotal
-    factura.iva_trasladado = max(Decimal("0"), Decimal(str(total)) - Decimal(str(subtotal)))
+    # IVA e IEPS por separado cuando el conector los manda (22-sep-2026). La
+    # derivación de antes —total menos subtotal— sumaba los dos en el IVA, y con
+    # 462 facturas de 2026 llevando IEPS eso no era un detalle: el reflejo
+    # reportaba como IVA un dinero que era IEPS. Se conserva como respaldo para
+    # un conector viejo que todavía no los mande.
+    if payload.iva is not None or payload.ieps is not None:
+        factura.iva_trasladado = Decimal(str(payload.iva or 0))
+        factura.ieps_trasladado = Decimal(str(payload.ieps or 0))
+    else:
+        factura.iva_trasladado = max(Decimal("0"), Decimal(str(total)) - Decimal(str(subtotal)))
+    if payload.uuid_sustitucion:
+        factura.uuid_sustitucion = payload.uuid_sustitucion.strip() or None
     factura.total = total
     if payload.estado == "CANCELADA":
         factura.saldo_insoluto = Decimal("0")

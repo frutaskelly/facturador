@@ -137,6 +137,17 @@ class FacturaEspejoIn(BaseModel):
     # Totales COMO LOS REPORTA SAE (la verdad es SAE; no se recalculan aquí).
     subtotal: Optional[Decimal] = Field(default=None, ge=0)
     total: Optional[Decimal] = Field(default=None, ge=0)
+    # IVA e IEPS POR SEPARADO (22-sep-2026). Sin ellos el reflejo derivaba el
+    # IVA como total - subtotal, que con IEPS de por medio es la suma de los
+    # dos: medido en SAE, 462 de las 2,684 facturas de 2026 llevan IEPS
+    # ($121,887.20), y todas se reflejaban con ese importe contado como IVA.
+    # La ZEHMOHOS 588 es el caso claro: IVA $0.00, IEPS $4.08, y el reflejo
+    # decía $4.09 de IVA.
+    iva: Optional[Decimal] = Field(default=None, ge=0)
+    ieps: Optional[Decimal] = Field(default=None, ge=0)
+    # CFDI que ESTA factura sustituye (CFDIxx.UUID_REL). Es lo que permite
+    # saber si una refacturación de verdad reemplaza a la cancelada.
+    uuid_sustitucion: Optional[str] = Field(default=None, max_length=36)
     # Saldo real de la PPD si la sync lo conoce; sin él, una TIMBRADA PPD
     # arranca con saldo = total (igual que una nativa recién timbrada).
     saldo_insoluto: Optional[Decimal] = Field(default=None, ge=0)
