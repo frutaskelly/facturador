@@ -3020,6 +3020,93 @@ export interface paths {
         patch: operations["reapuntar_alias_api_v1_productos_alias__alias_id__patch"];
         trace?: never;
     };
+    "/api/v1/productos/alta-sae": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Listar Altas Sae
+         * @description Las altas pedidas, lo último primero. Es lo que sondea el bot para su
+         *     acuse y lo que la pantalla de catálogo pinta como «pendiente en SAE».
+         */
+        get: operations["listar_altas_sae_api_v1_productos_alta_sae_get"];
+        put?: never;
+        /**
+         * Pedir Alta Sae
+         * @description Pide crear un producto en SAE, en las empresas que se indiquen.
+         *
+         *     Idempotente por clave, y eso es el candado, no una comodidad: dos «dale de
+         *     alta AJOKG» seguidos por WhatsApp tienen que devolver LA MISMA solicitud,
+         *     porque dos altas vivas insertarían dos veces el mismo artículo.
+         *
+         *     Si la clave ya está en el catálogo espejo de SAE (`claves_sae`, activa), no
+         *     se encola nada y se contesta 409: el producto ya existe allá y lo que hace
+         *     falta es ligarlo, no crearlo.
+         */
+        post: operations["pedir_alta_sae_api_v1_productos_alta_sae_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/productos/alta-sae/pendiente": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reclamar Alta Sae
+         * @description El conector pregunta si hay una alta que aplicar. Reclamar la marca
+         *     EN_CURSO con `skip_locked`: dos conectores no pueden tomar la misma y
+         *     escribirla dos veces en SAE.
+         *
+         *     Reclama UNA a la vez a propósito: si el proceso muere a media alta, hay que
+         *     poder decir exactamente de qué clave hay que ir a ver en SAE.
+         */
+        get: operations["reclamar_alta_sae_api_v1_productos_alta_sae_pendiente_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/productos/alta-sae/{solicitud_id}/reporte": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reportar Alta Sae
+         * @description El conector reporta qué creó, por empresa. Esto CIERRA la solicitud: no
+         *     hay reintento, porque lo que ya entró a SAE no se puede volver a insertar.
+         *
+         *     El estado sale de lo reportado, no de un `ok` que alguien manda: todas las
+         *     empresas bien = OK, ninguna = ERROR, mezcla = PARCIAL (falta trabajo y algo
+         *     ya se creó: las dos cosas son verdad y una persona tiene que verlo).
+         *
+         *     La clave se estampa en el producto SOLO si alguna empresa la confirmó —
+         *     misma regla que con los folios de SAE: el Facturador no se apunta una clave
+         *     que SAE no haya confirmado.
+         */
+        post: operations["reportar_alta_sae_api_v1_productos_alta_sae__solicitud_id__reporte_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/catalogo-cliente-batch": {
         parameters: {
             query?: never;
@@ -3090,6 +3177,39 @@ export interface paths {
          *     `cliente_id`, también se marca lo que ese cliente ya tiene vinculado.
          */
         post: operations["importar_preview_api_v1_productos_importar_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/productos/impuestos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Impuestos Por Clave
+         * @description La fiscalidad de un lote de claves, en una sola pregunta.
+         *
+         *     El bot resuelve impuestos contra SAE clave por clave (INVE.CVE_ESQIMPU →
+         *     IMPU.IMPUESTO4) desde seis funciones distintas. Esto contesta lo mismo con
+         *     el esquema del producto, que es el único cerebro fiscal de este lado
+         *     (`services/fiscal.calcular_linea_producto` lee estos mismos campos).
+         *
+         *     La clave se busca por `clave_sae` y, si no cae, por `sku`: el bot llama con
+         *     lo que traiga el documento y no siempre es lo mismo.
+         *
+         *     Una clave que no existe aquí NO se calla: vuelve con `encontrado: false`.
+         *     Callarla sería contestar «0% de IVA» a un producto que nadie conoce, que es
+         *     la peor respuesta posible — el bot tiene que poder distinguir «no lleva
+         *     IVA» de «no sé quién es».
+         */
+        post: operations["impuestos_por_clave_api_v1_productos_impuestos_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3622,6 +3742,122 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/remisiones/reporte-armado": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reporte Armado
+         * @description La materia prima de la hoja de armado (21-sep-2026, meta 1).
+         *
+         *     El comando «hoja de armado» pivotea el Master de Google Sheets: filas =
+         *     producto (descripción · unidad · nota), columnas = OC del cliente, celdas =
+         *     suma de cantidad. Este endpoint entrega el detalle POR REMISIÓN — folio del
+         *     cliente, cliente, fecha de bodega y las líneas con su categoría — y el
+         *     pivote, el PDF y los bloques por categoría los sigue armando el bot, igual
+         *     que con la lista de compras.
+         *
+         *     Dos filtros excluyentes, como el comando: por fecha de bodega
+         *     (fecha_entrega) o por lista de OC (su_pedido); la lista de OC manda.
+         *
+         *     `origen` acota al CARRIL de un Master: el de Balles/Jubrán solo ve las OC
+         *     que entraron por WhatsApp/correo (WA:, EMAIL:) y el de EHMO las suyas —
+         *     sin él, la hoja de armado de un carril se llevaría las entregas del otro
+         *     (medido 21-sep-2026: 21 remisiones de hospitales dentro de la hoja de
+         *     Balles). Aplica al filtro por fecha y al aviso; la lista de OC ya es
+         *     explícita y no lo necesita.
+         *
+         *     Dos avisos viajan con el reporte, los dos por la misma razón: que nada se
+         *     caiga de la hoja en silencio. `sin_remision` son las OC de la bandeja que
+         *     ese día nunca se cruzaron (no hay qué armar aunque el cliente lo pidió), y
+         *     `sin_fecha` viaja siempre que se filtra por fecha: una remisión sin
+         *     fecha_entrega no casa con NINGÚN día y se caería de la hoja en silencio —
+         *     el mismo hoyo que en la hoja vieja tuvo a la 24973 fuera con $50,633.78
+         *     dentro (13-ago-2026). La ventana es de 35 días hacia atrás: el proxy más
+         *     honesto del «periodo activo» de la hoja, que aquí no existe.
+         */
+        get: operations["reporte_armado_api_v1_remisiones_reporte_armado_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/remisiones/reporte-compras": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reporte Compras
+         * @description La materia prima de la lista de compras (21-sep-2026, meta 1).
+         *
+         *     El comando de WhatsApp «lista de compras <días>» hoy pivotea el Master de
+         *     Google Sheets. Este endpoint entrega LO MISMO desde las remisiones vivas:
+         *     cuánto se pide de cada producto+presentación por fecha de entrega. La
+         *     agregación por día y el pivote los sigue haciendo el bot — aquí solo viven
+         *     los datos, para que el reporte no dependa de la hoja.
+         *
+         *     `perfil` acota al universo del Master de ese perfil: las remisiones cuya OC
+         *     entró con ancla EHMO:<perfil>:. Sin perfil van todas las remisiones con
+         *     entrega en esas fechas — más de lo que el Master ve, no menos.
+         *
+         *     La UNIDAD que viaja es lineas_remision.presentacion, que ya es canónica
+         *     (KILO/PIEZA/...): la regla del dueño de nunca mezclar unidades se cumple
+         *     aguas abajo agrupando por ella.
+         */
+        get: operations["reporte_compras_api_v1_remisiones_reporte_compras_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/remisiones/reporte-sin-precio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reporte Sin Precio
+         * @description Lo que hoy NO se puede facturar bien: sin clave en SAE, o sin precio.
+         *
+         *     Es el cuarto reporte que sale del Master (21-sep-2026, meta 1). El de la
+         *     hoja resuelve cada producto contra el catálogo de SAE en vivo; este contesta
+         *     con lo que el Facturador ya sabe: el espejo de claves (`claves_sae`, las
+         *     cuatro empresas) y el precio con el que se capturó la partida.
+         *
+         *     Cuatro motivos, y se separan porque el arreglo de cada uno es distinto:
+         *       · SIN CLAVE — la partida no cruzó con ningún producto, o el producto no
+         *         tiene clave: hay que cruzarla o darla de alta.
+         *       · CLAVE NO EN SAE — la clave existe aquí pero la empresa de esa plaza no
+         *         la conoce (la 02 la tiene, la 03 no): hay que darla de alta ALLÁ.
+         *       · CLAVE DE BAJA — existe en esa empresa pero dada de baja: se reactiva.
+         *       · SIN PRECIO — la partida se capturó en $0: hay que ponerle precio.
+         *
+         *     Un producto puede tener dos motivos a la vez; se reporta una vez por motivo,
+         *     porque son dos trabajos distintos para dos personas distintas.
+         */
+        get: operations["reporte_sin_precio_api_v1_remisiones_reporte_sin_precio_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/remisiones/{rem_id}": {
         parameters: {
             query?: never;
@@ -3650,7 +3886,16 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancelar Remision */
+        /**
+         * Cancelar Remision
+         * @description Cancela la remisión y deja dicho por qué.
+         *
+         *     El motivo viaja AQUÍ y no en un PATCH previo a propósito: editar una
+         *     remisión que ya salió en un masivo devuelve 409 (`_exigir_no_exportada`),
+         *     así que el camino de dos llamadas fallaba justo donde la nota más importa —
+         *     y entre las dos quedaba una ventana con la nota escrita y la cancelación
+         *     no.
+         */
         post: operations["cancelar_remision_api_v1_remisiones__rem_id__cancelar_post"];
         delete?: never;
         options?: never;
@@ -4411,6 +4656,105 @@ export interface components {
             nombre?: string | null;
         };
         /**
+         * AltaSaeIn
+         * @description Pide crear un producto en SAE. `clave` es la identidad de la alta (CVE_ART).
+         *
+         *     `empresas` son las de SAE donde debe nacer. Vacío = las cuatro: es lo que
+         *     pidió el dueño («las 4 empresas») y evita que un olvido cree el producto en
+         *     una sola, que es el estado que hoy duele.
+         */
+        AltaSaeIn: {
+            /** Clave */
+            clave: string;
+            /**
+             * Crear Producto
+             * @default true
+             */
+            crear_producto: boolean;
+            /** Descripcion */
+            descripcion: string;
+            /** Empresas */
+            empresas?: string[];
+            /** Esquema */
+            esquema?: number | null;
+            /** Linea */
+            linea?: string | null;
+            /** Nota */
+            nota?: string | null;
+            /**
+             * Origen
+             * @default UI
+             */
+            origen: string;
+            /** Producto Id */
+            producto_id?: string | null;
+            /** Sat */
+            sat?: string | null;
+            /** Sat Unidad */
+            sat_unidad?: string | null;
+            /**
+             * Unidad
+             * @default PIEZA
+             */
+            unidad: string;
+        };
+        /**
+         * AltaSaeOut
+         * @description Una alta pedida: en qué estado va y qué contestó SAE por empresa.
+         */
+        AltaSaeOut: {
+            /** Clave */
+            clave: string;
+            /**
+             * Datos
+             * @default {}
+             */
+            datos: Record<string, never>;
+            /**
+             * Empresas
+             * @default []
+             */
+            empresas: unknown[];
+            /** Estado */
+            estado: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Iniciada At */
+            iniciada_at?: string | null;
+            /** Motivo */
+            motivo?: string | null;
+            /** Origen */
+            origen: string;
+            /** Producto Id */
+            producto_id?: string | null;
+            /** Resultado */
+            resultado?: Record<string, never> | null;
+            /**
+             * Solicitada At
+             * Format: date-time
+             */
+            solicitada_at: string;
+            /** Terminada At */
+            terminada_at?: string | null;
+        };
+        /**
+         * AltaSaeReporteIn
+         * @description El conector reporta qué creó. `por_empresa` es la verdad de la alta:
+         *     {"02": {"ok": true, "clave": "AJOKG"}, "03": {"ok": false, "error": "..."}}.
+         *
+         *     No hay reintento: lo que aquí se reporte como creado no se vuelve a
+         *     intentar nunca, porque un INSERT repetido duplica el producto en SAE.
+         */
+        AltaSaeReporteIn: {
+            /** Motivo */
+            motivo?: string | null;
+            /** Por Empresa */
+            por_empresa?: Record<string, never>;
+        };
+        /**
          * AutoRemisionOut
          * @description ¿La orden entera puede volverse remisión con un clic? Y con qué líneas.
          *
@@ -4620,6 +4964,19 @@ export interface components {
             motivo: string;
             /** Uuid Sustitucion */
             uuid_sustitucion?: string | null;
+        };
+        /**
+         * CancelarRemisionIn
+         * @description El porqué de la cancelación, para dejarlo escrito en la remisión.
+         *
+         *     «Nada se elimina: se cancela y se deja nota» — y la nota tiene que viajar
+         *     EN la cancelación, no en un PATCH aparte: editar una remisión ya exportada
+         *     devuelve 409, justo en los casos donde saber por qué se canceló importa
+         *     más.
+         */
+        CancelarRemisionIn: {
+            /** Motivo */
+            motivo?: string | null;
         };
         /** CandidatoLineaOut */
         CandidatoLineaOut: {
@@ -7065,6 +7422,80 @@ export interface components {
             vinculados: number;
         };
         /**
+         * ImpuestoDeClaveOut
+         * @description Lo que el bot necesita saber de un producto para decidir impuestos, en
+         *     una sola pregunta por lote. Antes lo resolvía contra SAE clave por clave
+         *     (INVE.CVE_ESQIMPU → IMPU.IMPUESTO4).
+         *
+         *     `iva` e `ieps` van como FRACCIÓN (0.16 = 16%), que es como el Facturador las
+         *     guarda — quien imprime un porcentaje multiplica, y así nadie tiene que
+         *     adivinar en qué unidad viene.
+         */
+        ImpuestoDeClaveOut: {
+            /**
+             * Activo
+             * @default true
+             */
+            activo: boolean;
+            /** Clave */
+            clave: string;
+            /**
+             * Encontrado
+             * @default false
+             */
+            encontrado: boolean;
+            /**
+             * Esquema
+             * @default
+             */
+            esquema: string;
+            /**
+             * Ieps
+             * @default 0
+             */
+            ieps: string;
+            /**
+             * Ieps Cuota
+             * @default 0
+             */
+            ieps_cuota: string;
+            /**
+             * Iva
+             * @default 0
+             */
+            iva: string;
+            /**
+             * Iva Exento
+             * @default false
+             */
+            iva_exento: boolean;
+            /**
+             * Nombre
+             * @default
+             */
+            nombre: string;
+            /**
+             * Objeto Imp
+             * @default 02
+             */
+            objeto_imp: string;
+            /** Producto Id */
+            producto_id?: string | null;
+            /**
+             * Tipo Ieps
+             * @default TASA
+             */
+            tipo_ieps: string;
+        };
+        /**
+         * ImpuestosPorClaveIn
+         * @description Claves de SAE (o SKU) de las que se quiere saber su fiscalidad.
+         */
+        ImpuestosPorClaveIn: {
+            /** Claves */
+            claves: string[];
+        };
+        /**
          * LiberarPedidoIn
          * @description Quitarle a una remisión el congelamiento del export de PEDIDO.
          *
@@ -8250,6 +8681,17 @@ export interface components {
         Page_AlmacenOut_: {
             /** Items */
             items: components["schemas"]["AlmacenOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** Page[AltaSaeOut] */
+        Page_AltaSaeOut_: {
+            /** Items */
+            items: components["schemas"]["AltaSaeOut"][];
             /** Limit */
             limit: number;
             /** Offset */
@@ -16854,6 +17296,145 @@ export interface operations {
             };
         };
     };
+    listar_altas_sae_api_v1_productos_alta_sae_get: {
+        parameters: {
+            query?: {
+                estado?: string | null;
+                clave?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_AltaSaeOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pedir_alta_sae_api_v1_productos_alta_sae_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AltaSaeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AltaSaeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reclamar_alta_sae_api_v1_productos_alta_sae_pendiente_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AltaSaeOut"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reportar_alta_sae_api_v1_productos_alta_sae__solicitud_id__reporte_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                solicitud_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AltaSaeReporteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AltaSaeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     catalogo_cliente_batch_api_v1_productos_catalogo_cliente_batch_post: {
         parameters: {
             query?: never;
@@ -16946,6 +17527,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportPreviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    impuestos_por_clave_api_v1_productos_impuestos_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImpuestosPorClaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImpuestoDeClaveOut"][];
                 };
             };
             /** @description Validation Error */
@@ -18104,6 +18720,116 @@ export interface operations {
             };
         };
     };
+    reporte_armado_api_v1_remisiones_reporte_armado_get: {
+        parameters: {
+            query?: {
+                /** @description Fechas de ENTREGA (bodega), ISO, separadas por coma */
+                fechas?: string | null;
+                /** @description OC del cliente (su_pedido), separadas por coma */
+                folios?: string | null;
+                /** @description Prefijos de origen_externo (csv): WA:,EMAIL: = carril Balles/Jubrán; EHMO:<perfil>: = un Master de EHMO */
+                origen?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reporte_compras_api_v1_remisiones_reporte_compras_get: {
+        parameters: {
+            query: {
+                /** @description Fechas de ENTREGA, ISO, separadas por coma */
+                fechas: string;
+                perfil?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reporte_sin_precio_api_v1_remisiones_reporte_sin_precio_get: {
+        parameters: {
+            query?: {
+                /** @description Fechas de ENTREGA, ISO, separadas por coma */
+                fechas?: string | null;
+                /** @description Si no hay fechas: últimos N días de remisión */
+                dias?: number;
+                origen?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_remision_api_v1_remisiones__rem_id__get: {
         parameters: {
             query?: never;
@@ -18216,7 +18942,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CancelarRemisionIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
