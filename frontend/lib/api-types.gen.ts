@@ -2718,6 +2718,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/precios/catalogo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Catalogo Con Precio
+         * @description El catálogo con el precio que le toca a un cliente, completo.
+         *
+         *     Existe para la meta «WhatsApp habla únicamente con el Facturador»
+         *     (22-sep-2026, decisión del dueño: *el Facturador manda en precios*). El bot
+         *     arma su catálogo leyendo INVE + PRECIO_X_PROD de SAE; esto contesta lo
+         *     mismo desde aquí, con la clave de SAE de cada producto para que el cruce
+         *     siga funcionando igual.
+         *
+         *     El precio sale de `resolver_precios_lote`, o sea de la MISMA cascada que
+         *     cotiza y que factura (override → asignación → lista base). Calcularlo de
+         *     otra forma sería fabricar un segundo precio que se parece al bueno, que es
+         *     exactamente lo que esta migración viene a quitar.
+         *
+         *     `precio: null` NO es «gratis»: es «este cliente no tiene precio para eso».
+         *     Quien lo lea tiene que poder distinguirlo, así que se devuelve nulo y no
+         *     cero — y `solo_con_precio` existe para pedir directamente los que sí.
+         */
+        get: operations["catalogo_con_precio_api_v1_precios_catalogo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/precios/contexto": {
         parameters: {
             query?: never;
@@ -3804,6 +3839,12 @@ export interface paths {
          *
          *     Vencido y cubetas usan la fecha de vencimiento (fecha + días de crédito del
          *     cliente), el mismo criterio del estado de cuenta.
+         *
+         *     `desde`/`hasta` acotan por FECHA DE EMISIÓN de la factura, que es lo que
+         *     hace que los filtros globales del tablero muevan también la cartera. Ojo
+         *     con leerlo: el saldo y el vencido siguen siendo los de HOY —solo se mira un
+         *     subconjunto de facturas—, así que un rango corto no es "lo que me debían
+         *     entonces" sino "lo que me deben de lo que facturé en ese tramo".
          */
         get: operations["cartera_api_v1_reportes_cartera_get"];
         put?: never;
@@ -3823,13 +3864,13 @@ export interface paths {
         };
         /**
          * Ventas
-         * @description Facturación: el detalle diario, el mes a mes, y el corte contra el
-         *     periodo anterior.
+         * @description Facturación del rango: la serie de tiempo y el corte contra el tramo
+         *     anterior del mismo tamaño.
          *
-         *     La comparación es contra el MISMO tramo del periodo pasado (los días
-         *     transcurridos de la semana contra esos mismos días de la semana anterior,
-         *     y del mes contra el mes anterior). Comparar una semana a medias contra una
-         *     semana completa siempre pinta una caída que no existe.
+         *     Las cubetas de los extremos se RECORTAN al rango (si el rango empieza un
+         *     miércoles, esa primera semana son tres días): la barra vale lo que se
+         *     facturó dentro del filtro y no lo que se facturó el lunes anterior, que
+         *     quedó fuera de lo que el usuario pidió ver.
          */
         get: operations["ventas_api_v1_reportes_ventas_get"];
         put?: never;
@@ -16247,6 +16288,45 @@ export interface operations {
             };
         };
     };
+    catalogo_con_precio_api_v1_precios_catalogo_get: {
+        parameters: {
+            query: {
+                /** @description De quién es la lista que manda */
+                cliente_id: string;
+                sucursal_id?: string | null;
+                proyecto_id?: string | null;
+                solo_con_precio?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     contexto_precios_api_v1_precios_contexto_get: {
         parameters: {
             query?: {
@@ -18418,6 +18498,12 @@ export interface operations {
             query?: {
                 agrupar?: "proyecto" | "cliente" | "sucursal";
                 incluir_en_cancelacion?: boolean;
+                /** @description Solo facturas emitidas desde esta fecha */
+                desde?: string | null;
+                /** @description Solo facturas emitidas hasta esta fecha */
+                hasta?: string | null;
+                /** @description Acota el reporte a un cliente */
+                cliente_id?: string | null;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
@@ -18450,10 +18536,14 @@ export interface operations {
     ventas_api_v1_reportes_ventas_get: {
         parameters: {
             query?: {
-                /** @description Días del detalle diario */
-                dias?: number;
-                /** @description Meses de la serie mensual */
-                meses?: number;
+                /** @description Inicio del rango (por omisión, hace 30 días) */
+                desde?: string | null;
+                /** @description Fin del rango (por omisión, hoy) */
+                hasta?: string | null;
+                /** @description Paso de la serie */
+                granularidad?: "auto" | "dia" | "semana" | "mes";
+                /** @description Acota el reporte a un cliente */
+                cliente_id?: string | null;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
