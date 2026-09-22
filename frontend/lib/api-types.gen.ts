@@ -3804,6 +3804,12 @@ export interface paths {
          *
          *     Vencido y cubetas usan la fecha de vencimiento (fecha + días de crédito del
          *     cliente), el mismo criterio del estado de cuenta.
+         *
+         *     `desde`/`hasta` acotan por FECHA DE EMISIÓN de la factura, que es lo que
+         *     hace que los filtros globales del tablero muevan también la cartera. Ojo
+         *     con leerlo: el saldo y el vencido siguen siendo los de HOY —solo se mira un
+         *     subconjunto de facturas—, así que un rango corto no es "lo que me debían
+         *     entonces" sino "lo que me deben de lo que facturé en ese tramo".
          */
         get: operations["cartera_api_v1_reportes_cartera_get"];
         put?: never;
@@ -3823,13 +3829,13 @@ export interface paths {
         };
         /**
          * Ventas
-         * @description Facturación: el detalle diario, el mes a mes, y el corte contra el
-         *     periodo anterior.
+         * @description Facturación del rango: la serie de tiempo y el corte contra el tramo
+         *     anterior del mismo tamaño.
          *
-         *     La comparación es contra el MISMO tramo del periodo pasado (los días
-         *     transcurridos de la semana contra esos mismos días de la semana anterior,
-         *     y del mes contra el mes anterior). Comparar una semana a medias contra una
-         *     semana completa siempre pinta una caída que no existe.
+         *     Las cubetas de los extremos se RECORTAN al rango (si el rango empieza un
+         *     miércoles, esa primera semana son tres días): la barra vale lo que se
+         *     facturó dentro del filtro y no lo que se facturó el lunes anterior, que
+         *     quedó fuera de lo que el usuario pidió ver.
          */
         get: operations["ventas_api_v1_reportes_ventas_get"];
         put?: never;
@@ -18418,6 +18424,12 @@ export interface operations {
             query?: {
                 agrupar?: "proyecto" | "cliente" | "sucursal";
                 incluir_en_cancelacion?: boolean;
+                /** @description Solo facturas emitidas desde esta fecha */
+                desde?: string | null;
+                /** @description Solo facturas emitidas hasta esta fecha */
+                hasta?: string | null;
+                /** @description Acota el reporte a un cliente */
+                cliente_id?: string | null;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
@@ -18450,10 +18462,14 @@ export interface operations {
     ventas_api_v1_reportes_ventas_get: {
         parameters: {
             query?: {
-                /** @description Días del detalle diario */
-                dias?: number;
-                /** @description Meses de la serie mensual */
-                meses?: number;
+                /** @description Inicio del rango (por omisión, hace 30 días) */
+                desde?: string | null;
+                /** @description Fin del rango (por omisión, hoy) */
+                hasta?: string | null;
+                /** @description Paso de la serie */
+                granularidad?: "auto" | "dia" | "semana" | "mes";
+                /** @description Acota el reporte a un cliente */
+                cliente_id?: string | null;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;

@@ -1,68 +1,184 @@
 "use client";
 
-// Gráficas de barras en SVG, sin librería. Son dos formas muy acotadas —una
-// serie de tiempo y una barra segmentada— y traer un paquete de gráficas
-// entero para eso pesaría más que el resto del reporte junto.
+// Gráficas del tablero, sin librería: una serie de tiempo y una barra
+// segmentada. Traer un paquete de gráficas entero para dos formas tan acotadas
+// pesaría más que el resto del reporte junto.
 //
-// El SVG lleva `viewBox` y ancho 100%: se adapta al contenedor sin JS, que es
-// lo que hace que sirva igual en el teléfono. Los colores salen de las mismas
-// variables del tema que el resto del app (`currentColor` sobre clases de
-// Tailwind), así que el modo oscuro no necesita nada especial.
+// La serie se dibuja con cajas (no SVG) porque el SVG que tenía `viewBox` con
+// `preserveAspectRatio="none"` deformaba todo lo que le metieras: con un eje de
+// pesos encima, los números habrían salido estirados. Con cajas el alto de cada
+// barra es un porcentaje y el navegador hace el reparto responsivo solo.
 
-import { fmtMoney } from "@/lib/format";
+import { useState } from "react";
 
-export type Punto = { etiqueta: string; valor: number; detalle?: string };
+import { fmtMoney, fmtMoneyCorto } from "@/lib/format";
 
-/** Serie de tiempo en barras. `destacar` marca la última (el día u hoy). */
-export function BarrasTiempo({
+export type Punto = {
+  /** Clave estable de la barra (la fecha de inicio de su cubeta). */
+  clave: string;
+  /** Lo que va bajo el eje X: corto ("8 sep", "sep 26"). */
+  etiqueta: string;
+  /** Lo que va en la lectura al pasar el cursor: puede ser largo ("7 – 13 sep"). */
+  detalle?: string;
+  /** Segunda línea de la lectura ("12 facturas"). */
+  nota?: string;
+  valor: number;
+};
+
+/** Escala del eje Y con cortes redondos (1, 2, 2.5, 5 × 10ⁿ).
+ *
+ * Un eje que terminara justo en el máximo daría topes como $1,347,912: se lee
+ * peor que $1.5 M y además deja la barra más alta pegada al techo. */
+function escala(max: number, divisiones = 4): { tope: number; cortes: number[] } {
+  if (!(max > 0)) return { tope: 1, cortes: [0] };
+  const bruto = max / divisiones;
+  const magnitud = Math.pow(10, Math.floor(Math.log10(bruto)));
+  const paso = [1, 2, 2.5, 5, 10].map((m) => m * magnitud).find((v) => v >= bruto) ?? magnitud * 10;
+  const tope = Math.ceil(max / paso) * paso;
+  const cortes: number[] = [];
+  for (let v = 0; v <= tope + paso / 2; v += paso) cortes.push(Number(v.toFixed(6)));
+  return { tope, cortes };
+}
+
+/** Hasta 5 marcas en el eje X, repartidas parejo. Una etiqueta por barra es
+ *  ilegible en cuanto pasan de diez; el resto vive en la lectura de arriba. */
+function marcas(n: number, cuantas = 5): number[] {
+  if (n <= cuantas) return Array.from({ length: n }, (_, i) => i);
+  return Array.from({ length: cuantas }, (_, k) => Math.round((k * (n - 1)) / (cuantas - 1)));
+}
+
+/**
+ * Serie de tiempo en barras, con eje de pesos y lectura por barra.
+ *
+ * La barra completa —no solo su alto pintado— es el blanco del cursor: con 90
+ * barras, apuntarle a un rectángulo de tres pixeles de alto es imposible. Y
+ * como es un `<button>`, el teclado la recorre igual que el ratón, y en el
+ * teléfono (donde no hay "pasar el cursor") el toque la deja fija.
+ */
+export function SerieTiempo({
   puntos,
-  alto = 120,
   titulo,
+  alto = 190,
+  destacar,
+  vacio = "Sin facturación en el rango.",
 }: {
   puntos: Punto[];
-  alto?: number;
   titulo: string;
+  alto?: number;
+  /** Barras que van en tono lleno (el día de hoy, el mes en curso…). */
+  destacar?: (p: Punto, i: number) => boolean;
+  vacio?: string;
 }) {
-  const max = Math.max(1, ...puntos.map((p) => p.valor));
-  const n = Math.max(1, puntos.length);
-  // Ancho virtual: 10 unidades por barra. El viewBox lo escala al contenedor,
-  // así que el número solo fija la PROPORCIÓN entre barra y separación.
-  const ancho = n * 10;
+  // `fijo` es el toque/clic; `sobre` el cursor. El cursor manda mientras esté
+  // encima, y al salirse vuelve a verse lo que el usuario dejó fijo.
+  const [fijo, setFijo] = useState<number | null>(null);
+  const [sobre, setSobre] = useState<number | null>(null);
+
+  const n = puntos.length;
+  const max = Math.max(0, ...puntos.map((p) => p.valor));
+  const { tope, cortes } = escala(max);
+  const visible = sobre ?? fijo;
+  const sel = visible !== null ? puntos[visible] : undefined;
+  const ejeX = marcas(n);
+  const separacion = n > 60 ? 1 : n > 24 ? 2 : 4;
+
+  if (n === 0) return <p className="py-10 text-center text-sm text-muted">{vacio}</p>;
 
   return (
     <figure className="m-0">
-      <svg
-        viewBox={`0 0 ${ancho} ${alto}`}
-        preserveAspectRatio="none"
-        className="h-28 w-full sm:h-32"
-        role="img"
-        aria-label={titulo}
-      >
-        {puntos.map((p, i) => {
-          const h = Math.max(p.valor > 0 ? 1.5 : 0, (p.valor / max) * (alto - 4));
-          const ultimo = i === puntos.length - 1;
-          return (
-            <rect
-              key={p.etiqueta}
-              x={i * 10 + 1.2}
-              y={alto - h}
-              width={7.6}
-              height={h}
-              rx={1}
-              className={ultimo ? "fill-accent" : "fill-accent/45"}
+      {/* Lectura de la barra activa. Ocupa su renglón siempre, aunque no haya
+          nada seleccionado: si apareciera y desapareciera, la gráfica entera
+          brincaría cada vez que el cursor entra y sale. */}
+      <div className="mb-2 flex min-h-[1.25rem] items-baseline justify-between gap-3 text-xs">
+        {sel ? (
+          <>
+            <span className="truncate text-muted">{sel.detalle ?? sel.etiqueta}</span>
+            <span className="shrink-0 tabular-nums">
+              <span className="font-semibold">{fmtMoney(sel.valor)}</span>
+              {sel.nota && <span className="ml-1.5 text-muted">· {sel.nota}</span>}
+            </span>
+          </>
+        ) : (
+          <span className="text-muted">Pasa el cursor o toca una barra para ver su total</span>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        {/* Eje Y, en pesos abreviados. */}
+        <div className="relative w-12 shrink-0 sm:w-14" style={{ height: alto }} aria-hidden>
+          {cortes.map((v) => (
+            <span
+              key={v}
+              className="absolute right-0 -translate-y-1/2 text-[10px] tabular-nums text-muted"
+              style={{ bottom: `${(v / tope) * 100}%` }}
             >
-              <title>{`${p.etiqueta}: ${fmtMoney(p.valor)}${p.detalle ? ` · ${p.detalle}` : ""}`}</title>
-            </rect>
-          );
-        })}
-      </svg>
-      {/* Solo los extremos y el medio: con 30 barras, una etiqueta por barra es
-          ilegible en cualquier pantalla. El resto vive en el tooltip. */}
-      <figcaption className="mt-1 flex justify-between text-[11px] text-muted">
-        <span>{puntos[0]?.etiqueta}</span>
-        {puntos.length > 2 && <span className="hidden sm:inline">{puntos[Math.floor(n / 2)]?.etiqueta}</span>}
-        <span>{puntos[puntos.length - 1]?.etiqueta}</span>
-      </figcaption>
+              {fmtMoneyCorto(v)}
+            </span>
+          ))}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="relative" style={{ height: alto }} role="img" aria-label={titulo}>
+            {cortes.map((v) => (
+              <div
+                key={v}
+                className={`absolute inset-x-0 border-t ${v === 0 ? "border-border" : "border-border/50"}`}
+                style={{ bottom: `${(v / tope) * 100}%` }}
+                aria-hidden
+              />
+            ))}
+            <div className="absolute inset-0 flex items-end" style={{ gap: separacion }}>
+              {puntos.map((p, i) => {
+                const activa = visible === i;
+                const lleno = activa || destacar?.(p, i);
+                return (
+                  <button
+                    key={p.clave}
+                    type="button"
+                    // Toda la columna es el blanco: apuntarle al alto pintado de
+                    // una barra en cero sería imposible.
+                    className="flex h-full min-w-0 flex-1 items-end rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    onMouseEnter={() => setSobre(i)}
+                    onMouseLeave={() => setSobre((s) => (s === i ? null : s))}
+                    onFocus={() => setSobre(i)}
+                    onBlur={() => setSobre((s) => (s === i ? null : s))}
+                    onClick={() => setFijo((f) => (f === i ? null : i))}
+                    aria-pressed={fijo === i}
+                    title={`${p.detalle ?? p.etiqueta}: ${fmtMoney(p.valor)}${p.nota ? ` · ${p.nota}` : ""}`}
+                  >
+                    <span
+                      className={`w-full rounded-t-sm transition-colors ${
+                        lleno ? "bg-accent" : "bg-accent/40"
+                      }`}
+                      // Mínimo visible en los periodos con venta pequeña: una
+                      // barra de medio pixel se lee como un cero que no es.
+                      style={{ height: `${p.valor > 0 ? Math.max(2, (p.valor / tope) * 100) : 0}%` }}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <figcaption className="relative mt-1 h-4 text-[10px] text-muted">
+            {ejeX.map((i) => (
+              <span
+                key={puntos[i].clave}
+                className="absolute whitespace-nowrap"
+                style={
+                  i === 0
+                    ? { left: 0 }
+                    : i === n - 1
+                      ? { right: 0 }
+                      : { left: `${((i + 0.5) / n) * 100}%`, transform: "translateX(-50%)" }
+                }
+              >
+                {puntos[i].etiqueta}
+              </span>
+            ))}
+          </figcaption>
+        </div>
+      </div>
     </figure>
   );
 }

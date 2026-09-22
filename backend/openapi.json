@@ -35090,7 +35090,7 @@
   },
   "/api/v1/reportes/cartera": {
    "get": {
-    "description": "Cuentas por cobrar: una fila por proyecto, cliente o plaza, más la\nantigüedad global por meses.\n\nVencido y cubetas usan la fecha de vencimiento (fecha + días de crédito del\ncliente), el mismo criterio del estado de cuenta.",
+    "description": "Cuentas por cobrar: una fila por proyecto, cliente o plaza, más la\nantigüedad global por meses.\n\nVencido y cubetas usan la fecha de vencimiento (fecha + días de crédito del\ncliente), el mismo criterio del estado de cuenta.\n\n`desde`/`hasta` acotan por FECHA DE EMISIÓN de la factura, que es lo que\nhace que los filtros globales del tablero muevan también la cartera. Ojo\ncon leerlo: el saldo y el vencido siguen siendo los de HOY —solo se mira un\nsubconjunto de facturas—, así que un rango corto no es \"lo que me debían\nentonces\" sino \"lo que me deben de lo que facturé en ese tramo\".",
     "operationId": "cartera_api_v1_reportes_cartera_get",
     "parameters": [
      {
@@ -35116,6 +35116,63 @@
        "default": false,
        "title": "Incluir En Cancelacion",
        "type": "boolean"
+      }
+     },
+     {
+      "description": "Solo facturas emitidas desde esta fecha",
+      "in": "query",
+      "name": "desde",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Solo facturas emitidas desde esta fecha",
+       "title": "Desde"
+      }
+     },
+     {
+      "description": "Solo facturas emitidas hasta esta fecha",
+      "in": "query",
+      "name": "hasta",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Solo facturas emitidas hasta esta fecha",
+       "title": "Hasta"
+      }
+     },
+     {
+      "description": "Acota el reporte a un cliente",
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Acota el reporte a un cliente",
+       "title": "Cliente Id"
       }
      },
      {
@@ -35168,35 +35225,82 @@
   },
   "/api/v1/reportes/ventas": {
    "get": {
-    "description": "Facturación: el detalle diario, el mes a mes, y el corte contra el\nperiodo anterior.\n\nLa comparación es contra el MISMO tramo del periodo pasado (los días\ntranscurridos de la semana contra esos mismos días de la semana anterior,\ny del mes contra el mes anterior). Comparar una semana a medias contra una\nsemana completa siempre pinta una caída que no existe.",
+    "description": "Facturación del rango: la serie de tiempo y el corte contra el tramo\nanterior del mismo tamaño.\n\nLas cubetas de los extremos se RECORTAN al rango (si el rango empieza un\nmiércoles, esa primera semana son tres días): la barra vale lo que se\nfacturó dentro del filtro y no lo que se facturó el lunes anterior, que\nquedó fuera de lo que el usuario pidió ver.",
     "operationId": "ventas_api_v1_reportes_ventas_get",
     "parameters": [
      {
-      "description": "Días del detalle diario",
+      "description": "Inicio del rango (por omisión, hace 30 días)",
       "in": "query",
-      "name": "dias",
+      "name": "desde",
       "required": false,
       "schema": {
-       "default": 30,
-       "description": "Días del detalle diario",
-       "maximum": 180,
-       "minimum": 7,
-       "title": "Dias",
-       "type": "integer"
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Inicio del rango (por omisión, hace 30 días)",
+       "title": "Desde"
       }
      },
      {
-      "description": "Meses de la serie mensual",
+      "description": "Fin del rango (por omisión, hoy)",
       "in": "query",
-      "name": "meses",
+      "name": "hasta",
       "required": false,
       "schema": {
-       "default": 6,
-       "description": "Meses de la serie mensual",
-       "maximum": 24,
-       "minimum": 3,
-       "title": "Meses",
-       "type": "integer"
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Fin del rango (por omisión, hoy)",
+       "title": "Hasta"
+      }
+     },
+     {
+      "description": "Paso de la serie",
+      "in": "query",
+      "name": "granularidad",
+      "required": false,
+      "schema": {
+       "default": "auto",
+       "description": "Paso de la serie",
+       "enum": [
+        "auto",
+        "dia",
+        "semana",
+        "mes"
+       ],
+       "title": "Granularidad",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Acota el reporte a un cliente",
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Acota el reporte a un cliente",
+       "title": "Cliente Id"
       }
      },
      {
