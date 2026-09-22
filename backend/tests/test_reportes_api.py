@@ -9,13 +9,13 @@ from app.models import Factura
 from tests.test_cobranza_api import _factura_ppd_timbrada, _h, env, auth  # noqa: F401
 
 
-def _factura_del_dia(env, *, total, dias_atras, folio, serie="F"):
+def _factura_del_dia(env, *, total, dias_atras, folio, serie="F", cliente=None):
     """Una TIMBRADA con fecha dada, para las series de ventas."""
     db = SessionLocal()
     try:
         f = Factura(
             tenant_id=uuid.UUID(str(env["tenant_id"])), serie=serie, folio=folio,
-            cliente_id=uuid.UUID(env["cli"]), metodo_pago="PUE", forma_pago="99",
+            cliente_id=uuid.UUID(cliente or env["cli"]), metodo_pago="PUE", forma_pago="99",
             total=Decimal(str(total)), subtotal=Decimal(str(total)),
             estado="TIMBRADA", uuid=str(uuid.uuid4()),
             fecha=datetime.now(timezone.utc) - timedelta(days=dias_atras),
@@ -63,22 +63,104 @@ def test_cartera_por_cliente_y_por_sucursal(client, env, auth):
     assert float(por_plaza["saldo_total"]) == 300.0
 
 
-def test_ventas_compara_contra_el_mismo_tramo(client, env, auth):
-    """El comparativo usa los días TRANSCURRIDOS, no el periodo completo: una
-    semana a medias contra una completa pintaría una caída inexistente."""
+def test_ventas_rellena_los_dias_sin_factura(client, env, auth):
+    """Los días en cero van en la serie: una gráfica que salta del lunes al
+    jueves miente sobre el ritmo."""
+    hoy = datetime.now(timezone.utc).date()
     _factura_del_dia(env, total=1000, dias_atras=0, folio=41)
-    _factura_del_dia(env, total=250, dias_atras=7, folio=42)     # mismo día, semana pasada
+    _factura_del_dia(env, total=250, dias_atras=4, folio=42)
 
-    d = client.get("/api/v1/reportes/ventas", params={"dias": 14}, headers=_h(env)).json()
-    assert len(d["diario"]) == 14                     # los días sin factura van en cero
-    assert float(d["diario"][-1]["total"]) == 1000.0
-    assert float(d["semana"]["actual"]) >= 1000.0
-    assert d["semana"]["variacion"] is not None
-    assert d["mes"]["dias_transcurridos"] >= 1
+    d = client.get("/api/v1/reportes/ventas", params={
+        "desde": (hoy - timedelta(days=4)).isoformat(), "hasta": hoy.isoformat(),
+    }, headers=_h(env)).json()
+
+    assert d["granularidad"] == "dia"
+    assert len(d["serie"]) == 5
+    assert [c["inicio"] for c in d["serie"]][0] == (hoy - timedelta(days=4)).isoformat()
+    assert float(d["serie"][-1]["total"]) == 1000.0
+    assert float(d["serie"][2]["total"]) == 0.0
+    assert float(d["total"]) == 1250.0
+    assert d["facturas"] == 2
+    # El total del rango ES la suma de las barras: si divergen, una cubeta se perdió.
+    assert sum(float(c["total"]) for c in d["serie"]) == float(d["total"])
+
+
+def test_ventas_por_semana_recorta_las_cubetas_al_rango(client, env, auth):
+    """La primera y la última cubeta valen lo facturado DENTRO del filtro, no
+    lo de la semana natural completa que las contiene."""
+    hoy = datetime.now(timezone.utc).date()
+    desde = hoy - timedelta(days=13)
+    _factura_del_dia(env, total=700, dias_atras=13, folio=44)
+    _factura_del_dia(env, total=300, dias_atras=20, folio=45)   # fuera del rango
+
+    d = client.get("/api/v1/reportes/ventas", params={
+        "desde": desde.isoformat(), "hasta": hoy.isoformat(), "granularidad": "semana",
+    }, headers=_h(env)).json()
+
+    assert d["granularidad"] == "semana"
+    assert d["serie"][0]["inicio"] == desde.isoformat()      # recortada al inicio del rango
+    assert d["serie"][-1]["fin"] == hoy.isoformat()          # y al final
+    assert float(d["total"]) == 700.0                        # la de hace 20 días no entra
+
+
+def test_ventas_compara_contra_el_mismo_tramo_del_mes_pasado(client, env, auth):
+    """Un mes empezado se compara contra el MISMO tramo del mes pasado: medirlo
+    contra los N días corridos previos partiría el mes pasado a la mitad."""
+    hoy = datetime.now(timezone.utc).date()
+    primero = hoy.replace(day=1)
+    _factura_del_dia(env, total=1000, dias_atras=0, folio=46)
+
+    d = client.get("/api/v1/reportes/ventas", params={
+        "desde": primero.isoformat(), "hasta": hoy.isoformat(),
+    }, headers=_h(env)).json()
+
+    anterior = d["anterior"]
+    mes_pasado = (primero - timedelta(days=1)).replace(day=1)
+    assert anterior["desde"] == mes_pasado.isoformat()
+    assert anterior["hasta"] <= (primero - timedelta(days=1)).isoformat()
+    assert float(d["total"]) >= 1000.0
 
 
 def test_ventas_sin_base_previa_no_inventa_porcentaje(client, env, auth):
     """Sin facturación previa no hay porcentaje que dar: None, no un 100%."""
     _factura_del_dia(env, total=500, dias_atras=0, folio=43)
     d = client.get("/api/v1/reportes/ventas", headers=_h(env)).json()
-    assert d["semana"]["variacion"] is None or isinstance(d["semana"]["variacion"], float)
+    assert d["anterior"]["variacion"] is None or isinstance(d["anterior"]["variacion"], float)
+
+
+def test_ventas_filtra_por_cliente(client, env, auth):
+    """El filtro global de cliente deja fuera lo de los demás, serie incluida."""
+    _factura_del_dia(env, total=1000, dias_atras=0, folio=47)
+    _factura_del_dia(env, total=400, dias_atras=0, folio=48, cliente=env["otro"])
+
+    todos = client.get("/api/v1/reportes/ventas", headers=_h(env)).json()
+    solo = client.get("/api/v1/reportes/ventas", params={"cliente_id": env["cli"]},
+                      headers=_h(env)).json()
+
+    assert float(todos["total"]) == 1400.0
+    assert float(solo["total"]) == 1000.0
+    assert sum(float(c["total"]) for c in solo["serie"]) == 1000.0
+
+
+def test_ventas_el_filtro_no_abre_el_candado_por_cliente(client, env, auth_atado):
+    """Pedir el cliente ajeno desde una sesión amarrada sale 404: el filtro
+    elige DENTRO de lo permitido, nunca lo ensancha."""
+    r = client.get("/api/v1/reportes/ventas", params={"cliente_id": env["otro"]},
+                   headers=_h(env))
+    assert r.status_code == 404
+
+
+def test_cartera_se_acota_al_rango_y_al_cliente(client, env, auth):
+    """Los filtros globales mueven también la cobranza, por fecha de emisión."""
+    hoy = datetime.now(timezone.utc).date()
+    _factura_ppd_timbrada(env, total=1000, dias_atras=5, folio=51, serie="ZEHMOTG")
+    _factura_ppd_timbrada(env, total=700, dias_atras=90, folio=52, serie="ZEHMOTG")
+
+    reciente = client.get("/api/v1/reportes/cartera", params={
+        "desde": (hoy - timedelta(days=30)).isoformat(), "hasta": hoy.isoformat(),
+    }, headers=_h(env)).json()
+    assert float(reciente["saldo_total"]) == 1000.0
+
+    ajeno = client.get("/api/v1/reportes/cartera", params={"cliente_id": env["otro"]},
+                       headers=_h(env)).json()
+    assert float(ajeno["saldo_total"]) == 0.0
