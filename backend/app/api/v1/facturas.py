@@ -11,6 +11,8 @@ en la unidad base; el resto factura la presentación con su unidad SAT.
 """
 from __future__ import annotations
 
+import re
+
 import html as html_mod
 import logging
 
@@ -830,38 +832,101 @@ def _norm_clave_sae(v: str) -> str:
 @router.get("/espejo/resumen")
 def espejo_resumen(
     empresa: str = Query(..., max_length=4),
-    serie: str = Query(..., max_length=20),
+    serie: Optional[str] = Query(default=None, max_length=20),
     desde: Optional[date] = Query(default=None),
+    q: Optional[str] = Query(default=None, max_length=120,
+                             description="Busca en la observación, el UUID y serie+folio"),
+    detalle: bool = Query(default=False, description="Añade fecha, UUID, observación e impuestos"),
+    lineas: bool = Query(default=False, description="Añade las partidas (exige serie o q)"),
+    limit: int = Query(default=500, ge=1, le=2000),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission("factura:espejo")),
 ):
-    """Qué tiene el espejo de esa serie: folio, total y estado.
+    """Qué tiene el espejo: folio, total y estado — y, si se piden, el detalle.
 
-    Es la contraparte de la conciliación Facturador↔SAE (criterio de la Etapa 3
-    del plan): el conector compara ESTO contra lo que SAE tiene y detecta las
-    facturas que nunca llegaron al espejo — si falta una, el estado de cuenta
-    del cliente miente y nadie se entera.
+    Nació como la contraparte de la conciliación Facturador↔SAE: el conector
+    compara ESTO contra lo que SAE tiene y detecta las facturas que nunca
+    llegaron al espejo — si falta una, el estado de cuenta del cliente miente y
+    nadie se entera. Esa forma mínima sigue igual y es la de default.
 
-    Deliberadamente gated por `factura:espejo` y no por `menu:facturas`: la
-    clave del conector puede verificar SU trabajo sin ganar acceso de lectura
-    a toda la facturación. Devuelve lo mínimo para cuadrar, no el detalle.
+    Se engorda el 22-sep-2026 (decisión del dueño) para que el bot de WhatsApp
+    pueda contestar de facturas SIN preguntarle a SAE, que es la meta 4. Lo que
+    el bot necesita y antes no estaba: buscar por la OC —que vive en la
+    OBSERVACIÓN del documento, no en un campo propio—, el UUID para el acuse,
+    el desglose de impuestos y las partidas.
+
+    Sigue gated por `factura:espejo` y NO por `menu:facturas`: la clave del
+    conector verifica su trabajo y lee el espejo de SAE, sin ganar acceso a la
+    facturación nativa del Facturador. Por eso el filtro de origen no es
+    negociable: aquí solo se ve lo que vino de SAE.
     """
-    q = db.query(Factura.folio, Factura.total, Factura.estado, Factura.saldo_insoluto).filter(
+    base = db.query(Factura).filter(
         Factura.tenant_id == ctx.tenant_id,
         Factura.origen == "ESPEJO_SAE",
         Factura.espejo_empresa == empresa.strip(),
-        Factura.serie == serie.strip().upper(),
         Factura.deleted_at.is_(None),
     )
+    if serie:
+        base = base.filter(Factura.serie == serie.strip().upper())
     if desde:
-        q = q.filter(Factura.fecha >= desde)
-    filas = q.order_by(Factura.folio).all()
+        base = base.filter(Factura.fecha >= desde)
+    if q and q.strip():
+        # La OC vive en la OBSERVACIÓN del documento («... OC 24610 ...»), que
+        # es como el bot la encuentra hoy en SAE. Se busca igual que en la
+        # pantalla: observación, UUID y serie+folio con y sin espacio.
+        termino = q.strip()
+        like = f"%{termino}%"
+        condiciones = [
+            Factura.notas.ilike(like),
+            Factura.uuid.ilike(like),
+            func.concat(Factura.serie, Factura.folio).ilike(like.replace(" ", "")),
+            func.concat(Factura.serie, " ", Factura.folio).ilike(like),
+        ]
+        digitos = re.sub(r"\D", "", termino)
+        if digitos:
+            condiciones.append(Factura.folio == int(digitos))
+        base = base.filter(or_(*condiciones))
+    if lineas and not (serie or (q and q.strip())):
+        raise HTTPException(status_code=422,
+                            detail="pedir las partidas exige acotar por serie o por búsqueda")
+    if lineas:
+        base = base.options(selectinload(Factura.lineas))
+
+    filas = base.order_by(Factura.serie, Factura.folio).limit(limit).all()
+    out = []
+    for f in filas:
+        d = {"folio": f.folio, "serie": f.serie, "total": str(f.total or 0),
+             "estado": f.estado, "saldo": str(f.saldo_insoluto or 0)}
+        if detalle or lineas:
+            d.update({
+                "fecha": f.fecha.isoformat() if f.fecha else None,
+                "uuid": f.uuid,
+                # la observación del documento: aquí es donde el bot encuentra la OC
+                "observaciones": f.notas,
+                "subtotal": str(f.subtotal or 0),
+                "iva": str(f.iva_trasladado or 0),
+                "ieps": str(f.ieps_trasladado or 0),
+                "cancelacion_msj": f.cancelacion_msj,
+                "uuid_sustitucion": f.uuid_sustitucion,
+                "cliente_id": str(f.cliente_id),
+            })
+        if lineas:
+            d["lineas"] = [
+                {"clave": ln.clave_sae, "clave_sat": ln.clave_prod_serv,
+                 "descripcion": ln.descripcion,
+                 "cantidad": str(ln.cantidad), "precio_unitario": str(ln.valor_unitario),
+                 "importe": str(ln.importe or 0), "producto_id": str(ln.producto_id) if ln.producto_id else None,
+                 "iva": str(ln.iva_importe or 0)}
+                for ln in sorted(f.lineas, key=lambda x: x.numero_linea)
+            ]
+        out.append(d)
     return {
-        "empresa": empresa, "serie": serie.strip().upper(), "total_facturas": len(filas),
-        "folios": [
-            {"folio": f, "total": str(t or 0), "estado": e, "saldo": str(sal or 0)}
-            for f, t, e, sal in filas
-        ],
+        "empresa": empresa, "serie": (serie or "").strip().upper() or None,
+        "total_facturas": len(out),
+        # `truncado` no es cosmético: sin él, quien pregunte por una OC y reciba
+        # 500 facturas no sabe si la suya quedó fuera del corte.
+        "truncado": len(out) >= limit,
+        "folios": out,
     }
 
 
@@ -1374,6 +1439,9 @@ def factura_espejo(
                 producto_id=pid if prod else None,
                 clave_prod_serv=(prod.clave_sat if prod else "01010101"),
                 clave_unidad=(prod.unidad_sat if prod else "H87"),
+                # la clave de SAE se guarda SIEMPRE, cruce o no: es la única
+                # forma de saber de qué artículo habla una partida que no cruzó
+                clave_sae=(ln.clave or "").strip()[:30] or None,
                 descripcion=(ln.descripcion or (prod.nombre if prod else "PARTIDA SAE"))[:1000],
                 cantidad=ln.cantidad,
                 valor_unitario=ln.precio_unitario,

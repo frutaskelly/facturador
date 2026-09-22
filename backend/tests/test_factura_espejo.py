@@ -967,3 +967,47 @@ def test_el_espejo_separa_iva_de_ieps(client, env, auth_as, sin_sesion):
     s = espejar(9103, iva="0", ieps="0",
                 uuid_sustitucion="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     assert s["uuid_sustitucion"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
+def test_el_resumen_del_espejo_contesta_por_la_oc_y_con_detalle(client, env, auth_as, sin_sesion):
+    """El bot busca la factura de una OC por la OBSERVACIÓN del documento —ahí
+    vive el «OC 24610», no en un campo propio— y necesita el UUID, el desglose
+    de impuestos y las partidas con su clave de SAE. Todo eso sale del espejo,
+    sin abrirle la facturación nativa: sigue bajo `factura:espejo`."""
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=7001, observaciones="ENTREGA SEM 38 · OC 24610", iva="100", ieps="25"))
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=7002, observaciones="OTRA COSA SIN LA ORDEN"))
+
+    # por la OC, que vive en la observación
+    r = client.get("/api/v1/facturas/espejo/resumen", headers=hk,
+                   params={"empresa": "02", "q": "24610", "detalle": True})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert [f["folio"] for f in out["folios"]] == [7001], out
+    f = out["folios"][0]
+    assert f["observaciones"] == "ENTREGA SEM 38 · OC 24610"
+    assert f["uuid"] and float(f["iva"]) == 100.0 and float(f["ieps"]) == 25.0
+
+    # por serie+folio, con y sin espacio
+    for termino in ("ZHGO 7002", "ZHGO7002"):
+        r2 = client.get("/api/v1/facturas/espejo/resumen", headers=hk,
+                        params={"empresa": "02", "q": termino})
+        assert [x["folio"] for x in r2.json()["folios"]] == [7002], termino
+
+    # con partidas: la clave de SAE viaja aunque la línea no cruce con producto
+    r3 = client.get("/api/v1/facturas/espejo/resumen", headers=hk,
+                    params={"empresa": "02", "q": "24610", "lineas": True})
+    ls = r3.json()["folios"][0]["lineas"]
+    assert {l["clave"] for l in ls} == {"ACEI-ACEI-639", "NO-EXISTE-999"}
+    assert [l for l in ls if l["clave"] == "NO-EXISTE-999"][0]["producto_id"] is None
+
+    # pedir partidas sin acotar se rechaza: sería volcar el espejo entero
+    assert client.get("/api/v1/facturas/espejo/resumen", headers=hk,
+                      params={"empresa": "02", "lineas": True}).status_code == 422
+
+    # y la forma vieja (la conciliación) sigue igual
+    r4 = client.get("/api/v1/facturas/espejo/resumen", headers=hk,
+                    params={"empresa": "02", "serie": "ZHGO"})
+    assert all({"folio", "total", "estado", "saldo"} <= set(x) for x in r4.json()["folios"])
