@@ -63,9 +63,12 @@ def verify_token(token: str) -> dict:
             algorithms=_ALGORITHMS,
             audience=_EXPECTED_AUD,
             issuer=issuer,
-            # Absorb minor client/server clock skew so a token issued a second
-            # ago isn't rejected as "not yet valid" (iat) — applies to iat/nbf/exp.
-            leeway=60,
+            # Absorb client/server clock skew so a token issued a second ago
+            # isn't rejected as "not yet valid" (iat) — applies to iat/nbf/exp.
+            # 60 s se quedó corto: el 23-sep el reloj del Mini se atrasó 61 s y
+            # dejó fuera a todos. 5 min de gracia en exp es aceptable (el token
+            # dura 1 h y se sigue verificando la firma).
+            leeway=300,
             options={"require": ["exp", "sub"], "verify_iss": bool(issuer)},
         )
     except jwt.ExpiredSignatureError:
