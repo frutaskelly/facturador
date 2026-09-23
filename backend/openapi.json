@@ -4486,6 +4486,80 @@
     "title": "DevolucionOut",
     "type": "object"
    },
+   "DoctoEspejoIn": {
+    "description": "Un renglón del documento: la factura a la que abona y cuánto.",
+    "properties": {
+     "folio": {
+      "exclusiveMinimum": 0.0,
+      "title": "Folio",
+      "type": "integer"
+     },
+     "importe": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Importe"
+     },
+     "num_parcialidad": {
+      "anyOf": [
+       {
+        "minimum": 1.0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Num Parcialidad"
+     },
+     "saldo_anterior": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Saldo Anterior"
+     },
+     "saldo_insoluto": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Saldo Insoluto"
+     },
+     "serie": {
+      "maxLength": 20,
+      "title": "Serie",
+      "type": "string"
+     }
+    },
+    "required": [
+     "serie",
+     "folio",
+     "importe"
+    ],
+    "title": "DoctoEspejoIn",
+    "type": "object"
+   },
    "EmpresaAccesoIn": {
     "properties": {
      "acceso": {
@@ -10604,6 +10678,104 @@
     "title": "MovimientoOut",
     "type": "object"
    },
+   "NotaCreditoEspejoIn": {
+    "properties": {
+     "cliente_sae": {
+      "maxLength": 10,
+      "title": "Cliente Sae",
+      "type": "string"
+     },
+     "cve_doc": {
+      "maxLength": 30,
+      "minLength": 1,
+      "title": "Cve Doc",
+      "type": "string"
+     },
+     "empresa": {
+      "maxLength": 4,
+      "title": "Empresa",
+      "type": "string"
+     },
+     "estado": {
+      "pattern": "^(VIGENTE|CANCELADA)$",
+      "title": "Estado",
+      "type": "string"
+     },
+     "facturas": {
+      "items": {
+       "$ref": "#/components/schemas/DoctoEspejoIn"
+      },
+      "maxItems": 500,
+      "title": "Facturas",
+      "type": "array"
+     },
+     "fecha": {
+      "format": "date-time",
+      "title": "Fecha",
+      "type": "string"
+     },
+     "fecha_cancelacion": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha Cancelacion"
+     },
+     "folio": {
+      "exclusiveMinimum": 0.0,
+      "title": "Folio",
+      "type": "integer"
+     },
+     "serie": {
+      "default": "",
+      "maxLength": 20,
+      "title": "Serie",
+      "type": "string"
+     },
+     "total": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Total"
+     },
+     "uuid": {
+      "anyOf": [
+       {
+        "maxLength": 36,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uuid"
+     }
+    },
+    "required": [
+     "empresa",
+     "cve_doc",
+     "folio",
+     "cliente_sae",
+     "fecha",
+     "estado"
+    ],
+    "title": "NotaCreditoEspejoIn",
+    "type": "object"
+   },
    "OCRecibidaDetailOut": {
     "properties": {
      "ambiguo": {
@@ -15495,6 +15667,110 @@
      "importe"
     ],
     "title": "ReciboFacturaIn",
+    "type": "object"
+   },
+   "ReciboPagoEspejoIn": {
+    "properties": {
+     "cliente_sae": {
+      "maxLength": 10,
+      "title": "Cliente Sae",
+      "type": "string"
+     },
+     "cve_doc": {
+      "maxLength": 30,
+      "minLength": 1,
+      "title": "Cve Doc",
+      "type": "string"
+     },
+     "empresa": {
+      "maxLength": 4,
+      "title": "Empresa",
+      "type": "string"
+     },
+     "estado": {
+      "pattern": "^(TIMBRADO|CANCELADO)$",
+      "title": "Estado",
+      "type": "string"
+     },
+     "facturas": {
+      "items": {
+       "$ref": "#/components/schemas/DoctoEspejoIn"
+      },
+      "maxItems": 500,
+      "title": "Facturas",
+      "type": "array"
+     },
+     "fecha_cancelacion": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha Cancelacion"
+     },
+     "fecha_pago": {
+      "format": "date-time",
+      "title": "Fecha Pago",
+      "type": "string"
+     },
+     "folio": {
+      "exclusiveMinimum": 0.0,
+      "title": "Folio",
+      "type": "integer"
+     },
+     "forma_pago": {
+      "default": "03",
+      "maxLength": 5,
+      "title": "Forma Pago",
+      "type": "string"
+     },
+     "monto": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Monto"
+     },
+     "serie": {
+      "default": "",
+      "maxLength": 20,
+      "title": "Serie",
+      "type": "string"
+     },
+     "uuid": {
+      "anyOf": [
+       {
+        "maxLength": 36,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uuid"
+     }
+    },
+    "required": [
+     "empresa",
+     "cve_doc",
+     "folio",
+     "cliente_sae",
+     "fecha_pago",
+     "estado"
+    ],
+    "title": "ReciboPagoEspejoIn",
     "type": "object"
    },
    "ReciboPagoIn": {
@@ -21761,6 +22037,132 @@
     "summary": "Claves Sae Del Cliente",
     "tags": [
      "clientes"
+    ]
+   }
+  },
+  "/api/v1/cobranza/espejo/nota-credito": {
+   "post": {
+    "description": "Refleja una nota de crédito (CFDI de egreso) de SAE con sus aplicaciones.",
+    "operationId": "nota_credito_espejo_api_v1_cobranza_espejo_nota_credito_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/NotaCreditoEspejoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Nota Credito Espejo",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/espejo/recibo-pago": {
+   "post": {
+    "description": "Refleja un REP timbrado (o cancelado) en SAE.",
+    "operationId": "recibo_pago_espejo_api_v1_cobranza_espejo_recibo_pago_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReciboPagoEspejoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Recibo Pago Espejo",
+    "tags": [
+     "cobranza"
     ]
    }
   },
@@ -37679,6 +38081,116 @@
      }
     ],
     "summary": "Cartera",
+    "tags": [
+     "reportes"
+    ]
+   }
+  },
+  "/api/v1/reportes/notas-credito": {
+   "get": {
+    "description": "Notas de crédito del rango con las facturas a las que se aplicaron. El\ntotal es lo VIGENTE; lo cancelado se informa aparte.",
+    "operationId": "notas_credito_api_v1_reportes_notas_credito_get",
+    "parameters": [
+     {
+      "description": "Inicio del rango (por omisión, hace 30 días)",
+      "in": "query",
+      "name": "desde",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Inicio del rango (por omisión, hace 30 días)",
+       "title": "Desde"
+      }
+     },
+     {
+      "description": "Fin del rango (por omisión, hoy)",
+      "in": "query",
+      "name": "hasta",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Fin del rango (por omisión, hoy)",
+       "title": "Hasta"
+      }
+     },
+     {
+      "description": "Acota el reporte a un cliente",
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Acota el reporte a un cliente",
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Notas Credito",
     "tags": [
      "reportes"
     ]

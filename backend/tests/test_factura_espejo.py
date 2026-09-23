@@ -31,6 +31,7 @@ from app.models import (
 
 _PURGE = (
     "timbrado_intentos", "recibo_pago_facturas", "recibos_pago",
+    "nota_credito_facturas", "notas_credito",
     "lineas_factura", "facturas", "lineas_remision", "remisiones",
     "movimientos_inventario", "lotes_inventario", "almacenes",
     "conexiones", "cliente_externos", "producto_clientes", "productos",

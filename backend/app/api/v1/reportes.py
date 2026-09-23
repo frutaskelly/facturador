@@ -23,8 +23,8 @@ from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
-    Cliente, ClienteSucursal, ClienteSucursalSerie, Factura, ReciboPago, ReciboPagoFactura,
-    Serie, Sucursal,
+    Cliente, ClienteSucursal, ClienteSucursalSerie, Factura, NotaCredito, NotaCreditoFactura,
+    ReciboPago, ReciboPagoFactura, Serie, Sucursal,
 )
 from .cobranza import _en_cancelacion, _fila_de_reporte, _recibo_out
 
@@ -519,9 +519,10 @@ def ventas_sumario(
 
 # ── Comprobantes de pago ─────────────────────────────────────────────────────
 #
-# Los REP (CFDI tipo P) que el Facturador timbró, por FECHA DE PAGO: es la
-# fecha que el SAT lee en el complemento y la que cuadra con el banco. Los
-# borradores no son comprobantes —nunca llegaron al SAT— y se quedan fuera.
+# Los REP (CFDI tipo P), los que timbra el Facturador y los que el espejo trae
+# de SAE, por FECHA DE PAGO: es la fecha que el SAT lee en el complemento y la
+# que cuadra con el banco. Los borradores no son comprobantes —nunca llegaron
+# al SAT— y se quedan fuera.
 
 
 @router.get("/pagos")
@@ -543,6 +544,7 @@ def pagos(
         db.query(ReciboPago, Cliente.legal_name)
         .join(Cliente, Cliente.id == ReciboPago.cliente_id)
         .filter(
+            ReciboPago.tenant_id == ctx.tenant_id,
             ReciboPago.estado.in_(("TIMBRADO", "CANCELADO")),
             sa.cast(ReciboPago.fecha_pago, sa.Date) >= desde,
             sa.cast(ReciboPago.fecha_pago, sa.Date) <= hasta,
@@ -565,7 +567,7 @@ def pagos(
         por_recibo.setdefault(d.recibo_id, []).append(d)
     folios = {
         f.id: f for f in db.query(Factura.id, Factura.serie, Factura.folio).filter(
-            Factura.id.in_({d.factura_id for d in detalle})
+            Factura.id.in_({d.factura_id for d in detalle if d.factura_id} or [None])
         ).all()
     } if detalle else {}
 
@@ -593,4 +595,90 @@ def pagos(
         "comprobantes": vigentes,
         "total_cancelado": cancelado,
         "cancelados": cancelados,
+    }
+
+
+# ── Notas de crédito ─────────────────────────────────────────────────────────
+#
+# Los CFDI de egreso que SAE timbra y aplica en la CxC (concepto 1002). Llegan
+# por el espejo (migración 0086) y restan del saldo de sus facturas allá, así
+# que aquí sólo se listan: el saldo de la cartera ya las trae descontadas.
+
+
+@router.get("/notas-credito")
+def notas_credito(
+    desde: date | None = Query(default=None, description="Inicio del rango (por omisión, hace 30 días)"),
+    hasta: date | None = Query(default=None, description="Fin del rango (por omisión, hoy)"),
+    cliente_id: UUID | None = Query(default=None, description="Acota el reporte a un cliente"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Notas de crédito del rango con las facturas a las que se aplicaron. El
+    total es lo VIGENTE; lo cancelado se informa aparte."""
+    hoy = datetime.now(timezone.utc).date()
+    if cliente_id is not None and not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    desde, hasta = _rango_pedido(desde, hasta, hoy)
+
+    q = (
+        db.query(NotaCredito, Cliente.legal_name)
+        .join(Cliente, Cliente.id == NotaCredito.cliente_id)
+        .filter(
+            NotaCredito.tenant_id == ctx.tenant_id,
+            sa.cast(NotaCredito.fecha, sa.Date) >= desde,
+            sa.cast(NotaCredito.fecha, sa.Date) <= hasta,
+        )
+    )
+    if ctx.cliente_scope:
+        q = q.filter(NotaCredito.cliente_id.in_(ctx.cliente_scope))
+    if cliente_id is not None:
+        q = q.filter(NotaCredito.cliente_id == cliente_id)
+    filas = q.order_by(NotaCredito.fecha.desc(), NotaCredito.folio.desc()).all()
+
+    ids = [n.id for n, _ in filas]
+    detalle = (
+        db.query(NotaCreditoFactura).filter(NotaCreditoFactura.nota_id.in_(ids)).all()
+        if ids else []
+    )
+    por_nota: dict = {}
+    for d in detalle:
+        por_nota.setdefault(d.nota_id, []).append(d)
+    folios = {
+        f.id: f for f in db.query(Factura.id, Factura.serie, Factura.folio).filter(
+            Factura.id.in_({d.factura_id for d in detalle if d.factura_id} or [None])
+        ).all()
+    } if detalle else {}
+
+    total = cancelado = ZERO
+    vigentes = canceladas = 0
+    items = []
+    for n, nombre_cliente in filas:
+        if n.estado == "CANCELADA":
+            cancelado += Decimal(n.total)
+            canceladas += 1
+        else:
+            total += Decimal(n.total)
+            vigentes += 1
+        items.append({
+            "id": str(n.id), "serie": n.serie, "folio": n.folio,
+            "fecha": n.fecha, "cliente_id": str(n.cliente_id), "cliente": nombre_cliente,
+            "total": n.total, "moneda": n.moneda, "estado": n.estado, "uuid": n.uuid,
+            "facturas": [{
+                "factura_id": str(d.factura_id) if d.factura_id else None,
+                "serie": folios[d.factura_id].serie if d.factura_id in folios else None,
+                "folio": folios[d.factura_id].folio if d.factura_id in folios else None,
+                "factura_ref": d.factura_ref,
+                "importe": d.importe,
+            } for d in por_nota.get(n.id, [])],
+        })
+
+    return {
+        "desde": desde,
+        "hasta": hasta,
+        "cliente_id": cliente_id,
+        "items": items,
+        "total": total,
+        "notas": vigentes,
+        "total_cancelado": cancelado,
+        "canceladas": canceladas,
     }

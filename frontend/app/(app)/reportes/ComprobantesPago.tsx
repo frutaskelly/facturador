@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
-import type { Recibo } from "@/lib/cobranza";
+import { folioRelacionado, type Recibo } from "@/lib/cobranza";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { useResource } from "@/lib/hooks";
 
@@ -21,7 +21,7 @@ type Pagos = {
 };
 
 const relacionadas = (r: Comprobante) =>
-  r.facturas.map((f) => (f.folio !== null ? `${f.serie ?? ""}${f.folio}` : "—")).join(", ");
+  r.facturas.map(folioRelacionado).join(", ");
 
 export function ComprobantesPago({
   filtros, rango, clienteNombre,
@@ -40,7 +40,12 @@ export function ComprobantesPago({
       cell: (r) => fmtDate(r.fecha_pago) },
     { header: "Folio", className: "whitespace-nowrap", sortable: true, sortValue: (r) => `${r.serie}${String(r.folio).padStart(8, "0")}`,
       exportValue: (r) => `${r.serie}${r.folio}`,
-      cell: (r) => <span className="font-medium">{r.serie}{r.folio}</span> },
+      cell: (r) => (
+        <span className="font-medium">
+          {r.serie}{r.folio}
+          {r.origen === "ESPEJO_SAE" && <span className="ml-1.5"><Badge tone="muted">SAE</Badge></span>}
+        </span>
+      ) },
     { header: "Cliente", truncate: true, sortable: true, sortValue: (r) => r.cliente,
       exportValue: (r) => r.cliente, cell: (r) => <span title={r.cliente}>{r.cliente}</span> },
     { header: "UUID", exportValue: (r) => r.uuid ?? "",

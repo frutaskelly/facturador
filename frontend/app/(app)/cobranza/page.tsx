@@ -108,7 +108,12 @@ export default function Page() {
   }, [toast]);
 
   const cols: Column<Recibo>[] = useMemo(() => [
-    { header: "Recibo", cell: (r) => <span className="font-medium">{r.serie}{r.folio}</span> },
+    { header: "Recibo", cell: (r) => (
+      <span className="font-medium">
+        {r.serie}{r.folio}
+        {r.origen === "ESPEJO_SAE" && <span className="ml-1.5"><Badge tone="muted">SAE</Badge></span>}
+      </span>
+    ) },
     { header: "Cliente", cell: (r) => cliName[r.cliente_id] ?? "—" },
     { header: "Fecha pago", cell: (r) => fmtDate(r.fecha_pago) },
     { header: "Monto", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.monto) },
@@ -118,18 +123,21 @@ export default function Page() {
       ? <span className="font-mono text-xs text-muted">{r.uuid.slice(0, 8)}…</span> : <span className="text-muted">—</span> },
   ], [cliName]);
 
+  // Un REP del espejo lo timbró SAE: su PDF, su envío y su cancelación viven
+  // allá (el backend los rechaza con 409). Aquí sólo se consulta.
+  const esSae = (r: Recibo) => r.origen === "ESPEJO_SAE";
   const rowActions: RowAction<Recibo>[] = useMemo(() => [
     { id: "timbrar", label: timbrando ? "Timbrando…" : "Timbrar", icon: <Stamp size={15} />,
       onClick: (r) => setATimbrar(r),
       hidden: (r) => !(canWrite && r.estado === "BORRADOR") },
     { id: "pdf", label: "Descargar PDF", icon: <FileText size={15} />,
-      onClick: (r) => descargar(r, "pdf"), hidden: (r) => r.estado !== "TIMBRADO" },
+      onClick: (r) => descargar(r, "pdf"), hidden: (r) => esSae(r) || r.estado !== "TIMBRADO" },
     { id: "xml", label: "Descargar XML", icon: <Download size={15} />,
-      onClick: (r) => descargar(r, "xml"), hidden: (r) => r.estado !== "TIMBRADO" },
+      onClick: (r) => descargar(r, "xml"), hidden: (r) => esSae(r) || r.estado !== "TIMBRADO" },
     { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />,
-      onClick: (r) => setEnviar(r), hidden: (r) => !(canWrite && r.estado === "TIMBRADO") },
+      onClick: (r) => setEnviar(r), hidden: (r) => esSae(r) || !(canWrite && r.estado === "TIMBRADO") },
     { id: "cancelar", label: "Cancelar REP", icon: <Ban size={15} />, tone: "danger",
-      onClick: (r) => setCancelar(r), hidden: (r) => !(canWrite && r.estado === "TIMBRADO") },
+      onClick: (r) => setCancelar(r), hidden: (r) => esSae(r) || !(canWrite && r.estado === "TIMBRADO") },
   ], [timbrando, canWrite, descargar]);
 
   const pendCols: Column<FacturaPendiente>[] = useMemo(() => [

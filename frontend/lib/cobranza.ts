@@ -14,9 +14,12 @@ export type FacturaPendiente = {
 };
 
 export type ReciboFactura = {
-  factura_id: string; serie: string | null; folio: number | null;
+  /** null en el espejo cuando SAE abonó a una factura que aquí no está. */
+  factura_id: string | null; serie: string | null; folio: number | null;
+  /** La factura como la nombra SAE (sólo el espejo). */
+  factura_ref?: string | null;
   importe_pagado: string; num_parcialidad: number;
-  saldo_anterior: string; saldo_insoluto: string;
+  saldo_anterior: string | null; saldo_insoluto: string | null;
 };
 
 export type Recibo = {
@@ -25,7 +28,13 @@ export type Recibo = {
   num_operacion: string | null; banco: string | null;
   estado: "BORRADOR" | "TIMBRADO" | "CANCELADO"; uuid: string | null;
   fecha_timbrado: string | null; facturas: ReciboFactura[];
+  /** ESPEJO_SAE = lo timbró SAE: aquí sólo se consulta. */
+  origen?: "NATIVO" | "ESPEJO_SAE";
 };
+
+/** El folio de la factura que abona un renglón, con el nombre de SAE de respaldo. */
+export const folioRelacionado = (f: { serie: string | null; folio: number | null; factura_ref?: string | null }) =>
+  f.folio !== null ? `${f.serie ?? ""}${f.folio}` : (f.factura_ref ?? "—");
 
 // Formas de pago SAT más usadas para cobranza.
 export const FORMA_PAGO_SAT: { value: string; label: string }[] = [
