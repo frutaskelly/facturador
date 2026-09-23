@@ -3,11 +3,12 @@
 // Reportes de dirección — las dos preguntas del dueño: cuánto se está
 // facturando y cuánto nos deben. Arriba las ventas, abajo la cobranza.
 //
-// Todo cuelga de DOS filtros globales —un rango de fechas y un cliente— que
-// mueven la pantalla completa: KPIs, gráfica y cartera salen del mismo recorte,
-// así que no hay forma de leer un total de un periodo junto a un detalle de
-// otro. Antes cada gráfica traía su propia ventana fija (30 días, 6 meses) y
-// no se podía mirar atrás.
+// Dos pestañas. «Ventas» cuelga de dos filtros —un rango de fechas y un
+// cliente— que mueven los KPIs y la gráfica juntos, así que no hay forma de
+// leer un total de un periodo junto a una barra de otro. «Cuentas por cobrar»
+// va APARTE y sin filtros: la cartera es lo que nos deben hoy, sin importar
+// cuándo se facturó, y recortarla por el periodo de ventas escondía saldos
+// viejos justo donde más importan.
 //
 // Los comparativos son contra el tramo equivalente anterior —un mes empezado
 // contra los mismos días del mes pasado, no contra el mes completo—: comparar
@@ -34,6 +35,12 @@ import {
 } from "./rango";
 
 type Agrupar = "proyecto" | "cliente" | "sucursal";
+type Pestana = "ventas" | "cartera";
+
+const PESTANAS: { key: Pestana; label: string }[] = [
+  { key: "ventas", label: "Ventas" },
+  { key: "cartera", label: "Cuentas por cobrar" },
+];
 type Granularidad = "dia" | "semana" | "mes";
 
 type FilaCartera = {
@@ -126,13 +133,13 @@ export default function ReportesPage() {
   const [paso, setPaso] = useState<Granularidad | "auto">("auto");
   const [clienteId, setClienteId] = useState("");
   const [agrupar, setAgrupar] = useState<Agrupar>("proyecto");
+  const [pestana, setPestana] = useState<Pestana>("ventas");
 
   const dias = diasDe(rango);
   const preset = presetDe(rango, hoy);
   const pasoQuery = paso !== "auto" && pasoCabe(paso, dias) ? paso : "auto";
 
-  // Un solo juego de filtros para las dos consultas: si divergieran, la cartera
-  // hablaría de un periodo y la gráfica de otro.
+  // Los filtros son solo de ventas: la cartera se pide completa, al corte de hoy.
   const filtros = useMemo(() => {
     const qs = new URLSearchParams({ desde: rango.desde, hasta: rango.hasta });
     if (clienteId) qs.set("cliente_id", clienteId);
@@ -142,7 +149,9 @@ export default function ReportesPage() {
   const ventasRes = useResource<Ventas>(
     `/api/v1/reportes/ventas?${filtros}${pasoQuery === "auto" ? "" : `&granularidad=${pasoQuery}`}`,
   );
-  const carteraRes = useResource<Cartera>(`/api/v1/reportes/cartera?agrupar=${agrupar}&${filtros}`);
+  const carteraRes = useResource<Cartera>(
+    pestana === "cartera" ? `/api/v1/reportes/cartera?agrupar=${agrupar}` : null,
+  );
   const verClientes = can(me, "menu:clientes");
   const clientesRes = useResource<Page<Cliente>>(verClientes ? "/api/v1/clientes?limit=1000" : null);
   const clientes = clientesRes.data?.items ?? [];
@@ -180,310 +189,334 @@ export default function ReportesPage() {
     <div className="space-y-4">
       <PageHeader
         title="Reportes"
-        subtitle="Ventas y cobranza del periodo que elijas · se recalculan con cada pasada del espejo de SAE"
+        subtitle="Ventas y cobranza · se recalculan con cada pasada del espejo de SAE"
       />
 
-      {/* ── Filtros globales: mandan sobre TODO lo de abajo ── */}
-      <Card>
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <span className="mb-1 block text-sm font-medium">Periodo</span>
-            <div className="flex items-stretch gap-1">
-              <button
-                type="button"
-                className={NAV}
-                aria-label="Periodo anterior"
-                title="Periodo anterior"
-                onClick={() => setRango((r) => correr(r, -1))}
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <Select
-                className="min-w-[11rem]"
-                value={preset ?? "personalizado"}
-                onChange={(e) => setRango(rangoPreset(e.target.value as PresetKey, hoy))}
-                aria-label="Periodo"
-              >
-                {PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-                <option value="personalizado" disabled>Personalizado</option>
-              </Select>
-              <button
-                type="button"
-                className={NAV}
-                aria-label="Periodo siguiente"
-                title="Periodo siguiente"
-                // Adelantarse a hoy solo traería barras en cero.
-                disabled={rango.hasta >= hoy}
-                onClick={() => setRango((r) => correr(r, 1))}
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          </div>
+      <div role="tablist" aria-label="Reportes" className="flex gap-1 border-b border-border">
+        {PESTANAS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={pestana === t.key}
+            onClick={() => setPestana(t.key)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm transition ${
+              pestana === t.key
+                ? "border-accent font-medium text-foreground"
+                : "border-transparent text-muted hover:text-foreground"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-          <div className="w-36 sm:w-40">
-            <Field label="Desde">
-              <Input
-                type="date"
-                value={rango.desde}
-                max={rango.hasta}
-                onChange={(e) => {
-                  const desde = e.target.value;
-                  if (desde) setRango((r) => ({ desde, hasta: desde > r.hasta ? desde : r.hasta }));
-                }}
-              />
-            </Field>
-          </div>
-          <div className="w-36 sm:w-40">
-            <Field label="Hasta">
-              <Input
-                type="date"
-                value={rango.hasta}
-                min={rango.desde}
-                onChange={(e) => {
-                  const hasta = e.target.value;
-                  if (hasta) setRango((r) => ({ hasta, desde: hasta < r.desde ? hasta : r.desde }));
-                }}
-              />
-            </Field>
-          </div>
-
-          {/* Sin permiso de clientes no hay catálogo que ofrecer: el filtro se
-              esconde en vez de quedarse como un desplegable muerto. */}
-          {verClientes && (
-            <Field label="Cliente">
-              <Select
-                className="min-w-56"
-                value={clienteId}
-                onChange={(e) => setClienteId(e.target.value)}
-                disabled={clientes.length === 0}
-                aria-label="Filtrar por cliente"
-              >
-                <option value="">Todos los clientes</option>
-                {clientes.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
-              </Select>
-            </Field>
-          )}
-
-          {!limpio && (
-            <button
-              type="button"
-              onClick={() => { setRango(rangoPreset("30d", hoy)); setClienteId(""); setPaso("auto"); }}
-              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-sm text-muted transition hover:text-foreground"
-            >
-              <RotateCcw size={14} aria-hidden /> Limpiar
-            </button>
-          )}
-        </div>
-
-        <p className="mt-3 border-t border-border pt-3 text-xs text-muted">
-          Mostrando <span className="font-medium text-foreground">{etiquetaRango(rango)}</span>
-          {" "}({fmtNumber(dias, 0)} {dias === 1 ? "día" : "días"})
-          {clienteNombre && <> · solo <span className="font-medium text-foreground">{clienteNombre}</span></>}
-        </p>
-      </Card>
-
-      {!ventas ? (
-        <div className="flex justify-center py-16"><Spinner /></div>
-      ) : (
+      {pestana === "ventas" && (
         <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <KPI
-              titulo="Facturado"
-              valor={fmtMoney(ventas.total)}
-              pct={ventas.anterior.variacion}
-              pie={`vs ${etiquetaRango({ desde: ventas.anterior.desde, hasta: ventas.anterior.hasta })}: ${fmtMoney(ventas.anterior.total)}`}
-            />
-            <KPI
-              titulo="Promedio por día"
-              valor={fmtMoney(ventas.promedio_dia)}
-              pie={`${fmtNumber(ventas.dias, 0)} días en el rango`}
-            />
-            <KPI
-              titulo="Facturas"
-              valor={fmtNumber(ventas.facturas, 0)}
-              pie={`ticket promedio ${fmtMoney(ventas.ticket_promedio)}`}
-            />
-            {ventas.hoy_total !== null ? (
-              <KPI titulo="Facturado hoy" valor={fmtMoney(ventas.hoy_total)} pie={fmtDate(ventas.hoy)} />
-            ) : (
-              <KPI
-                titulo={`Mejor ${unidad}`}
-                valor={fmtMoney(ventas.mejor?.total ?? 0)}
-                pie={ventas.mejor ? etiquetaRango({ desde: ventas.mejor.inicio, hasta: ventas.mejor.fin }) : "sin facturación"}
-              />
+        {/* ── Filtros de ventas: mandan sobre los KPIs y la gráfica ── */}
+        <Card>
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <span className="mb-1 block text-sm font-medium">Periodo</span>
+              <div className="flex items-stretch gap-1">
+                <button
+                  type="button"
+                  className={NAV}
+                  aria-label="Periodo anterior"
+                  title="Periodo anterior"
+                  onClick={() => setRango((r) => correr(r, -1))}
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <Select
+                  className="min-w-[11rem]"
+                  value={preset ?? "personalizado"}
+                  onChange={(e) => setRango(rangoPreset(e.target.value as PresetKey, hoy))}
+                  aria-label="Periodo"
+                >
+                  {PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+                  <option value="personalizado" disabled>Personalizado</option>
+                </Select>
+                <button
+                  type="button"
+                  className={NAV}
+                  aria-label="Periodo siguiente"
+                  title="Periodo siguiente"
+                  // Adelantarse a hoy solo traería barras en cero.
+                  disabled={rango.hasta >= hoy}
+                  onClick={() => setRango((r) => correr(r, 1))}
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+
+            <div className="w-36 sm:w-40">
+              <Field label="Desde">
+                <Input
+                  type="date"
+                  value={rango.desde}
+                  max={rango.hasta}
+                  onChange={(e) => {
+                    const desde = e.target.value;
+                    if (desde) setRango((r) => ({ desde, hasta: desde > r.hasta ? desde : r.hasta }));
+                  }}
+                />
+              </Field>
+            </div>
+            <div className="w-36 sm:w-40">
+              <Field label="Hasta">
+                <Input
+                  type="date"
+                  value={rango.hasta}
+                  min={rango.desde}
+                  onChange={(e) => {
+                    const hasta = e.target.value;
+                    if (hasta) setRango((r) => ({ hasta, desde: hasta < r.desde ? hasta : r.desde }));
+                  }}
+                />
+              </Field>
+            </div>
+
+            {/* Sin permiso de clientes no hay catálogo que ofrecer: el filtro se
+                esconde en vez de quedarse como un desplegable muerto. */}
+            {verClientes && (
+              <Field label="Cliente">
+                <Select
+                  className="min-w-56"
+                  value={clienteId}
+                  onChange={(e) => setClienteId(e.target.value)}
+                  disabled={clientes.length === 0}
+                  aria-label="Filtrar por cliente"
+                >
+                  <option value="">Todos los clientes</option>
+                  {clientes.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
+                </Select>
+              </Field>
+            )}
+
+            {!limpio && (
+              <button
+                type="button"
+                onClick={() => { setRango(rangoPreset("30d", hoy)); setClienteId(""); setPaso("auto"); }}
+                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-sm text-muted transition hover:text-foreground"
+              >
+                <RotateCcw size={14} aria-hidden /> Limpiar
+              </button>
             )}
           </div>
 
-          <Card
-            title="Facturación"
-            subtitle={`Una barra por ${unidad} · ${etiquetaRango(rango)}`}
-            actions={
-              <div className="inline-flex rounded-lg border border-border p-0.5">
-                {PASOS.map((p) => {
-                  const cabe = pasoCabe(p.key, dias);
-                  return (
-                    <button
-                      key={p.key}
-                      type="button"
-                      disabled={!cabe}
-                      onClick={() => setPaso(p.key)}
-                      aria-pressed={ventas.granularidad === p.key}
-                      title={cabe ? `Una barra por ${p.unidad}` : `El rango es muy largo para verlo por ${p.unidad}`}
-                      className={`rounded-md px-2.5 py-1 text-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                        ventas.granularidad === p.key
-                          ? "bg-surface-2 font-medium text-foreground"
-                          : "text-muted hover:text-foreground"
-                      }`}
-                    >
-                      {p.label}
-                    </button>
-                  );
-                })}
-              </div>
-            }
-            footer={
-              <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-xs text-muted">
-                <span>
-                  Promedio por {unidad}:{" "}
-                  <span className="font-medium text-foreground">{fmtMoney(ventas.promedio_cubeta)}</span>
-                </span>
-                {ventas.mejor && (
-                  <span>
-                    Mejor {unidad}:{" "}
-                    <span className="font-medium text-foreground">
-                      {etiquetaRango({ desde: ventas.mejor.inicio, hasta: ventas.mejor.fin })} · {fmtMoney(ventas.mejor.total)}
-                    </span>
-                  </span>
-                )}
-                <span>
-                  Periodo anterior:{" "}
-                  <span className="font-medium text-foreground">{fmtMoney(ventas.anterior.total)}</span>
-                </span>
-              </div>
-            }
-          >
-            <div className={ventasRes.loading ? "opacity-50 transition-opacity" : "transition-opacity"}>
-              <SerieTiempo
-                puntos={grafica.puntos}
-                titulo={`Facturación por ${unidad} · ${etiquetaRango(rango)}`}
-                destacar={(p) => p.clave === grafica.claveHoy}
+          <p className="mt-3 border-t border-border pt-3 text-xs text-muted">
+            Mostrando <span className="font-medium text-foreground">{etiquetaRango(rango)}</span>
+            {" "}({fmtNumber(dias, 0)} {dias === 1 ? "día" : "días"})
+            {clienteNombre && <> · solo <span className="font-medium text-foreground">{clienteNombre}</span></>}
+          </p>
+        </Card>
+
+        {!ventas ? (
+          <div className="flex justify-center py-16"><Spinner /></div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <KPI
+                titulo="Facturado"
+                valor={fmtMoney(ventas.total)}
+                pct={ventas.anterior.variacion}
+                pie={`vs ${etiquetaRango({ desde: ventas.anterior.desde, hasta: ventas.anterior.hasta })}: ${fmtMoney(ventas.anterior.total)}`}
               />
+              <KPI
+                titulo="Promedio por día"
+                valor={fmtMoney(ventas.promedio_dia)}
+                pie={`${fmtNumber(ventas.dias, 0)} días en el rango`}
+              />
+              <KPI
+                titulo="Facturas"
+                valor={fmtNumber(ventas.facturas, 0)}
+                pie={`ticket promedio ${fmtMoney(ventas.ticket_promedio)}`}
+              />
+              {ventas.hoy_total !== null ? (
+                <KPI titulo="Facturado hoy" valor={fmtMoney(ventas.hoy_total)} pie={fmtDate(ventas.hoy)} />
+              ) : (
+                <KPI
+                  titulo={`Mejor ${unidad}`}
+                  valor={fmtMoney(ventas.mejor?.total ?? 0)}
+                  pie={ventas.mejor ? etiquetaRango({ desde: ventas.mejor.inicio, hasta: ventas.mejor.fin }) : "sin facturación"}
+                />
+              )}
             </div>
-          </Card>
 
-          {/* ── Cobranza ── */}
-          <Card
-            title="Cuentas por cobrar"
-            subtitle={`Saldos de hoy (${fmtDate(cartera?.corte ?? ventas.hoy)}) sobre las facturas emitidas ${etiquetaRango(rango)}`}
-          >
-            {!cartera ? (
-              <div className="flex justify-center py-8"><Spinner /></div>
-            ) : cartera.filas.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted">
-                Ninguna factura emitida en este periodo tiene saldo pendiente.
-              </p>
-            ) : (
-              <>
-                <div className="mb-4">
-                  <BarraSegmentada
-                    titulo="Antigüedad de la cartera"
-                    tramos={CUBETAS.map((c) => ({
-                      etiqueta: c.label,
-                      valor: Number(cartera.antiguedad[c.key]),
-                      clase: c.clase,
-                    }))}
-                  />
-                </div>
-
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
-                  {/* La misma cartera vista por la dimensión que se quiera: el total
-                      no cambia entre pestañas, solo el reparto. */}
-                  <div className="inline-flex rounded-lg border border-border p-0.5">
-                    {AGRUPAR.map((a) => (
+            <Card
+              title="Facturación"
+              subtitle={`Una barra por ${unidad} · ${etiquetaRango(rango)}`}
+              actions={
+                <div className="inline-flex rounded-lg border border-border p-0.5">
+                  {PASOS.map((p) => {
+                    const cabe = pasoCabe(p.key, dias);
+                    return (
                       <button
-                        key={a.key}
+                        key={p.key}
                         type="button"
-                        onClick={() => setAgrupar(a.key)}
-                        aria-pressed={agrupar === a.key}
-                        className={`rounded-md px-3 py-1 text-sm transition ${
-                          agrupar === a.key ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:text-foreground"
+                        disabled={!cabe}
+                        onClick={() => setPaso(p.key)}
+                        aria-pressed={ventas.granularidad === p.key}
+                        title={cabe ? `Una barra por ${p.unidad}` : `El rango es muy largo para verlo por ${p.unidad}`}
+                        className={`rounded-md px-2.5 py-1 text-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                          ventas.granularidad === p.key
+                            ? "bg-surface-2 font-medium text-foreground"
+                            : "text-muted hover:text-foreground"
                         }`}
                       >
-                        {a.label}
+                        {p.label}
                       </button>
-                    ))}
-                  </div>
-                  <div className="text-sm">
-                    Total: <span className="font-semibold tabular-nums">{fmtMoney(cartera.saldo_total)}</span>
-                    <span className="ml-2 text-danger">
-                      vencido <span className="font-semibold tabular-nums">{fmtMoney(cartera.vencido_total)}</span>
-                    </span>
-                  </div>
-                </div>
-
-                {/* Teléfono: renglones apilados. Escritorio: tabla. */}
-                <div className="sm:hidden">
-                  {cartera.filas.map((f) => {
-                    const href = destino(f);
-                    const fila = (
-                      <div className="flex items-baseline justify-between gap-2 border-b border-border/60 py-2">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm">{f.etiqueta}</div>
-                          <div className="text-xs text-muted">
-                            {f.facturas} fact.
-                            {Number(f.vencido) > 0 && (
-                              <> · vencido <span className="font-medium text-danger">{fmtMoney(f.vencido)}</span></>
-                            )}
-                          </div>
-                        </div>
-                        <div className="shrink-0 text-sm font-medium tabular-nums">{fmtMoney(f.saldo)}</div>
-                      </div>
                     );
-                    return href
-                      ? <Link key={f.etiqueta} href={href} className="block">{fila}</Link>
-                      : <div key={f.etiqueta}>{fila}</div>;
                   })}
                 </div>
-                <table className="hidden w-full text-sm sm:table">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted">
-                      <th className="py-1.5">{AGRUPAR.find((a) => a.key === agrupar)?.label}</th>
-                      <th className="py-1.5 text-right">Saldo</th>
-                      <th className="py-1.5 text-right">Vencido</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cartera.filas.map((f) => {
-                      const href = destino(f);
-                      return (
-                        <tr key={f.etiqueta} className="border-b border-border/60">
-                          <td className="py-1.5 pr-2">
-                            {href ? <Link href={href} className="hover:underline">{f.etiqueta}</Link> : f.etiqueta}
-                            <span className="text-xs text-muted"> · {f.facturas}</span>
-                          </td>
-                          <td className="py-1.5 text-right tabular-nums">{fmtMoney(f.saldo)}</td>
-                          <td className="py-1.5 text-right tabular-nums">
-                            {Number(f.vencido) > 0
-                              ? <span className="font-medium text-danger">{fmtMoney(f.vencido)}</span>
-                              : <span className="text-muted">—</span>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-
-                {Number(cartera.saldo_en_cancelacion) > 0 && (
-                  <p className="mt-3 text-xs text-muted">
-                    Fuera del total: {fmtMoney(cartera.saldo_en_cancelacion)} en facturas con la
-                    cancelación ya pedida al SAT.
-                  </p>
-                )}
-              </>
-            )}
-          </Card>
+              }
+              footer={
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-xs text-muted">
+                  <span>
+                    Promedio por {unidad}:{" "}
+                    <span className="font-medium text-foreground">{fmtMoney(ventas.promedio_cubeta)}</span>
+                  </span>
+                  {ventas.mejor && (
+                    <span>
+                      Mejor {unidad}:{" "}
+                      <span className="font-medium text-foreground">
+                        {etiquetaRango({ desde: ventas.mejor.inicio, hasta: ventas.mejor.fin })} · {fmtMoney(ventas.mejor.total)}
+                      </span>
+                    </span>
+                  )}
+                  <span>
+                    Periodo anterior:{" "}
+                    <span className="font-medium text-foreground">{fmtMoney(ventas.anterior.total)}</span>
+                  </span>
+                </div>
+              }
+            >
+              <div className={ventasRes.loading ? "opacity-50 transition-opacity" : "transition-opacity"}>
+                <SerieTiempo
+                  puntos={grafica.puntos}
+                  titulo={`Facturación por ${unidad} · ${etiquetaRango(rango)}`}
+                  destacar={(p) => p.clave === grafica.claveHoy}
+                />
+              </div>
+            </Card>
+          </>
+        )}
         </>
+      )}
+
+      {pestana === "cartera" && (
+        <Card
+          title="Cuentas por cobrar"
+          subtitle={`Saldos al ${fmtDate(cartera?.corte ?? hoy)} de todas las facturas vigentes`}
+        >
+          {!cartera ? (
+            <div className="flex justify-center py-8"><Spinner /></div>
+          ) : cartera.filas.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted">
+              Ninguna factura tiene saldo pendiente.
+            </p>
+          ) : (
+            <>
+              <div className="mb-4">
+                <BarraSegmentada
+                  titulo="Antigüedad de la cartera"
+                  tramos={CUBETAS.map((c) => ({
+                    etiqueta: c.label,
+                    valor: Number(cartera.antiguedad[c.key]),
+                    clase: c.clase,
+                  }))}
+                />
+              </div>
+
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+                {/* La misma cartera vista por la dimensión que se quiera: el total
+                    no cambia entre pestañas, solo el reparto. */}
+                <div className="inline-flex rounded-lg border border-border p-0.5">
+                  {AGRUPAR.map((a) => (
+                    <button
+                      key={a.key}
+                      type="button"
+                      onClick={() => setAgrupar(a.key)}
+                      aria-pressed={agrupar === a.key}
+                      className={`rounded-md px-3 py-1 text-sm transition ${
+                        agrupar === a.key ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:text-foreground"
+                      }`}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="text-sm">
+                  Total: <span className="font-semibold tabular-nums">{fmtMoney(cartera.saldo_total)}</span>
+                  <span className="ml-2 text-danger">
+                    vencido <span className="font-semibold tabular-nums">{fmtMoney(cartera.vencido_total)}</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Teléfono: renglones apilados. Escritorio: tabla. */}
+              <div className="sm:hidden">
+                {cartera.filas.map((f) => {
+                  const href = destino(f);
+                  const fila = (
+                    <div className="flex items-baseline justify-between gap-2 border-b border-border/60 py-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm">{f.etiqueta}</div>
+                        <div className="text-xs text-muted">
+                          {f.facturas} fact.
+                          {Number(f.vencido) > 0 && (
+                            <> · vencido <span className="font-medium text-danger">{fmtMoney(f.vencido)}</span></>
+                          )}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-sm font-medium tabular-nums">{fmtMoney(f.saldo)}</div>
+                    </div>
+                  );
+                  return href
+                    ? <Link key={f.etiqueta} href={href} className="block">{fila}</Link>
+                    : <div key={f.etiqueta}>{fila}</div>;
+                })}
+              </div>
+              <table className="hidden w-full text-sm sm:table">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted">
+                    <th className="py-1.5">{AGRUPAR.find((a) => a.key === agrupar)?.label}</th>
+                    <th className="py-1.5 text-right">Saldo</th>
+                    <th className="py-1.5 text-right">Vencido</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cartera.filas.map((f) => {
+                    const href = destino(f);
+                    return (
+                      <tr key={f.etiqueta} className="border-b border-border/60">
+                        <td className="py-1.5 pr-2">
+                          {href ? <Link href={href} className="hover:underline">{f.etiqueta}</Link> : f.etiqueta}
+                          <span className="text-xs text-muted"> · {f.facturas}</span>
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums">{fmtMoney(f.saldo)}</td>
+                        <td className="py-1.5 text-right tabular-nums">
+                          {Number(f.vencido) > 0
+                            ? <span className="font-medium text-danger">{fmtMoney(f.vencido)}</span>
+                            : <span className="text-muted">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {Number(cartera.saldo_en_cancelacion) > 0 && (
+                <p className="mt-3 text-xs text-muted">
+                  Fuera del total: {fmtMoney(cartera.saldo_en_cancelacion)} en facturas con la
+                  cancelación ya pedida al SAT.
+                </p>
+              )}
+            </>
+          )}
+        </Card>
       )}
     </div>
   );
