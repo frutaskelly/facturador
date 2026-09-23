@@ -16,6 +16,7 @@ from .devolucion import Devolucion, LineaDevolucion
 from .factura import Factura, LineaFactura, TimbradoIntento
 from .pago import Pago
 from .recibo_pago import ReciboPago, ReciboPagoFactura
+from .nota_credito import NotaCredito, NotaCreditoFactura
 from .pos_corte import PosCorte
 from .inventario import LoteInventario, Merma, MovimientoInventario
 from .oc_recibida import OCRecibida
@@ -85,6 +86,8 @@ __all__ = [
     "Pago",
     "ReciboPago",
     "ReciboPagoFactura",
+    "NotaCredito",
+    "NotaCreditoFactura",
     "PosCorte",
     "TimbradoIntento",
     # ── precios v2 ──

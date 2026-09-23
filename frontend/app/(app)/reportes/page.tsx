@@ -33,13 +33,15 @@ import {
   presetDe, rangoPreset, type PresetKey, type Rango,
 } from "./rango";
 import { ComprobantesPago } from "./ComprobantesPago";
+import { NotasCredito } from "./NotasCredito";
 import { SumarioAgrupado, type Agrupar, type FilaSumario } from "./SumarioAgrupado";
 
-type Pestana = "ventas" | "pagos" | "cartera";
+type Pestana = "ventas" | "pagos" | "notas" | "cartera";
 
 const PESTANAS: { key: Pestana; label: string }[] = [
   { key: "ventas", label: "Ventas" },
   { key: "pagos", label: "Comprobantes de pago" },
+  { key: "notas", label: "Notas de crédito" },
   { key: "cartera", label: "Cuentas por cobrar" },
 ];
 type Granularidad = "dia" | "semana" | "mes";
@@ -332,6 +334,10 @@ export default function ReportesPage() {
             {clienteNombre && <> · solo <span className="font-medium text-foreground">{clienteNombre}</span></>}
           </p>
         </Card>
+
+        {pestana === "notas" && (
+          <NotasCredito filtros={filtros} rango={etiquetaRango(rango)} clienteNombre={clienteNombre} />
+        )}
 
         {pestana === "pagos" && (
           <ComprobantesPago filtros={filtros} rango={etiquetaRango(rango)} clienteNombre={clienteNombre} />

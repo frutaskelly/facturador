@@ -366,6 +366,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cobranza/espejo/nota-credito": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Nota Credito Espejo
+         * @description Refleja una nota de crédito (CFDI de egreso) de SAE con sus aplicaciones.
+         */
+        post: operations["nota_credito_espejo_api_v1_cobranza_espejo_nota_credito_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/espejo/recibo-pago": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recibo Pago Espejo
+         * @description Refleja un REP timbrado (o cancelado) en SAE.
+         */
+        post: operations["recibo_pago_espejo_api_v1_cobranza_espejo_recibo_pago_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cobranza/estado-cuenta/{cliente_id}": {
         parameters: {
             query?: never;
@@ -4142,6 +4182,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reportes/notas-credito": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Notas Credito
+         * @description Notas de crédito del rango con las facturas a las que se aplicaron. El
+         *     total es lo VIGENTE; lo cancelado se informa aparte.
+         */
+        get: operations["notas_credito_api_v1_reportes_notas_credito_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reportes/pagos": {
         parameters: {
             query?: never;
@@ -6352,6 +6413,24 @@ export interface components {
             lineas: components["schemas"]["LineaDevolucionOut"][];
             /** Motivo */
             motivo?: string | null;
+        };
+        /**
+         * DoctoEspejoIn
+         * @description Un renglón del documento: la factura a la que abona y cuánto.
+         */
+        DoctoEspejoIn: {
+            /** Folio */
+            folio: number;
+            /** Importe */
+            importe: number | string;
+            /** Num Parcialidad */
+            num_parcialidad?: number | null;
+            /** Saldo Anterior */
+            saldo_anterior?: number | string | null;
+            /** Saldo Insoluto */
+            saldo_insoluto?: number | string | null;
+            /** Serie */
+            serie: string;
         };
         /** EmpresaAccesoIn */
         EmpresaAccesoIn: {
@@ -8607,6 +8686,37 @@ export interface components {
             /** Tipo */
             tipo: string;
         };
+        /** NotaCreditoEspejoIn */
+        NotaCreditoEspejoIn: {
+            /** Cliente Sae */
+            cliente_sae: string;
+            /** Cve Doc */
+            cve_doc: string;
+            /** Empresa */
+            empresa: string;
+            /** Estado */
+            estado: string;
+            /** Facturas */
+            facturas?: components["schemas"]["DoctoEspejoIn"][];
+            /**
+             * Fecha
+             * Format: date-time
+             */
+            fecha: string;
+            /** Fecha Cancelacion */
+            fecha_cancelacion?: string | null;
+            /** Folio */
+            folio: number;
+            /**
+             * Serie
+             * @default
+             */
+            serie: string;
+            /** Total */
+            total?: number | string | null;
+            /** Uuid */
+            uuid?: string | null;
+        };
         /** OCRecibidaDetailOut */
         OCRecibidaDetailOut: {
             /**
@@ -10173,6 +10283,42 @@ export interface components {
             factura_id: string;
             /** Importe */
             importe: number | string;
+        };
+        /** ReciboPagoEspejoIn */
+        ReciboPagoEspejoIn: {
+            /** Cliente Sae */
+            cliente_sae: string;
+            /** Cve Doc */
+            cve_doc: string;
+            /** Empresa */
+            empresa: string;
+            /** Estado */
+            estado: string;
+            /** Facturas */
+            facturas?: components["schemas"]["DoctoEspejoIn"][];
+            /** Fecha Cancelacion */
+            fecha_cancelacion?: string | null;
+            /**
+             * Fecha Pago
+             * Format: date-time
+             */
+            fecha_pago: string;
+            /** Folio */
+            folio: number;
+            /**
+             * Forma Pago
+             * @default 03
+             */
+            forma_pago: string;
+            /** Monto */
+            monto?: number | string | null;
+            /**
+             * Serie
+             * @default
+             */
+            serie: string;
+            /** Uuid */
+            uuid?: string | null;
         };
         /** ReciboPagoIn */
         ReciboPagoIn: {
@@ -12477,6 +12623,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClavesSaeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    nota_credito_espejo_api_v1_cobranza_espejo_nota_credito_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotaCreditoEspejoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recibo_pago_espejo_api_v1_cobranza_espejo_recibo_pago_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReciboPagoEspejoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -19857,6 +20073,44 @@ export interface operations {
                 /** @description Solo facturas emitidas desde esta fecha */
                 desde?: string | null;
                 /** @description Solo facturas emitidas hasta esta fecha */
+                hasta?: string | null;
+                /** @description Acota el reporte a un cliente */
+                cliente_id?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notas_credito_api_v1_reportes_notas_credito_get: {
+        parameters: {
+            query?: {
+                /** @description Inicio del rango (por omisión, hace 30 días) */
+                desde?: string | null;
+                /** @description Fin del rango (por omisión, hoy) */
                 hasta?: string | null;
                 /** @description Acota el reporte a un cliente */
                 cliente_id?: string | null;

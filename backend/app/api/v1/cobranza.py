@@ -630,10 +630,15 @@ def _recibo_out(
         "num_operacion": recibo.num_operacion, "banco": recibo.banco,
         "estado": recibo.estado, "uuid": recibo.uuid,
         "fecha_timbrado": recibo.fecha_timbrado,
+        # ESPEJO_SAE = lo timbró SAE: se consulta aquí, pero se cancela, se
+        # imprime y se envía desde SAE (ver _solo_nativo)
+        "origen": recibo.origen or "NATIVO",
         "facturas": [{
-            "factura_id": str(r.factura_id),
+            "factura_id": str(r.factura_id) if r.factura_id else None,
             "serie": fac[r.factura_id].serie if r.factura_id in fac else None,
             "folio": fac[r.factura_id].folio if r.factura_id in fac else None,
+            # la factura como la nombra SAE, para el renglón que el espejo no cruzó
+            "factura_ref": r.factura_ref,
             "importe_pagado": r.importe_pagado,
             "num_parcialidad": r.num_parcialidad,
             "saldo_anterior": r.saldo_anterior,
@@ -657,7 +662,13 @@ def list_recibos(
     if cliente_id is not None:
         q = q.filter(ReciboPago.cliente_id == cliente_id)
     total = q.count()
-    rows = q.order_by(ReciboPago.created_at.desc()).limit(limit).offset(offset).all()
+    # Los borradores arriba (son trabajo pendiente) y luego por fecha de pago:
+    # con los REP del espejo de SAE, «el último que se creó» ya no dice nada.
+    rows = (
+        q.order_by((ReciboPago.estado == "BORRADOR").desc(), ReciboPago.fecha_pago.desc(),
+                   ReciboPago.created_at.desc())
+        .limit(limit).offset(offset).all()
+    )
     # Precarga en 2 consultas lo que _recibo_out hacía por recibo (2×N por página).
     filas_todas = (
         db.query(ReciboPagoFactura)
@@ -669,7 +680,7 @@ def list_recibos(
         por_recibo.setdefault(f.recibo_id, []).append(f)
     folios = {
         f.id: f for f in db.query(Factura.id, Factura.serie, Factura.folio).filter(
-            Factura.id.in_({f.factura_id for f in filas_todas} or [None])
+            Factura.id.in_({f.factura_id for f in filas_todas if f.factura_id} or [None])
         ).all()
     } if filas_todas else {}
     return {"items": [
@@ -773,6 +784,7 @@ def timbrar_recibo(
     persistencia inmediata del timbre."""
     enforce(f"timbrar-rep:{ctx.tenant_id}", 300, 3600)
     recibo = get_or_404(db, ReciboPago, recibo_id, soft=False, for_update=True)
+    _solo_nativo(recibo, "timbrarlo")
     if recibo.estado == "TIMBRADO":
         raise HTTPException(status_code=409, detail="El recibo ya está timbrado")
     if recibo.estado == "CANCELADO":
@@ -881,6 +893,18 @@ class CancelarReciboIn(BaseModel):
     uuid_sustitucion: Optional[UUID] = None
 
 
+def _solo_nativo(recibo: ReciboPago, accion: str) -> None:
+    """Un REP del espejo lo timbró SAE: cancelarlo aquí iría al PAC con un
+    comprobante que el Facturador no emitió (y le devolvería el abono a unas
+    facturas cuyo saldo manda la CxC de SAE); imprimirlo o enviarlo sacaría
+    un PDF que no es el del SAT. Todo eso se hace en SAE."""
+    if (recibo.origen or "NATIVO") == "ESPEJO_SAE":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Este comprobante lo timbró SAE: {accion} se hace desde SAE",
+        )
+
+
 def _docs_recibo(db: Session, recibo: ReciboPago, *, lock: bool = False):
     filas = db.query(ReciboPagoFactura).filter(ReciboPagoFactura.recibo_id == recibo.id).all()
     out = []
@@ -903,6 +927,7 @@ def cancelar_recibo(
     (le regresa el importe abonado). El SAT exige aceptación del receptor para
     cancelar un CFDI de pago (positiva ficta a 3 días)."""
     recibo = get_or_404(db, ReciboPago, recibo_id, soft=False, for_update=True)
+    _solo_nativo(recibo, "cancelarlo")
     if recibo.estado != "TIMBRADO":
         raise HTTPException(status_code=409, detail="Solo se cancela un recibo timbrado")
     if payload.motivo == "01" and payload.uuid_sustitucion is None:
@@ -951,6 +976,7 @@ def recibo_pdf(
     recibo = get_or_404(db, ReciboPago, recibo_id, soft=False)
     if not ctx.cliente_permitido(recibo.cliente_id):
         raise HTTPException(status_code=404, detail="Recibo no encontrado")
+    _solo_nativo(recibo, "su PDF")
     pdf = _recibo_pdf_bytes(db, ctx, recibo)
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="REP-{recibo.serie}{recibo.folio}.pdf"'})
@@ -991,6 +1017,7 @@ def enviar_recibo(
     from .remisiones import _validar_destinatarios
 
     recibo = get_or_404(db, ReciboPago, recibo_id, soft=False)
+    _solo_nativo(recibo, "enviarlo")
     if recibo.estado != "TIMBRADO":
         raise HTTPException(status_code=409, detail="Solo se envía un recibo timbrado")
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
