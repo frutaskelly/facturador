@@ -384,8 +384,17 @@ def ingesta(
         existente.payload = data
         existente.folio_externo = payload.folio_externo
         existente.remitente = payload.remitente
-        existente.archivo_nombre = payload.archivo_nombre
-        existente.archivo_url = payload.archivo_url
+        # QUITAR UN DATO NUNCA ES ACTUALIZARLO (23-sep-2026). Estos dos venían
+        # asignados sin condición, y la conciliación de cada 6 h llama
+        # `espejar_folios_bandeja(ws, folios)` sin `archivo_url`: el payload viaja
+        # con None y cada pasada le borraba el enlace a toda OC todavía pendiente,
+        # dejando el botón «Ver la OC original» sin a dónde ir. Si el documento de
+        # verdad cambió, el reenvío trae el nuevo enlace; un vacío solo significa
+        # que quien mandó el espejo no lo tenía a la mano.
+        if payload.archivo_nombre:
+            existente.archivo_nombre = payload.archivo_nombre
+        if payload.archivo_url:
+            existente.archivo_url = payload.archivo_url
         existente.updated_by = ctx.user_id
         # Solo se re-resuelve lo que nadie ha tocado. Un reintento por timeout no
         # puede borrar la asignación que un humano ya hizo (ni convertir a sus

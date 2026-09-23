@@ -249,6 +249,30 @@ def test_reintento_completa_el_link_del_documento(client, env, auth_as):
     assert otra["archivo_url"] == url
 
 
+def test_reenvio_sin_link_no_borra_el_que_ya_tenia(client, env, auth_as):
+    """Una OC PENDIENTE que se vuelve a espejar sin `archivo_url` conserva el
+    suyo. La conciliación del bot corre cada 6 h y manda el payload sin enlace
+    (`espejar_folios_bandeja` lo deja en None): con la asignación incondicional,
+    cada pasada blanqueaba el «Ver la OC original» de todo lo que aún no tenía
+    remisión. Un enlace nuevo sí pisa al viejo."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    url = "https://drive.google.com/file/d/abc123/view"
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        archivo_url=url, archivo_nombre="OC 1188.pdf")).json()
+    assert oc["archivo_url"] == url and oc["remision_id"] is None
+
+    igual = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=oc["origen_externo"])).json()          # sin link, como el espejo
+    assert igual["archivo_url"] == url
+    assert igual["archivo_nombre"] == "OC 1188.pdf"
+
+    nuevo = "https://drive.google.com/file/d/xyz789/view"
+    otra = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        origen_externo=oc["origen_externo"], archivo_url=nuevo)).json()
+    assert otra["archivo_url"] == nuevo
+
+
 def test_listado_filtra_por_fecha_de_recepcion(client, env, auth_as):
     """El flujo diario es "lo que llegó hoy": el rango va sobre recibida_at y
     `fecha_hasta` es INCLUSIVO — "hasta el 28" no puede dejar fuera la tarde."""
