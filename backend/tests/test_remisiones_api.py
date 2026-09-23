@@ -1342,3 +1342,113 @@ def test_la_logistica_si_se_toca_en_una_facturada(client, env, auth_as):
         s.commit()
     assert client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
                         json={"fecha_entrega": "2031-11-11"}).status_code == 409
+
+
+# ── enlazar vocabulario (el comando *enlaza* del bot, 23-sep-2026) ───────────
+
+def _rem_enlace(client, env, h, *, su_pedido, lineas=None, por_cruzar=None):
+    body = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+            "su_pedido": su_pedido,
+            "lineas": lineas or [{"producto_id": env["prod_a"], "presentacion": "KILO",
+                                  "cantidad_solicitada": "1", "precio_unitario": "10"}]}
+    r = client.post("/api/v1/remisiones", headers=h, json=body)
+    assert r.status_code == 201, r.text
+    if por_cruzar:
+        pc = client.patch(f"/api/v1/remisiones/{r.json()['id']}", headers=h,
+                          json={"partidas_por_cruzar": por_cruzar})
+        assert pc.status_code == 200, pc.text
+    return r.json()
+
+
+def test_enlazar_vocabulario_vuelve_linea_la_partida_sin_cruzar(client, env, auth_as):
+    """La partida que llegó sin producto se vuelve línea, el alias queda en el
+    vocabulario y la remisión sale de la cola de «por cruzar»."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    rem = _rem_enlace(client, env, h, su_pedido="VH-39YAJ-MIE", por_cruzar=[
+        {"numero": 2, "descripcion": "Pimiento morrón fresco color amarillo y verde",
+         "cantidad": "1.5", "unidad": "KILO"}])
+
+    r = client.post("/api/v1/remisiones/enlazar-vocabulario", headers=h, json={
+        "texto": "pimiento morron fresco color amarillo y verde",
+        "producto_id": env["prod_bulto_a"], "su_pedido": "vh-39yaj-mie", "precio": "20"})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["alcance"] == "GLOBAL" and out["choque_global"] is None
+    assert [(x["folio"], x["agregadas"], x["reapuntadas"], x["precio_sin_lista"])
+            for x in out["remisiones"]] == [(rem["folio_interno"], 1, 0, 1)]
+
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["partidas_por_cruzar"] == []
+    nueva = [ln for ln in det["lineas"] if ln["producto_id"] == env["prod_bulto_a"]]
+    assert len(nueva) == 1
+    assert float(nueva[0]["cantidad_solicitada"]) == 1.5
+    assert float(nueva[0]["precio_unitario"]) == 20
+    assert float(det["total"]) == 10 + 30
+
+    voc = client.get("/api/v1/productos/vocabulario?q=pimiento", headers=h).json()
+    assert [a["texto"] for a in voc["items"]] == ["pimiento morron fresco color amarillo y verde"]
+
+
+def test_enlazar_vocabulario_reapunta_la_linea_y_respeta_lo_impreso(client, env, auth_as):
+    """La línea que venía con ese texto hacia otro producto se reapunta; la de
+    una remisión ya impresa no se toca y se reporta."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    linea = [{"producto_id": env["prod_a"], "presentacion": "KILO",
+              "cantidad_solicitada": "5", "precio_unitario": "0",
+              "notas": "Como venía: «CEBOLLA MOEADA» · Revisar: parecido"}]
+    viva = _rem_enlace(client, env, h, su_pedido="VH-39TEN-MIE", lineas=linea)
+    impresa = _rem_enlace(client, env, h, su_pedido="VH-39TEN-MIE", lineas=linea)
+    with SessionLocal() as s:
+        s.execute(text("UPDATE remisiones SET impresa_at = now() WHERE id = :i"),
+                  {"i": impresa["id"]})
+        s.commit()
+
+    r = client.post("/api/v1/remisiones/enlazar-vocabulario", headers=h, json={
+        "texto": "cebolla moeada", "producto_id": env["prod_bulto_a"],
+        "su_pedido": "VH-39TEN-MIE", "precio": "15.51"})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert [(x["id"], x["reapuntadas"]) for x in out["remisiones"]] == [(viva["id"], 1)]
+    assert out["omitidas"] == [f"{impresa['folio_interno']}: ya se imprimió"]
+
+    ln = client.get(f"/api/v1/remisiones/{viva['id']}", headers=h).json()["lineas"][0]
+    assert ln["producto_id"] == env["prod_bulto_a"]
+    assert float(ln["precio_unitario"]) == 15.51       # estaba en $0: toma el del bot
+    assert "venía a «Prod R»" in ln["notas"]
+    ln_imp = client.get(f"/api/v1/remisiones/{impresa['id']}", headers=h).json()["lineas"][0]
+    assert ln_imp["producto_id"] == env["prod_a"]
+
+
+def test_enlazar_vocabulario_no_pisa_el_global_ajeno(client, env, auth_as):
+    """Si el texto ya significaba otro producto, el alias se aprende para el
+    cliente y el global se queda como estaba — y se avisa el choque."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    a = client.post("/api/v1/productos/alias", headers=h,
+                    json={"texto": "ELOTE MAZORCA", "producto_id": env["prod_a"]})
+    assert a.status_code == 201, a.text
+    with SessionLocal() as s:
+        s.query(Producto).filter(Producto.id == uuid.UUID(env["prod_bulto_a"])).update(
+            {"clave_sae": "ELOTEENTEROKG"})
+        s.commit()
+
+    r = client.post("/api/v1/remisiones/enlazar-vocabulario", headers=h, json={
+        "texto": "elote (mazorca)", "clave": "eloteenterokg",
+        "cliente_id": env["cli_a"]})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["producto"] == "Prod Bulto R"
+    assert out["alcance"] == "CLIENTE" and out["choque_global"] == "Prod R"
+    with SessionLocal() as s:
+        filas = s.execute(text(
+            "SELECT cliente_id IS NULL AS global, producto_id FROM producto_alias "
+            "WHERE tenant_id = :t AND alias_normalizado = 'elote mazorca'"),
+            {"t": env["admin_a"]["tenant_id"]}).all()
+    assert sorted((g, str(p)) for g, p in filas) == sorted(
+        [(True, env["prod_a"]), (False, env["prod_bulto_a"])])
+
+
+def test_enlazar_vocabulario_sin_producto_claro_no_escribe(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    r = client.post("/api/v1/remisiones/enlazar-vocabulario", headers=h, json={
+        "texto": "chile raro", "destino": "Prod"})       # solo un parecido
+    assert r.status_code == 422, r.text

@@ -316,3 +316,63 @@ class ClavesSaeOut(BaseModel):
     # Con `producto_id`: lo que ese producto ya usa en otro lado. Va primero en
     # la lista porque es la respuesta correcta la mayoría de las veces.
     ya_usa: list[ClaveSaeEnUso] = []
+
+
+class EnlazarVocabularioIn(BaseModel):
+    """«enlaza vocabulario OC VH-39YAJ-MIE pimiento morrón fresco por pimiento
+    morrón mixto», dicho en WhatsApp, aterrizado en el Facturador.
+
+    Hasta el 23-sep-2026 el comando del bot solo escribía su archivo local y el
+    Master: el vocabulario de /vocabulario no se enteraba y las remisiones que
+    ya vivían aquí seguían con la partida sin cruzar. Esto hace las dos cosas
+    del lado de acá: aprende el alias y corrige los borradores."""
+    # El texto tal como lo escribió el cliente en su orden.
+    texto: str = Field(min_length=1, max_length=254)
+    # A qué producto va: el id si ya se sabe; si no, la clave de SAE (la que el
+    # bot saca de su lista) y, como último recurso, el nombre interno — este
+    # solo se acepta si cruza exacto o por alias, nunca por parecido.
+    producto_id: Optional[uuid.UUID] = None
+    clave: Optional[str] = Field(default=None, max_length=50)
+    destino: Optional[str] = Field(default=None, max_length=254)
+    # Una presentación forzada («por lechuga romana kg»). Sin ella, cada partida
+    # conserva la unidad con que vino si el producto la vende.
+    presentacion: Optional[str] = Field(default=None, max_length=20)
+    # La OC nombrada. Sin OC se corrigen las partidas SIN CRUZAR de los
+    # borradores del mismo origen — igual que el bot con los «SIN CLAVE».
+    su_pedido: Optional[str] = Field(default=None, max_length=60)
+    # Prefijo del origen de las órdenes del grupo («EHMO:villahermosa:»): acota
+    # la búsqueda sin OC a lo que ese grupo mandó.
+    origen: Optional[str] = Field(default=None, max_length=100)
+    # El cliente, cuando quien llama lo sabe; si no, se toma el de las
+    # remisiones que se encontraron (si todas son del mismo).
+    cliente_id: Optional[uuid.UUID] = None
+    # El precio que conoce quien enlaza (la lista del bot). Solo se usa cuando
+    # la lista del Facturador no tiene ese producto para el cliente: sin él la
+    # partida entraría en $0, que es justo lo que el enlace venía a arreglar.
+    precio: Optional[Decimal] = Field(default=None, gt=0)
+
+
+class EnlazarRemisionOut(BaseModel):
+    id: uuid.UUID
+    folio: str
+    su_pedido: Optional[str] = None
+    agregadas: int = 0          # partidas sin cruzar que ya son líneas
+    reapuntadas: int = 0        # líneas que iban a otro producto
+    total: Optional[Decimal] = None
+    # Partidas que tomaron el precio de quien enlaza porque la lista del
+    # Facturador no tenía ese producto: hay que dar de alta el precio.
+    precio_sin_lista: int = 0
+
+
+class EnlazarVocabularioOut(BaseModel):
+    producto_id: uuid.UUID
+    producto: str
+    # GLOBAL, CLIENTE, o None si no se pudo aprender (choque sin cliente).
+    alcance: Optional[str] = None
+    # Si el texto ya significaba OTRO producto en el vocabulario global: el
+    # alias se guardó para el cliente y el global quedó como estaba.
+    choque_global: Optional[str] = None
+    remisiones: list[EnlazarRemisionOut] = []
+    # Remisiones que casaban pero no se tocaron, y por qué (impresa, exportada,
+    # facturada…).
+    omitidas: list[str] = []

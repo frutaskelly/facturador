@@ -45,6 +45,7 @@ from ...models import (
     LoteInventario,
     OCRecibida,
     Producto,
+    ProductoAlias,
     ProductoCliente,
     Proyecto,
     Remision,
@@ -68,6 +69,7 @@ from ...services.producto_match import (
     buscar,
     normalizar,
     normalizar_catalogo,
+    normalizar_unidad,
     productos_activos,
 )
 from ...services.precios import resolver_precios_lote
@@ -81,6 +83,9 @@ from ...schemas.remision import (
     ClavesSaeOut,
     ConfirmarRemisionIn,
     CruzarLineaIn,
+    EnlazarRemisionOut,
+    EnlazarVocabularioIn,
+    EnlazarVocabularioOut,
     LiberarPedidoIn,
     RemisionCreate,
     RemisionDetailOut,
@@ -1630,6 +1635,271 @@ def cruzar_linea(
     db.flush()
     db.refresh(rem)
     return _decorar_detalle(db, ctx, rem)
+
+
+_RX_COMO_VENIA = re.compile(r"Como ven[ií]a:\s*«([^»]+)»")
+
+
+def _producto_del_enlace(db: Session, ctx: AuthContext, payload: EnlazarVocabularioIn) -> Producto:
+    """El producto al que apunta el enlace: id → clave de SAE → nombre exacto.
+
+    El nombre solo vale si cruza exacto o por alias. Un parecido aquí no es un
+    candidato: es escribir el vocabulario Y las remisiones con el producto que
+    nadie dijo (el clúster papa/papaya)."""
+    if payload.producto_id is not None:
+        _ensure_productos(db, [payload.producto_id])
+        return db.query(Producto).filter(Producto.id == payload.producto_id).one()
+    if payload.clave and payload.clave.strip():
+        con_clave = (
+            db.query(Producto)
+            .filter(
+                Producto.tenant_id == ctx.tenant_id,
+                Producto.activo.is_(True),
+                func.upper(Producto.clave_sae) == payload.clave.strip().upper(),
+            )
+            .all()
+        )
+        if len(con_clave) == 1:
+            return con_clave[0]
+        if len(con_clave) > 1 and payload.destino:
+            mismo = [p for p in con_clave if normalizar(p.nombre) == normalizar(payload.destino)]
+            if len(mismo) == 1:
+                return mismo[0]
+        if len(con_clave) > 1:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"La clave {payload.clave.strip().upper()} la tienen {len(con_clave)} productos "
+                    f"({', '.join(sorted(p.nombre for p in con_clave)[:4])}); dime cuál"
+                ),
+            )
+    if payload.destino and payload.destino.strip():
+        for c in buscar(db, ctx.tenant_id, payload.destino, limit=3):
+            if c.origen in ("exacto", "alias") and c.score >= 95:
+                return db.query(Producto).filter(Producto.id == c.producto_id).one()
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"No encontré «{(payload.destino or payload.clave or '').strip()}» en el catálogo "
+            "del Facturador (ni por clave ni por nombre exacto)"
+        ),
+    )
+
+
+@router.post("/enlazar-vocabulario", response_model=EnlazarVocabularioOut)
+def enlazar_vocabulario(
+    payload: EnlazarVocabularioIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """«Este texto del cliente es este producto»: se aprende y se corrige.
+
+    Es el comando *enlaza vocabulario* del bot (23-sep-2026): antes solo
+    escribía su archivo y el Master, así que /vocabulario no se enteraba y las
+    remisiones seguían con la partida sin cruzar. Aquí:
+
+    1. El alias se aprende con la regla del catálogo multicliente: GLOBAL si el
+       texto no significaba nada, del CLIENTE si ya significaba otro producto —
+       el global ajeno no se reapunta desde un chat.
+    2. En los borradores de la OC nombrada (o, sin OC, en los del mismo origen
+       que tengan esa partida sin cruzar), la partida sin cruzar se vuelve línea
+       y la línea que venía con ese texto hacia otro producto se reapunta, las
+       dos con el precio de la lista.
+
+    Solo BORRADOR y solo lo que se puede editar: una impresa, exportada al SAE
+    o ligada a factura se reporta como omitida y no se toca.
+    """
+    texto_n = normalizar(payload.texto)
+    if not texto_n:
+        raise HTTPException(status_code=422, detail="El texto del cliente quedó vacío")
+    prod = _producto_del_enlace(db, ctx, payload)
+    presentaciones = prod.presentaciones or {}
+    forzada = (payload.presentacion or "").strip().upper() or None
+    if forzada and forzada not in presentaciones:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{prod.nombre} no se vende por {forzada}",
+        )
+
+    def _pres(unidad_doc: Optional[str], actual: Optional[str] = None) -> str:
+        if forzada:
+            return forzada
+        for cand in (normalizar_unidad(unidad_doc), actual):
+            if cand and cand in presentaciones:
+                return cand
+        return prod.presentacion_default or prod.unidad_base
+
+    # ── qué remisiones ──────────────────────────────────────────────────────
+    q = db.query(Remision).filter(
+        Remision.tenant_id == ctx.tenant_id,
+        Remision.deleted_at.is_(None),
+        Remision.estado != "CANCELADA",
+    )
+    if payload.su_pedido and payload.su_pedido.strip():
+        q = q.filter(func.upper(func.trim(Remision.su_pedido)) == payload.su_pedido.strip().upper())
+    else:
+        q = q.filter(Remision.estado == "BORRADOR")
+    if payload.origen and payload.origen.strip():
+        q = q.filter(Remision.origen_externo.like(f"OC:{payload.origen.strip()}%"))
+    if payload.cliente_id is not None:
+        q = q.filter(Remision.cliente_facturacion_id == payload.cliente_id)
+    candidatas = [r for r in q.all() if ctx.cliente_permitido(r.cliente_facturacion_id)]
+
+    def _casa(txt: Optional[str]) -> bool:
+        return bool(txt) and normalizar(txt) == texto_n
+
+    def _venia(ln: LineaRemision) -> Optional[str]:
+        m = _RX_COMO_VENIA.search(ln.notas or "")
+        return m.group(1) if m else None
+
+    tocables: list[tuple[Remision, list[dict], list[LineaRemision]]] = []
+    omitidas: list[str] = []
+    for rem in candidatas:
+        partidas = [p for p in (rem.partidas_por_cruzar or []) if _casa(p.get("descripcion"))]
+        # La línea que venía con ese texto hacia OTRO producto, o hacia éste pero
+        # en $0 (cruzó por parecido sin precio: el caso «cebolla moeada»).
+        lineas = [
+            ln for ln in rem.lineas
+            if _casa(_venia(ln)) and (ln.producto_id != prod.id or (ln.precio_unitario or 0) <= 0)
+        ]
+        if not partidas and not lineas:
+            continue
+        motivo = None
+        if rem.estado != "BORRADOR":
+            motivo = f"está {rem.estado.lower()}"
+        elif rem.impresa_at is not None:
+            motivo = "ya se imprimió"
+        else:
+            try:
+                _exigir_editable(db, rem)
+                _exigir_no_exportada(rem)
+            except HTTPException as e:
+                motivo = str(e.detail)
+        if motivo:
+            omitidas.append(f"{rem.folio_interno}: {motivo}")
+            continue
+        tocables.append((rem, partidas, lineas))
+
+    # ── el alias ───────────────────────────────────────────────────────────
+    cliente_id = payload.cliente_id
+    if cliente_id is None:
+        clientes = {r.cliente_facturacion_id for r in candidatas}
+        cliente_id = next(iter(clientes)) if len(clientes) == 1 else None
+    global_previo = (
+        db.query(ProductoAlias)
+        .filter(
+            ProductoAlias.tenant_id == ctx.tenant_id,
+            ProductoAlias.alias_normalizado == texto_n[:254],
+            ProductoAlias.cliente_id.is_(None),
+            ProductoAlias.sucursal_id.is_(None),
+        )
+        .one_or_none()
+    )
+    choque = None
+    if global_previo is not None and global_previo.producto_id != prod.id:
+        choque = db.query(Producto.nombre).filter(Producto.id == global_previo.producto_id).scalar()
+    aprendido = aprender_alias_con_alcance(
+        db, ctx.tenant_id, payload.texto, prod.id,
+        cliente_id=cliente_id, origen="MANUAL", user_id=ctx.user_id,
+    )
+    alcance = None
+    if aprendido is not None:
+        alcance = "GLOBAL" if aprendido.cliente_id is None else "CLIENTE"
+
+    # ── las remisiones ─────────────────────────────────────────────────────
+    fiscal = _fiscal_por_producto(db, [prod.id])
+    prod_fiscal, esq = fiscal.get(prod.id, (None, None))
+    salida: list[EnlazarRemisionOut] = []
+    for rem, partidas, lineas in tocables:
+        agregadas = reapuntadas = sin_lista = 0
+        for ln in lineas:
+            antes = (
+                db.query(Producto.nombre).filter(Producto.id == ln.producto_id).scalar()
+                if ln.producto_id != prod.id else None
+            )
+            ln.producto_id = prod.id
+            ln.presentacion = _pres(None, ln.presentacion)
+            precio = _precios_de_lineas(db, rem, [{
+                "producto_id": prod.id, "presentacion": ln.presentacion,
+                "cantidad_solicitada": ln.cantidad_solicitada, "precio_unitario": None,
+            }])[0]
+            if precio is not None and precio > 0:
+                ln.precio_unitario = precio
+            elif (ln.precio_unitario or 0) <= 0 and payload.precio:
+                ln.precio_unitario = payload.precio
+                sin_lista += 1
+            ln.importe = ln.cantidad_solicitada * ln.precio_unitario
+            calc = calcular_linea_producto(prod_fiscal, esq, ln.importe, ln.cantidad_solicitada)
+            ln.iva_importe, ln.ieps_importe = calc["iva_importe"], calc["ieps_importe"]
+            rastro = f"Enlazada por vocabulario: venía a «{antes}»" if antes else "Enlazada por vocabulario"
+            notas = (ln.notas or "").strip()
+            # La «(clave …)» del producto viejo engañaría al vigía del bot: la
+            # partida ya es de otro producto.
+            notas = re.sub(r"\s*\(clave [^)]*\)", "", notas)
+            if prod.clave_sae and _RX_COMO_VENIA.search(notas):
+                notas = _RX_COMO_VENIA.sub(lambda m: f"{m.group(0)} (clave {prod.clave_sae})", notas, count=1)
+            ln.notas = f"{notas} · {rastro}" if notas else rastro
+            reapuntadas += 1
+        siguiente = max((x.numero_linea for x in rem.lineas), default=0)
+        for p in partidas:
+            try:
+                cantidad = Decimal(str(p.get("cantidad") or "0").replace(",", ""))
+            except Exception:
+                cantidad = _ZERO
+            if cantidad <= 0:
+                omitidas.append(f"{rem.folio_interno}: «{p.get('descripcion')}» no trae cantidad")
+                continue
+            pres = _pres(p.get("unidad"))
+            precio = _precios_de_lineas(db, rem, [{
+                "producto_id": prod.id, "presentacion": pres,
+                "cantidad_solicitada": cantidad, "precio_unitario": None,
+            }])[0]
+            if not precio or precio <= 0:
+                precio = payload.precio or _ZERO
+                if payload.precio:
+                    sin_lista += 1
+            importe = cantidad * precio
+            calc = calcular_linea_producto(prod_fiscal, esq, importe, cantidad)
+            siguiente += 1
+            rem.lineas.append(LineaRemision(
+                tenant_id=ctx.tenant_id, remision_id=rem.id, numero_linea=siguiente,
+                producto_id=prod.id, presentacion=pres, cantidad_solicitada=cantidad,
+                precio_unitario=precio, importe=importe,
+                iva_importe=calc["iva_importe"], ieps_importe=calc["ieps_importe"],
+                # Mismo formato que la ingesta: el vigía del bot reconoce la
+                # partida por la «(clave …)» de su nota al compararla con el Master.
+                notas=(
+                    f"Como venía: «{p.get('descripcion')}»"
+                    + (f" (clave {prod.clave_sae})" if prod.clave_sae else "")
+                    + " · Enlazada por vocabulario"
+                ),
+            ))
+            agregadas += 1
+        if agregadas:
+            usadas = {id(p) for p in partidas}
+            # Lista nueva, no mutación: SQLAlchemy no ve cambios dentro del JSONB.
+            rem.partidas_por_cruzar = [
+                p for p in (rem.partidas_por_cruzar or []) if id(p) not in usadas
+            ]
+        if not (agregadas or reapuntadas):
+            continue
+        rem.subtotal = sum((x.importe or _ZERO for x in rem.lineas), _ZERO)
+        rem.iva = sum((x.iva_importe or _ZERO for x in rem.lineas), _ZERO)
+        rem.ieps = sum((x.ieps_importe or _ZERO for x in rem.lineas), _ZERO)
+        rem.total = rem.subtotal - (rem.descuento or _ZERO) + rem.iva + rem.ieps
+        ligar_remision_con_espejo(db, rem)
+        rem.updated_by = ctx.user_id
+        db.flush()
+        salida.append(EnlazarRemisionOut(
+            id=rem.id, folio=rem.folio_interno, su_pedido=rem.su_pedido,
+            agregadas=agregadas, reapuntadas=reapuntadas, total=rem.total,
+            precio_sin_lista=sin_lista,
+        ))
+
+    return EnlazarVocabularioOut(
+        producto_id=prod.id, producto=prod.nombre, alcance=alcance,
+        choque_global=choque, remisiones=salida, omitidas=omitidas,
+    )
 
 
 def exigir_precios(rem: Remision) -> None:

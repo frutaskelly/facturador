@@ -551,6 +551,252 @@
     "title": "AlmacenUpdate",
     "type": "object"
    },
+   "AltaSaeIn": {
+    "description": "Pide crear un producto en SAE. `clave` es la identidad de la alta (CVE_ART).\n\n`empresas` son las de SAE donde debe nacer. Vacío = las cuatro: es lo que\npidió el dueño («las 4 empresas») y evita que un olvido cree el producto en\nuna sola, que es el estado que hoy duele.",
+    "properties": {
+     "clave": {
+      "maxLength": 20,
+      "minLength": 1,
+      "title": "Clave",
+      "type": "string"
+     },
+     "crear_producto": {
+      "default": true,
+      "title": "Crear Producto",
+      "type": "boolean"
+     },
+     "descripcion": {
+      "maxLength": 60,
+      "minLength": 1,
+      "title": "Descripcion",
+      "type": "string"
+     },
+     "empresas": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Empresas",
+      "type": "array"
+     },
+     "esquema": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Esquema"
+     },
+     "linea": {
+      "anyOf": [
+       {
+        "maxLength": 10,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Linea"
+     },
+     "nota": {
+      "anyOf": [
+       {
+        "maxLength": 300,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nota"
+     },
+     "origen": {
+      "default": "UI",
+      "maxLength": 12,
+      "title": "Origen",
+      "type": "string"
+     },
+     "producto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
+     },
+     "sat": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sat"
+     },
+     "sat_unidad": {
+      "anyOf": [
+       {
+        "maxLength": 10,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sat Unidad"
+     },
+     "unidad": {
+      "default": "PIEZA",
+      "maxLength": 20,
+      "title": "Unidad",
+      "type": "string"
+     }
+    },
+    "required": [
+     "clave",
+     "descripcion"
+    ],
+    "title": "AltaSaeIn",
+    "type": "object"
+   },
+   "AltaSaeOut": {
+    "description": "Una alta pedida: en qué estado va y qué contestó SAE por empresa.",
+    "properties": {
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "datos": {
+      "default": {},
+      "title": "Datos",
+      "type": "object"
+     },
+     "empresas": {
+      "default": [],
+      "items": {},
+      "title": "Empresas",
+      "type": "array"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "iniciada_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Iniciada At"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "producto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
+     },
+     "resultado": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resultado"
+     },
+     "solicitada_at": {
+      "format": "date-time",
+      "title": "Solicitada At",
+      "type": "string"
+     },
+     "terminada_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Terminada At"
+     }
+    },
+    "required": [
+     "id",
+     "estado",
+     "origen",
+     "clave",
+     "solicitada_at"
+    ],
+    "title": "AltaSaeOut",
+    "type": "object"
+   },
+   "AltaSaeReporteIn": {
+    "description": "El conector reporta qué creó. `por_empresa` es la verdad de la alta:\n{\"02\": {\"ok\": true, \"clave\": \"AJOKG\"}, \"03\": {\"ok\": false, \"error\": \"...\"}}.\n\nNo hay reintento: lo que aquí se reporte como creado no se vuelve a\nintentar nunca, porque un INSERT repetido duplica el producto en SAE.",
+    "properties": {
+     "motivo": {
+      "anyOf": [
+       {
+        "maxLength": 300,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     },
+     "por_empresa": {
+      "title": "Por Empresa",
+      "type": "object"
+     }
+    },
+    "title": "AltaSaeReporteIn",
+    "type": "object"
+   },
    "AutoRemisionOut": {
     "description": "¿La orden entera puede volverse remisión con un clic? Y con qué líneas.\n\n`ok` solo cuando TODAS las partidas cruzaron por clave del cliente, alias o\nexacto, con unidad vendible y precio de lista negociada (no lista base).",
     "properties": {
@@ -1030,6 +1276,25 @@
      }
     },
     "title": "CancelarReciboIn",
+    "type": "object"
+   },
+   "CancelarRemisionIn": {
+    "description": "El porqué de la cancelación, para dejarlo escrito en la remisión.\n\n«Nada se elimina: se cancela y se deja nota» — y la nota tiene que viajar\nEN la cancelación, no en un PATCH aparte: editar una remisión ya exportada\ndevuelve 409, justo en los casos donde saber por qué se canceló importa\nmás.",
+    "properties": {
+     "motivo": {
+      "anyOf": [
+       {
+        "maxLength": 300,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     }
+    },
+    "title": "CancelarRemisionIn",
     "type": "object"
    },
    "CandidatoLineaOut": {
@@ -4622,6 +4887,234 @@
     "title": "EmpresaUpdate",
     "type": "object"
    },
+   "EnlazarRemisionOut": {
+    "properties": {
+     "agregadas": {
+      "default": 0,
+      "title": "Agregadas",
+      "type": "integer"
+     },
+     "folio": {
+      "title": "Folio",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "precio_sin_lista": {
+      "default": 0,
+      "title": "Precio Sin Lista",
+      "type": "integer"
+     },
+     "reapuntadas": {
+      "default": 0,
+      "title": "Reapuntadas",
+      "type": "integer"
+     },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
+     },
+     "total": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Total"
+     }
+    },
+    "required": [
+     "id",
+     "folio"
+    ],
+    "title": "EnlazarRemisionOut",
+    "type": "object"
+   },
+   "EnlazarVocabularioIn": {
+    "description": "«enlaza vocabulario OC VH-39YAJ-MIE pimiento morrón fresco por pimiento\nmorrón mixto», dicho en WhatsApp, aterrizado en el Facturador.\n\nHasta el 23-sep-2026 el comando del bot solo escribía su archivo local y el\nMaster: el vocabulario de /vocabulario no se enteraba y las remisiones que\nya vivían aquí seguían con la partida sin cruzar. Esto hace las dos cosas\ndel lado de acá: aprende el alias y corrige los borradores.",
+    "properties": {
+     "clave": {
+      "anyOf": [
+       {
+        "maxLength": 50,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "destino": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Destino"
+     },
+     "origen": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Origen"
+     },
+     "precio": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Precio"
+     },
+     "presentacion": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     },
+     "producto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
+     },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "maxLength": 60,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
+     },
+     "texto": {
+      "maxLength": 254,
+      "minLength": 1,
+      "title": "Texto",
+      "type": "string"
+     }
+    },
+    "required": [
+     "texto"
+    ],
+    "title": "EnlazarVocabularioIn",
+    "type": "object"
+   },
+   "EnlazarVocabularioOut": {
+    "properties": {
+     "alcance": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Alcance"
+     },
+     "choque_global": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Choque Global"
+     },
+     "omitidas": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Omitidas",
+      "type": "array"
+     },
+     "producto": {
+      "title": "Producto",
+      "type": "string"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     },
+     "remisiones": {
+      "default": [],
+      "items": {
+       "$ref": "#/components/schemas/EnlazarRemisionOut"
+      },
+      "title": "Remisiones",
+      "type": "array"
+     }
+    },
+    "required": [
+     "producto_id",
+     "producto"
+    ],
+    "title": "EnlazarVocabularioOut",
+    "type": "object"
+   },
    "EnviarEstadoCuentaIn": {
     "properties": {
      "asunto": {
@@ -6183,6 +6676,36 @@
       ],
       "title": "Forma Pago"
      },
+     "ieps": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ieps"
+     },
+     "iva": {
+      "anyOf": [
+       {
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Iva"
+     },
      "lineas": {
       "items": {
        "$ref": "#/components/schemas/LineaFacturaEspejoIn"
@@ -6286,6 +6809,18 @@
        }
       ],
       "title": "Uuid Fiscal"
+     },
+     "uuid_sustitucion": {
+      "anyOf": [
+       {
+        "maxLength": 36,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uuid Sustitucion"
      }
     },
     "required": [
@@ -7619,6 +8154,101 @@
      "omitidos"
     ],
     "title": "ImportResultOut",
+    "type": "object"
+   },
+   "ImpuestoDeClaveOut": {
+    "description": "Lo que el bot necesita saber de un producto para decidir impuestos, en\nuna sola pregunta por lote. Antes lo resolvía contra SAE clave por clave\n(INVE.CVE_ESQIMPU → IMPU.IMPUESTO4).\n\n`iva` e `ieps` van como FRACCIÓN (0.16 = 16%), que es como el Facturador las\nguarda — quien imprime un porcentaje multiplica, y así nadie tiene que\nadivinar en qué unidad viene.",
+    "properties": {
+     "activo": {
+      "default": true,
+      "title": "Activo",
+      "type": "boolean"
+     },
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "encontrado": {
+      "default": false,
+      "title": "Encontrado",
+      "type": "boolean"
+     },
+     "esquema": {
+      "default": "",
+      "title": "Esquema",
+      "type": "string"
+     },
+     "ieps": {
+      "default": "0",
+      "title": "Ieps",
+      "type": "string"
+     },
+     "ieps_cuota": {
+      "default": "0",
+      "title": "Ieps Cuota",
+      "type": "string"
+     },
+     "iva": {
+      "default": "0",
+      "title": "Iva",
+      "type": "string"
+     },
+     "iva_exento": {
+      "default": false,
+      "title": "Iva Exento",
+      "type": "boolean"
+     },
+     "nombre": {
+      "default": "",
+      "title": "Nombre",
+      "type": "string"
+     },
+     "objeto_imp": {
+      "default": "02",
+      "title": "Objeto Imp",
+      "type": "string"
+     },
+     "producto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
+     },
+     "tipo_ieps": {
+      "default": "TASA",
+      "title": "Tipo Ieps",
+      "type": "string"
+     }
+    },
+    "required": [
+     "clave"
+    ],
+    "title": "ImpuestoDeClaveOut",
+    "type": "object"
+   },
+   "ImpuestosPorClaveIn": {
+    "description": "Claves de SAE (o SKU) de las que se quiere saber su fiscalidad.",
+    "properties": {
+     "claves": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 500,
+      "minItems": 1,
+      "title": "Claves",
+      "type": "array"
+     }
+    },
+    "required": [
+     "claves"
+    ],
+    "title": "ImpuestosPorClaveIn",
     "type": "object"
    },
    "LiberarPedidoIn": {
@@ -11409,6 +12039,37 @@
      "offset"
     ],
     "title": "Page[AlmacenOut]",
+    "type": "object"
+   },
+   "Page_AltaSaeOut_": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/AltaSaeOut"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "offset": {
+      "title": "Offset",
+      "type": "integer"
+     },
+     "total": {
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "items",
+     "total",
+     "limit",
+     "offset"
+    ],
+    "title": "Page[AltaSaeOut]",
     "type": "object"
    },
    "Page_CategoriaOut_": {
@@ -24786,7 +25447,7 @@
   },
   "/api/v1/facturas/espejo/resumen": {
    "get": {
-    "description": "Qué tiene el espejo de esa serie: folio, total y estado.\n\nEs la contraparte de la conciliación Facturador↔SAE (criterio de la Etapa 3\ndel plan): el conector compara ESTO contra lo que SAE tiene y detecta las\nfacturas que nunca llegaron al espejo — si falta una, el estado de cuenta\ndel cliente miente y nadie se entera.\n\nDeliberadamente gated por `factura:espejo` y no por `menu:facturas`: la\nclave del conector puede verificar SU trabajo sin ganar acceso de lectura\na toda la facturación. Devuelve lo mínimo para cuadrar, no el detalle.",
+    "description": "Qué tiene el espejo: folio, total y estado — y, si se piden, el detalle.\n\nNació como la contraparte de la conciliación Facturador↔SAE: el conector\ncompara ESTO contra lo que SAE tiene y detecta las facturas que nunca\nllegaron al espejo — si falta una, el estado de cuenta del cliente miente y\nnadie se entera. Esa forma mínima sigue igual y es la de default.\n\nSe engorda el 22-sep-2026 (decisión del dueño) para que el bot de WhatsApp\npueda contestar de facturas SIN preguntarle a SAE, que es la meta 4. Lo que\nel bot necesita y antes no estaba: buscar por la OC —que vive en la\nOBSERVACIÓN del documento, no en un campo propio—, el UUID para el acuse,\nel desglose de impuestos y las partidas.\n\nSigue gated por `factura:espejo` y NO por `menu:facturas`: la clave del\nconector verifica su trabajo y lee el espejo de SAE, sin ganar acceso a la\nfacturación nativa del Facturador. Por eso el filtro de origen no es\nnegociable: aquí solo se ve lo que vino de SAE.",
     "operationId": "espejo_resumen_api_v1_facturas_espejo_resumen_get",
     "parameters": [
      {
@@ -24802,11 +25463,18 @@
      {
       "in": "query",
       "name": "serie",
-      "required": true,
+      "required": false,
       "schema": {
-       "maxLength": 20,
-       "title": "Serie",
-       "type": "string"
+       "anyOf": [
+        {
+         "maxLength": 20,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Serie"
       }
      },
      {
@@ -24824,6 +25492,99 @@
         }
        ],
        "title": "Desde"
+      }
+     },
+     {
+      "description": "Busca en la observación, el UUID y serie+folio",
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 120,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Busca en la observación, el UUID y serie+folio",
+       "title": "Q"
+      }
+     },
+     {
+      "description": "Folio EXACTO (con `serie`, devuelve una)",
+      "in": "query",
+      "name": "folio",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "minimum": 1,
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Folio EXACTO (con `serie`, devuelve una)",
+       "title": "Folio"
+      }
+     },
+     {
+      "description": "Números de cliente EN SAE (csv), p. ej. «6,7»",
+      "in": "query",
+      "name": "cliente_sae",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 60,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Números de cliente EN SAE (csv), p. ej. «6,7»",
+       "title": "Cliente Sae"
+      }
+     },
+     {
+      "description": "Añade fecha, UUID, observación e impuestos",
+      "in": "query",
+      "name": "detalle",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Añade fecha, UUID, observación e impuestos",
+       "title": "Detalle",
+       "type": "boolean"
+      }
+     },
+     {
+      "description": "Añade las partidas (exige serie o q)",
+      "in": "query",
+      "name": "lineas",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Añade las partidas (exige serie o q)",
+       "title": "Lineas",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 500,
+       "maximum": 2000,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
       }
      },
      {
@@ -31811,6 +32572,319 @@
     ]
    }
   },
+  "/api/v1/productos/alta-sae": {
+   "get": {
+    "description": "Las altas pedidas, lo último primero. Es lo que sondea el bot para su\nacuse y lo que la pantalla de catálogo pinta como «pendiente en SAE».",
+    "operationId": "listar_altas_sae_api_v1_productos_alta_sae_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "estado",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 10,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Estado"
+      }
+     },
+     {
+      "in": "query",
+      "name": "clave",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 20,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Clave"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "maximum": 200,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Page_AltaSaeOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar Altas Sae",
+    "tags": [
+     "productos"
+    ]
+   },
+   "post": {
+    "description": "Pide crear un producto en SAE, en las empresas que se indiquen.\n\nIdempotente por clave, y eso es el candado, no una comodidad: dos «dale de\nalta AJOKG» seguidos por WhatsApp tienen que devolver LA MISMA solicitud,\nporque dos altas vivas insertarían dos veces el mismo artículo.\n\nSi la clave ya está en el catálogo espejo de SAE (`claves_sae`, activa), no\nse encola nada y se contesta 409: el producto ya existe allá y lo que hace\nfalta es ligarlo, no crearlo.",
+    "operationId": "pedir_alta_sae_api_v1_productos_alta_sae_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AltaSaeIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AltaSaeOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Pedir Alta Sae",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/alta-sae/pendiente": {
+   "get": {
+    "description": "El conector pregunta si hay una alta que aplicar. Reclamar la marca\nEN_CURSO con `skip_locked`: dos conectores no pueden tomar la misma y\nescribirla dos veces en SAE.\n\nReclama UNA a la vez a propósito: si el proceso muere a media alta, hay que\npoder decir exactamente de qué clave hay que ir a ver en SAE.",
+    "operationId": "reclamar_alta_sae_api_v1_productos_alta_sae_pendiente_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "anyOf": [
+          {
+           "$ref": "#/components/schemas/AltaSaeOut"
+          },
+          {
+           "type": "null"
+          }
+         ],
+         "title": "Response Reclamar Alta Sae Api V1 Productos Alta Sae Pendiente Get"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Reclamar Alta Sae",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/alta-sae/{solicitud_id}/reporte": {
+   "post": {
+    "description": "El conector reporta qué creó, por empresa. Esto CIERRA la solicitud: no\nhay reintento, porque lo que ya entró a SAE no se puede volver a insertar.\n\nEl estado sale de lo reportado, no de un `ok` que alguien manda: todas las\nempresas bien = OK, ninguna = ERROR, mezcla = PARCIAL (falta trabajo y algo\nya se creó: las dos cosas son verdad y una persona tiene que verlo).\n\nLa clave se estampa en el producto SOLO si alguna empresa la confirmó —\nmisma regla que con los folios de SAE: el Facturador no se apunta una clave\nque SAE no haya confirmado.",
+    "operationId": "reportar_alta_sae_api_v1_productos_alta_sae__solicitud_id__reporte_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "solicitud_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Solicitud Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AltaSaeReporteIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AltaSaeOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Reportar Alta Sae",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
   "/api/v1/productos/catalogo-cliente-batch": {
    "post": {
     "description": "Guarda de golpe el código/nombre/presentación que usan uno o varios\nclientes para una lista de productos — el último paso de la importación,\ncuando el usuario ya decidió de quién era la lista.\n\nEscribe por lotes (una consulta para leer lo existente, un flush al final):\ncon 500 productos × 2 clientes, hacerlo uno por uno serían miles de viajes.",
@@ -32001,6 +33075,75 @@
      }
     ],
     "summary": "Importar Preview",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/impuestos": {
+   "post": {
+    "description": "La fiscalidad de un lote de claves, en una sola pregunta.\n\nEl bot resuelve impuestos contra SAE clave por clave (INVE.CVE_ESQIMPU →\nIMPU.IMPUESTO4) desde seis funciones distintas. Esto contesta lo mismo con\nel esquema del producto, que es el único cerebro fiscal de este lado\n(`services/fiscal.calcular_linea_producto` lee estos mismos campos).\n\nLa clave se busca por `clave_sae` y, si no cae, por `sku`: el bot llama con\nlo que traiga el documento y no siempre es lo mismo.\n\nUna clave que no existe aquí NO se calla: vuelve con `encontrado: false`.\nCallarla sería contestar «0% de IVA» a un producto que nadie conoce, que es\nla peor respuesta posible — el bot tiene que poder distinguir «no lleva\nIVA» de «no sé quién es».",
+    "operationId": "impuestos_por_clave_api_v1_productos_impuestos_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ImpuestosPorClaveIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ImpuestoDeClaveOut"
+         },
+         "title": "Response Impuestos Por Clave Api V1 Productos Impuestos Post",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Impuestos Por Clave",
     "tags": [
      "productos"
     ]
@@ -34035,6 +35178,71 @@
     ]
    }
   },
+  "/api/v1/remisiones/enlazar-vocabulario": {
+   "post": {
+    "description": "«Este texto del cliente es este producto»: se aprende y se corrige.\n\nEs el comando *enlaza vocabulario* del bot (23-sep-2026): antes solo\nescribía su archivo y el Master, así que /vocabulario no se enteraba y las\nremisiones seguían con la partida sin cruzar. Aquí:\n\n1. El alias se aprende con la regla del catálogo multicliente: GLOBAL si el\n   texto no significaba nada, del CLIENTE si ya significaba otro producto —\n   el global ajeno no se reapunta desde un chat.\n2. En los borradores de la OC nombrada (o, sin OC, en los del mismo origen\n   que tengan esa partida sin cruzar), la partida sin cruzar se vuelve línea\n   y la línea que venía con ese texto hacia otro producto se reapunta, las\n   dos con el precio de la lista.\n\nSolo BORRADOR y solo lo que se puede editar: una impresa, exportada al SAE\no ligada a factura se reporta como omitida y no se toca.",
+    "operationId": "enlazar_vocabulario_api_v1_remisiones_enlazar_vocabulario_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EnlazarVocabularioIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EnlazarVocabularioOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Enlazar Vocabulario",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
   "/api/v1/remisiones/enviar-lote": {
    "post": {
     "description": "Un SOLO correo con todas las remisiones indicadas (un PDF adjunto por\nremisión). Pensado para el envío masivo agrupado por cliente: cada cliente\nrecibe un único correo con todas sus remisiones.",
@@ -34414,6 +35622,297 @@
     ]
    }
   },
+  "/api/v1/remisiones/reporte-armado": {
+   "get": {
+    "description": "La materia prima de la hoja de armado (21-sep-2026, meta 1).\n\nEl comando «hoja de armado» pivotea el Master de Google Sheets: filas =\nproducto (descripción · unidad · nota), columnas = OC del cliente, celdas =\nsuma de cantidad. Este endpoint entrega el detalle POR REMISIÓN — folio del\ncliente, cliente, fecha de bodega y las líneas con su categoría — y el\npivote, el PDF y los bloques por categoría los sigue armando el bot, igual\nque con la lista de compras.\n\nDos filtros excluyentes, como el comando: por fecha de bodega\n(fecha_entrega) o por lista de OC (su_pedido); la lista de OC manda.\n\n`origen` acota al CARRIL de un Master: el de Balles/Jubrán solo ve las OC\nque entraron por WhatsApp/correo (WA:, EMAIL:) y el de EHMO las suyas —\nsin él, la hoja de armado de un carril se llevaría las entregas del otro\n(medido 21-sep-2026: 21 remisiones de hospitales dentro de la hoja de\nBalles). Aplica al filtro por fecha y al aviso; la lista de OC ya es\nexplícita y no lo necesita.\n\nDos avisos viajan con el reporte, los dos por la misma razón: que nada se\ncaiga de la hoja en silencio. `sin_remision` son las OC de la bandeja que\nese día nunca se cruzaron (no hay qué armar aunque el cliente lo pidió), y\n`sin_fecha` viaja siempre que se filtra por fecha: una remisión sin\nfecha_entrega no casa con NINGÚN día y se caería de la hoja en silencio —\nel mismo hoyo que en la hoja vieja tuvo a la 24973 fuera con $50,633.78\ndentro (13-ago-2026). La ventana es de 35 días hacia atrás: el proxy más\nhonesto del «periodo activo» de la hoja, que aquí no existe.",
+    "operationId": "reporte_armado_api_v1_remisiones_reporte_armado_get",
+    "parameters": [
+     {
+      "description": "Fechas de ENTREGA (bodega), ISO, separadas por coma",
+      "in": "query",
+      "name": "fechas",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Fechas de ENTREGA (bodega), ISO, separadas por coma",
+       "title": "Fechas"
+      }
+     },
+     {
+      "description": "OC del cliente (su_pedido), separadas por coma",
+      "in": "query",
+      "name": "folios",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "OC del cliente (su_pedido), separadas por coma",
+       "title": "Folios"
+      }
+     },
+     {
+      "description": "Prefijos de origen_externo (csv): WA:,EMAIL: = carril Balles/Jubrán; EHMO:<perfil>: = un Master de EHMO",
+      "in": "query",
+      "name": "origen",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Prefijos de origen_externo (csv): WA:,EMAIL: = carril Balles/Jubrán; EHMO:<perfil>: = un Master de EHMO",
+       "title": "Origen"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Reporte Armado",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
+  "/api/v1/remisiones/reporte-compras": {
+   "get": {
+    "description": "La materia prima de la lista de compras (21-sep-2026, meta 1).\n\nEl comando de WhatsApp «lista de compras <días>» hoy pivotea el Master de\nGoogle Sheets. Este endpoint entrega LO MISMO desde las remisiones vivas:\ncuánto se pide de cada producto+presentación por fecha de entrega. La\nagregación por día y el pivote los sigue haciendo el bot — aquí solo viven\nlos datos, para que el reporte no dependa de la hoja.\n\n`perfil` acota al universo del Master de ese perfil: las remisiones cuya OC\nentró con ancla EHMO:<perfil>:. Sin perfil van todas las remisiones con\nentrega en esas fechas — más de lo que el Master ve, no menos.\n\nLa UNIDAD que viaja es lineas_remision.presentacion, que ya es canónica\n(KILO/PIEZA/...): la regla del dueño de nunca mezclar unidades se cumple\naguas abajo agrupando por ella.",
+    "operationId": "reporte_compras_api_v1_remisiones_reporte_compras_get",
+    "parameters": [
+     {
+      "description": "Fechas de ENTREGA, ISO, separadas por coma",
+      "in": "query",
+      "name": "fechas",
+      "required": true,
+      "schema": {
+       "description": "Fechas de ENTREGA, ISO, separadas por coma",
+       "title": "Fechas",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "perfil",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 40,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Perfil"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Reporte Compras",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
+  "/api/v1/remisiones/reporte-sin-precio": {
+   "get": {
+    "description": "Lo que hoy NO se puede facturar bien: sin clave en SAE, o sin precio.\n\nEs el cuarto reporte que sale del Master (21-sep-2026, meta 1). El de la\nhoja resuelve cada producto contra el catálogo de SAE en vivo; este contesta\ncon lo que el Facturador ya sabe: el espejo de claves (`claves_sae`, las\ncuatro empresas) y el precio con el que se capturó la partida.\n\nCuatro motivos, y se separan porque el arreglo de cada uno es distinto:\n  · SIN CLAVE — la partida no cruzó con ningún producto, o el producto no\n    tiene clave: hay que cruzarla o darla de alta.\n  · CLAVE NO EN SAE — la clave existe aquí pero la empresa de esa plaza no\n    la conoce (la 02 la tiene, la 03 no): hay que darla de alta ALLÁ.\n  · CLAVE DE BAJA — existe en esa empresa pero dada de baja: se reactiva.\n  · SIN PRECIO — la partida se capturó en $0: hay que ponerle precio.\n\nUn producto puede tener dos motivos a la vez; se reporta una vez por motivo,\nporque son dos trabajos distintos para dos personas distintas.",
+    "operationId": "reporte_sin_precio_api_v1_remisiones_reporte_sin_precio_get",
+    "parameters": [
+     {
+      "description": "Fechas de ENTREGA, ISO, separadas por coma",
+      "in": "query",
+      "name": "fechas",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Fechas de ENTREGA, ISO, separadas por coma",
+       "title": "Fechas"
+      }
+     },
+     {
+      "description": "Si no hay fechas: últimos N días de remisión",
+      "in": "query",
+      "name": "dias",
+      "required": false,
+      "schema": {
+       "default": 14,
+       "description": "Si no hay fechas: últimos N días de remisión",
+       "maximum": 90,
+       "minimum": 1,
+       "title": "Dias",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "origen",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Origen"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Reporte Sin Precio",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
   "/api/v1/remisiones/{rem_id}": {
    "delete": {
     "operationId": "delete_remision_api_v1_remisiones__rem_id__delete",
@@ -34607,6 +36106,7 @@
   },
   "/api/v1/remisiones/{rem_id}/cancelar": {
    "post": {
+    "description": "Cancela la remisión y deja dicho por qué.\n\nEl motivo viaja AQUÍ y no en un PATCH previo a propósito: editar una\nremisión que ya salió en un masivo devuelve 409 (`_exigir_no_exportada`),\nasí que el camino de dos llamadas fallaba justo donde la nota más importa —\ny entre las dos quedaba una ventana con la nota escrita y la cancelación\nno.",
     "operationId": "cancelar_remision_api_v1_remisiones__rem_id__cancelar_post",
     "parameters": [
      {
@@ -34636,6 +36136,23 @@
       }
      }
     ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/CancelarRemisionIn"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Payload"
+       }
+      }
+     }
+    },
     "responses": {
      "200": {
       "content": {
