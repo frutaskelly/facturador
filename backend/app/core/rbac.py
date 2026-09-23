@@ -65,6 +65,9 @@ _OWNER_ROLE = "OWNER"
 #     eso la conexión tiene que poder encolar la solicitud y crear el producto
 #     nuevo que la acompaña. Es angosto a propósito, como precio:depositar: crea
 #     lo que no existía y encola; NO edita, NO reapunta alias, NO da de baja.
+#   - el BUZÓN DE TICKETS (menu:tickets + ticket:gestionar, 23-sep-2026): el
+#     bot deposita ahí cada «necesito una mano» con su número y reclama las
+#     acciones que alguien pide desde la pantalla. Solo toca la tabla tickets.
 # Fuera, deliberadamente: cualquier cosa de CFDI nativo, borrar, usuarios,
 # series, `producto:gestionar` (reapuntar un alias afecta a todo el catálogo) y
 # `lista_precios:gestionar` (la conexión consulta precios, no los fija).
@@ -78,6 +81,8 @@ PERMISOS_CONEXION = frozenset({
     "menu:cotizador",     # consultar precios
     "precio:depositar",   # y fijarlos SOLO en listas que ya existen
     "producto:alta_sae",  # pedir el alta en SAE, sin poder tocar lo que existe
+    "menu:tickets",       # el buzón de tickets: deposita los casos que no resolvió
+    "ticket:gestionar",   # y confirma las acciones que se le piden desde la pantalla
 })
 
 

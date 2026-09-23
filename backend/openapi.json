@@ -12661,6 +12661,37 @@
     "title": "Page[SucursalOut]",
     "type": "object"
    },
+   "Page_TicketOut_": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/TicketOut"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "offset": {
+      "title": "Offset",
+      "type": "integer"
+     },
+     "total": {
+      "title": "Total",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "items",
+     "total",
+     "limit",
+     "offset"
+    ],
+    "title": "Page[TicketOut]",
+    "type": "object"
+   },
    "Page_VocabularioOut_": {
     "properties": {
      "items": {
@@ -18387,6 +18418,787 @@
      }
     },
     "title": "SustituirIn",
+    "type": "object"
+   },
+   "TicketAccionIn": {
+    "properties": {
+     "accion": {
+      "enum": [
+       "EXTRA",
+       "CERRAR"
+      ],
+      "title": "Accion",
+      "type": "string"
+     },
+     "nota": {
+      "anyOf": [
+       {
+        "maxLength": 1000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nota"
+     }
+    },
+    "required": [
+     "accion"
+    ],
+    "title": "TicketAccionIn",
+    "type": "object"
+   },
+   "TicketAccionPendienteOut": {
+    "description": "Lo que el bot reclama: qué ticket, qué hacer, quién lo pidió.",
+    "properties": {
+     "accion": {
+      "title": "Accion",
+      "type": "string"
+     },
+     "archivo_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Nombre"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nota": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nota"
+     },
+     "numero": {
+      "title": "Numero",
+      "type": "integer"
+     },
+     "origen_externo": {
+      "title": "Origen Externo",
+      "type": "string"
+     },
+     "pedida_por": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pedida Por"
+     }
+    },
+    "required": [
+     "id",
+     "numero",
+     "origen_externo",
+     "accion"
+    ],
+    "title": "TicketAccionPendienteOut",
+    "type": "object"
+   },
+   "TicketAckIn": {
+    "description": "El bot ya ejecutó (o no pudo ejecutar) la acción pedida desde aquí.",
+    "properties": {
+     "detalle": {
+      "anyOf": [
+       {
+        "maxLength": 1000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Detalle"
+     },
+     "ok": {
+      "title": "Ok",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "ok"
+    ],
+    "title": "TicketAckIn",
+    "type": "object"
+   },
+   "TicketComentarioIn": {
+    "properties": {
+     "texto": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Texto",
+      "type": "string"
+     }
+    },
+    "required": [
+     "texto"
+    ],
+    "title": "TicketComentarioIn",
+    "type": "object"
+   },
+   "TicketDetailOut": {
+    "properties": {
+     "accion_pedida": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Accion Pedida"
+     },
+     "accion_pedida_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Accion Pedida At"
+     },
+     "accion_pedida_por": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Accion Pedida Por"
+     },
+     "accion_tomada_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Accion Tomada At"
+     },
+     "acciones": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Acciones",
+      "type": "array"
+     },
+     "archivo_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Nombre"
+     },
+     "canal": {
+      "title": "Canal",
+      "type": "string"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "eventos": {
+      "default": [],
+      "items": {
+       "type": "object"
+      },
+      "title": "Eventos",
+      "type": "array"
+     },
+     "grupo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Grupo"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nota": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nota"
+     },
+     "numero": {
+      "title": "Numero",
+      "type": "integer"
+     },
+     "perfil": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Perfil"
+     },
+     "que_paso": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Que Paso"
+     },
+     "recibido_at": {
+      "format": "date-time",
+      "title": "Recibido At",
+      "type": "string"
+     },
+     "remitente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remitente"
+     },
+     "resolucion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resolucion"
+     },
+     "resuelto_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resuelto At"
+     },
+     "resuelto_por": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resuelto Por"
+     },
+     "tiene_foto": {
+      "default": false,
+      "title": "Tiene Foto",
+      "type": "boolean"
+     },
+     "tipo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tipo"
+     },
+     "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "numero",
+     "canal",
+     "estado",
+     "recibido_at",
+     "updated_at"
+    ],
+    "title": "TicketDetailOut",
+    "type": "object"
+   },
+   "TicketIn": {
+    "description": "Lo que manda el bot. Idempotente por `origen_externo`: se re-manda cada\nvez que el caso cambia (se abre, se resuelve, se cierra).",
+    "properties": {
+     "acciones": {
+      "items": {
+       "enum": [
+        "EXTRA",
+        "CERRAR"
+       ],
+       "type": "string"
+      },
+      "title": "Acciones",
+      "type": "array"
+     },
+     "archivo_nombre": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Nombre"
+     },
+     "canal": {
+      "default": "WHATSAPP",
+      "maxLength": 20,
+      "title": "Canal",
+      "type": "string"
+     },
+     "estado": {
+      "default": "ABIERTO",
+      "enum": [
+       "ABIERTO",
+       "RESUELTO",
+       "CERRADO"
+      ],
+      "title": "Estado",
+      "type": "string"
+     },
+     "evento": {
+      "anyOf": [
+       {
+        "maxLength": 1000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Evento"
+     },
+     "foto_b64": {
+      "anyOf": [
+       {
+        "maxLength": 6000000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Foto B64"
+     },
+     "foto_mime": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Foto Mime"
+     },
+     "grupo": {
+      "anyOf": [
+       {
+        "maxLength": 160,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Grupo"
+     },
+     "jid": {
+      "anyOf": [
+       {
+        "maxLength": 120,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Jid"
+     },
+     "nota": {
+      "anyOf": [
+       {
+        "maxLength": 2000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nota"
+     },
+     "numero": {
+      "minimum": 1.0,
+      "title": "Numero",
+      "type": "integer"
+     },
+     "origen_externo": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Origen Externo",
+      "type": "string"
+     },
+     "perfil": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Perfil"
+     },
+     "que_paso": {
+      "anyOf": [
+       {
+        "maxLength": 4000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Que Paso"
+     },
+     "remitente": {
+      "anyOf": [
+       {
+        "maxLength": 160,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remitente"
+     },
+     "resolucion": {
+      "anyOf": [
+       {
+        "maxLength": 1000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resolucion"
+     },
+     "resuelto_por": {
+      "anyOf": [
+       {
+        "maxLength": 160,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resuelto Por"
+     },
+     "tipo": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tipo"
+     }
+    },
+    "required": [
+     "numero",
+     "origen_externo"
+    ],
+    "title": "TicketIn",
+    "type": "object"
+   },
+   "TicketOut": {
+    "properties": {
+     "accion_pedida": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Accion Pedida"
+     },
+     "accion_pedida_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Accion Pedida At"
+     },
+     "accion_pedida_por": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Accion Pedida Por"
+     },
+     "accion_tomada_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Accion Tomada At"
+     },
+     "acciones": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Acciones",
+      "type": "array"
+     },
+     "archivo_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Nombre"
+     },
+     "canal": {
+      "title": "Canal",
+      "type": "string"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "grupo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Grupo"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nota": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nota"
+     },
+     "numero": {
+      "title": "Numero",
+      "type": "integer"
+     },
+     "perfil": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Perfil"
+     },
+     "que_paso": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Que Paso"
+     },
+     "recibido_at": {
+      "format": "date-time",
+      "title": "Recibido At",
+      "type": "string"
+     },
+     "remitente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remitente"
+     },
+     "resolucion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resolucion"
+     },
+     "resuelto_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resuelto At"
+     },
+     "resuelto_por": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resuelto Por"
+     },
+     "tiene_foto": {
+      "default": false,
+      "title": "Tiene Foto",
+      "type": "boolean"
+     },
+     "tipo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tipo"
+     },
+     "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "numero",
+     "canal",
+     "estado",
+     "recibido_at",
+     "updated_at"
+    ],
+    "title": "TicketOut",
+    "type": "object"
+   },
+   "TicketResumenOut": {
+    "properties": {
+     "abiertos": {
+      "title": "Abiertos",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "abiertos"
+    ],
+    "title": "TicketResumenOut",
     "type": "object"
    },
    "TimbrarIn": {
@@ -38894,6 +39706,644 @@
     "summary": "Upsert Vinculo",
     "tags": [
      "sucursales"
+    ]
+   }
+  },
+  "/api/v1/tickets": {
+   "get": {
+    "description": "`estado` acepta una lista separada por comas («ABIERTO,EN_CURSO»).",
+    "operationId": "listar_api_v1_tickets_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "estado",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 40,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Estado"
+      }
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Q"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "maximum": 200,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Page_TicketOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar",
+    "tags": [
+     "tickets"
+    ]
+   },
+   "post": {
+    "description": "El bot deposita (o actualiza) un ticket. IDEMPOTENTE por `origen_externo`.",
+    "operationId": "depositar_api_v1_tickets_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TicketIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TicketDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Depositar",
+    "tags": [
+     "tickets"
+    ]
+   }
+  },
+  "/api/v1/tickets/acciones/pendientes": {
+   "get": {
+    "description": "El bot reclama lo que se pidió desde la pantalla. Reclamar marca\n`accion_tomada_at` (skip_locked): dos pasadas del bot no ejecutan dos veces\nel mismo reproceso. Si falla, el /ack con ok=false lo regresa a ABIERTO.",
+    "operationId": "acciones_pendientes_api_v1_tickets_acciones_pendientes_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/TicketAccionPendienteOut"
+         },
+         "title": "Response Acciones Pendientes Api V1 Tickets Acciones Pendientes Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Acciones Pendientes",
+    "tags": [
+     "tickets"
+    ]
+   }
+  },
+  "/api/v1/tickets/resumen": {
+   "get": {
+    "description": "Lo que el menú lateral enseña como contador.",
+    "operationId": "resumen_api_v1_tickets_resumen_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TicketResumenOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Resumen",
+    "tags": [
+     "tickets"
+    ]
+   }
+  },
+  "/api/v1/tickets/{ticket_id}": {
+   "get": {
+    "operationId": "detalle_api_v1_tickets__ticket_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "ticket_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Ticket Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TicketDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Detalle",
+    "tags": [
+     "tickets"
+    ]
+   }
+  },
+  "/api/v1/tickets/{ticket_id}/accion": {
+   "post": {
+    "description": "Pide al bot que resuelva el caso.\n\nCERRAR se cierra AQUÍ mismo (no hay nada que ejecutar) y además se le avisa\nal bot para que deje de perseguir la foto. EXTRA queda EN_CURSO hasta que el\nbot la registre y mande el RESUELTO con la OC.",
+    "operationId": "pedir_accion_api_v1_tickets__ticket_id__accion_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "ticket_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Ticket Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TicketAccionIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TicketDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Pedir Accion",
+    "tags": [
+     "tickets"
+    ]
+   }
+  },
+  "/api/v1/tickets/{ticket_id}/ack": {
+   "post": {
+    "operationId": "ack_api_v1_tickets__ticket_id__ack_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "ticket_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Ticket Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TicketAckIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TicketDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Ack",
+    "tags": [
+     "tickets"
+    ]
+   }
+  },
+  "/api/v1/tickets/{ticket_id}/comentarios": {
+   "post": {
+    "operationId": "comentar_api_v1_tickets__ticket_id__comentarios_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "ticket_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Ticket Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TicketComentarioIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TicketDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Comentar",
+    "tags": [
+     "tickets"
+    ]
+   }
+  },
+  "/api/v1/tickets/{ticket_id}/foto": {
+   "get": {
+    "operationId": "foto_api_v1_tickets__ticket_id__foto_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "ticket_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Ticket Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Foto",
+    "tags": [
+     "tickets"
     ]
    }
   },

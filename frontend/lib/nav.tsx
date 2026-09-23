@@ -17,6 +17,7 @@ import {
   Palette,
   Percent,
   HandCoins,
+  Inbox,
   Receipt,
   Repeat,
   Shield,
@@ -56,6 +57,9 @@ export const NAV: NavSection[] = [
     items: [
       { label: "Dashboard", href: "/dashboard", perm: "menu:dashboard", icon: LayoutDashboard },
       { label: "Remisiones", href: "/remisiones", perm: "menu:remisiones", icon: FileText },
+      // Lo que el bot de WhatsApp no se atrevió a resolver solo («necesito una
+      // mano»), con su número. Va junto a Remisiones porque hoy son pedidos atorados.
+      { label: "Buzón de tickets", href: "/tickets", perm: "menu:tickets", icon: Inbox },
       { label: "Facturas", href: "/facturas", perm: "menu:facturas", icon: Receipt },
       { label: "Cobranza (REP)", href: "/cobranza", perm: "menu:facturas", icon: HandCoins },
       // Los cortes del negocio (saldos por proyecto y los que vengan). Mismo

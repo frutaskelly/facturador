@@ -61,6 +61,7 @@ const MATRIX: MatrixRow[] = [
   // «órdenes por resolver» dentro de Remisiones (y el acceso del bot).
   { pantalla: "Órdenes por resolver (en Remisiones)", ver: ["menu:oc"], editar: ["remision:gestionar"], borrar: [] },
   { pantalla: "Remisiones", ver: ["menu:remisiones"], editar: ["remision:gestionar"], borrar: ["remision:eliminar"] },
+  { pantalla: "Buzón de tickets", ver: ["menu:tickets"], editar: ["ticket:gestionar"], borrar: [] },
   {
     pantalla: "Facturas",
     ver: ["menu:facturas"],
