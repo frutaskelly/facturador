@@ -281,8 +281,8 @@ class ClaveSaeSugerida(BaseModel):
     descripcion: Optional[str] = None
     # False = existe en SAE pero está dada de BAJA: no factura.
     activa: bool = True
-    # Si ESE cliente ya usa la clave para otro producto, se dice: dos productos
-    # con la misma CVE_ART mandan a SAE la misma línea dos veces.
+    # Si ESE cliente ya usa la clave para otro producto, se dice (es un aviso,
+    # no un bloqueo: varios productos pueden compartir la misma CVE_ART).
     producto_id: Optional[uuid.UUID] = None
     producto_nombre: Optional[str] = None
 

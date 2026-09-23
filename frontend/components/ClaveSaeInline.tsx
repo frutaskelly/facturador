@@ -202,7 +202,7 @@ export function ClaveSaeInline({
                   !c.activa
                     ? "dada de BAJA en SAE: no factura"
                     : c.producto_id && c.producto_id !== productoId
-                    ? `ya es la clave de ${c.producto_nombre}`
+                    ? `también la usa ${c.producto_nombre}`
                     : null
                 }
               />

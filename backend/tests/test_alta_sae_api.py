@@ -344,3 +344,19 @@ def test_impuestos_por_clave_contesta_por_lote_y_no_calla_lo_que_no_conoce(clien
     sku = client.get(f"/api/v1/productos/{env['prod']}", headers=h).json()["sku"]
     r2 = client.post("/api/v1/productos/impuestos", headers=h, json={"claves": [sku]})
     assert r2.json()[0]["encontrado"] is True
+
+
+def test_dos_productos_pueden_compartir_la_clave_sae(client, env, auth_as):
+    """Regla del dueño (23-sep): una clave de SAE ampara varios productos. Antes
+    esto era un 409 («ya es de CEBOLLA BLANCA») y dejaba partidas sin clave."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    otro = client.post("/api/v1/productos", headers=h, json={
+        "sku": "", "nombre": "Ajo primera", "clave_sat": "01010101", "unidad_sat": "KGM",
+        "clave_sae": " ajokg ", "esquema_impuesto_id": str(env["esq2"])})
+    assert otro.status_code in (200, 201), otro.text
+    otro = otro.json()
+    assert otro["clave_sae"] == "AJOKG"
+    r = client.patch(f"/api/v1/productos/{env['prod']}", headers=h,
+                     json={"clave_sae": "ajokg"})
+    assert r.status_code == 200, r.text
+    assert r.json()["clave_sae"] == "AJOKG"
