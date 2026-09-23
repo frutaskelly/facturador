@@ -249,6 +249,26 @@ def test_reintento_completa_el_link_del_documento(client, env, auth_as):
     assert otra["archivo_url"] == url
 
 
+def test_el_lote_de_la_partida_se_guarda(client, env, auth_as):
+    """EXTRA / REPOSICIÓN viajan con la partida y quedan en el payload.
+
+    De ese dato depende el dinero: una reposición se surte y no se cobra, y
+    hasta hoy solo vivía en la celda del Master de EHMO. Sin él, archivar la
+    hoja hacía que una reposición se empezara a cobrar. No entra en la
+    comparación de cambios, así que un payload viejo sin `lote` no despierta
+    ninguna incidencia."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    r = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(lineas=[
+        {"descripcion": "JITOMATE SALADET", "cantidad": "25", "unidad": "KG"},
+        {"descripcion": "CHILE POBLANO", "cantidad": "8", "unidad": "KG",
+         "lote": "REPOSICION"}]))
+    assert r.status_code == 201, r.text
+    lineas = r.json()["payload"]["lineas"]
+    assert lineas[0].get("lote") is None
+    assert lineas[1]["lote"] == "REPOSICION"
+
+
 def test_reenvio_sin_link_no_borra_el_que_ya_tenia(client, env, auth_as):
     """Una OC PENDIENTE que se vuelve a espejar sin `archivo_url` conserva el
     suyo. La conciliación del bot corre cada 6 h y manda el payload sin enlace
