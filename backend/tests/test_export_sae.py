@@ -812,9 +812,9 @@ def test_clave_base_del_producto_ampara_sin_catalogo_del_cliente(client, env, au
     assert hoja.row(1)[4].value == "PEPI-CLI-9"
 
 
-def test_dos_productos_no_comparten_clave_base(client, env, auth_as):
-    """Dos productos con la misma CVE_ART le mandan a SAE la misma línea dos
-    veces: el alta y la edición lo rechazan diciendo de quién es la clave."""
+def test_dos_productos_pueden_compartir_clave_base(client, env, auth_as):
+    """Una CVE_ART ampara varios productos (regla del dueño, 23-sep-2026): el
+    alta con la clave de otro producto pasa, normalizada."""
     auth_as(env["admin"]); h = _hdr(env["admin"])
     db = SessionLocal()
     try:
@@ -835,8 +835,8 @@ def test_dos_productos_no_comparten_clave_base(client, env, auth_as):
         "clave_sae": " rabanokg ",          # mismo artículo, con ruido
         "forzar": True,
     })
-    assert r.status_code == 409, r.text
-    assert "RABANO" in r.json()["detail"]
+    assert r.status_code == 201, r.text
+    assert r.json()["clave_sae"] == "RABANOKG"
 
     # Y la clave se guarda normalizada (SAE rellena con espacios).
     r = client.patch(f"/api/v1/productos/{dueno_id}", headers=h,

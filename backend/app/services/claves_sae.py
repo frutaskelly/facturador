@@ -142,8 +142,8 @@ def sugerencias_de_claves(
     # arriba sería ofrecer el siguiente problema.
     filas = filas_q.order_by(ClaveSae.activa.desc(), ClaveSae.descripcion).limit(20).all()
 
-    # ¿Alguna ya es de otro producto de ESTE cliente? Dos productos con la misma
-    # CVE_ART mandan a SAE la misma línea dos veces.
+    # ¿Alguna ya la usa otro producto de ESTE cliente? Se avisa, no se bloquea:
+    # varios productos pueden compartir la misma CVE_ART.
     normalizadas = {norm_clave(f.clave) for f in filas}
     usadas: dict[str, tuple] = {}
     if normalizadas:

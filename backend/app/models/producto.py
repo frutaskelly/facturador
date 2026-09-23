@@ -87,8 +87,9 @@ class Producto(Base, TimestampMixin, SoftDeleteMixin):
     # Clave del artículo en SAE — la MISMA en todas sus empresas (decisión del
     # dueño, 18-sep-2026). Es la base: el catálogo del cliente sigue pudiendo
     # pisarla con una clave propia por plaza, pero ya no hace falta repetirla
-    # cliente por cliente. Única por tenant (índice parcial de la 0079): dos
-    # productos con la misma CVE_ART le mandan a SAE la misma línea dos veces.
+    # cliente por cliente. NO es única: varios productos pueden compartir la
+    # misma CVE_ART (regla del dueño, 23-sep-2026; la 0085 quitó el índice
+    # único de la 0079). Lo que no puede haber es producto sin clave.
     clave_sae = Column(String(50))
 
     sinonimos = Column(ARRAY(Text), nullable=False, server_default="{}")

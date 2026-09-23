@@ -111,35 +111,15 @@ router = APIRouter(prefix="/productos", tags=["productos"])
 _READ = "menu:productos"
 _WRITE = "producto:gestionar"
 def _clave_sae_limpia(db: Session, ctx: AuthContext, data: dict, obj=None) -> None:
-    """Normaliza la clave base de SAE y defiende su unicidad con un mensaje.
+    """Normaliza la clave base de SAE igual que al comparar contra el espejo
+    (SAE guarda CVE_ART con relleno y el cruce falla por un espacio).
 
-    Se normaliza igual que al comparar contra el espejo (SAE guarda CVE_ART con
-    relleno y el cruce falla por un espacio). Y dos productos no pueden
-    compartirla: le mandarían a SAE la misma línea dos veces. El índice parcial
-    de la 0079 es el candado real; esto es para que el 409 diga de quién es.
-    """
+    NO se defiende unicidad: una clave de SAE puede ampararse varios productos
+    (regla del dueño, 23-sep-2026; la 0085 quitó el índice único)."""
     if "clave_sae" not in data:
         return
     clave = (data.get("clave_sae") or "").strip().upper()
     data["clave_sae"] = clave or None
-    if not clave:
-        return
-    q = db.query(Producto).filter(
-        Producto.tenant_id == ctx.tenant_id,
-        func.upper(func.btrim(Producto.clave_sae)) == clave,
-        Producto.deleted_at.is_(None),
-    )
-    if obj is not None:
-        q = q.filter(Producto.id != obj.id)
-    dup = q.first()
-    if dup is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"La clave {clave} ya es de «{dup.nombre}» (SKU {dup.sku}); dos "
-                "productos con la misma clave le mandan a SAE la misma línea dos veces"
-            ),
-        )
 
 
 _DUP = "Ya existe un producto con ese SKU"
