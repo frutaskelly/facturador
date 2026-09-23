@@ -1,44 +1,69 @@
-# Estado del proyecto — 19/09/2026 (cierre: `562d798` — una remisión impresa ya no se reescribe sola)
-
-**Retiro del Master Órdenes:** el tema vive en `PLAN-retiro-master-ordenes.md`, que abre con
-una sección «Cómo retomar esto» con el estado, lo inmediato y las trampas. Para auditarla desde cero está
-`BRIEFING-AUDITORIA-RETIRO-MASTER.md`. La reversa del corte de
-Pachuca **se aplicó el 19-sep** (`backend/scripts/reversa_pachuca_ehmo_mafan.sql`) y quedó
-verificada; lo pendiente es sacar por el masivo las 137 remisiones de Pachuca en borrador.
+# Estado del proyecto — 23/09/2026 (cierre: `43558ed` — el bot dejó de hablar con SAE)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
 
+**Lo del 22–23 de septiembre:** el Facturador se volvió la única fuente del bot de WhatsApp.
+Se agregaron las lecturas que le faltaban —hoja de armado, resumen sin precio, catálogo con
+precio, impuestos por clave, espejo de facturas con detalle, cola de altas a SAE— y el bot
+apagó su conexión a Aspel. El detalle de qué quedó encendido y con qué banderas vive en el
+repo del bot (`SmartSupply/bot/docs/ESTADO.md`); aquí queda lo que toca a este producto.
+
 > **Este archivo tiene un hueco declarado.** La cabecera y los pendientes están al día
-> (19-sep), y abajo hay una sección del incidente de esta semana. Pero las secciones
-> históricas siguientes terminan el **01-sep**: entre el 02 y el 19 entraron **91 PRs y 16
-> migraciones** de otras sesiones que nadie resumió aquí. Para ese tramo manda
-> `git log 9021dfa..main --oneline` y el índice de memoria, no este archivo.
+> (23-sep). Las secciones históricas de más abajo terminan el **01-sep**: entre el 02 y el 19
+> entraron 91 PRs y 16 migraciones de otras sesiones que nadie resumió aquí. Para ese tramo
+> manda `git log 9021dfa..main --oneline`, no este archivo.
+
+## Lo que entró para cerrar las metas del bot (PRs #212 a #218)
+
+| ruta nueva | para qué |
+|---|---|
+| `GET /remisiones/reporte-armado` | la hoja de armado, por fechas o por folios, con filtro de carril |
+| `GET /remisiones/reporte-sin-precio` | las partidas sin precio, con el motivo separado en cuatro |
+| `GET /precios/catalogo` | el catálogo con su precio resuelto por la misma cascada que cotizar |
+| `POST /productos/impuestos` | el IVA/IEPS por clave; contesta `encontrado:false`, nunca 0% callado |
+| `GET /facturas/espejo/resumen` | ganó `folio` exacto, `cliente_sae`, `detalle`, `lineas` |
+| `POST/GET /productos/alta-sae` | la cola de altas que el bot aplica a las cuatro empresas |
+
+Migraciones: `0081_solicitudes_alta_sae`, `0082_permiso_alta_sae`,
+`0083_lineas_factura_clave_sae`.
+
+**Dos reglas que se tocaron a propósito:**
+
+- `PUT /remisiones/{id}` deja editar `fecha_entrega` y `revision_pendiente` en una remisión
+  ya FACTURADA (autorizado por el dueño el 22-sep). Sólo esos dos campos: si el cambio toca
+  cualquier otro, el candado de siempre se aplica entero, y el del masivo nunca se abre.
+- El orden de las rutas importa: las literales van **antes** de `/{id}`, o FastAPI intenta
+  leer «reporte-armado» como un entero. Pasó tres veces en dos días.
+
+## Un defecto viejo que salió al comparar contra SAE
+
+El espejo guardaba el IVA **derivado** (`total − subtotal`), y con IEPS de por medio eso es
+la suma de los dos impuestos. Ahora se depositan `iva` y `ieps` explícitos por línea, más el
+`uuid_sustitucion` y la `clave_sae`. Las facturas que ya estaban en el espejo se
+repararon con una pasada nueva; quedan bien las 46 con IEPS de la muestra comparada.
 
 ## Git
 
 | | |
 |---|---|
-| Rama base | `main` en `562d798`, igual que `origin/main` |
+| Rama base | `main` en `43558ed`, igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio en el padre |
-| Worktrees | La de esta sesión (`qa-proceso-diseno-optimizacion`), más `eager-heisenberg-ac9797` y `modest-chandrasekhar-970f08` — **las dos nacieron durante el cierre: hay sesiones vivas trabajando en paralelo y no se tocaron** |
-| PRs abiertos | ninguno |
-| Migración head | `0078_autoria_productos` — **corre DESPUÉS de la `0079`** pese al número (ver abajo) |
+| Worktrees | `gerencia-frutaskelly-access` — **de otra sesión viva, no se tocó** |
+| PRs abiertos | ninguno de esta sesión |
+| Migración head | `0083_lineas_factura_clave_sae` |
 
-`Cristian/smartsupply-v2.0` es un enlace simbólico a esta carpeta, no otro clon.
-
-**El push directo a `main` lo bloquea el clasificador de permisos.** El camino que sí funciona
-es `gh pr create --base main` y luego `gh pr merge N --squash`.
+**Este checkout lo comparten varias sesiones a la vez.** El 22-sep un `git add -A backend`
+se llevó 335 líneas a medias de otra sesión y salieron a `main` en un PR ajeno (se revirtió
+en el #211, sin llegar a producción). Aquí se commitea **nombrando los archivos propios**,
+uno por uno, nunca `-A` ni una carpeta entera.
 
 ## Deploy
 
-**En vivo en https://facturador.mx con `562d798`.** `./deploy.sh` aplicó la migración
-(`0079_clave_sae_producto → 0078_autoria_productos`) y recreó backend y frontend; los cinco
-contenedores quedaron sanos. Verificado contra los dominios reales (`facturador.mx` 200,
-`api.facturador.mx/health` 200) y **dentro del contenedor**, que es lo que de verdad prueba que
-la imagen es la nueva: la BD quedó en `0078_autoria_productos`, la tabla `import_productos_log`
-existe y `productos` tiene sus dos columnas de autoría.
+**En vivo en https://facturador.mx con `43558ed`.** `./deploy.sh` recreó el backend el 23-sep
+a las 09:17 UTC; los cinco contenedores quedaron sanos y el archivo que tocó el último merge
+(`backend/app/core/auth.py`) tiene dentro del contenedor el mismo hash que en `main`.
 
 Los contenedores se construyen desde este checkout; ninguna worktree respalda el deploy
 (comprobable con `docker inspect facturador_backend --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'`).
@@ -442,10 +467,32 @@ es el `headRefOid` del PR contra el tip local, comparar el **contenido** de los 
 #42; se confirmó por contenido (los cinco marcadores que introducía están en `main`) antes de
 podarla.
 
-## Pendientes abiertos (19-sep)
+## Pendientes abiertos (23-sep)
 
-Éstos son los vivos. Los de más abajo son del cierre del 01-sep y **nadie los ha revisado
+Éstos son los vivos. Los de más abajo son de cierres anteriores y **nadie los ha revisado
 desde entonces**: trátalos como historia, no como lista de trabajo.
+
+1. **416 desacuerdos de catálogo con SAE**, en `SmartSupply/bot/listas/catalogo_desacuerdos.csv`:
+   246 claves que sólo conoce SAE (ninguna facturada en 180 días), 128 con otra categoría y 62
+   con otra unidad —de ésas, 42 son de verdad distintas (pieza contra kilogramo)—. Manda el
+   Facturador; corregirlas es trabajo de datos, no de código.
+2. **85 claves donde SAE y el Facturador no cobran el mismo IVA**
+   (`SmartSupply/bot/listas/IVA_discrepancias.csv`). El dueño las revisa en SAE.
+3. **El bot depende ahora de este API para contestar.** Si el backend se cae, WhatsApp deja
+   de dar precios, armado y facturas: ya no hay segunda fuente. Las banderas del bot
+   (`sheets_config.json` → `facturador`) son la reversa, pero sólo sirven mientras SAE siga
+   ahí.
+4. **Cada llamada del bot cuesta ~1.4 s** (`/health` 0.11 s contra 1.21 s de una ruta con BD):
+   el backend corre en el Mac y Supabase está en us-east-1, así que el viaje se paga por
+   consulta. Un comando que hace diez llamadas tarda catorce segundos. Si eso estorba, lo que
+   toca es agrupar lecturas, no acercar la base.
+5. **El tramo 02–19 de septiembre no está resumido aquí** (91 PRs, 16 migraciones). Si alguien
+   va a retomar en frío, ese hueco es lo primero que le va a faltar.
+6. **La contraseña de la BD de producción se imprimió** en un mensaje de error de `psycopg2`
+   durante la sesión del 17-sep. El script ya no la expone, pero quedó en el transcript;
+   rotarla es decisión del dueño.
+
+## Pendientes del cierre del 19-sep (sin revisar desde entonces)
 
 1. **Dos sesiones vivas sin cerrar.** `eager-heisenberg-ac9797`
    (`claude/producto-sin-clave-sae-954fb9`, 2 commits adelante) y
