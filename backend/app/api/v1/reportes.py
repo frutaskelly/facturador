@@ -22,8 +22,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Cliente, ClienteSucursal, ClienteSucursalSerie, Factura, Serie, Sucursal
-from .cobranza import _en_cancelacion, _fila_de_reporte
+from ...models import (
+    Cliente, ClienteSucursal, ClienteSucursalSerie, Factura, ReciboPago, ReciboPagoFactura,
+    Serie, Sucursal,
+)
+from .cobranza import _en_cancelacion, _fila_de_reporte, _recibo_out
 
 router = APIRouter(prefix="/reportes", tags=["reportes"])
 
@@ -93,9 +96,30 @@ def _plaza_unica(db: Session, tenant_id) -> dict:
     return {c: next(iter(p)) for c, p in cuenta.items() if len(p) == 1}
 
 
+Agrupar = Literal["proyecto", "cliente", "sucursal"]
+
+
+def _etiquetador(db: Session, tenant_id, agrupar: str):
+    """La fila a la que va cada factura según la dimensión pedida.
+
+    Cartera y sumario de ventas reparten por el mismo criterio —proyecto por
+    serie, cliente por razón social, plaza por serie o por plaza única—, así
+    que una factura cae en la misma fila en las dos vistas.
+    """
+    if agrupar == "cliente":
+        return lambda f, nombre_cliente, cliente_id: nombre_cliente
+    if agrupar == "sucursal":
+        serie_plaza = _serie_a_plaza(db, tenant_id)
+        plaza_unica = _plaza_unica(db, tenant_id)
+        return lambda f, nombre_cliente, cliente_id: (
+            serie_plaza.get(f.serie or "") or plaza_unica.get(cliente_id) or "Sin plaza"
+        )
+    return lambda f, nombre_cliente, cliente_id: _fila_de_reporte(f, nombre_cliente)
+
+
 @router.get("/cartera")
 def cartera(
-    agrupar: Literal["proyecto", "cliente", "sucursal"] = Query(default="proyecto"),
+    agrupar: Agrupar = Query(default="proyecto"),
     incluir_en_cancelacion: bool = Query(default=False),
     desde: date | None = Query(default=None, description="Solo facturas emitidas desde esta fecha"),
     hasta: date | None = Query(default=None, description="Solo facturas emitidas hasta esta fecha"),
@@ -118,8 +142,7 @@ def cartera(
     hoy = datetime.now(timezone.utc).date()
     if cliente_id is not None and not ctx.cliente_permitido(cliente_id):
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
-    serie_plaza = _serie_a_plaza(db, ctx.tenant_id) if agrupar == "sucursal" else {}
-    plaza_unica = _plaza_unica(db, ctx.tenant_id) if agrupar == "sucursal" else {}
+    etiqueta_de = _etiquetador(db, ctx.tenant_id, agrupar)
 
     filas: dict[str, dict] = {}
     antiguedad = {c: ZERO for c in _CUBETAS}
@@ -150,12 +173,7 @@ def cartera(
             en_cancelacion += saldo
             if not incluir_en_cancelacion:
                 continue
-        if agrupar == "cliente":
-            etiqueta = nombre_cliente
-        elif agrupar == "sucursal":
-            etiqueta = serie_plaza.get(f.serie or "") or plaza_unica.get(fila_cliente_id) or "Sin plaza"
-        else:
-            etiqueta = _fila_de_reporte(f, nombre_cliente)
+        etiqueta = etiqueta_de(f, nombre_cliente, fila_cliente_id)
 
         fila = filas.setdefault(etiqueta, {
             "saldo": ZERO, "vencido": ZERO, "facturas": 0,
@@ -426,4 +444,153 @@ def ventas(
             "facturas": facturas_previo,
             "variacion": _variacion(total_rango, total_previo),
         },
+    }
+
+
+@router.get("/ventas/sumario")
+def ventas_sumario(
+    agrupar: Agrupar = Query(default="cliente"),
+    desde: date | None = Query(default=None, description="Inicio del rango (por omisión, hace 30 días)"),
+    hasta: date | None = Query(default=None, description="Fin del rango (por omisión, hoy)"),
+    cliente_id: UUID | None = Query(default=None, description="Acota el reporte a un cliente"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Sumario de venta: lo facturado en el rango, repartido por cliente, plaza
+    o proyecto.
+
+    Mismo universo que `/ventas` —timbradas del rango, con el candado del
+    portal y el filtro de cliente—, así que el total de aquí ES el «Facturado»
+    del tablero y la suma de las barras. Las facturas con la cancelación ya
+    pedida al SAT siguen contando (la gráfica también las cuenta); se informan
+    aparte para que se sepa cuánto de la venta está en riesgo de caerse.
+    """
+    hoy = datetime.now(timezone.utc).date()
+    if cliente_id is not None and not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    desde, hasta = _rango_pedido(desde, hasta, hoy)
+    etiqueta_de = _etiquetador(db, ctx.tenant_id, agrupar)
+
+    q = (
+        db.query(Factura, Cliente.legal_name, Cliente.id)
+        .join(Cliente, Cliente.id == Factura.cliente_id)
+        .filter(
+            Factura.deleted_at.is_(None),
+            Factura.estado == "TIMBRADA",
+            sa.cast(Factura.fecha, sa.Date) >= desde,
+            sa.cast(Factura.fecha, sa.Date) <= hasta,
+        )
+    )
+    filas: dict[str, dict] = {}
+    total = en_cancelacion = ZERO
+    facturas = 0
+    for f, nombre_cliente, fila_cliente_id in _acotar(q, ctx, cliente_id).all():
+        monto = Decimal(f.total or 0)
+        etiqueta = etiqueta_de(f, nombre_cliente, fila_cliente_id)
+        fila = filas.setdefault(etiqueta, {
+            "total": ZERO, "facturas": 0,
+            "cliente_id": str(fila_cliente_id), "serie": f.serie,
+        })
+        fila["total"] += monto
+        fila["facturas"] += 1
+        total += monto
+        facturas += 1
+        if _en_cancelacion(f.cancelacion_msj):
+            en_cancelacion += monto
+        if fila["serie"] != f.serie:
+            fila["serie"] = None
+        if fila["cliente_id"] != str(fila_cliente_id):
+            fila["cliente_id"] = None
+
+    return {
+        "desde": desde,
+        "hasta": hasta,
+        "agrupar": agrupar,
+        "cliente_id": cliente_id,
+        "filas": [
+            {"etiqueta": nombre, **datos}
+            for nombre, datos in sorted(filas.items(), key=lambda kv: kv[1]["total"], reverse=True)
+        ],
+        "total": total,
+        "facturas": facturas,
+        "total_en_cancelacion": en_cancelacion,
+    }
+
+
+# ── Comprobantes de pago ─────────────────────────────────────────────────────
+#
+# Los REP (CFDI tipo P) que el Facturador timbró, por FECHA DE PAGO: es la
+# fecha que el SAT lee en el complemento y la que cuadra con el banco. Los
+# borradores no son comprobantes —nunca llegaron al SAT— y se quedan fuera.
+
+
+@router.get("/pagos")
+def pagos(
+    desde: date | None = Query(default=None, description="Inicio del rango (por omisión, hace 30 días)"),
+    hasta: date | None = Query(default=None, description="Fin del rango (por omisión, hoy)"),
+    cliente_id: UUID | None = Query(default=None, description="Acota el reporte a un cliente"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Comprobantes de pago timbrados o cancelados del rango, con sus facturas
+    relacionadas. El total es lo VIGENTE; lo cancelado se informa aparte."""
+    hoy = datetime.now(timezone.utc).date()
+    if cliente_id is not None and not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    desde, hasta = _rango_pedido(desde, hasta, hoy)
+
+    q = (
+        db.query(ReciboPago, Cliente.legal_name)
+        .join(Cliente, Cliente.id == ReciboPago.cliente_id)
+        .filter(
+            ReciboPago.estado.in_(("TIMBRADO", "CANCELADO")),
+            sa.cast(ReciboPago.fecha_pago, sa.Date) >= desde,
+            sa.cast(ReciboPago.fecha_pago, sa.Date) <= hasta,
+        )
+    )
+    if ctx.cliente_scope:
+        q = q.filter(ReciboPago.cliente_id.in_(ctx.cliente_scope))
+    if cliente_id is not None:
+        q = q.filter(ReciboPago.cliente_id == cliente_id)
+    filas = q.order_by(ReciboPago.fecha_pago.desc(), ReciboPago.folio.desc()).all()
+
+    # Mismo armado que el listado de cobranza, precargado en dos consultas.
+    ids = [r.id for r, _ in filas]
+    detalle = (
+        db.query(ReciboPagoFactura).filter(ReciboPagoFactura.recibo_id.in_(ids)).all()
+        if ids else []
+    )
+    por_recibo: dict = {}
+    for d in detalle:
+        por_recibo.setdefault(d.recibo_id, []).append(d)
+    folios = {
+        f.id: f for f in db.query(Factura.id, Factura.serie, Factura.folio).filter(
+            Factura.id.in_({d.factura_id for d in detalle})
+        ).all()
+    } if detalle else {}
+
+    total = cancelado = ZERO
+    vigentes = cancelados = 0
+    items = []
+    for r, nombre_cliente in filas:
+        if r.estado == "TIMBRADO":
+            total += Decimal(r.monto)
+            vigentes += 1
+        else:
+            cancelado += Decimal(r.monto)
+            cancelados += 1
+        items.append({
+            **_recibo_out(db, r, filas_pre=por_recibo.get(r.id, []), folios_pre=folios),
+            "cliente": nombre_cliente,
+        })
+
+    return {
+        "desde": desde,
+        "hasta": hasta,
+        "cliente_id": cliente_id,
+        "items": items,
+        "total": total,
+        "comprobantes": vigentes,
+        "total_cancelado": cancelado,
+        "cancelados": cancelados,
     }

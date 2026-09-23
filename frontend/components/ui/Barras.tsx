@@ -89,7 +89,7 @@ export function SerieTiempo({
       {/* Lectura de la barra activa. Ocupa su renglón siempre, aunque no haya
           nada seleccionado: si apareciera y desapareciera, la gráfica entera
           brincaría cada vez que el cursor entra y sale. */}
-      <div className="mb-2 flex min-h-[1.25rem] items-baseline justify-between gap-3 text-xs">
+      <div className="mb-3 flex min-h-[1.25rem] items-baseline justify-between gap-3 text-xs">
         {sel ? (
           <>
             <span className="truncate text-muted">{sel.detalle ?? sel.etiqueta}</span>
@@ -103,7 +103,10 @@ export function SerieTiempo({
         )}
       </div>
 
-      <div className="flex gap-2">
+      {/* El `pt-2` es aire para la marca de arriba del eje Y: va centrada en
+          su línea y sobresale media altura hacia arriba, donde chocaba con la
+          lectura ("Pasa el cursor…" encimado sobre el "$2 M"). */}
+      <div className="flex gap-2 pt-2">
         {/* Eje Y, en pesos abreviados. */}
         <div className="relative w-12 shrink-0 sm:w-14" style={{ height: alto }} aria-hidden>
           {cortes.map((v) => (

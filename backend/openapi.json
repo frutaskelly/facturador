@@ -37684,6 +37684,116 @@
     ]
    }
   },
+  "/api/v1/reportes/pagos": {
+   "get": {
+    "description": "Comprobantes de pago timbrados o cancelados del rango, con sus facturas\nrelacionadas. El total es lo VIGENTE; lo cancelado se informa aparte.",
+    "operationId": "pagos_api_v1_reportes_pagos_get",
+    "parameters": [
+     {
+      "description": "Inicio del rango (por omisión, hace 30 días)",
+      "in": "query",
+      "name": "desde",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Inicio del rango (por omisión, hace 30 días)",
+       "title": "Desde"
+      }
+     },
+     {
+      "description": "Fin del rango (por omisión, hoy)",
+      "in": "query",
+      "name": "hasta",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Fin del rango (por omisión, hoy)",
+       "title": "Hasta"
+      }
+     },
+     {
+      "description": "Acota el reporte a un cliente",
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Acota el reporte a un cliente",
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Pagos",
+    "tags": [
+     "reportes"
+    ]
+   }
+  },
   "/api/v1/reportes/ventas": {
    "get": {
     "description": "Facturación del rango: la serie de tiempo y el corte contra el tramo\nanterior del mismo tamaño.\n\nLas cubetas de los extremos se RECORTAN al rango (si el rango empieza un\nmiércoles, esa primera semana son tres días): la barra vale lo que se\nfacturó dentro del filtro y no lo que se facturó el lunes anterior, que\nquedó fuera de lo que el usuario pidió ver.",
@@ -37807,6 +37917,131 @@
      }
     ],
     "summary": "Ventas",
+    "tags": [
+     "reportes"
+    ]
+   }
+  },
+  "/api/v1/reportes/ventas/sumario": {
+   "get": {
+    "description": "Sumario de venta: lo facturado en el rango, repartido por cliente, plaza\no proyecto.\n\nMismo universo que `/ventas` —timbradas del rango, con el candado del\nportal y el filtro de cliente—, así que el total de aquí ES el «Facturado»\ndel tablero y la suma de las barras. Las facturas con la cancelación ya\npedida al SAT siguen contando (la gráfica también las cuenta); se informan\naparte para que se sepa cuánto de la venta está en riesgo de caerse.",
+    "operationId": "ventas_sumario_api_v1_reportes_ventas_sumario_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "agrupar",
+      "required": false,
+      "schema": {
+       "default": "cliente",
+       "enum": [
+        "proyecto",
+        "cliente",
+        "sucursal"
+       ],
+       "title": "Agrupar",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Inicio del rango (por omisión, hace 30 días)",
+      "in": "query",
+      "name": "desde",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Inicio del rango (por omisión, hace 30 días)",
+       "title": "Desde"
+      }
+     },
+     {
+      "description": "Fin del rango (por omisión, hoy)",
+      "in": "query",
+      "name": "hasta",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Fin del rango (por omisión, hoy)",
+       "title": "Hasta"
+      }
+     },
+     {
+      "description": "Acota el reporte a un cliente",
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Acota el reporte a un cliente",
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Ventas Sumario",
     "tags": [
      "reportes"
     ]

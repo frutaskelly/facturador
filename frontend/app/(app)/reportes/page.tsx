@@ -14,7 +14,6 @@
 // contra los mismos días del mes pasado, no contra el mes completo—: comparar
 // un periodo a medias contra uno entero pinta una caída que no existe, y en un
 // tablero de dirección eso se lee como un problema.
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, RotateCcw, TrendingDown, TrendingUp } from "lucide-react";
 import type { ReactNode } from "react";
@@ -33,12 +32,14 @@ import {
   PRESETS, correr, diasDe, etiquetaDia, etiquetaMes, etiquetaRango, hoyISO,
   presetDe, rangoPreset, type PresetKey, type Rango,
 } from "./rango";
+import { ComprobantesPago } from "./ComprobantesPago";
+import { SumarioAgrupado, type Agrupar, type FilaSumario } from "./SumarioAgrupado";
 
-type Agrupar = "proyecto" | "cliente" | "sucursal";
-type Pestana = "ventas" | "cartera";
+type Pestana = "ventas" | "pagos" | "cartera";
 
 const PESTANAS: { key: Pestana; label: string }[] = [
   { key: "ventas", label: "Ventas" },
+  { key: "pagos", label: "Comprobantes de pago" },
   { key: "cartera", label: "Cuentas por cobrar" },
 ];
 type Granularidad = "dia" | "semana" | "mes";
@@ -53,6 +54,14 @@ type Cartera = {
   antiguedad: { por_vencer: string; mes_1: string; mes_2: string; mes_3: string; mes_4_mas: string };
   saldo_en_cancelacion: string;
 };
+type FilaVenta = {
+  etiqueta: string; total: string; facturas: number;
+  cliente_id: string | null; serie: string | null;
+};
+type SumarioVenta = {
+  desde: string; hasta: string; agrupar: Agrupar; filas: FilaVenta[];
+  total: string; facturas: number; total_en_cancelacion: string;
+};
 type Cubeta = { inicio: string; fin: string; total: string; facturas: number };
 type Ventas = {
   hoy: string; desde: string; hasta: string; dias: number;
@@ -65,11 +74,8 @@ type Ventas = {
   anterior: { desde: string; hasta: string; total: string; facturas: number; variacion: number | null };
 };
 
-const AGRUPAR: { key: Agrupar; label: string }[] = [
-  { key: "proyecto", label: "Proyecto" },
-  { key: "cliente", label: "Cliente" },
-  { key: "sucursal", label: "Sucursal" },
-];
+// El mismo orden en ventas y en cartera: la pregunta primera es «¿quién?».
+const AGRUPAR: Agrupar[] = ["cliente", "sucursal", "proyecto"];
 
 const CUBETAS = [
   { key: "por_vencer", label: "Por vencer", clase: "bg-success/70" },
@@ -132,7 +138,8 @@ export default function ReportesPage() {
   // usuario toca los botones, manda él.
   const [paso, setPaso] = useState<Granularidad | "auto">("auto");
   const [clienteId, setClienteId] = useState("");
-  const [agrupar, setAgrupar] = useState<Agrupar>("proyecto");
+  const [agrupar, setAgrupar] = useState<Agrupar>("cliente");
+  const [agruparVentas, setAgruparVentas] = useState<Agrupar>("cliente");
   const [pestana, setPestana] = useState<Pestana>("ventas");
 
   const dias = diasDe(rango);
@@ -149,6 +156,11 @@ export default function ReportesPage() {
   const ventasRes = useResource<Ventas>(
     `/api/v1/reportes/ventas?${filtros}${pasoQuery === "auto" ? "" : `&granularidad=${pasoQuery}`}`,
   );
+  // El sumario cuelga de los MISMOS filtros que la gráfica: su total es el
+  // «Facturado» del KPI, repartido.
+  const sumarioRes = useResource<SumarioVenta>(
+    pestana === "ventas" ? `/api/v1/reportes/ventas/sumario?${filtros}&agrupar=${agruparVentas}` : null,
+  );
   const carteraRes = useResource<Cartera>(
     pestana === "cartera" ? `/api/v1/reportes/cartera?agrupar=${agrupar}` : null,
   );
@@ -159,6 +171,7 @@ export default function ReportesPage() {
 
   const ventas = ventasRes.data;
   const cartera = carteraRes.data;
+  const sumario = sumarioRes.data;
   const limpio = preset === "30d" && !clienteId;
 
   const grafica = useMemo<{ puntos: Punto[]; claveHoy: string | undefined }>(() => {
@@ -182,8 +195,14 @@ export default function ReportesPage() {
   if (ventasRes.error) return <Alert tone="danger">No se pudieron cargar los reportes.</Alert>;
 
   const unidad = PASOS.find((p) => p.key === ventas?.granularidad)?.unidad ?? "periodo";
-  const destino = (f: FilaCartera) =>
+  const destino = (f: { cliente_id: string | null; serie: string | null }) =>
     f.cliente_id ? `/clientes/${f.cliente_id}/estado-cuenta${f.serie ? `?serie=${f.serie}` : ""}` : null;
+  const filasVenta: FilaSumario[] = (sumario?.filas ?? []).map((f) => ({
+    etiqueta: f.etiqueta, monto: f.total, facturas: f.facturas, href: destino(f),
+  }));
+  const filasCartera: FilaSumario[] = (cartera?.filas ?? []).map((f) => ({
+    etiqueta: f.etiqueta, monto: f.saldo, facturas: f.facturas, href: destino(f), alerta: f.vencido,
+  }));
 
   return (
     <div className="space-y-4">
@@ -211,9 +230,10 @@ export default function ReportesPage() {
         ))}
       </div>
 
-      {pestana === "ventas" && (
+      {pestana !== "cartera" && (
         <>
-        {/* ── Filtros de ventas: mandan sobre los KPIs y la gráfica ── */}
+        {/* ── Filtros de ventas y pagos: mandan sobre los KPIs, la gráfica,
+            el sumario y los comprobantes ── */}
         <Card>
           <div className="flex flex-wrap items-end gap-3">
             <div>
@@ -313,7 +333,11 @@ export default function ReportesPage() {
           </p>
         </Card>
 
-        {!ventas ? (
+        {pestana === "pagos" && (
+          <ComprobantesPago filtros={filtros} rango={etiquetaRango(rango)} clienteNombre={clienteNombre} />
+        )}
+
+        {pestana === "ventas" && (!ventas ? (
           <div className="flex justify-center py-16"><Spinner /></div>
         ) : (
           <>
@@ -401,8 +425,34 @@ export default function ReportesPage() {
                 />
               </div>
             </Card>
+
+            <Card
+              title="Sumario de venta"
+              subtitle={`Lo facturado en ${etiquetaRango(rango)}${clienteNombre ? ` · solo ${clienteNombre}` : ""}`}
+            >
+              {!sumario ? (
+                <div className="flex justify-center py-8"><Spinner /></div>
+              ) : (
+                <SumarioAgrupado
+                  opciones={AGRUPAR}
+                  agrupar={agruparVentas}
+                  onAgrupar={setAgruparVentas}
+                  cargando={sumarioRes.loading}
+                  total={<>Total: <span className="font-semibold tabular-nums">{fmtMoney(sumario.total)}</span></>}
+                  filas={filasVenta}
+                  columnaMonto="Venta"
+                  vacio="Sin facturación en el rango."
+                  pie={Number(sumario.total_en_cancelacion) > 0 && (
+                    <>
+                      Incluye {fmtMoney(sumario.total_en_cancelacion)} en facturas con la cancelación
+                      ya pedida al SAT.
+                    </>
+                  )}
+                />
+              )}
+            </Card>
           </>
-        )}
+        ))}
         </>
       )}
 
@@ -430,90 +480,32 @@ export default function ReportesPage() {
                 />
               </div>
 
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
-                {/* La misma cartera vista por la dimensión que se quiera: el total
-                    no cambia entre pestañas, solo el reparto. */}
-                <div className="inline-flex rounded-lg border border-border p-0.5">
-                  {AGRUPAR.map((a) => (
-                    <button
-                      key={a.key}
-                      type="button"
-                      onClick={() => setAgrupar(a.key)}
-                      aria-pressed={agrupar === a.key}
-                      className={`rounded-md px-3 py-1 text-sm transition ${
-                        agrupar === a.key ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:text-foreground"
-                      }`}
-                    >
-                      {a.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="text-sm">
-                  Total: <span className="font-semibold tabular-nums">{fmtMoney(cartera.saldo_total)}</span>
-                  <span className="ml-2 text-danger">
-                    vencido <span className="font-semibold tabular-nums">{fmtMoney(cartera.vencido_total)}</span>
-                  </span>
-                </div>
+              <div className="border-t border-border pt-4">
+                <SumarioAgrupado
+                  opciones={AGRUPAR}
+                  agrupar={agrupar}
+                  onAgrupar={setAgrupar}
+                  cargando={carteraRes.loading}
+                  total={
+                    <>
+                      Total: <span className="font-semibold tabular-nums">{fmtMoney(cartera.saldo_total)}</span>
+                      <span className="ml-2 text-danger">
+                        vencido <span className="font-semibold tabular-nums">{fmtMoney(cartera.vencido_total)}</span>
+                      </span>
+                    </>
+                  }
+                  filas={filasCartera}
+                  columnaMonto="Saldo"
+                  columnaAlerta="Vencido"
+                  vacio="Ninguna factura tiene saldo pendiente."
+                  pie={Number(cartera.saldo_en_cancelacion) > 0 && (
+                    <>
+                      Fuera del total: {fmtMoney(cartera.saldo_en_cancelacion)} en facturas con la
+                      cancelación ya pedida al SAT.
+                    </>
+                  )}
+                />
               </div>
-
-              {/* Teléfono: renglones apilados. Escritorio: tabla. */}
-              <div className="sm:hidden">
-                {cartera.filas.map((f) => {
-                  const href = destino(f);
-                  const fila = (
-                    <div className="flex items-baseline justify-between gap-2 border-b border-border/60 py-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm">{f.etiqueta}</div>
-                        <div className="text-xs text-muted">
-                          {f.facturas} fact.
-                          {Number(f.vencido) > 0 && (
-                            <> · vencido <span className="font-medium text-danger">{fmtMoney(f.vencido)}</span></>
-                          )}
-                        </div>
-                      </div>
-                      <div className="shrink-0 text-sm font-medium tabular-nums">{fmtMoney(f.saldo)}</div>
-                    </div>
-                  );
-                  return href
-                    ? <Link key={f.etiqueta} href={href} className="block">{fila}</Link>
-                    : <div key={f.etiqueta}>{fila}</div>;
-                })}
-              </div>
-              <table className="hidden w-full text-sm sm:table">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted">
-                    <th className="py-1.5">{AGRUPAR.find((a) => a.key === agrupar)?.label}</th>
-                    <th className="py-1.5 text-right">Saldo</th>
-                    <th className="py-1.5 text-right">Vencido</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cartera.filas.map((f) => {
-                    const href = destino(f);
-                    return (
-                      <tr key={f.etiqueta} className="border-b border-border/60">
-                        <td className="py-1.5 pr-2">
-                          {href ? <Link href={href} className="hover:underline">{f.etiqueta}</Link> : f.etiqueta}
-                          <span className="text-xs text-muted"> · {f.facturas}</span>
-                        </td>
-                        <td className="py-1.5 text-right tabular-nums">{fmtMoney(f.saldo)}</td>
-                        <td className="py-1.5 text-right tabular-nums">
-                          {Number(f.vencido) > 0
-                            ? <span className="font-medium text-danger">{fmtMoney(f.vencido)}</span>
-                            : <span className="text-muted">—</span>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              {Number(cartera.saldo_en_cancelacion) > 0 && (
-                <p className="mt-3 text-xs text-muted">
-                  Fuera del total: {fmtMoney(cartera.saldo_en_cancelacion)} en facturas con la
-                  cancelación ya pedida al SAT.
-                </p>
-              )}
             </>
           )}
         </Card>

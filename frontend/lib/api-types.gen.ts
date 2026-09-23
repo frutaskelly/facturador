@@ -4142,6 +4142,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reportes/pagos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Pagos
+         * @description Comprobantes de pago timbrados o cancelados del rango, con sus facturas
+         *     relacionadas. El total es lo VIGENTE; lo cancelado se informa aparte.
+         */
+        get: operations["pagos_api_v1_reportes_pagos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reportes/ventas": {
         parameters: {
             query?: never;
@@ -4160,6 +4181,33 @@ export interface paths {
          *     quedó fuera de lo que el usuario pidió ver.
          */
         get: operations["ventas_api_v1_reportes_ventas_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reportes/ventas/sumario": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ventas Sumario
+         * @description Sumario de venta: lo facturado en el rango, repartido por cliente, plaza
+         *     o proyecto.
+         *
+         *     Mismo universo que `/ventas` —timbradas del rango, con el candado del
+         *     portal y el filtro de cliente—, así que el total de aquí ES el «Facturado»
+         *     del tablero y la suma de las barras. Las facturas con la cancelación ya
+         *     pedida al SAT siguen contando (la gráfica también las cuenta); se informan
+         *     aparte para que se sepa cuánto de la venta está en riesgo de caerse.
+         */
+        get: operations["ventas_sumario_api_v1_reportes_ventas_sumario_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -19841,6 +19889,44 @@ export interface operations {
             };
         };
     };
+    pagos_api_v1_reportes_pagos_get: {
+        parameters: {
+            query?: {
+                /** @description Inicio del rango (por omisión, hace 30 días) */
+                desde?: string | null;
+                /** @description Fin del rango (por omisión, hoy) */
+                hasta?: string | null;
+                /** @description Acota el reporte a un cliente */
+                cliente_id?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     ventas_api_v1_reportes_ventas_get: {
         parameters: {
             query?: {
@@ -19850,6 +19936,45 @@ export interface operations {
                 hasta?: string | null;
                 /** @description Paso de la serie */
                 granularidad?: "auto" | "dia" | "semana" | "mes";
+                /** @description Acota el reporte a un cliente */
+                cliente_id?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ventas_sumario_api_v1_reportes_ventas_sumario_get: {
+        parameters: {
+            query?: {
+                agrupar?: "proyecto" | "cliente" | "sucursal";
+                /** @description Inicio del rango (por omisión, hace 30 días) */
+                desde?: string | null;
+                /** @description Fin del rango (por omisión, hoy) */
+                hasta?: string | null;
                 /** @description Acota el reporte a un cliente */
                 cliente_id?: string | null;
             };
