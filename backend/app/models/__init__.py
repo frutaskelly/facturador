@@ -35,6 +35,7 @@ from .serie import Serie
 from .solicitud_alta_sae import SolicitudAltaSae
 from .sucursal import ClienteSucursal, ClienteSucursalSerie, PrecioOverride, Sucursal
 from .tenant import Membership, Tenant, User
+from .ticket import Ticket
 
 __all__ = [
     "Tenant",
@@ -48,6 +49,7 @@ __all__ = [
     "EsquemaImpuesto",
     "EspejoSync",
     "SolicitudAltaSae",
+    "Ticket",
     "Producto",
     "ProductoAlias",
     "ProductoCliente",

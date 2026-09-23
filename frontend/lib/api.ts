@@ -230,6 +230,19 @@ export async function apiFetch<T = unknown>(
   }
 }
 
+/** Un binario autenticado (la foto de un ticket) como URL `blob:` para un
+ *  `<img>`: la etiqueta no manda el Bearer, así que se descarga aquí. Quien
+ *  la pide la libera con `URL.revokeObjectURL` al desmontar. */
+export async function apiBlobUrl(path: string): Promise<string> {
+  const token = await sessionToken().catch(() => null);
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  tenantHeader(headers);
+  const res = await fetch(`${apiBaseUrl()}${path}`, { headers });
+  if (!res.ok) throw new ApiError(res.status, res.statusText);
+  return URL.createObjectURL(await res.blob());
+}
+
 /** Descarga autenticada de un archivo binario (XML/PDF) y dispara el guardado. */
 export async function apiDownload(path: string, filename: string): Promise<void> {
   const token = await sessionToken().catch(() => null);

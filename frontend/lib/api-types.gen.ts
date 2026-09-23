@@ -4493,6 +4493,164 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Listar
+         * @description `estado` acepta una lista separada por comas («ABIERTO,EN_CURSO»).
+         */
+        get: operations["listar_api_v1_tickets_get"];
+        put?: never;
+        /**
+         * Depositar
+         * @description El bot deposita (o actualiza) un ticket. IDEMPOTENTE por `origen_externo`.
+         */
+        post: operations["depositar_api_v1_tickets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tickets/acciones/pendientes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Acciones Pendientes
+         * @description El bot reclama lo que se pidió desde la pantalla. Reclamar marca
+         *     `accion_tomada_at` (skip_locked): dos pasadas del bot no ejecutan dos veces
+         *     el mismo reproceso. Si falla, el /ack con ok=false lo regresa a ABIERTO.
+         */
+        get: operations["acciones_pendientes_api_v1_tickets_acciones_pendientes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tickets/resumen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resumen
+         * @description Lo que el menú lateral enseña como contador.
+         */
+        get: operations["resumen_api_v1_tickets_resumen_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tickets/{ticket_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detalle */
+        get: operations["detalle_api_v1_tickets__ticket_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tickets/{ticket_id}/accion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pedir Accion
+         * @description Pide al bot que resuelva el caso.
+         *
+         *     CERRAR se cierra AQUÍ mismo (no hay nada que ejecutar) y además se le avisa
+         *     al bot para que deje de perseguir la foto. EXTRA queda EN_CURSO hasta que el
+         *     bot la registre y mande el RESUELTO con la OC.
+         */
+        post: operations["pedir_accion_api_v1_tickets__ticket_id__accion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tickets/{ticket_id}/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ack */
+        post: operations["ack_api_v1_tickets__ticket_id__ack_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tickets/{ticket_id}/comentarios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Comentar */
+        post: operations["comentar_api_v1_tickets__ticket_id__comentarios_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tickets/{ticket_id}/foto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Foto */
+        get: operations["foto_api_v1_tickets__ticket_id__foto_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -9039,6 +9197,17 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** Page[TicketOut] */
+        Page_TicketOut_: {
+            /** Items */
+            items: components["schemas"]["TicketOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
         /** Page[VocabularioOut] */
         Page_VocabularioOut_: {
             /** Items */
@@ -10904,6 +11073,238 @@ export interface components {
             serie_id?: string | null;
             /** Uso Cfdi */
             uso_cfdi?: string | null;
+        };
+        /** TicketAccionIn */
+        TicketAccionIn: {
+            /**
+             * Accion
+             * @enum {string}
+             */
+            accion: "EXTRA" | "CERRAR";
+            /** Nota */
+            nota?: string | null;
+        };
+        /**
+         * TicketAccionPendienteOut
+         * @description Lo que el bot reclama: qué ticket, qué hacer, quién lo pidió.
+         */
+        TicketAccionPendienteOut: {
+            /** Accion */
+            accion: string;
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nota */
+            nota?: string | null;
+            /** Numero */
+            numero: number;
+            /** Origen Externo */
+            origen_externo: string;
+            /** Pedida Por */
+            pedida_por?: string | null;
+        };
+        /**
+         * TicketAckIn
+         * @description El bot ya ejecutó (o no pudo ejecutar) la acción pedida desde aquí.
+         */
+        TicketAckIn: {
+            /** Detalle */
+            detalle?: string | null;
+            /** Ok */
+            ok: boolean;
+        };
+        /** TicketComentarioIn */
+        TicketComentarioIn: {
+            /** Texto */
+            texto: string;
+        };
+        /** TicketDetailOut */
+        TicketDetailOut: {
+            /** Accion Pedida */
+            accion_pedida?: string | null;
+            /** Accion Pedida At */
+            accion_pedida_at?: string | null;
+            /** Accion Pedida Por */
+            accion_pedida_por?: string | null;
+            /** Accion Tomada At */
+            accion_tomada_at?: string | null;
+            /**
+             * Acciones
+             * @default []
+             */
+            acciones: string[];
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
+            /** Canal */
+            canal: string;
+            /** Estado */
+            estado: string;
+            /**
+             * Eventos
+             * @default []
+             */
+            eventos: Record<string, never>[];
+            /** Grupo */
+            grupo?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nota */
+            nota?: string | null;
+            /** Numero */
+            numero: number;
+            /** Perfil */
+            perfil?: string | null;
+            /** Que Paso */
+            que_paso?: string | null;
+            /**
+             * Recibido At
+             * Format: date-time
+             */
+            recibido_at: string;
+            /** Remitente */
+            remitente?: string | null;
+            /** Resolucion */
+            resolucion?: string | null;
+            /** Resuelto At */
+            resuelto_at?: string | null;
+            /** Resuelto Por */
+            resuelto_por?: string | null;
+            /**
+             * Tiene Foto
+             * @default false
+             */
+            tiene_foto: boolean;
+            /** Tipo */
+            tipo?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * TicketIn
+         * @description Lo que manda el bot. Idempotente por `origen_externo`: se re-manda cada
+         *     vez que el caso cambia (se abre, se resuelve, se cierra).
+         */
+        TicketIn: {
+            /** Acciones */
+            acciones?: ("EXTRA" | "CERRAR")[];
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
+            /**
+             * Canal
+             * @default WHATSAPP
+             */
+            canal: string;
+            /**
+             * Estado
+             * @default ABIERTO
+             * @enum {string}
+             */
+            estado: "ABIERTO" | "RESUELTO" | "CERRADO";
+            /** Evento */
+            evento?: string | null;
+            /** Foto B64 */
+            foto_b64?: string | null;
+            /** Foto Mime */
+            foto_mime?: string | null;
+            /** Grupo */
+            grupo?: string | null;
+            /** Jid */
+            jid?: string | null;
+            /** Nota */
+            nota?: string | null;
+            /** Numero */
+            numero: number;
+            /** Origen Externo */
+            origen_externo: string;
+            /** Perfil */
+            perfil?: string | null;
+            /** Que Paso */
+            que_paso?: string | null;
+            /** Remitente */
+            remitente?: string | null;
+            /** Resolucion */
+            resolucion?: string | null;
+            /** Resuelto Por */
+            resuelto_por?: string | null;
+            /** Tipo */
+            tipo?: string | null;
+        };
+        /** TicketOut */
+        TicketOut: {
+            /** Accion Pedida */
+            accion_pedida?: string | null;
+            /** Accion Pedida At */
+            accion_pedida_at?: string | null;
+            /** Accion Pedida Por */
+            accion_pedida_por?: string | null;
+            /** Accion Tomada At */
+            accion_tomada_at?: string | null;
+            /**
+             * Acciones
+             * @default []
+             */
+            acciones: string[];
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
+            /** Canal */
+            canal: string;
+            /** Estado */
+            estado: string;
+            /** Grupo */
+            grupo?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nota */
+            nota?: string | null;
+            /** Numero */
+            numero: number;
+            /** Perfil */
+            perfil?: string | null;
+            /** Que Paso */
+            que_paso?: string | null;
+            /**
+             * Recibido At
+             * Format: date-time
+             */
+            recibido_at: string;
+            /** Remitente */
+            remitente?: string | null;
+            /** Resolucion */
+            resolucion?: string | null;
+            /** Resuelto At */
+            resuelto_at?: string | null;
+            /** Resuelto Por */
+            resuelto_por?: string | null;
+            /**
+             * Tiene Foto
+             * @default false
+             */
+            tiene_foto: boolean;
+            /** Tipo */
+            tipo?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** TicketResumenOut */
+        TicketResumenOut: {
+            /** Abiertos */
+            abiertos: number;
         };
         /** TimbrarIn */
         TimbrarIn: {
@@ -20362,6 +20763,316 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listar_api_v1_tickets_get: {
+        parameters: {
+            query?: {
+                estado?: string | null;
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_TicketOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    depositar_api_v1_tickets_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TicketIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acciones_pendientes_api_v1_tickets_acciones_pendientes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketAccionPendienteOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resumen_api_v1_tickets_resumen_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResumenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    detalle_api_v1_tickets__ticket_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pedir_accion_api_v1_tickets__ticket_id__accion_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TicketAccionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ack_api_v1_tickets__ticket_id__ack_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TicketAckIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    comentar_api_v1_tickets__ticket_id__comentarios_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TicketComentarioIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    foto_api_v1_tickets__ticket_id__foto_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
             };
             /** @description Validation Error */
             422: {
