@@ -11230,6 +11230,11 @@
       ],
       "title": "Folio Externo"
      },
+     "forzar": {
+      "default": false,
+      "title": "Forzar",
+      "type": "boolean"
+     },
      "ieps": {
       "anyOf": [
        {

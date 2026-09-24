@@ -252,6 +252,66 @@ def _resolver_y_aplicar(db: Session, oc: OCRecibida) -> None:
         )
 
 
+def _fecha_entrega(payload) -> Optional[date]:
+    """La fecha de entrega como fecha, o None si el documento no la traía."""
+    v = getattr(payload, "fecha_entrega", None)
+    if isinstance(v, date):
+        return v
+    try:
+        return date.fromisoformat(str(v)[:10]) if v else None
+    except ValueError:
+        return None
+
+
+def _candado_folio_repetido(db: Session, ctx: AuthContext, payload) -> None:
+    """Un folio que ya existe CON OTRA FECHA DE ENTREGA no se pisa: se frena.
+
+    Es el primero de los cinco candados del Master de EHMO que se muda aquí, y
+    el que más urgía — no porque duplique, sino al revés: si el bot dejara de
+    ejecutarlo, esta ingesta no crearía una orden de más, SOBRESCRIBIRÍA la que
+    ya estaba. Es el único de los cinco cuyo hueco no duplica sino que BORRA, y
+    en silencio.
+
+    El folio de EHMO es determinista (hospital + semana + día), así que dos
+    entregas distintas pueden generar el mismo: ahí es donde el original aborta
+    y aquí se contesta 409.
+
+    TRES DECISIONES, y las tres importan:
+
+    · Se compara la FECHA DE ENTREGA, no el contenido. Un reenvío corregido de
+      la misma entrega trae la misma fecha y entra como siempre: esto no le
+      estorba a la corrección, solo al choque.
+    · Sin fecha en alguno de los dos lados NO se bloquea. Un candado que frena
+      por falta de dato frena lo bueno, y aquí lo bueno es la entrega de un
+      hospital.
+    · `forzar` lo salta, y existe porque una persona ya dijo «es otra». Sin esa
+      salida, un falso positivo deja a alguien sin entrega y sin manera de
+      destrabarla.
+    """
+    folio = (payload.folio_externo or "").strip()
+    nueva = _fecha_entrega(payload)
+    if getattr(payload, "forzar", False) or not folio or nueva is None:
+        return
+    choque = (
+        db.query(OCRecibida)
+        .filter(OCRecibida.tenant_id == ctx.tenant_id,
+                OCRecibida.folio_externo == folio,
+                OCRecibida.origen_externo != payload.origen_externo,
+                OCRecibida.fecha_entrega.isnot(None),
+                OCRecibida.fecha_entrega != nueva,
+                OCRecibida.estado != "DESCARTADA")
+        .first()
+    )
+    if choque is None:
+        return
+    raise HTTPException(
+        status_code=409,
+        detail=(f"El folio {folio} ya existe con otra fecha de entrega "
+                f"({choque.fecha_entrega.isoformat()}, y ésta trae {nueva.isoformat()}). "
+                "Si de verdad son entregas distintas, confírmalo y se registra aparte."),
+    )
+
+
 def _detectar_cambio(db: Session, oc: OCRecibida, data: dict, ctx: AuthContext) -> None:
     """La orden ya tiene remisión y llegó otra versión de su documento.
 
@@ -359,6 +419,7 @@ def ingesta(
     remisión ya existe) — el bot no necesita distinguir los caminos.
     """
     data = payload.model_dump(mode="json")
+    _candado_folio_repetido(db, ctx, payload)
     existente = (
         db.query(OCRecibida)
         .filter(OCRecibida.origen_externo == payload.origen_externo)
@@ -383,6 +444,7 @@ def ingesta(
             return _detalle(db, existente)
         existente.payload = data
         existente.folio_externo = payload.folio_externo
+        existente.fecha_entrega = _fecha_entrega(payload)
         existente.remitente = payload.remitente
         # QUITAR UN DATO NUNCA ES ACTUALIZARLO (23-sep-2026). Estos dos venían
         # asignados sin condición, y la conciliación de cada 6 h llama
@@ -416,6 +478,7 @@ def ingesta(
         remitente=payload.remitente,
         archivo_nombre=payload.archivo_nombre,
         archivo_url=payload.archivo_url,
+        fecha_entrega=_fecha_entrega(payload),
         payload=data,
         created_by=ctx.user_id,
         updated_by=ctx.user_id,

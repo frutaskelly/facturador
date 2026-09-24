@@ -8957,6 +8957,11 @@ export interface components {
             fecha_entrega?: string | null;
             /** Folio Externo */
             folio_externo?: string | null;
+            /**
+             * Forzar
+             * @default false
+             */
+            forzar: boolean;
             /** Ieps */
             ieps?: number | string | null;
             /** Iva */
