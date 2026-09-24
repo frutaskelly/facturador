@@ -234,3 +234,27 @@ def test_una_factura_sin_equivalencia_se_omite_sin_gritar(monkeypatch):
     hechas, omitidas = espejo_sae._traer_folios(None, None, "02", "ZMAFAN", [131], errores)
     assert (hechas, omitidas) == (0, 1)
     assert errores == []          # no es un error: es una omisión explicada
+
+
+def test_la_pasada_reporta_aunque_nadie_haya_presionado_el_boton(monkeypatch):
+    """La fecha de «SAE actualizado» que pinta la UI sale del reporte, también
+    en las pasadas automáticas. Y una solicitud reclamada y nunca reportada
+    deja la pantalla «Sincronizando…» hasta que el backend la expira a la hora,
+    así que el reporte sale SIEMPRE — con botón o sin él."""
+    from app.services import espejo_sae
+    from app.core.config import settings as s
+
+    monkeypatch.setattr(sae_lectura, "disponible", lambda: True)
+    monkeypatch.setattr(s, "ESPEJO_SAE_TENANT_ID", "11111111-1111-1111-1111-111111111111")
+    monkeypatch.setattr(s, "ESPEJO_SAE_EMPRESAS", "")     # sin empresas: la pasada no toca SAE
+    reclamos, reportes = [], []
+    monkeypatch.setattr(espejo_sae, "_reclamar_solicitud", lambda t: reclamos.append(t) or None)
+    monkeypatch.setattr(espejo_sae, "_reportar", lambda t, sol, tot: reportes.append((sol, tot)))
+
+    r = espejo_sae.pasada_programada()
+    assert r["corrio"] is False          # sin empresas no hay nada que traer
+    assert reportes == []                # …y sin pasada no hay nada que reportar
+
+    monkeypatch.setattr(s, "ESPEJO_SAE_EMPRESAS", "99")   # empresa sin series
+    espejo_sae.pasada_programada()
+    assert reclamos and reportes, "el botón se reclama y la pasada se reporta"

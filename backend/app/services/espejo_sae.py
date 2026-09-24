@@ -491,6 +491,16 @@ def pasada_programada() -> dict[str, Any]:
     toca_cobranza = (ahora - _ultima_cobranza) >= max(60, int(settings.ESPEJO_SAE_COBRANZA_CADA_SEG))
     total = {"corrio": True, "nuevas": 0, "actualizadas": 0, "errores": [],
              "cuadre": None, "cobranza": None}
+    # EL BOTÓN «SINCRONIZAR SAE» LO ATIENDE ESTE MISMO RELOJ (24-sep-2026).
+    # Antes lo reclamaba el bot con un poller de 60 s; ahora que el espejo vive
+    # aquí, dejarlo allá sería que el botón dependa de un programa que ya no
+    # tiene nada que ver con las facturas. Se reclama ANTES de la pasada para
+    # que lo que el botón pide entre en esta misma vuelta.
+    solicitud = _reclamar_solicitud(settings.ESPEJO_SAE_TENANT_ID)
+    if solicitud:
+        total["solicitud"] = str(solicitud)
+        toca_cuadre = toca_cobranza = True   # el botón es el refresco completo
+
     for empresa in empresas:
         series = list(_SERIES_POR_EMPRESA.get(empresa, ()))
         if not series:
@@ -525,7 +535,43 @@ def pasada_programada() -> dict[str, Any]:
         _ultimo_cuadre = hoy
     if toca_cobranza:
         _ultima_cobranza = ahora
+    # El reporte sale SIEMPRE, con o sin botón: la fecha de «SAE actualizado»
+    # que pinta la UI sale de aquí, también en las pasadas automáticas. Y una
+    # solicitud reclamada y nunca reportada deja la pantalla «Sincronizando…»
+    # hasta que el backend la expira a la hora.
+    _reportar(settings.ESPEJO_SAE_TENANT_ID, solicitud, total)
     return total
+
+
+def _reclamar_solicitud(tenant_id) -> Optional[Any]:
+    """¿Alguien presionó «Sincronizar SAE»? Reclamarla la marca EN_CURSO."""
+    from ..api.v1.facturas import reclamar_espejo_sync
+    from ..core.rbac import tenant_session
+
+    try:
+        with tenant_session(tenant_id) as db:
+            sol = reclamar_espejo_sync(db=db, ctx=contexto_de_sistema(tenant_id))
+        return getattr(sol, "id", None) if sol else None
+    except Exception:
+        return None
+
+
+def _reportar(tenant_id, solicitud, total: dict) -> None:
+    """Cierra la solicitud del botón, o registra la pasada automática."""
+    from ..api.v1.facturas import reportar_espejo_sync
+    from ..core.rbac import tenant_session
+    from ..schemas.factura import EspejoSyncReporteIn
+
+    try:
+        resumen = {k: total.get(k) for k in ("nuevas", "actualizadas", "cuadre", "cobranza")}
+        with tenant_session(tenant_id) as db:
+            reportar_espejo_sync(
+                payload=EspejoSyncReporteIn(solicitud_id=solicitud,
+                                            ok=not total.get("errores"),
+                                            resultado=resumen),
+                db=db, ctx=contexto_de_sistema(tenant_id))
+    except Exception:
+        pass
 
 
 async def reloj(intervalo: int) -> None:
