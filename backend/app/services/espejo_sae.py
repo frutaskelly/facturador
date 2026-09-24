@@ -228,6 +228,36 @@ def como_payload(empresa: str, cab: dict, partidas: list[dict],
     )
 
 
+def _saldos(empresa: str, cabs: list[dict]) -> dict[str, float]:
+    """{cve_doc: saldo} = total menos lo abonado, para esos encabezados."""
+    if not cabs:
+        return {}
+    abonado = leer_abonos(empresa, [c["cve_doc"] for c in cabs])
+    out: dict[str, float] = {}
+    for c in cabs:
+        pagado = abonado.get(c["cve_doc"])
+        if pagado is None:
+            continue
+        try:
+            out[c["cve_doc"]] = max(0.0, round(float(c["total"]) - float(pagado), 2))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _saldo_cambio(guardado: Optional[float], nuevo: Optional[float]) -> bool:
+    """¿Vale la pena reescribir? Un centavo sí; el mismo número, no.
+
+    `nuevo` en None es «CxC no reporta abonos de esta factura»: no es cero, es
+    que no hay información, y no se usa para pisar lo guardado.
+    """
+    if nuevo is None:
+        return False
+    if guardado is None:
+        return True
+    return abs(float(guardado) - float(nuevo)) > 0.005
+
+
 def sincronizar(db: Session, ctx: AuthContext, empresa: str, series: list[str],
                 dias_cancelaciones: int = 3, limite: int = 500) -> dict[str, Any]:
     """Una pasada: trae lo nuevo y revisa lo que pudo haber cambiado.
@@ -260,21 +290,33 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, series: list[str],
         vistos = {c["folio"] for c in cabs}
         previas = leer_encabezados(empresa, serie, desde_fecha=desde, limite=limite)
         en_espejo = {
-            f.folio: f.estado for f in db.query(Factura).filter(
+            f.folio: (f.estado, float(f.saldo_insoluto) if f.saldo_insoluto is not None else None)
+            for f in db.query(Factura).filter(
                 Factura.origen == "ESPEJO_SAE", Factura.espejo_empresa == empresa,
                 Factura.serie == serie, Factura.fecha >= desde).all()
         }
         cambiadas = [c for c in previas
                      if c["folio"] not in vistos
                      and c["folio"] in en_espejo
-                     and en_espejo[c["folio"]] != c["estado"]]
+                     and en_espejo[c["folio"]][0] != c["estado"]]
 
         # EL PAGO LLEGA DÍAS DESPUÉS DE LA FACTURA, así que ninguna ventana por
         # fecha del documento lo ve. Sin esto el estado de cuenta sigue cobrando
-        # lo ya pagado. Se traen de vuelta las facturas cuyo saldo se movió.
+        # lo ya pagado.
+        #
+        # PERO SOLO SE REESCRIBE LO QUE DE VERDAD CAMBIÓ. Con «tiene abono
+        # reciente» como único criterio, cada pasada volvía a depositar las
+        # mismas facturas: a 30 segundos son 2,880 escrituras al día para no
+        # cambiar nada, con el backend rehaciendo partidas y bloqueando
+        # remisiones en cada una. Es la misma lección que el espejo del bot
+        # aprendió con su caché de huellas, y aquí se paga comparando el saldo.
         con_abono = abonos_por_serie.get(serie, [])
         ya = vistos | {c["folio"] for c in cambiadas}
-        repago = [c for c in previas if c["folio"] in con_abono and c["folio"] not in ya]
+        candidatos = [c for c in previas if c["folio"] in con_abono and c["folio"] not in ya]
+        saldos_nuevos = _saldos(empresa, candidatos)
+        repago = [c for c in candidatos
+                  if _saldo_cambio(en_espejo.get(c["folio"], (None, None))[1],
+                                   saldos_nuevos.get(c["cve_doc"]))]
 
         pendientes = cabs + cambiadas + repago
         if not pendientes:
@@ -283,7 +325,7 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, series: list[str],
 
         docs = [c["cve_doc"] for c in pendientes]
         partidas = leer_partidas(empresa, docs)
-        abonado = leer_abonos(empresa, docs)
+        abonado = leer_abonos(empresa, docs)   # para las nuevas; las de repago ya se midieron
         nuevas = actualizadas = 0
         for cab in pendientes:
             try:
