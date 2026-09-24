@@ -380,7 +380,7 @@ def cuadre(db: Session, ctx: AuthContext, empresa: str, series: list[str],
     escondidas taparía el problema en vez de mostrarlo.
     """
     res: dict[str, Any] = {"empresa": empresa, "series": {}, "faltantes": 0,
-                           "reparadas": 0, "errores": []}
+                           "reparadas": 0, "omitidas": 0, "errores": []}
     for serie in series:
         try:
             en_sae = folios_en_sae(empresa, serie)
@@ -394,11 +394,13 @@ def cuadre(db: Session, ctx: AuthContext, empresa: str, series: list[str],
         }
         faltan = sorted(en_sae - en_espejo)
         info = {"sae": len(en_sae), "espejo": len(en_espejo), "faltan": len(faltan),
-                "folios": faltan[:50], "reparadas": 0}
+                "folios": faltan[:50], "reparadas": 0, "omitidas": 0}
         res["faltantes"] += len(faltan)
         if faltan and reparar and len(faltan) <= tope:
-            info["reparadas"] = _traer_folios(db, ctx, empresa, serie, faltan, res["errores"])
+            info["reparadas"], info["omitidas"] = _traer_folios(
+                db, ctx, empresa, serie, faltan, res["errores"])
             res["reparadas"] += info["reparadas"]
+            res["omitidas"] += info["omitidas"]
         elif faltan and reparar:
             res["errores"].append(
                 f"{serie}: faltan {len(faltan)} facturas, más del tope de {tope} — "
@@ -408,11 +410,19 @@ def cuadre(db: Session, ctx: AuthContext, empresa: str, series: list[str],
 
 
 def _traer_folios(db: Session, ctx: AuthContext, empresa: str, serie: str,
-                  folios: list[int], errores: list) -> int:
-    """Deposita esos folios concretos, uno por uno, contando lo que sí entró."""
+                  folios: list[int], errores: list) -> tuple[int, int]:
+    """Deposita esos folios, uno por uno. Devuelve (traídas, omitidas).
+
+    OMITIDA NO ES ERROR. Una factura de un cliente sin equivalencia en el
+    Facturador no se puede reflejar —el depósito la rechaza a propósito, para
+    no adivinar de quién es— y eso no va a cambiar mañana. Contarla como error
+    todos los días entrena al equipo a ignorar el reporte; contarla aparte deja
+    el hueco visible sin gritar. Caso real: ZMAFAN 131, de un cliente cuyo
+    contrato terminó y cuya factura además está en proceso de cancelación.
+    """
     from ..api.v1.facturas import factura_espejo
 
-    hechas = 0
+    hechas = omitidas = 0
     for folio in folios:
         try:
             cabs = leer_encabezados(empresa, serie, desde_folio=folio - 1, limite=1)
@@ -425,8 +435,11 @@ def _traer_folios(db: Session, ctx: AuthContext, empresa: str, serie: str,
                            db=db, ctx=ctx)
             hechas += 1
         except Exception as e:
+            if "equivalencia" in str(e).lower():
+                omitidas += 1
+                continue
             errores.append(f"{serie} {folio}: {type(e).__name__}: {e}")
-    return hechas
+    return hechas, omitidas
 
 
 # ─── El reloj ────────────────────────────────────────────────────────────────
@@ -434,6 +447,9 @@ def _traer_folios(db: Session, ctx: AuthContext, empresa: str, serie: str,
 # Última fecha en que se contó contra SAE. En memoria a propósito: si el
 # proceso se reinicia, el cuadre vuelve a correr, que es el lado seguro.
 _ultimo_cuadre: Optional[dt.date] = None
+# Los REP llegan de a poco, no cada medio minuto: correrlos en cada vuelta
+# sería pedirle a SAE cuatro consultas para nada. Se lleva su propio paso.
+_ultima_cobranza: float = 0.0
 
 def contexto_de_sistema(tenant_id) -> AuthContext:
     """Quien corre la pasada automática: nadie. No hay usuario al que atribuir.
@@ -466,10 +482,15 @@ def pasada_programada() -> dict[str, Any]:
         return {"corrio": False, "motivo": "sin empresas configuradas"}
 
     from ..api.v1.sae import _SERIES_POR_EMPRESA
-    global _ultimo_cuadre
+    global _ultimo_cuadre, _ultima_cobranza
+    import time as _time
+
     hoy = dt.date.today()
     toca_cuadre = _ultimo_cuadre != hoy
-    total = {"corrio": True, "nuevas": 0, "actualizadas": 0, "errores": [], "cuadre": None}
+    ahora = _time.monotonic()
+    toca_cobranza = (ahora - _ultima_cobranza) >= max(60, int(settings.ESPEJO_SAE_COBRANZA_CADA_SEG))
+    total = {"corrio": True, "nuevas": 0, "actualizadas": 0, "errores": [],
+             "cuadre": None, "cobranza": None}
     for empresa in empresas:
         series = list(_SERIES_POR_EMPRESA.get(empresa, ()))
         if not series:
@@ -484,8 +505,15 @@ def pasada_programada() -> dict[str, Any]:
                 if toca_cuadre:
                     c = cuadre(db, ctx, empresa, series)
                     total["cuadre"] = total["cuadre"] or {}
-                    total["cuadre"][empresa] = {k: c[k] for k in ("faltantes", "reparadas")}
+                    total["cuadre"][empresa] = {k: c[k] for k in ("faltantes", "reparadas", "omitidas")}
                     total["errores"].extend(c.get("errores", []))
+                if toca_cobranza:
+                    from . import cobranza_sae
+                    cb = cobranza_sae.sincronizar(db, ctx, empresa)
+                    total["cobranza"] = total["cobranza"] or {}
+                    total["cobranza"][empresa] = {"pagos": cb["pagos"]["enviados"],
+                                                  "notas": cb["notas_credito"]["enviados"]}
+                    total["errores"].extend(cb.get("errores", []))
             total["nuevas"] += r.get("nuevas", 0)
             total["actualizadas"] += r.get("actualizadas", 0)
             total["errores"].extend(r.get("errores", []))
@@ -495,6 +523,8 @@ def pasada_programada() -> dict[str, Any]:
         # se marca aunque alguna empresa haya fallado: reintentarlo en la
         # siguiente pasada sería correrlo cada 30 s el resto del día
         _ultimo_cuadre = hoy
+    if toca_cobranza:
+        _ultima_cobranza = ahora
     return total
 
 
@@ -524,6 +554,9 @@ async def reloj(intervalo: int) -> None:
                          r.get("nuevas"), r.get("actualizadas"))
             if r.get("cuadre"):
                 log.info("espejo SAE · cuadre del día: %s", r["cuadre"])
+            if r.get("cobranza") and any(v.get("pagos") or v.get("notas")
+                                         for v in r["cobranza"].values()):
+                log.info("espejo SAE · cobranza: %s", r["cobranza"])
             for e in (r.get("errores") or [])[:3]:
                 log.warning("espejo SAE: %s", e)
         except Exception as e:

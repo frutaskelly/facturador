@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     ESPEJO_SAE_INTERVALO_SEG: int = 0
     ESPEJO_SAE_TENANT_ID: str = ""
     ESPEJO_SAE_EMPRESAS: str = "02,03,04"
+    # Cada cuánto se traen los REP y las notas de crédito. Llegan de a poco, no
+    # cada medio minuto: correrlos en cada vuelta sería pedirle a SAE cuatro
+    # consultas para nada.
+    ESPEJO_SAE_COBRANZA_CADA_SEG: int = 300
 
     # ─── Integrations ───────────────────────────────────────────────────────────
     ANTHROPIC_API_KEY: str = ""
