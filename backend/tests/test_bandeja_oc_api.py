@@ -269,6 +269,76 @@ def test_el_lote_de_la_partida_se_guarda(client, env, auth_as):
     assert lineas[1]["lote"] == "REPOSICION"
 
 
+def _lineas(n, desde=1):
+    return [{"descripcion": f"PRODUCTO {i}", "cantidad": "5", "unidad": "KG"}
+            for i in range(desde, desde + n)]
+
+
+def test_un_reenvio_mutilado_no_reemplaza_la_entrega_completa(client, env, auth_as):
+    """Así se perdió el pedido de OTOMÍ el 17-ago-2026: 27 renglones
+    reemplazados por 4. Un reenvío que trae mucho menos de lo ya registrado casi
+    nunca es una corrección — son unos extras, un segundo pedido o una foto a
+    medias.
+
+    El umbral se copia TAL CUAL del original, con sus huecos: `previos >= 8` y
+    `nuevos < previos/2`, contando renglones.
+    """
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    comun = dict(ubicacion="HOSPITAL OTOMI", fecha_entrega="2026-09-24")
+
+    r1 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39OTO-JUE", lineas=_lineas(27), **comun))
+    assert r1.status_code == 201, r1.text
+
+    # el reenvío mutilado: 4 donde había 27
+    r2 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39OTO-JUE-B", lineas=_lineas(4, 100), **comun))
+    assert r2.status_code == 409, r2.text
+    assert "27" in r2.json()["detail"] and "OTOMI" in r2.json()["detail"].upper()
+
+    # con `forzar` entra: quien miró la foto manda
+    r3 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39OTO-JUE-B", lineas=_lineas(4, 100), forzar=True, **comun))
+    assert r3.status_code == 201, r3.text
+
+
+def test_el_antirreemplazo_respeta_sus_dos_huecos_conocidos(client, env, auth_as):
+    """Los dos agujeros del umbral son deliberados y se copian sin «mejorarlos»:
+    una entrega de menos de 8 productos no está protegida, y un reenvío
+    mutilado a la mitad JUSTA pasa. El día que se muevan, que sea con datos."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+
+    # 7 previos: por debajo del mínimo, no protege
+    chico = dict(ubicacion="HOSPITAL CHICO", fecha_entrega="2026-09-24")
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39CHI-JUE", lineas=_lineas(7), **chico))
+    r = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39CHI-JUE-B", lineas=_lineas(1, 50), **chico))
+    assert r.status_code == 201, r.text
+
+    # la mitad justa de 10 es 5, y `nuevos < previos*0.5` es falso: pasa
+    medio = dict(ubicacion="HOSPITAL MEDIO", fecha_entrega="2026-09-24")
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39MED-JUE", lineas=_lineas(10), **medio))
+    r2 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39MED-JUE-B", lineas=_lineas(5, 60), **medio))
+    assert r2.status_code == 201, r2.text
+
+
+def test_una_entrega_aparte_no_dispara_el_antirreemplazo(client, env, auth_as):
+    """Las «aparte» traen poco por definición: contarlas sería frenar lo normal."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    comun = dict(ubicacion="HOSPITAL APARTE", fecha_entrega="2026-09-24")
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39APA-JUE", lineas=_lineas(20), **comun))
+    r = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39APA-JUE-2", lineas=_lineas(2, 70), **comun))
+    assert r.status_code == 201, r.text
+
+
 def test_el_contador_de_sufijos_aparte_sale_de_la_bandeja(client, env, auth_as):
     """Una entrega APARTE del mismo hospital y día lleva sufijo para no chocar
     con la principal. Ese contador sale hoy del Master de EHMO, y es la pieza
