@@ -352,7 +352,88 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, series: list[str],
     return res
 
 
+def folios_en_sae(empresa: str, serie: str) -> set[int]:
+    """Todos los folios que SAE tiene de esa serie. Una columna, nada más."""
+    return {
+        int(r["folio"]) for r in sae_lectura.consultar(
+            f"SELECT F.FOLIO AS folio FROM {sae_lectura.tabla('FACTF', empresa)} F "
+            "WHERE RTRIM(F.SERIE) = %s", (serie,))
+        if str(r.get("folio") or "").strip().isdigit() or isinstance(r.get("folio"), int)
+    }
+
+
+def cuadre(db: Session, ctx: AuthContext, empresa: str, series: list[str],
+           reparar: bool = True, tope: int = 25) -> dict[str, Any]:
+    """Contar contra contar: ¿el espejo tiene TODAS las facturas de SAE?
+
+    LA MARCA DE AGUA NO PUEDE VER UN HUECO. Pide lo posterior al folio más
+    alto, así que cualquier factura que se haya perdido por debajo queda
+    congelada para siempre. Se descubrió el 24-sep-2026: siete facturas que
+    existían en SAE y nunca llegaron al espejo —ZHGO 62 a 67 y ZMAFAN 131—,
+    invisibles para toda la maquinaria porque nadie contaba.
+
+    Es una consulta de una columna por serie, así que cuesta poco y puede
+    correr una vez al día.
+
+    REPARA HASTA `tope` y NO MÁS. Si faltan cinco, las trae; si faltan
+    trescientas, eso no es un hueco, es que algo se rompió, y traerlas a
+    escondidas taparía el problema en vez de mostrarlo.
+    """
+    res: dict[str, Any] = {"empresa": empresa, "series": {}, "faltantes": 0,
+                           "reparadas": 0, "errores": []}
+    for serie in series:
+        try:
+            en_sae = folios_en_sae(empresa, serie)
+        except Exception as e:
+            res["errores"].append(f"{serie}: {type(e).__name__}: {e}")
+            continue
+        en_espejo = {
+            f.folio for f in db.query(Factura.folio).filter(
+                Factura.origen == "ESPEJO_SAE", Factura.espejo_empresa == empresa,
+                Factura.serie == serie).all()
+        }
+        faltan = sorted(en_sae - en_espejo)
+        info = {"sae": len(en_sae), "espejo": len(en_espejo), "faltan": len(faltan),
+                "folios": faltan[:50], "reparadas": 0}
+        res["faltantes"] += len(faltan)
+        if faltan and reparar and len(faltan) <= tope:
+            info["reparadas"] = _traer_folios(db, ctx, empresa, serie, faltan, res["errores"])
+            res["reparadas"] += info["reparadas"]
+        elif faltan and reparar:
+            res["errores"].append(
+                f"{serie}: faltan {len(faltan)} facturas, más del tope de {tope} — "
+                f"eso no es un hueco, es que algo se rompió; no las traigo a escondidas")
+        res["series"][serie] = info
+    return res
+
+
+def _traer_folios(db: Session, ctx: AuthContext, empresa: str, serie: str,
+                  folios: list[int], errores: list) -> int:
+    """Deposita esos folios concretos, uno por uno, contando lo que sí entró."""
+    from ..api.v1.facturas import factura_espejo
+
+    hechas = 0
+    for folio in folios:
+        try:
+            cabs = leer_encabezados(empresa, serie, desde_folio=folio - 1, limite=1)
+            cab = next((c for c in cabs if c["folio"] == folio), None)
+            if not cab:
+                continue
+            partidas = leer_partidas(empresa, [cab["cve_doc"]])
+            factura_espejo(payload=como_payload(empresa, cab,
+                                                partidas.get(cab["cve_doc"], [])),
+                           db=db, ctx=ctx)
+            hechas += 1
+        except Exception as e:
+            errores.append(f"{serie} {folio}: {type(e).__name__}: {e}")
+    return hechas
+
+
 # ─── El reloj ────────────────────────────────────────────────────────────────
+
+# Última fecha en que se contó contra SAE. En memoria a propósito: si el
+# proceso se reinicia, el cuadre vuelve a correr, que es el lado seguro.
+_ultimo_cuadre: Optional[dt.date] = None
 
 def contexto_de_sistema(tenant_id) -> AuthContext:
     """Quien corre la pasada automática: nadie. No hay usuario al que atribuir.
@@ -385,20 +466,35 @@ def pasada_programada() -> dict[str, Any]:
         return {"corrio": False, "motivo": "sin empresas configuradas"}
 
     from ..api.v1.sae import _SERIES_POR_EMPRESA
-    total = {"corrio": True, "nuevas": 0, "actualizadas": 0, "errores": []}
+    global _ultimo_cuadre
+    hoy = dt.date.today()
+    toca_cuadre = _ultimo_cuadre != hoy
+    total = {"corrio": True, "nuevas": 0, "actualizadas": 0, "errores": [], "cuadre": None}
     for empresa in empresas:
         series = list(_SERIES_POR_EMPRESA.get(empresa, ()))
         if not series:
             continue
         try:
             with tenant_session(settings.ESPEJO_SAE_TENANT_ID) as db:
-                r = sincronizar(db, contexto_de_sistema(settings.ESPEJO_SAE_TENANT_ID),
-                                empresa, series)
+                ctx = contexto_de_sistema(settings.ESPEJO_SAE_TENANT_ID)
+                r = sincronizar(db, ctx, empresa, series)
+                # CONTAR CONTRA CONTAR, una vez al día. La marca de agua no ve
+                # un hueco por debajo de ella, así que sin esto un faltante se
+                # queda invisible para siempre — pasó con siete facturas.
+                if toca_cuadre:
+                    c = cuadre(db, ctx, empresa, series)
+                    total["cuadre"] = total["cuadre"] or {}
+                    total["cuadre"][empresa] = {k: c[k] for k in ("faltantes", "reparadas")}
+                    total["errores"].extend(c.get("errores", []))
             total["nuevas"] += r.get("nuevas", 0)
             total["actualizadas"] += r.get("actualizadas", 0)
             total["errores"].extend(r.get("errores", []))
         except Exception as e:
             total["errores"].append(f"[{empresa}] {type(e).__name__}: {e}")
+    if toca_cuadre:
+        # se marca aunque alguna empresa haya fallado: reintentarlo en la
+        # siguiente pasada sería correrlo cada 30 s el resto del día
+        _ultimo_cuadre = hoy
     return total
 
 
@@ -426,6 +522,8 @@ async def reloj(intervalo: int) -> None:
             if r.get("nuevas") or r.get("actualizadas"):
                 log.info("espejo SAE: %s nuevas, %s actualizadas",
                          r.get("nuevas"), r.get("actualizadas"))
+            if r.get("cuadre"):
+                log.info("espejo SAE · cuadre del día: %s", r["cuadre"])
             for e in (r.get("errores") or [])[:3]:
                 log.warning("espejo SAE: %s", e)
         except Exception as e:
