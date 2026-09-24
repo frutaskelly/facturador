@@ -38977,12 +38977,51 @@
       "description": "Texto que busca en la OBSERVACIÓN del documento (la OC)",
       "in": "query",
       "name": "q",
-      "required": true,
+      "required": false,
       "schema": {
+       "anyOf": [
+        {
+         "maxLength": 120,
+         "minLength": 3,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
        "description": "Texto que busca en la OBSERVACIÓN del documento (la OC)",
-       "maxLength": 120,
-       "minLength": 3,
-       "title": "Q",
+       "title": "Q"
+      }
+     },
+     {
+      "description": "CVE_DOC exacto («ZEHMOVH 1442»), sin importar los espacios",
+      "in": "query",
+      "name": "doc",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 40,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "CVE_DOC exacto («ZEHMOVH 1442»), sin importar los espacios",
+       "title": "Doc"
+      }
+     },
+     {
+      "description": "«factura» (FACTF) o «pedido» (FACTP)",
+      "in": "query",
+      "name": "tipo",
+      "required": false,
+      "schema": {
+       "default": "factura",
+       "description": "«factura» (FACTF) o «pedido» (FACTP)",
+       "pattern": "^(factura|pedido)$",
+       "title": "Tipo",
        "type": "string"
       }
      },
@@ -39041,6 +39080,81 @@
      }
     ],
     "summary": "Facturas",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
+  "/api/v1/sae/partidas": {
+   "get": {
+    "description": "Las partidas de esas facturas: clave, cantidad, precio e importe.\n\nPor lote a propósito: con ochenta documentos, ir de a uno tarda minutos.",
+    "operationId": "partidas_api_v1_sae_partidas_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "empresa",
+      "required": true,
+      "schema": {
+       "maxLength": 4,
+       "title": "Empresa",
+       "type": "string"
+      }
+     },
+     {
+      "description": "CVE_DOC separados por coma («ZEHMOVH 1442,ZEHMOVH 1443»)",
+      "in": "query",
+      "name": "docs",
+      "required": true,
+      "schema": {
+       "description": "CVE_DOC separados por coma («ZEHMOVH 1442,ZEHMOVH 1443»)",
+       "maxLength": 4000,
+       "title": "Docs",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Partidas",
     "tags": [
      "sae"
     ]

@@ -4356,6 +4356,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sae/partidas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Partidas
+         * @description Las partidas de esas facturas: clave, cantidad, precio e importe.
+         *
+         *     Por lote a propósito: con ochenta documentos, ir de a uno tarda minutos.
+         */
+        get: operations["partidas_api_v1_sae_partidas_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sae/salud": {
         parameters: {
             query?: never;
@@ -20517,8 +20539,47 @@ export interface operations {
                 /** @description Empresa de SAE: 02, 03, 04… */
                 empresa: string;
                 /** @description Texto que busca en la OBSERVACIÓN del documento (la OC) */
-                q: string;
+                q?: string | null;
+                /** @description CVE_DOC exacto («ZEHMOVH 1442»), sin importar los espacios */
+                doc?: string | null;
+                /** @description «factura» (FACTF) o «pedido» (FACTP) */
+                tipo?: string;
                 limite?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    partidas_api_v1_sae_partidas_get: {
+        parameters: {
+            query: {
+                empresa: string;
+                /** @description CVE_DOC separados por coma («ZEHMOVH 1442,ZEHMOVH 1443») */
+                docs: string;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
