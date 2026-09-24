@@ -364,6 +364,61 @@ def sufijos_aparte(
             "siguiente": (mio[0] if mio else max([1, *usados]) + 1)}
 
 
+def _candado_antirreemplazo(db: Session, ctx: AuthContext, payload) -> None:
+    """Un reenvío que trae MUCHO menos de lo ya registrado casi nunca es un reenvío.
+
+    Tercer candado del Master de EHMO que se muda aquí. Así se perdió el pedido
+    de OTOMÍ el 17-ago-2026: 27 renglones reemplazados por 4. Casi siempre no es
+    una corrección sino otra cosa mal clasificada — unos extras, un segundo
+    pedido, o una foto que salió a medias.
+
+    EL UMBRAL SE COPIA TAL CUAL, con sus huecos, y no se «mejora» de paso:
+    `previos >= 8 and nuevos < previos * 0.5`, contando RENGLONES y no dinero.
+    Sus dos agujeros son conocidos y deliberados —una entrega de 7 productos o
+    menos no está protegida, y un reenvío mutilado a la mitad justa pasa—; el
+    día que se muevan, que sea una decisión con datos y no un efecto colateral
+    de haberlo reescrito de memoria.
+
+    ALCANCE: mismo punto de entrega y misma fecha de entrega, sin contar las
+    entregas «aparte», que por definición traen poco. Un reenvío que aterriza en
+    otro día es invisible aquí: ese hueco es la razón de existir del candado de
+    la gemela, que va después.
+
+    Como los otros, `forzar` lo salta: quien ya miró la foto y dijo que está
+    bien, manda.
+    """
+    if getattr(payload, "forzar", False):
+        return
+    punto = (getattr(payload, "ubicacion", None) or "").strip()
+    fecha = _fecha_entrega(payload)
+    nuevos = len(getattr(payload, "lineas", None) or [])
+    folio = (payload.folio_externo or "").strip().upper()
+    if not punto or fecha is None or _RE_SUFIJO_APARTE.match(folio):
+        return
+    previos_oc = (
+        db.query(OCRecibida)
+        .filter(OCRecibida.tenant_id == ctx.tenant_id,
+                func.upper(func.trim(OCRecibida.punto_entrega)) == punto.upper(),
+                OCRecibida.fecha_entrega == fecha,
+                OCRecibida.origen_externo != payload.origen_externo,
+                OCRecibida.estado != "DESCARTADA")
+        .all()
+    )
+    previos = sum(len((oc.payload or {}).get("lineas") or []) for oc in previos_oc
+                  if not _RE_SUFIJO_APARTE.match((oc.folio_externo or "").strip().upper()))
+    if previos < 8 or nuevos >= previos * 0.5:
+        return
+    anterior = next((oc.folio_externo for oc in previos_oc if oc.folio_externo), "")
+    raise HTTPException(
+        status_code=409,
+        detail=(f"Esta entrega traería {nuevos} producto(s) donde ya hay {previos} "
+                f"registrados para {punto} el {fecha.isoformat()}"
+                + (f" (folio {anterior})" if anterior else "")
+                + ". Si son extras o un pedido aparte, mándalo diciéndolo; "
+                "si de verdad reemplaza, confírmalo."),
+    )
+
+
 def _detectar_cambio(db: Session, oc: OCRecibida, data: dict, ctx: AuthContext) -> None:
     """La orden ya tiene remisión y llegó otra versión de su documento.
 
@@ -472,6 +527,7 @@ def ingesta(
     """
     data = payload.model_dump(mode="json")
     _candado_folio_repetido(db, ctx, payload)
+    _candado_antirreemplazo(db, ctx, payload)
     existente = (
         db.query(OCRecibida)
         .filter(OCRecibida.origen_externo == payload.origen_externo)
