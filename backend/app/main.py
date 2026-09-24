@@ -63,7 +63,15 @@ async def lifespan(app: FastAPI):
     )
     for w in facturama_startup_warnings(settings):
         log.warning("Facturama config: %s", w)
+    tarea_espejo = None
+    if settings.ESPEJO_SAE_INTERVALO_SEG:
+        import asyncio
+        from .services.espejo_sae import reloj
+        tarea_espejo = asyncio.create_task(reloj(settings.ESPEJO_SAE_INTERVALO_SEG))
+        log.info("espejo SAE: reloj cada %ss", settings.ESPEJO_SAE_INTERVALO_SEG)
     yield
+    if tarea_espejo:
+        tarea_espejo.cancel()
     log.info("Shutting down")
 
 

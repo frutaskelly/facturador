@@ -127,3 +127,35 @@ def test_una_factura_sin_uuid_no_se_refleja_como_timbrada(monkeypatch):
     assert espejo_sae.leer_encabezados("03", "ZEHMOVH")[0]["estado"] == "TIMBRADA"
     fila["fecha_cancela"] = "2026-09-24"
     assert espejo_sae.leer_encabezados("03", "ZEHMOVH")[0]["estado"] == "CANCELADA"
+
+
+def test_el_reloj_no_corre_sin_tenant(monkeypatch):
+    """Sin `ESPEJO_SAE_TENANT_ID` la pasada no corre. No hay manera honesta de
+    adivinar de quién es el espejo, y equivocarse sería escribir las facturas
+    en el tenant que no es."""
+    from app.services import espejo_sae
+    from app.core.config import settings as s
+    monkeypatch.setattr(sae_lectura, "disponible", lambda: True)
+    monkeypatch.setattr(s, "ESPEJO_SAE_TENANT_ID", "")
+    assert espejo_sae.pasada_programada()["corrio"] is False
+    # y tampoco si no hay acceso a SAE, aunque el tenant esté puesto
+    monkeypatch.setattr(s, "ESPEJO_SAE_TENANT_ID", "11111111-1111-1111-1111-111111111111")
+    monkeypatch.setattr(sae_lectura, "disponible", lambda: False)
+    assert espejo_sae.pasada_programada()["corrio"] is False
+
+
+def test_el_saldo_sale_del_total_menos_lo_abonado(monkeypatch):
+    """Los REP traen IMPORTE=0 —el importe real vive en el XML— pero CxC ya los
+    tiene aplicados factura por factura. El saldo es total menos abonado, y
+    nunca negativo."""
+    from app.services import espejo_sae
+    monkeypatch.setattr(sae_lectura, "disponible", lambda: True)
+    monkeypatch.setattr(sae_lectura, "consultar",
+                        lambda *a, **k: [{"doc": "ZEHMOVH 1442", "abonado": "1000.00"}])
+    assert espejo_sae.leer_abonos("03", ["ZEHMOVH 1442"]) == {"ZEHMOVH 1442": 1000.0}
+    p = espejo_sae.como_payload("03", {
+        "serie": "ZEHMOVH", "folio": 1442, "cliente_sae": "6", "fecha": None,
+        "estado": "TIMBRADA", "uuid": "u-1", "cancelacion_msj": None,
+        "observaciones": None, "subtotal": "1500", "total": "1500",
+        "iva": "0", "ieps": "0", "uuid_sustitucion": None}, [], saldo=500.0)
+    assert float(p.saldo_insoluto) == 500.0

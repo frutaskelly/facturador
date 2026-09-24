@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     SAE_PASSWORD: str = ""
     SAE_DATABASE: str = "EMPRESA_SQL"
     SAE_TIMEOUT: int = 25
+    # El reloj del espejo de facturas, DENTRO del Facturador (24-sep-2026).
+    # En 0 no corre: mientras el espejo del bot siga vivo, dos relojes sobre
+    # las mismas facturas solo se estorban. Se enciende en el mismo movimiento
+    # en que se apaga el del bot.
+    ESPEJO_SAE_INTERVALO_SEG: int = 0
+    ESPEJO_SAE_TENANT_ID: str = ""
+    ESPEJO_SAE_EMPRESAS: str = "02,03,04"
 
     # ─── Integrations ───────────────────────────────────────────────────────────
     ANTHROPIC_API_KEY: str = ""

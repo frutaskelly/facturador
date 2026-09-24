@@ -158,7 +158,61 @@ def leer_partidas(empresa: str, cve_docs: list[str]) -> dict[str, list[dict[str,
     return salida
 
 
-def como_payload(empresa: str, cab: dict, partidas: list[dict]) -> FacturaEspejoIn:
+def leer_abonos(empresa: str, cve_docs: list[str]) -> dict[str, float]:
+    """{cve_doc: total abonado} desde CxC (CUEN_DETxx, TIPO_MOV='A').
+
+    Es la fuente correcta del saldo: los REP (FACTGxx) traen IMPORTE=0 —los
+    importes reales del complemento viven en el XML— pero CxC ya los tiene
+    aplicados factura por factura, con REFER = CVE_DOC. El saldo del espejo es
+    el total de la factura menos lo abonado aquí.
+    """
+    cuen = sae_lectura.tabla("CUEN_DET", empresa)
+    abonos: dict[str, float] = {}
+    for i in range(0, len(cve_docs), _LOTE_PARTIDAS):
+        lote = [d for d in cve_docs[i:i + _LOTE_PARTIDAS] if d]
+        if not lote:
+            continue
+        marcadores = ", ".join(["%s"] * len(lote))
+        for r in sae_lectura.consultar(
+            "SELECT RTRIM(REFER) AS doc, "
+            "CAST(CAST(SUM(IMPORTE) AS decimal(18,4)) AS varchar(30)) AS abonado "
+            f"FROM {cuen} WHERE TIPO_MOV='A' AND SIGNO=-1 "
+            f"AND RTRIM(REFER) IN ({marcadores}) GROUP BY RTRIM(REFER)",
+            tuple(lote),
+        ):
+            try:
+                abonos[str(r.get("doc") or "").strip()] = float(r.get("abonado") or 0)
+            except (TypeError, ValueError):
+                continue
+    return abonos
+
+
+def folios_con_abonos(empresa: str, desde: dt.date, series: list[str]) -> dict[str, list[int]]:
+    """{serie: [folios]} de facturas que recibieron un ABONO desde esa fecha.
+
+    Un pago llega DÍAS después de la factura, así que la ventana por fecha del
+    documento no lo ve nunca. Esto trae de vuelta las facturas viejas cuyo
+    saldo cambió — sin esto, el estado de cuenta sigue cobrando lo ya pagado.
+    """
+    cuen = sae_lectura.tabla("CUEN_DET", empresa)
+    out: dict[str, list[int]] = {}
+    for r in sae_lectura.consultar(
+        f"SELECT DISTINCT RTRIM(REFER) AS doc FROM {cuen} "
+        "WHERE TIPO_MOV='A' AND FECHA_APLI >= %s",
+        (desde.isoformat(),),
+    ):
+        doc = str(r.get("doc") or "").strip()
+        for serie in series:
+            if doc.startswith(serie):
+                resto = doc[len(serie):].strip()
+                if resto.isdigit():
+                    out.setdefault(serie, []).append(int(resto))
+                break
+    return out
+
+
+def como_payload(empresa: str, cab: dict, partidas: list[dict],
+                 saldo: Optional[float] = None) -> FacturaEspejoIn:
     """El encabezado de SAE y sus partidas, con la forma que espera el depósito."""
     return FacturaEspejoIn(
         empresa=empresa, serie=cab["serie"], folio=cab["folio"],
@@ -169,6 +223,7 @@ def como_payload(empresa: str, cab: dict, partidas: list[dict]) -> FacturaEspejo
         subtotal=cab["subtotal"], total=cab["total"],
         iva=cab["iva"], ieps=cab["ieps"],
         uuid_sustitucion=cab["uuid_sustitucion"],
+        saldo_insoluto=saldo,
         lineas=[LineaFacturaEspejoIn(**p) for p in partidas],
     )
 
@@ -189,6 +244,11 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, series: list[str],
     desde = hoy - dt.timedelta(days=max(0, int(dias_cancelaciones)))
     res: dict[str, Any] = {"empresa": empresa, "nuevas": 0, "actualizadas": 0,
                            "errores": [], "por_serie": {}}
+    try:
+        abonos_por_serie = folios_con_abonos(empresa, desde, list(series))
+    except Exception as e:     # sin CxC la pasada sigue: peor es no espejar nada
+        abonos_por_serie = {}
+        res["errores"].append(f"abonos: {type(e).__name__}: {e}")
 
     for serie in series:
         marca = marca_de_agua(db, empresa, serie)
@@ -209,16 +269,33 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, series: list[str],
                      and c["folio"] in en_espejo
                      and en_espejo[c["folio"]] != c["estado"]]
 
-        pendientes = cabs + cambiadas
+        # EL PAGO LLEGA DÍAS DESPUÉS DE LA FACTURA, así que ninguna ventana por
+        # fecha del documento lo ve. Sin esto el estado de cuenta sigue cobrando
+        # lo ya pagado. Se traen de vuelta las facturas cuyo saldo se movió.
+        con_abono = abonos_por_serie.get(serie, [])
+        ya = vistos | {c["folio"] for c in cambiadas}
+        repago = [c for c in previas if c["folio"] in con_abono and c["folio"] not in ya]
+
+        pendientes = cabs + cambiadas + repago
         if not pendientes:
             res["por_serie"][serie] = {"nuevas": 0, "actualizadas": 0, "marca": marca}
             continue
 
-        partidas = leer_partidas(empresa, [c["cve_doc"] for c in pendientes])
+        docs = [c["cve_doc"] for c in pendientes]
+        partidas = leer_partidas(empresa, docs)
+        abonado = leer_abonos(empresa, docs)
         nuevas = actualizadas = 0
         for cab in pendientes:
             try:
-                factura_espejo(payload=como_payload(empresa, cab, partidas.get(cab["cve_doc"], [])),
+                pagado = abonado.get(cab["cve_doc"])
+                saldo = None
+                if pagado is not None:
+                    try:
+                        saldo = max(0.0, round(float(cab["total"]) - float(pagado), 2))
+                    except (TypeError, ValueError):
+                        saldo = None
+                factura_espejo(payload=como_payload(empresa, cab,
+                                                    partidas.get(cab["cve_doc"], []), saldo),
                                db=db, ctx=ctx)
                 if cab["folio"] in vistos:
                     nuevas += 1
@@ -231,3 +308,83 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, series: list[str],
         res["por_serie"][serie] = {"nuevas": nuevas, "actualizadas": actualizadas,
                                    "marca": marca}
     return res
+
+
+# ─── El reloj ────────────────────────────────────────────────────────────────
+
+def contexto_de_sistema(tenant_id) -> AuthContext:
+    """Quien corre la pasada automática: nadie. No hay usuario al que atribuir.
+
+    Es el mismo caso que ya contempla AuthContext para las conexiones (el bot),
+    con `user_id=None`: lo que escriba esta pasada no queda firmado por una
+    persona, porque ninguna lo pidió.
+    """
+    return AuthContext(
+        user_id=None, auth_user_id="sistema:espejo-sae", email=None,
+        tenant_id=tenant_id, role_id=None, role_name="sistema",
+        is_owner=False, permissions={"factura:espejo"},
+    )
+
+
+def pasada_programada() -> dict[str, Any]:
+    """Una vuelta del reloj, para todas las empresas configuradas.
+
+    Sin `ESPEJO_SAE_TENANT_ID` no corre: no hay manera honesta de adivinar de
+    quién es el espejo, y equivocarse sería escribir facturas en el tenant que
+    no es.
+    """
+    from ..core.config import settings
+    from ..core.rbac import tenant_session
+
+    if not sae_lectura.disponible() or not settings.ESPEJO_SAE_TENANT_ID:
+        return {"corrio": False, "motivo": "sin acceso a SAE o sin tenant configurado"}
+    empresas = [e.strip() for e in str(settings.ESPEJO_SAE_EMPRESAS or "").split(",") if e.strip()]
+    if not empresas:
+        return {"corrio": False, "motivo": "sin empresas configuradas"}
+
+    from ..api.v1.sae import _SERIES_POR_EMPRESA
+    total = {"corrio": True, "nuevas": 0, "actualizadas": 0, "errores": []}
+    for empresa in empresas:
+        series = list(_SERIES_POR_EMPRESA.get(empresa, ()))
+        if not series:
+            continue
+        try:
+            with tenant_session(settings.ESPEJO_SAE_TENANT_ID) as db:
+                r = sincronizar(db, contexto_de_sistema(settings.ESPEJO_SAE_TENANT_ID),
+                                empresa, series)
+            total["nuevas"] += r.get("nuevas", 0)
+            total["actualizadas"] += r.get("actualizadas", 0)
+            total["errores"].extend(r.get("errores", []))
+        except Exception as e:
+            total["errores"].append(f"[{empresa}] {type(e).__name__}: {e}")
+    return total
+
+
+async def reloj(intervalo: int) -> None:
+    """Corre una pasada cada `intervalo` segundos, para siempre.
+
+    Vive en el proceso del API porque uvicorn arranca UNO solo (ver el CMD de
+    la imagen): no hay dos relojes compitiendo. Si algún día se le ponen
+    workers, esto necesita un candado compartido antes que nada.
+
+    La pasada es sincrónica y toca la red, así que va a un hilo: bloquear el
+    bucle de eventos dejaría al API sin contestar durante cada vuelta. Y
+    NUNCA deja morir el bucle: un error se escribe y se sigue, porque un reloj
+    que se detiene en silencio es divergencia callada — la misma lección que
+    dejó el espejo del bot cuando murió a medias y nadie lo supo en 12 horas.
+    """
+    import asyncio
+    import logging
+
+    log = logging.getLogger(__name__)
+    while True:
+        await asyncio.sleep(max(5, int(intervalo)))
+        try:
+            r = await asyncio.to_thread(pasada_programada)
+            if r.get("nuevas") or r.get("actualizadas"):
+                log.info("espejo SAE: %s nuevas, %s actualizadas",
+                         r.get("nuevas"), r.get("actualizadas"))
+            for e in (r.get("errores") or [])[:3]:
+                log.warning("espejo SAE: %s", e)
+        except Exception as e:
+            log.exception("espejo SAE: la pasada falló (%s)", type(e).__name__)
