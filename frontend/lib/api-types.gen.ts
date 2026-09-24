@@ -4331,6 +4331,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sae/facturas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Facturas
+         * @description Las facturas de SAE que mencionan ese texto en su observación, EN VIVO.
+         *
+         *     Es la misma pregunta que el espejo contesta más barato; ésta es para cuando
+         *     la respuesta decide algo y no puede ir media hora atrasada — sobre todo
+         *     cuando la respuesta es «no hay ninguna», que es la que lleva a facturar dos
+         *     veces si llega equivocada.
+         */
+        get: operations["facturas_api_v1_sae_facturas_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sae/salud": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Salud
+         * @description ¿El Facturador puede hablar con SAE? Sin tocar la red si no hay config.
+         */
+        get: operations["salud_api_v1_sae_salud_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sat/claves": {
         parameters: {
             query?: never;
@@ -20451,6 +20496,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoleDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    facturas_api_v1_sae_facturas_get: {
+        parameters: {
+            query: {
+                /** @description Empresa de SAE: 02, 03, 04… */
+                empresa: string;
+                /** @description Texto que busca en la OBSERVACIÓN del documento (la OC) */
+                q: string;
+                limite?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    salud_api_v1_sae_salud_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
