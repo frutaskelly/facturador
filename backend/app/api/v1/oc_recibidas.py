@@ -419,6 +419,68 @@ def _candado_antirreemplazo(db: Session, ctx: AuthContext, payload) -> None:
     )
 
 
+# El folio de EHMO lleva la SEMANA adentro: «VH-37AMA-LUN» es Amatán, lunes,
+# semana 37. Quitarle los dos dígitos deja la identidad de la entrega —hospital
+# y día— sin la semana, que es justo lo que cambió y produjo los dobles.
+_RE_SEMANA_EN_FOLIO = re.compile(r"^([A-Z]{2,3}-)(\d{2})([A-Z]{2,4}-[A-Z]{3})$")
+
+
+def _folio_sin_semana(folio: str) -> Optional[str]:
+    m = _RE_SEMANA_EN_FOLIO.match((folio or "").strip().upper())
+    return f"{m.group(1)}{m.group(3)}" if m else None
+
+
+def _candado_misma_entrega_otra_semana(db: Session, ctx: AuthContext, payload) -> None:
+    """La misma entrega que vuelve a llegar con OTRO número de semana.
+
+    Cuarto candado del Master de EHMO. En la hoja casa por (hospital, día,
+    fecha) y REEMPLAZA; aquí la llave es el `origen_externo`, que lleva el folio
+    adentro — y cuando el folio cambia, las dos llaves dejan de coincidir.
+
+    ESTO NO ES TEÓRICO, ESTÁ MEDIDO (24-sep-2026). De 507 combinaciones de
+    (punto de entrega, fecha) en la bandeja, 487 coinciden entre las dos
+    llaves. Las 20 que no, son casi todas la MISMA entrega con dos folios: el
+    13-sep cambió el corte de semana y las entregas del 14 al 18 llegaron una
+    vez como semana 37 y otra como 38. Resultado: 17 órdenes dobles, 16
+    remisiones duplicadas y una persona cancelándolas a mano, una por una.
+    Este candado es lo único que lo habría evitado.
+
+    POR QUÉ BLOQUEA EN VEZ DE REEMPLAZAR, que es lo que hace la hoja: aquí la
+    orden anterior puede tener ya una remisión —en esos 16 casos la tenía—, y
+    cancelar una remisión no es algo que deba decidir un candado. Se frena y se
+    pregunta.
+
+    POR QUÉ NO BASTA (punto, fecha): dos clientes distintos entregan el mismo
+    día en el mismo punto —COSTALES DIF, con DI-32EHM y DI-32MAF— y frenarlos
+    sería un falso positivo sobre algo normal. Por eso se exige además que los
+    dos folios sean el mismo salvo la semana.
+    """
+    if getattr(payload, "forzar", False):
+        return
+    punto = (getattr(payload, "ubicacion", None) or "").strip()
+    fecha = _fecha_entrega(payload)
+    sin_semana = _folio_sin_semana(payload.folio_externo or "")
+    if not punto or fecha is None or not sin_semana:
+        return
+    for oc in (db.query(OCRecibida)
+               .filter(OCRecibida.tenant_id == ctx.tenant_id,
+                       func.upper(func.trim(OCRecibida.punto_entrega)) == punto.upper(),
+                       OCRecibida.fecha_entrega == fecha,
+                       OCRecibida.origen_externo != payload.origen_externo,
+                       OCRecibida.estado != "DESCARTADA")
+               .all()):
+        if _folio_sin_semana(oc.folio_externo or "") != sin_semana:
+            continue
+        raise HTTPException(
+            status_code=409,
+            detail=(f"Esta entrega ya está registrada como {oc.folio_externo} para {punto} "
+                    f"el {fecha.isoformat()}: es la misma, con otro número de semana. "
+                    + ("La anterior ya tiene remisión, así que hay que decidirla a mano. "
+                       if oc.remision_id else "")
+                    + "Si de verdad son dos entregas distintas, confírmalo."),
+        )
+
+
 def _detectar_cambio(db: Session, oc: OCRecibida, data: dict, ctx: AuthContext) -> None:
     """La orden ya tiene remisión y llegó otra versión de su documento.
 
@@ -528,6 +590,7 @@ def ingesta(
     data = payload.model_dump(mode="json")
     _candado_folio_repetido(db, ctx, payload)
     _candado_antirreemplazo(db, ctx, payload)
+    _candado_misma_entrega_otra_semana(db, ctx, payload)
     existente = (
         db.query(OCRecibida)
         .filter(OCRecibida.origen_externo == payload.origen_externo)

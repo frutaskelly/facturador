@@ -274,6 +274,50 @@ def _lineas(n, desde=1):
             for i in range(desde, desde + n)]
 
 
+def test_la_misma_entrega_con_otro_numero_de_semana_no_se_registra_dos_veces(client, env, auth_as):
+    """El 13-sep-2026 cambió el corte de semana y las entregas del 14 al 18
+    llegaron una vez como semana 37 y otra como 38. Medido el 24-sep sobre la
+    bandeja real: 17 órdenes dobles, 16 remisiones duplicadas, y una persona
+    cancelándolas a mano una por una.
+
+    La hoja lo evitaba porque casa por (hospital, día, fecha); aquí la llave
+    lleva el folio adentro, y cuando el folio cambia las dos llaves dejan de
+    coincidir. Este candado cierra esa diferencia.
+    """
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    comun = dict(ubicacion="AMATAN", fecha_entrega="2026-09-14", lineas=_lineas(21))
+
+    r1 = client.post("/api/v1/oc-recibidas", headers=h,
+                     json=_oc(folio_externo="VH-37AMA-LUN", **comun))
+    assert r1.status_code == 201, r1.text
+
+    r2 = client.post("/api/v1/oc-recibidas", headers=h,
+                     json=_oc(folio_externo="VH-38AMA-LUN", **comun))
+    assert r2.status_code == 409, r2.text
+    assert "VH-37AMA-LUN" in r2.json()["detail"]
+
+    # con `forzar` entra: si de verdad son dos entregas, una persona lo dice
+    r3 = client.post("/api/v1/oc-recibidas", headers=h,
+                     json=_oc(folio_externo="VH-38AMA-LUN", forzar=True, **comun))
+    assert r3.status_code == 201, r3.text
+
+
+def test_dos_clientes_en_el_mismo_punto_y_dia_no_se_frenan(client, env, auth_as):
+    """COSTALES DIF recibe el mismo día de dos clientes distintos —DI-32EHM y
+    DI-32MAF— y frenarlos sería un falso positivo sobre algo normal. Por eso el
+    candado exige que los dos folios sean el MISMO salvo la semana, y no solo
+    que coincidan punto y fecha."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    comun = dict(ubicacion="COSTALES DIF", fecha_entrega="2026-08-14", lineas=_lineas(3))
+    assert client.post("/api/v1/oc-recibidas", headers=h,
+                       json=_oc(folio_externo="DI-32EHM", **comun)).status_code == 201
+    r = client.post("/api/v1/oc-recibidas", headers=h,
+                    json=_oc(folio_externo="DI-32MAF", **comun))
+    assert r.status_code == 201, r.text
+
+
 def test_un_reenvio_mutilado_no_reemplaza_la_entrega_completa(client, env, auth_as):
     """Así se perdió el pedido de OTOMÍ el 17-ago-2026: 27 renglones
     reemplazados por 4. Un reenvío que trae mucho menos de lo ya registrado casi
