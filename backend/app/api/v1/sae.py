@@ -11,10 +11,12 @@ de su cola.
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, require_permission
-from ...services import sae_lectura
+from ...core.rbac import get_tenant_db
+from ...services import espejo_sae, sae_lectura
 
 router = APIRouter(prefix="/sae", tags=["sae"])
 
@@ -103,3 +105,43 @@ def partidas(
         raise HTTPException(status_code=502, detail=f"SAE no contestó: {type(e).__name__}: {e}")
     return {"ok": True, "empresa": empresa, "documentos": len(lista),
             "total": len(filas), "partidas": filas, "fuente": "SAE_EN_VIVO"}
+
+
+# Las series de SAE por empresa, las mismas con las que el bot espeja hoy.
+_SERIES_POR_EMPRESA = {
+    "02": ("ZHGO", "ZEHMOHOS", "ZMAFAN", "ZEHMOFAC", "ZECA"),
+    "03": ("ZEHMOVH",),
+    "04": ("ZEHMOTG", "ZSUR", "ZDIF", "ZBPT", "ZCH5C", "ZCS", "MIN5C", "ZVIDA"),
+}
+
+
+@router.post("/espejo/jalar")
+def jalar_espejo(
+    empresa: str = Query(..., max_length=4),
+    series: Optional[str] = Query(default=None,
+                                  description="Series separadas por coma; por omisión las de esa empresa"),
+    dias: int = Query(default=3, ge=0, le=60,
+                      description="Ventana para revisar cancelaciones de lo ya reflejado"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_LEER)),
+):
+    """El Facturador se trae de SAE lo que le falta, sin pasar por el bot.
+
+    La marca de agua es el propio espejo: se pide a SAE solo lo posterior al
+    folio más alto que ya se tiene de cada serie, así que la pasada es barata
+    aunque corra seguido. Aparte se revisa una ventana corta por si algo se
+    canceló, que es el cambio que la marca de agua no puede ver.
+    """
+    if not sae_lectura.disponible():
+        raise HTTPException(status_code=503, detail="el Facturador no tiene acceso a SAE")
+    lista = [s.strip() for s in (series or "").split(",") if s.strip()]
+    if not lista:
+        lista = list(_SERIES_POR_EMPRESA.get(empresa, ()))
+    if not lista:
+        raise HTTPException(status_code=422, detail=f"no sé qué series tiene la empresa {empresa}")
+    try:
+        return {"ok": True, **espejo_sae.sincronizar(db, ctx, empresa, lista, dias_cancelaciones=dias)}
+    except sae_lectura.SAENoDisponible as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"la pasada del espejo falló: {type(e).__name__}: {e}")

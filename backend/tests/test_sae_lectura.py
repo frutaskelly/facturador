@@ -88,3 +88,42 @@ def test_las_rutas_estan_registradas_y_pedidas_con_permiso(client):
     assert client.get("/api/v1/sae/salud").status_code in (401, 403)
     assert client.get("/api/v1/sae/facturas",
                       params={"empresa": "03", "q": "VH-36PAL-SAB"}).status_code in (401, 403)
+
+
+def test_la_marca_de_agua_pide_solo_lo_nuevo(monkeypatch):
+    """El espejo es su propia marca de agua: se piden a SAE los folios por
+    encima del más alto que ya se tiene. Sin tabla de estado que se pueda
+    desincronizar — y si alguien borra una factura del espejo, la siguiente
+    pasada la vuelve a traer sola."""
+    from app.services import espejo_sae
+    visto = {}
+
+    def _fake(sql, params=(), timeout=None):
+        visto["sql"], visto["params"] = sql, params
+        return []
+
+    monkeypatch.setattr(sae_lectura, "consultar", _fake)
+    monkeypatch.setattr(sae_lectura, "disponible", lambda: True)
+    espejo_sae.leer_encabezados("03", "ZEHMOVH", desde_folio=1442)
+    assert "F.FOLIO > %s" in visto["sql"]
+    assert visto["params"] == ("ZEHMOVH", 1442)
+    # sin marca, se pide todo lo de la serie
+    espejo_sae.leer_encabezados("03", "ZEHMOVH")
+    assert "F.FOLIO >" not in visto["sql"] and visto["params"] == ("ZEHMOVH",)
+
+
+def test_una_factura_sin_uuid_no_se_refleja_como_timbrada(monkeypatch):
+    """El documento existe en SAE pero el PAC no lo confirmó: eso es BORRADOR.
+    El backend además rechaza TIMBRADA sin uuid_fiscal."""
+    from app.services import espejo_sae
+    fila = {"cve_doc": "ZEHMOVH 9", "serie": "ZEHMOVH", "folio": 9, "cliente_sae": "6",
+            "fecha": "2026-09-24 00:00:00", "subtotal": "100", "total": "100",
+            "iva": "0", "ieps": "0", "status": "", "uuid": "", "fecha_cancela": "",
+            "observaciones": "OC X", "cancelacion_msj": "", "uuid_sustitucion": ""}
+    monkeypatch.setattr(sae_lectura, "consultar", lambda *a, **k: [fila])
+    monkeypatch.setattr(sae_lectura, "disponible", lambda: True)
+    assert espejo_sae.leer_encabezados("03", "ZEHMOVH")[0]["estado"] == "BORRADOR"
+    fila["uuid"] = "u-1"
+    assert espejo_sae.leer_encabezados("03", "ZEHMOVH")[0]["estado"] == "TIMBRADA"
+    fila["fecha_cancela"] = "2026-09-24"
+    assert espejo_sae.leer_encabezados("03", "ZEHMOVH")[0]["estado"] == "CANCELADA"
