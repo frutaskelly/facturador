@@ -38956,6 +38956,101 @@
     ]
    }
   },
+  "/api/v1/sae/espejo/jalar": {
+   "post": {
+    "description": "El Facturador se trae de SAE lo que le falta, sin pasar por el bot.\n\nLa marca de agua es el propio espejo: se pide a SAE solo lo posterior al\nfolio más alto que ya se tiene de cada serie, así que la pasada es barata\naunque corra seguido. Aparte se revisa una ventana corta por si algo se\ncanceló, que es el cambio que la marca de agua no puede ver.",
+    "operationId": "jalar_espejo_api_v1_sae_espejo_jalar_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "empresa",
+      "required": true,
+      "schema": {
+       "maxLength": 4,
+       "title": "Empresa",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Series separadas por coma; por omisión las de esa empresa",
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Series separadas por coma; por omisión las de esa empresa",
+       "title": "Series"
+      }
+     },
+     {
+      "description": "Ventana para revisar cancelaciones de lo ya reflejado",
+      "in": "query",
+      "name": "dias",
+      "required": false,
+      "schema": {
+       "default": 3,
+       "description": "Ventana para revisar cancelaciones de lo ya reflejado",
+       "maximum": 60,
+       "minimum": 0,
+       "title": "Dias",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Jalar Espejo",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
   "/api/v1/sae/facturas": {
    "get": {
     "description": "Las facturas de SAE que mencionan ese texto en su observación, EN VIVO.\n\nEs la misma pregunta que el espejo contesta más barato; ésta es para cuando\nla respuesta decide algo y no puede ir media hora atrasada — sobre todo\ncuando la respuesta es «no hay ninguna», que es la que lleva a facturar dos\nveces si llega equivocada.",

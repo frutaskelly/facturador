@@ -4331,6 +4331,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sae/espejo/jalar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Jalar Espejo
+         * @description El Facturador se trae de SAE lo que le falta, sin pasar por el bot.
+         *
+         *     La marca de agua es el propio espejo: se pide a SAE solo lo posterior al
+         *     folio más alto que ya se tiene de cada serie, así que la pasada es barata
+         *     aunque corra seguido. Aparte se revisa una ventana corta por si algo se
+         *     canceló, que es el cambio que la marca de agua no puede ver.
+         */
+        post: operations["jalar_espejo_api_v1_sae_espejo_jalar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sae/facturas": {
         parameters: {
             query?: never;
@@ -20520,6 +20545,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoleDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    jalar_espejo_api_v1_sae_espejo_jalar_post: {
+        parameters: {
+            query: {
+                empresa: string;
+                /** @description Series separadas por coma; por omisión las de esa empresa */
+                series?: string | null;
+                /** @description Ventana para revisar cancelaciones de lo ya reflejado */
+                dias?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
