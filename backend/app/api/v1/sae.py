@@ -39,8 +39,12 @@ def salud(ctx: AuthContext = Depends(require_permission(_LEER))):
 @router.get("/facturas")
 def facturas(
     empresa: str = Query(..., max_length=4, description="Empresa de SAE: 02, 03, 04…"),
-    q: str = Query(..., min_length=3, max_length=120,
-                   description="Texto que busca en la OBSERVACIÓN del documento (la OC)"),
+    q: Optional[str] = Query(default=None, min_length=3, max_length=120,
+                             description="Texto que busca en la OBSERVACIÓN del documento (la OC)"),
+    doc: Optional[str] = Query(default=None, max_length=40,
+                               description="CVE_DOC exacto («ZEHMOVH 1442»), sin importar los espacios"),
+    tipo: str = Query(default="factura", pattern="^(factura|pedido)$",
+                      description="«factura» (FACTF) o «pedido» (FACTP)"),
     limite: int = Query(default=50, ge=1, le=200),
     ctx: AuthContext = Depends(require_permission(_LEER)),
 ):
@@ -51,18 +55,51 @@ def facturas(
     cuando la respuesta es «no hay ninguna», que es la que lleva a facturar dos
     veces si llega equivocada.
     """
+    if not (q or doc):
+        raise HTTPException(status_code=422, detail="hace falta `q` (la observación) o `doc`")
     if not sae_lectura.disponible():
         raise HTTPException(
             status_code=503,
             detail="el Facturador no tiene acceso a SAE; pregunta al espejo o revisa la configuración",
         )
     try:
-        filas = sae_lectura.facturas_de(empresa, q.strip(), limite=limite)
+        if doc:
+            uno = sae_lectura.documento_por_clave(empresa, doc, tipo=tipo)
+            filas = [uno] if uno else []
+        else:
+            filas = sae_lectura.documentos_de(empresa, q.strip(), tipo=tipo, limite=limite)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except sae_lectura.SAENoDisponible as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"SAE no contestó: {type(e).__name__}: {e}")
-    return {"ok": True, "empresa": empresa, "q": q.strip(),
-            "total": len(filas), "facturas": filas, "fuente": "SAE_EN_VIVO"}
+    return {"ok": True, "empresa": empresa, "q": (q or "").strip() or None, "doc": doc,
+            "tipo": tipo, "total": len(filas), "facturas": filas, "fuente": "SAE_EN_VIVO"}
+
+
+@router.get("/partidas")
+def partidas(
+    empresa: str = Query(..., max_length=4),
+    docs: str = Query(..., max_length=4000,
+                      description="CVE_DOC separados por coma («ZEHMOVH 1442,ZEHMOVH 1443»)"),
+    ctx: AuthContext = Depends(require_permission(_LEER)),
+):
+    """Las partidas de esas facturas: clave, cantidad, precio e importe.
+
+    Por lote a propósito: con ochenta documentos, ir de a uno tarda minutos.
+    """
+    if not sae_lectura.disponible():
+        raise HTTPException(status_code=503,
+                            detail="el Facturador no tiene acceso a SAE")
+    lista = [d.strip() for d in docs.split(",") if d.strip()]
+    try:
+        filas = sae_lectura.partidas_de(empresa, lista)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except sae_lectura.SAENoDisponible as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"SAE no contestó: {type(e).__name__}: {e}")
+    return {"ok": True, "empresa": empresa, "documentos": len(lista),
+            "total": len(filas), "partidas": filas, "fuente": "SAE_EN_VIVO"}

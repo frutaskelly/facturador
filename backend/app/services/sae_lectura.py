@@ -96,46 +96,125 @@ def consultar(sql: str, parametros: tuple = (), timeout: Optional[int] = None) -
         conexion.close()
 
 
-def facturas_de(empresa: str, texto: str, limite: int = 50) -> list[dict[str, Any]]:
-    """Las facturas VIGENTES de SAE cuya OBSERVACIÓN menciona `texto`.
+_TABLA_POR_TIPO = {"factura": "FACTF", "pedido": "FACTP"}
 
-    Es la consulta que el bot hacía por su cuenta para decidir si una entrega
-    ya está facturada. Vigente = timbrada de verdad (tiene UUID) y sin la
-    cancelación pedida al SAT; quien decide es el SAT y no el texto de la
-    observación, que ya mintió en los dos sentidos (21-ago-2026).
+
+def documentos_de(empresa: str, texto: str, tipo: str = "factura",
+                  limite: int = 50) -> list[dict[str, Any]]:
+    """Los documentos VIGENTES de SAE cuya OBSERVACION menciona `texto`.
+
+    `tipo` decide la tabla: las facturas viven en FACTF y los pedidos en FACTP,
+    y el bot pregunta por los dos cuando va a mover una entrega de semana —el
+    folio viaja dentro de la observacion de ambos—.
+
+    Vigente = timbrada de verdad (tiene UUID) y sin la cancelacion pedida al
+    SAT. Quien decide es el SAT y no el texto de la observacion, que ya mintio
+    en los dos sentidos (21-ago-2026). Un PEDIDO no se timbra, asi que ahi la
+    vigencia es solo su STATUS.
     """
-    factf, obs, cfdi = tabla("FACTF", empresa), tabla("OBS_DOCF", empresa), tabla("CFDI", empresa)
+    base = _TABLA_POR_TIPO.get(str(tipo or "").lower())
+    if not base:
+        raise ValueError(f"tipo de documento invalido: {tipo!r}")
+    doc_t, obs = tabla(base, empresa), tabla("OBS_DOCF", empresa)
+    if base == "FACTF":
+        cfdi = tabla("CFDI", empresa)
+        extra_sel = ("ISNULL(C.UUID,'') AS uuid, "
+                     "LEFT(ISNULL(CONVERT(varchar(30), C.FECHA_CERT), ''), 19) AS fecha_timbrado, "
+                     "LEFT(ISNULL(CONVERT(varchar(30), C.FECHA_CANCELA), ''), 19) AS fecha_cancelacion, "
+                     "RTRIM(ISNULL(C.MSJ_CANC,'')) AS cancelacion_msj, ")
+        extra_join = f"LEFT JOIN {cfdi} C ON C.CVE_DOC = F.CVE_DOC AND C.TIPO_DOC = 'F' "
+    else:
+        extra_sel = ("'' AS uuid, '' AS fecha_timbrado, '' AS fecha_cancelacion, "
+                     "'' AS cancelacion_msj, ")
+        extra_join = ""
     filas = consultar(
         f"SELECT TOP {int(limite)} RTRIM(F.CVE_DOC) AS doc, RTRIM(F.STATUS) AS status, "
         "CONVERT(varchar(10), F.FECHA_DOC, 23) AS fecha, "
         "CAST(CAST(ISNULL(F.IMPORTE,0) AS decimal(18,2)) AS varchar(30)) AS total, "
         "CAST(CAST(ISNULL(F.CAN_TOT,0) AS decimal(18,2)) AS varchar(30)) AS subtotal, "
-        "ISNULL(C.UUID,'') AS uuid, "
-        "LEFT(ISNULL(CONVERT(varchar(30), C.FECHA_CERT), ''), 19) AS fecha_timbrado, "
-        "LEFT(ISNULL(CONVERT(varchar(30), C.FECHA_CANCELA), ''), 19) AS fecha_cancelacion, "
-        "RTRIM(ISNULL(C.MSJ_CANC,'')) AS cancelacion_msj, "
+        + extra_sel +
         "LEFT(CAST(O.STR_OBS AS varchar(250)), 250) AS observaciones "
-        f"FROM {factf} F JOIN {obs} O ON O.CVE_OBS = F.CVE_OBS "
-        f"LEFT JOIN {cfdi} C ON C.CVE_DOC = F.CVE_DOC AND C.TIPO_DOC = 'F' "
+        f"FROM {doc_t} F JOIN {obs} O ON O.CVE_OBS = F.CVE_OBS " + extra_join +
         "WHERE CAST(O.STR_OBS AS varchar(250)) LIKE %s "
         "ORDER BY F.FECHA_DOC DESC",
         (f"%{texto}%",),
     )
-    salida = []
-    for f in filas:
-        cancelada = bool((f.get("fecha_cancelacion") or "").strip()) or f.get("status") == "C"
-        doc = " ".join(str(f.get("doc") or "").split())
-        serie, _, folio = doc.rpartition(" ")
-        salida.append({
-            "doc": doc, "serie": serie or None,
-            "folio": int(folio) if folio.isdigit() else None,
-            "estado": "CANCELADA" if cancelada else "TIMBRADA",
-            "total": float(f.get("total") or 0), "subtotal": float(f.get("subtotal") or 0),
-            "uuid": (f.get("uuid") or "").strip() or None,
-            "fecha": f.get("fecha"), "fecha_timbrado": (f.get("fecha_timbrado") or "").strip() or None,
-            "fecha_cancelacion": (f.get("fecha_cancelacion") or "").strip() or None,
-            "cancelacion_msj": (f.get("cancelacion_msj") or "").strip() or None,
-            "observaciones": (f.get("observaciones") or "").strip(),
-            "timbrada": bool((f.get("uuid") or "").strip()),
-        })
-    return salida
+    return [_documento(f, tipo) for f in filas]
+
+
+def documento_por_clave(empresa: str, doc: str, tipo: str = "factura") -> Optional[dict[str, Any]]:
+    """Un documento por su CVE_DOC, que en SAE viene con relleno de espacios.
+
+    Lo usa la verificacion de una escritura: «el pedido que acabo de crear,
+    ¿esta ahi?». Se compara sin espacios porque 'ZMAFAN       166' y
+    'ZMAFAN 166' son el mismo documento escrito distinto.
+    """
+    base = _TABLA_POR_TIPO.get(str(tipo or "").lower())
+    if not base:
+        raise ValueError(f"tipo de documento invalido: {tipo!r}")
+    doc_t = tabla(base, empresa)
+    filas = consultar(
+        "SELECT TOP 1 RTRIM(F.CVE_DOC) AS doc, RTRIM(F.STATUS) AS status, "
+        "CONVERT(varchar(10), F.FECHA_DOC, 23) AS fecha, "
+        "CAST(CAST(ISNULL(F.IMPORTE,0) AS decimal(18,2)) AS varchar(30)) AS total, "
+        "CAST(CAST(ISNULL(F.CAN_TOT,0) AS decimal(18,2)) AS varchar(30)) AS subtotal, "
+        "'' AS uuid, '' AS fecha_timbrado, '' AS fecha_cancelacion, '' AS cancelacion_msj, "
+        "'' AS observaciones "
+        f"FROM {doc_t} F WHERE REPLACE(RTRIM(F.CVE_DOC), ' ', '') = %s",
+        (str(doc or "").replace(" ", ""),),
+    )
+    return _documento(filas[0], tipo) if filas else None
+
+
+def partidas_de(empresa: str, docs: list[str], limite: int = 2000) -> list[dict[str, Any]]:
+    """Las partidas de esos documentos: clave, cantidad y su documento.
+
+    Se pide por lote y no una por una: con ochenta documentos, ir de a uno
+    tarda minutos. La lista de documentos entra como parametros, uno por
+    marcador, nunca concatenada.
+    """
+    claves = [str(d or "").strip() for d in (docs or []) if str(d or "").strip()]
+    if not claves:
+        return []
+    if len(claves) > 200:
+        raise ValueError("demasiados documentos en una sola consulta (maximo 200)")
+    par = tabla("PAR_FACTF", empresa)
+    marcadores = ", ".join(["%s"] * len(claves))
+    filas = consultar(
+        f"SELECT TOP {int(limite)} RTRIM(P.CVE_DOC) AS doc, RTRIM(P.CVE_ART) AS clave, "
+        "CAST(CAST(ISNULL(P.CANT,0) AS decimal(18,3)) AS varchar(30)) AS cantidad, "
+        "CAST(CAST(ISNULL(P.PREC,0) AS decimal(18,4)) AS varchar(30)) AS precio, "
+        "CAST(CAST(ISNULL(P.TOT_PARTIDA,0) AS decimal(18,2)) AS varchar(30)) AS importe "
+        f"FROM {par} P WHERE REPLACE(RTRIM(P.CVE_DOC), ' ', '') IN ({marcadores}) "
+        "ORDER BY P.CVE_DOC, P.NUM_PAR",
+        tuple(c.replace(" ", "") for c in claves),
+    )
+    return [{"doc": " ".join(str(f.get("doc") or "").split()),
+             "clave": (f.get("clave") or "").strip(),
+             "cantidad": float(f.get("cantidad") or 0),
+             "precio": float(f.get("precio") or 0),
+             "importe": float(f.get("importe") or 0)} for f in filas]
+
+
+def _documento(f: dict, tipo: str) -> dict[str, Any]:
+    cancelada = bool((f.get("fecha_cancelacion") or "").strip()) or f.get("status") == "C"
+    doc = " ".join(str(f.get("doc") or "").split())
+    serie, _, folio = doc.rpartition(" ")
+    return {
+        "doc": doc, "serie": serie or None, "tipo": tipo,
+        "folio": int(folio) if folio.isdigit() else None,
+        "estado": "CANCELADA" if cancelada else "TIMBRADA",
+        "total": float(f.get("total") or 0), "subtotal": float(f.get("subtotal") or 0),
+        "uuid": (f.get("uuid") or "").strip() or None,
+        "fecha": f.get("fecha"),
+        "fecha_timbrado": (f.get("fecha_timbrado") or "").strip() or None,
+        "fecha_cancelacion": (f.get("fecha_cancelacion") or "").strip() or None,
+        "cancelacion_msj": (f.get("cancelacion_msj") or "").strip() or None,
+        "observaciones": (f.get("observaciones") or "").strip(),
+        "timbrada": bool((f.get("uuid") or "").strip()),
+    }
+
+
+def facturas_de(empresa: str, texto: str, limite: int = 50) -> list[dict[str, Any]]:
+    """Atajo historico: las FACTURAS cuya observacion menciona `texto`."""
+    return documentos_de(empresa, texto, tipo="factura", limite=limite)

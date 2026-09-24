@@ -43,6 +43,39 @@ def test_sin_configuracion_no_hay_puerta(monkeypatch):
         sae_lectura.consultar("SELECT 1")
 
 
+def test_el_tipo_de_documento_decide_la_tabla(monkeypatch):
+    """Las facturas viven en FACTF y los pedidos en FACTP. El bot pregunta por
+    los dos cuando va a mover una entrega de semana: el folio viaja dentro de
+    la observación de ambos."""
+    vistas = []
+    monkeypatch.setattr(sae_lectura, "consultar",
+                        lambda sql, params=(), timeout=None: vistas.append(sql) or [])
+    monkeypatch.setattr(sae_lectura, "disponible", lambda: True)
+    sae_lectura.documentos_de("03", "VH-36PAL-SAB", tipo="factura")
+    sae_lectura.documentos_de("03", "VH-36PAL-SAB", tipo="pedido")
+    assert "FACTF03" in vistas[0] and "CFDI03" in vistas[0]      # la factura se timbra
+    assert "FACTP03" in vistas[1] and "CFDI03" not in vistas[1]  # el pedido no
+    with pytest.raises(ValueError):
+        sae_lectura.documentos_de("03", "x", tipo="remision")
+
+
+def test_las_partidas_van_por_parametro_y_con_tope(monkeypatch):
+    """La lista de documentos entra como parámetros, uno por marcador, nunca
+    concatenada — y con tope, porque un IN gigantesco tumba la consulta."""
+    visto = {}
+    def _fake(sql, params=(), timeout=None):
+        visto["sql"], visto["params"] = sql, params
+        return []
+    monkeypatch.setattr(sae_lectura, "consultar", _fake)
+    monkeypatch.setattr(sae_lectura, "disponible", lambda: True)
+    sae_lectura.partidas_de("03", ["ZEHMOVH 1442", "ZEHMOVH 1443"])
+    assert visto["sql"].count("%s") == 2
+    assert visto["params"] == ("ZEHMOVH1442", "ZEHMOVH1443")   # sin el relleno de SAE
+    assert sae_lectura.partidas_de("03", []) == []
+    with pytest.raises(ValueError):
+        sae_lectura.partidas_de("03", [f"D{i}" for i in range(201)])
+
+
 def test_las_rutas_estan_registradas_y_pedidas_con_permiso(client):
     """La puerta existe y cuelga del prefijo de siempre. Las pruebas de extremo
     a extremo de estas rutas viven con las del espejo, que ya montan el tenant;
@@ -50,6 +83,7 @@ def test_las_rutas_estan_registradas_y_pedidas_con_permiso(client):
     from app.main import app
     rutas = {r.path for r in app.routes}
     assert "/api/v1/sae/salud" in rutas and "/api/v1/sae/facturas" in rutas
+    assert "/api/v1/sae/partidas" in rutas
     # sin credencial no se lee SAE
     assert client.get("/api/v1/sae/salud").status_code in (401, 403)
     assert client.get("/api/v1/sae/facturas",
