@@ -8045,6 +8045,8 @@ export interface components {
             desc_pct?: number | string | null;
             /** Descripcion */
             descripcion: string;
+            /** Lote */
+            lote?: string | null;
             /** Notas */
             notas?: string | null;
             /** Precio */

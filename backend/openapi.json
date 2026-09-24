@@ -8880,6 +8880,18 @@
       "title": "Descripcion",
       "type": "string"
      },
+     "lote": {
+      "anyOf": [
+       {
+        "maxLength": 30,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lote"
+     },
      "notas": {
       "anyOf": [
        {
