@@ -27,6 +27,16 @@ class LineaOCRecibidaIn(BaseModel):
     # quedan byte-idénticos a los de antes y la detección de cambios no despierta
     # incidencias falsas sobre las órdenes ya guardadas.
     desc_pct: Optional[Decimal] = Field(default=None, ge=0, le=100)
+    # LOTE (23-sep-2026), el hermano del descuento: en los Masters de EHMO esta
+    # celda dice EXTRA o REPOSICIÓN, y de ella depende el dinero — una reposición
+    # se surte y NO se cobra (regla del dueño, 17-ago-2026), así que el bot pone
+    # el precio en cero al dibujar la remisión. Vivía SOLO en la hoja: sin este
+    # campo, archivar el Master hacía que una reposición se empezara a cobrar.
+    # No entra en la comparación de `oc_cambios` todavía, a propósito: primero
+    # que llegue el dato, y decidir después si un lote que cambia merece abrir
+    # incidencia. El bot lo manda solo cuando la celda trae algo, así que los
+    # payloads de siempre quedan byte-idénticos.
+    lote: Optional[str] = Field(default=None, max_length=30)
 
 
 class OCRecibidaIn(BaseModel):
