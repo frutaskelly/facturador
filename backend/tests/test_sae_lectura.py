@@ -176,3 +176,41 @@ def test_no_se_reescribe_una_factura_cuyo_saldo_no_cambio():
     assert _saldo_cambio(500.0, 499.99) is True        # un centavo sí
     assert _saldo_cambio(None, 500.0) is True          # nunca tuvo saldo: se pone
     assert _saldo_cambio(500.0, None) is False         # sin dato no se pisa
+
+
+def test_el_cuadre_encuentra_el_hueco_y_no_repara_de_mas(monkeypatch):
+    """La marca de agua no ve un hueco por debajo de ella: una factura perdida
+    queda congelada para siempre. Contar contra contar la encuentra.
+
+    Y repara HASTA el tope: si faltan trescientas eso no es un hueco, es que
+    algo se rompió, y traerlas a escondidas taparía el problema.
+    """
+    from app.services import espejo_sae
+
+    class _Q:
+        def __init__(self, folios): self._f = folios
+        def filter(self, *a, **k): return self
+        def all(self): return [type("F", (), {"folio": n})() for n in self._f]
+
+    class _DB:
+        def __init__(self, folios): self._f = folios
+        def query(self, *a, **k): return _Q(self._f)
+
+    monkeypatch.setattr(espejo_sae, "folios_en_sae", lambda e, s: {1, 2, 3, 4, 5})
+    traidos = []
+    monkeypatch.setattr(espejo_sae, "_traer_folios",
+                        lambda db, ctx, e, s, fol, err: traidos.extend(fol) or len(fol))
+
+    r = espejo_sae.cuadre(_DB({1, 2, 5}), None, "03", ["ZEHMOVH"])
+    assert r["faltantes"] == 2 and r["series"]["ZEHMOVH"]["folios"] == [3, 4]
+    assert traidos == [3, 4] and r["reparadas"] == 2
+
+    # con el tope en 1, dos faltantes ya no se reparan solas: se reportan
+    traidos.clear()
+    r2 = espejo_sae.cuadre(_DB({1, 2, 5}), None, "03", ["ZEHMOVH"], tope=1)
+    assert r2["reparadas"] == 0 and traidos == []
+    assert any("algo se rompió" in e for e in r2["errores"]), r2["errores"]
+
+    # sin huecos, ni reporta ni repara
+    r3 = espejo_sae.cuadre(_DB({1, 2, 3, 4, 5}), None, "03", ["ZEHMOVH"])
+    assert r3["faltantes"] == 0 and r3["errores"] == []

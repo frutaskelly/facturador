@@ -4331,6 +4331,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sae/espejo/cuadre": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cuadrar Espejo
+         * @description ¿El espejo tiene TODAS las facturas que SAE tiene? Cuenta contra cuenta.
+         *
+         *     La marca de agua pide lo posterior al folio más alto, así que **no puede
+         *     ver un hueco por debajo**: una factura que se haya perdido queda congelada
+         *     para siempre. Esto la encuentra contando, y trae las que falten — hasta el
+         *     tope, porque si faltan trescientas eso no es un hueco, es que algo se
+         *     rompió, y repararlo a escondidas taparía el problema.
+         */
+        post: operations["cuadrar_espejo_api_v1_sae_espejo_cuadre_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sae/espejo/jalar": {
         parameters: {
             query?: never;
@@ -20545,6 +20571,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoleDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cuadrar_espejo_api_v1_sae_espejo_cuadre_post: {
+        parameters: {
+            query: {
+                empresa: string;
+                series?: string | null;
+                /** @description Trae las que falten, hasta el tope */
+                reparar?: boolean;
+                /** @description Más faltantes que esto no se reparan solas */
+                tope?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

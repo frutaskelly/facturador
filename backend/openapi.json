@@ -38956,6 +38956,111 @@
     ]
    }
   },
+  "/api/v1/sae/espejo/cuadre": {
+   "post": {
+    "description": "¿El espejo tiene TODAS las facturas que SAE tiene? Cuenta contra cuenta.\n\nLa marca de agua pide lo posterior al folio más alto, así que **no puede\nver un hueco por debajo**: una factura que se haya perdido queda congelada\npara siempre. Esto la encuentra contando, y trae las que falten — hasta el\ntope, porque si faltan trescientas eso no es un hueco, es que algo se\nrompió, y repararlo a escondidas taparía el problema.",
+    "operationId": "cuadrar_espejo_api_v1_sae_espejo_cuadre_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "empresa",
+      "required": true,
+      "schema": {
+       "maxLength": 4,
+       "title": "Empresa",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Series"
+      }
+     },
+     {
+      "description": "Trae las que falten, hasta el tope",
+      "in": "query",
+      "name": "reparar",
+      "required": false,
+      "schema": {
+       "default": true,
+       "description": "Trae las que falten, hasta el tope",
+       "title": "Reparar",
+       "type": "boolean"
+      }
+     },
+     {
+      "description": "Más faltantes que esto no se reparan solas",
+      "in": "query",
+      "name": "tope",
+      "required": false,
+      "schema": {
+       "default": 25,
+       "description": "Más faltantes que esto no se reparan solas",
+       "maximum": 200,
+       "minimum": 0,
+       "title": "Tope",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cuadrar Espejo",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
   "/api/v1/sae/espejo/jalar": {
    "post": {
     "description": "El Facturador se trae de SAE lo que le falta, sin pasar por el bot.\n\nLa marca de agua es el propio espejo: se pide a SAE solo lo posterior al\nfolio más alto que ya se tiene de cada serie, así que la pasada es barata\naunque corra seguido. Aparte se revisa una ventana corta por si algo se\ncanceló, que es el cambio que la marca de agua no puede ver.",
