@@ -159,3 +159,20 @@ def test_el_saldo_sale_del_total_menos_lo_abonado(monkeypatch):
         "observaciones": None, "subtotal": "1500", "total": "1500",
         "iva": "0", "ieps": "0", "uuid_sustitucion": None}, [], saldo=500.0)
     assert float(p.saldo_insoluto) == 500.0
+
+
+def test_no_se_reescribe_una_factura_cuyo_saldo_no_cambio():
+    """Tener un abono reciente no es razón para volver a depositar la factura.
+
+    Con «tiene abono» como único criterio, cada pasada reescribía las mismas:
+    a 30 segundos son 2,880 escrituras al día para no cambiar nada, con el
+    backend rehaciendo partidas y bloqueando remisiones en cada una. Un
+    centavo de diferencia sí; el mismo número, no. Y `None` es «CxC no reporta
+    abonos», que no es cero y no pisa lo guardado.
+    """
+    from app.services.espejo_sae import _saldo_cambio
+    assert _saldo_cambio(500.0, 500.0) is False
+    assert _saldo_cambio(500.0, 500.004) is False      # ruido de redondeo
+    assert _saldo_cambio(500.0, 499.99) is True        # un centavo sí
+    assert _saldo_cambio(None, 500.0) is True          # nunca tuvo saldo: se pone
+    assert _saldo_cambio(500.0, None) is False         # sin dato no se pisa
