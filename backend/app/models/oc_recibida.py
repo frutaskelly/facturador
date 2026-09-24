@@ -15,7 +15,8 @@ Ciclo de vida:
 la misma orden, así un reintento por timeout actualiza en vez de duplicar. Sin
 esto una caída de red a las 3am dejaba dos remisiones y un folio quemado.
 """
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text, UniqueConstraint, text
+from sqlalchemy import (Boolean, Column, Date, DateTime, ForeignKey, String, Text,
+                        UniqueConstraint, text)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
@@ -40,6 +41,12 @@ class OCRecibida(Base, TimestampMixin):
     remitente = Column(String(254))
     archivo_nombre = Column(String(254))
     archivo_url = Column(Text)
+    # LA FECHA DE ENTREGA, COMO COLUMNA (24-sep-2026). Ya viajaba en el payload,
+    # pero el candado de folio repetido la compara en CADA alta y hacerlo sobre
+    # el JSONB es recorrer la tabla entera. Puede ser NULL: en una orden vieja o
+    # en un documento sin fecha legible, y el candado trata NULL como «no sé» y
+    # deja pasar — un candado que bloquea por falta de dato bloquea lo bueno.
+    fecha_entrega = Column(Date)
     recibida_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=False)
     estado = Column(String(16), nullable=False, server_default="PENDIENTE")
     motivo = Column(Text)

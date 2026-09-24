@@ -269,6 +269,59 @@ def test_el_lote_de_la_partida_se_guarda(client, env, auth_as):
     assert lineas[1]["lote"] == "REPOSICION"
 
 
+def test_un_folio_repetido_con_otra_fecha_no_pisa_la_orden_anterior(client, env, auth_as):
+    """El primero de los cinco candados del Master de EHMO, mudado aquí.
+
+    El folio de EHMO es determinista (hospital + semana + día), así que dos
+    entregas distintas pueden generar el mismo. En la hoja ese choque ABORTA;
+    aquí, sin candado, la ingesta no duplicaba: SOBRESCRIBÍA la orden anterior,
+    en silencio. Es el único de los cinco cuyo hueco borra en vez de duplicar.
+
+    Se compara la fecha de ENTREGA, no el contenido: un reenvío corregido de la
+    misma entrega trae la misma fecha y tiene que seguir entrando.
+    """
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+
+    base = dict(folio_externo="VH-39PAL-MIE", fecha_entrega="2026-09-23")
+    r1 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(**base))
+    assert r1.status_code == 201, r1.text
+
+    # el mismo documento otra vez: entra, es el reenvío de siempre
+    igual = client.post("/api/v1/oc-recibidas", headers=h,
+                        json=_oc(origen_externo=r1.json()["origen_externo"], **base))
+    assert igual.status_code in (200, 201), igual.text
+
+    # otra entrega que generó el MISMO folio, con otra fecha: se frena
+    choque = dict(base, fecha_entrega="2026-09-30")
+    r2 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(**choque))
+    assert r2.status_code == 409, r2.text
+    assert "otra fecha de entrega" in r2.json()["detail"]
+
+    # y la primera sigue intacta: el candado frena ANTES de escribir
+    sigue = client.get(f"/api/v1/oc-recibidas/{r1.json()['id']}", headers=h).json()
+    assert sigue["payload"]["fecha_entrega"] == "2026-09-23"
+
+    # con `forzar` —una persona dijo «es otra»— entra y se registra aparte
+    r3 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(forzar=True, **choque))
+    assert r3.status_code == 201, r3.text
+    assert r3.json()["id"] != r1.json()["id"]
+
+
+def test_sin_fecha_de_entrega_el_candado_no_frena(client, env, auth_as):
+    """Un candado que bloquea por falta de dato bloquea lo bueno, y aquí lo
+    bueno es la entrega de un hospital. Sin fecha en alguno de los dos lados,
+    deja pasar."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    r1 = client.post("/api/v1/oc-recibidas", headers=h,
+                     json=_oc(folio_externo="VH-40CUN-LUN"))          # sin fecha
+    assert r1.status_code == 201, r1.text
+    r2 = client.post("/api/v1/oc-recibidas", headers=h,
+                     json=_oc(folio_externo="VH-40CUN-LUN", fecha_entrega="2026-10-05"))
+    assert r2.status_code == 201, r2.text
+
+
 def test_reenvio_sin_link_no_borra_el_que_ya_tenia(client, env, auth_as):
     """Una OC PENDIENTE que se vuelve a espejar sin `archivo_url` conserva el
     suyo. La conciliación del bot corre cada 6 h y manda el payload sin enlace

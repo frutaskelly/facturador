@@ -49,6 +49,12 @@ class OCRecibidaIn(BaseModel):
     canal: Canal
     origen_externo: str = Field(min_length=1, max_length=120)
     folio_externo: Optional[str] = Field(default=None, max_length=60)
+    # LA SALIDA HUMANA DEL CANDADO DE FOLIO REPETIDO (24-sep-2026). Ese candado
+    # frena una orden cuyo folio ya existe con OTRA fecha de entrega. Cuando el
+    # equipo contesta «es otra» por WhatsApp, el bot reenvía con esto en true y
+    # la orden entra. Sin salida, un falso positivo deja a un hospital sin su
+    # entrega y a nadie con forma de destrabarlo.
+    forzar: bool = False
     remitente: Optional[str] = Field(default=None, max_length=254)
     archivo_nombre: Optional[str] = Field(default=None, max_length=254)
     archivo_url: Optional[str] = None
