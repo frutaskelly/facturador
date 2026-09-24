@@ -1023,6 +1023,30 @@ def test_el_resumen_del_espejo_contesta_por_la_oc_y_con_detalle(client, env, aut
     assert all({"folio", "total", "estado", "saldo"} <= set(x) for x in r4.json()["folios"])
 
 
+def test_la_busqueda_no_confunde_un_numero_de_la_oc_con_un_folio(client, env, auth_as, sin_sesion):
+    """El folio de EHMO trae la semana adentro: «VH-36PAL-SAB». Buscar esa orden
+    sacaba los dígitos del término y los comparaba contra el folio, así que
+    devolvía también la factura 36 —de otro mes y otro hospital—. Quien pregunta
+    «¿ya se facturó esta OC?» leía dos facturas donde hay una. Un número suelto
+    dentro de otra cosa no es un folio; «ZHGO 36» y «36» sí lo son."""
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=36, observaciones="SEM 09 HOSPITAL JUAN GRAHAM 01 MARZO"))
+    client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=9442, observaciones="OC VH-36PAL-SAB PALENQUE SEM 36"))
+
+    def folios(term):
+        r = client.get("/api/v1/facturas/espejo/resumen", headers=hk,
+                       params={"empresa": "02", "q": term})
+        assert r.status_code == 200, r.text
+        return sorted(f["folio"] for f in r.json()["folios"])
+
+    assert folios("VH-36PAL-SAB") == [9442]        # la 36 ya no se cuela
+    assert 36 in folios("36")                       # un folio a secas sigue sirviendo
+    assert 36 in folios("ZHGO 36")                  # y con su serie delante
+    assert 36 in folios("ZHGO36")
+
+
 def test_el_resumen_filtra_por_cliente_de_sae(client, env, auth_as, sin_sesion):
     """El bot habla en números de cliente de SAE («6 es Balles»), no en UUID. Se
     traduce con la misma equivalencia que usa el export, para que no aparezca

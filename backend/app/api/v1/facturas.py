@@ -908,9 +908,17 @@ def espejo_resumen(
             func.concat(Factura.serie, Factura.folio).ilike(like.replace(" ", "")),
             func.concat(Factura.serie, " ", Factura.folio).ilike(like),
         ]
-        digitos = re.sub(r"\D", "", termino)
-        if digitos:
-            condiciones.append(Factura.folio == int(digitos))
+        # UN NÚMERO SUELTO DENTRO DE OTRA COSA NO ES UN FOLIO (24-sep-2026).
+        # Antes se sacaban los dígitos del término con un re.sub y se comparaba
+        # contra el folio, así que buscar la orden «VH-36PAL-SAB» —el folio de
+        # EHMO trae la semana adentro— devolvía de regalo la factura 36, de
+        # marzo y de otro hospital. Quien pregunta «¿ya se facturó esta OC?»
+        # leía dos facturas donde hay una, y la de más con otro importe. Ahora
+        # sólo cuenta como folio lo que ES un folio: dígitos, con o sin serie
+        # delante y con o sin almohadilla («370», «ZHGO 37», «ZHGO37», «#37»).
+        m_folio = re.fullmatch(r"[A-Za-z]*\s*#?\s*(\d+)", termino)
+        if m_folio:
+            condiciones.append(Factura.folio == int(m_folio.group(1)))
         base = base.filter(or_(*condiciones))
     if lineas and not (serie or (q and q.strip())):
         raise HTTPException(status_code=422,
