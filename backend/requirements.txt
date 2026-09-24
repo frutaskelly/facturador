@@ -41,6 +41,9 @@ reportlab==4.5.0
 pdfplumber==0.11.10
 Jinja2==3.1.6
 RapidFuzz==3.14.5
+# Lectura directa de Aspel SAE (SQL Server). La rueda trae FreeTDS adentro:
+# no hace falta ODBC ni paquetes del sistema en la imagen.
+pymssql==2.3.2
 
 # ─── Tests ────────────────────────────────────────────────────────────────────
 pytest==8.3.3

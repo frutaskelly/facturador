@@ -38956,6 +38956,149 @@
     ]
    }
   },
+  "/api/v1/sae/facturas": {
+   "get": {
+    "description": "Las facturas de SAE que mencionan ese texto en su observación, EN VIVO.\n\nEs la misma pregunta que el espejo contesta más barato; ésta es para cuando\nla respuesta decide algo y no puede ir media hora atrasada — sobre todo\ncuando la respuesta es «no hay ninguna», que es la que lleva a facturar dos\nveces si llega equivocada.",
+    "operationId": "facturas_api_v1_sae_facturas_get",
+    "parameters": [
+     {
+      "description": "Empresa de SAE: 02, 03, 04…",
+      "in": "query",
+      "name": "empresa",
+      "required": true,
+      "schema": {
+       "description": "Empresa de SAE: 02, 03, 04…",
+       "maxLength": 4,
+       "title": "Empresa",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Texto que busca en la OBSERVACIÓN del documento (la OC)",
+      "in": "query",
+      "name": "q",
+      "required": true,
+      "schema": {
+       "description": "Texto que busca en la OBSERVACIÓN del documento (la OC)",
+       "maxLength": 120,
+       "minLength": 3,
+       "title": "Q",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limite",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "maximum": 200,
+       "minimum": 1,
+       "title": "Limite",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Facturas",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
+  "/api/v1/sae/salud": {
+   "get": {
+    "description": "¿El Facturador puede hablar con SAE? Sin tocar la red si no hay config.",
+    "operationId": "salud_api_v1_sae_salud_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Salud",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
   "/api/v1/sat/claves": {
    "get": {
     "description": "Búsqueda en el catálogo SAT oficial (c_ClaveProdServ) cargado en la base:\npor texto (FTS español + variantes) o por prefijo de clave. Alimenta el\nautocompletar del formulario de producto y del wizard de importación.",
