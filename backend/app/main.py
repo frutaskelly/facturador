@@ -22,6 +22,7 @@ from .api.v1 import (
     espejo_cobranza,
     esquemas_impuesto,
     facturas,
+    sae,
     inventario,
     listas_precios,
     memberships,
@@ -132,6 +133,7 @@ app.include_router(oc_recibidas.router, prefix="/api/v1")
 app.include_router(tickets.router, prefix="/api/v1")
 app.include_router(conexiones.router, prefix="/api/v1")
 app.include_router(facturas.router, prefix="/api/v1")
+app.include_router(sae.router, prefix="/api/v1")  # lectura en vivo de Aspel
 app.include_router(sat.router, prefix="/api/v1")
 # IAM admin — roles, permission catalog, memberships
 app.include_router(roles.router, prefix="/api/v1")

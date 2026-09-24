@@ -42,6 +42,18 @@ class Settings(BaseSettings):
     SUPABASE_SECRET_KEY: str = ""  # service-role; backend only
     SUPABASE_JWKS_URL: str = ""
 
+    # ─── Aspel SAE (solo lectura) ───────────────────────────────────────────────
+    # El acceso propio del Facturador a SAE (24-sep-2026). Sin estas variables
+    # la puerta no existe y el backend se comporta igual que ayer: quien
+    # pregunta recibe «no tengo acceso a SAE», no un error. Las escrituras NO
+    # pasan por aquí: siguen siendo del bot y de su cola, porque la regla de
+    # que una escritura a SAE jamás se reintenta se sostiene con UN escritor.
+    SAE_SERVER: str = ""        # host,puerto
+    SAE_USER: str = ""
+    SAE_PASSWORD: str = ""
+    SAE_DATABASE: str = "EMPRESA_SQL"
+    SAE_TIMEOUT: int = 25
+
     # ─── Integrations ───────────────────────────────────────────────────────────
     ANTHROPIC_API_KEY: str = ""
     # Model for the SAT-code suggester. Haiku is plenty for this simple
