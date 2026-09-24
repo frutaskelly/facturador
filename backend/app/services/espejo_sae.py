@@ -27,6 +27,7 @@ duplicarlos sería garantizar que se separen.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from typing import Any, Optional
 
 from sqlalchemy import func
@@ -551,8 +552,11 @@ def _reclamar_solicitud(tenant_id) -> Optional[Any]:
     try:
         with tenant_session(tenant_id) as db:
             sol = reclamar_espejo_sync(db=db, ctx=contexto_de_sistema(tenant_id))
-        return getattr(sol, "id", None) if sol else None
-    except Exception:
+            # el id se lee DENTRO de la sesión: afuera el objeto queda suelto
+            return getattr(sol, "id", None) if sol else None
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "espejo SAE: no pude reclamar la solicitud (%s: %s)", type(e).__name__, e)
         return None
 
 
@@ -570,8 +574,13 @@ def _reportar(tenant_id, solicitud, total: dict) -> None:
                                             ok=not total.get("errores"),
                                             resultado=resumen),
                 db=db, ctx=contexto_de_sistema(tenant_id))
-    except Exception:
-        pass
+    except Exception as e:
+        # SE ESCRIBE, no se traga. De este reporte sale la fecha de «SAE
+        # actualizado» que la UI pinta: si falla en silencio, la pantalla se
+        # queda con una fecha vieja y nadie se entera de que el espejo lleva
+        # horas sin reportar. Un espejo que no reporta es divergencia callada.
+        logging.getLogger(__name__).warning(
+            "espejo SAE: no pude reportar la pasada (%s: %s)", type(e).__name__, e)
 
 
 async def reloj(intervalo: int) -> None:
