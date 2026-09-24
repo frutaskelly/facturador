@@ -199,7 +199,7 @@ def test_el_cuadre_encuentra_el_hueco_y_no_repara_de_mas(monkeypatch):
     monkeypatch.setattr(espejo_sae, "folios_en_sae", lambda e, s: {1, 2, 3, 4, 5})
     traidos = []
     monkeypatch.setattr(espejo_sae, "_traer_folios",
-                        lambda db, ctx, e, s, fol, err: traidos.extend(fol) or len(fol))
+                        lambda db, ctx, e, s, fol, err: (traidos.extend(fol) or len(fol), 0))
 
     r = espejo_sae.cuadre(_DB({1, 2, 5}), None, "03", ["ZEHMOVH"])
     assert r["faltantes"] == 2 and r["series"]["ZEHMOVH"]["folios"] == [3, 4]
@@ -214,3 +214,23 @@ def test_el_cuadre_encuentra_el_hueco_y_no_repara_de_mas(monkeypatch):
     # sin huecos, ni reporta ni repara
     r3 = espejo_sae.cuadre(_DB({1, 2, 3, 4, 5}), None, "03", ["ZEHMOVH"])
     assert r3["faltantes"] == 0 and r3["errores"] == []
+
+
+def test_una_factura_sin_equivalencia_se_omite_sin_gritar(monkeypatch):
+    """No se puede reflejar una factura de un cliente que el Facturador no sabe
+    de quién es —el depósito la rechaza a propósito— y eso no cambia mañana.
+    Contarla como error todos los días entrena al equipo a ignorar el reporte.
+    Caso real: ZMAFAN 131, cliente sin contrato y factura en cancelación."""
+    from app.services import espejo_sae
+
+    def _explota(*a, **k):
+        raise RuntimeError("422: Sin equivalencia SAE para '02:1' (cliente_externos)")
+
+    monkeypatch.setattr(espejo_sae, "leer_encabezados",
+                        lambda *a, **k: [{"cve_doc": "ZMAFAN 131", "folio": 131}])
+    monkeypatch.setattr(espejo_sae, "leer_partidas", lambda *a, **k: {})
+    monkeypatch.setattr(espejo_sae, "como_payload", _explota)
+    errores = []
+    hechas, omitidas = espejo_sae._traer_folios(None, None, "02", "ZMAFAN", [131], errores)
+    assert (hechas, omitidas) == (0, 1)
+    assert errores == []          # no es un error: es una omisión explicada
