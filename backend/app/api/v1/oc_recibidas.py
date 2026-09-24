@@ -312,6 +312,58 @@ def _candado_folio_repetido(db: Session, ctx: AuthContext, payload) -> None:
     )
 
 
+_RE_SUFIJO_APARTE = re.compile(r"^(.*-[A-Z]{2,3})-(\d{1,2})$")
+
+
+@router.get("/sufijos-aparte")
+def sufijos_aparte(
+    base: str = Query(..., max_length=60,
+                      description="El folio base, sin sufijo: «HO-39ACT-LUN»"),
+    archivo: Optional[str] = Query(default=None, max_length=254,
+                                   description="El archivo que se está procesando"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Qué sufijos «aparte» ya se usaron para ese folio base, y cuál toca.
+
+    Una entrega APARTE del mismo hospital y el mismo día lleva un sufijo
+    (`HO-39ACT-LUN-2`) para no chocar con la principal. Ese contador sale hoy
+    del Master de EHMO, y es la pieza que hace únicos a esos folios — sin ella
+    los otros candados no sirven de nada.
+
+    ES EL MODO DE FALLA QUE EL RETIRO INTRODUCE POR SU CUENTA, y por eso se
+    mueve junto con el candado de folio repetido: sin la hoja, el contador
+    arrancaría en 2 siempre y toda entrega aparte del día reusaría el mismo
+    folio. Como el `origen_externo` se arma con el folio, la segunda entrega
+    aparte del día BORRARÍA a la primera, en silencio.
+
+    Dos reglas, las mismas del original:
+      · El MISMO archivo reprocesado reusa su sufijo. Reprocesar una foto no
+        puede crear una entrega nueva cada vez.
+      · Si no, el siguiente libre: `max(usados) + 1`, empezando en 2.
+    """
+    raiz = (base or "").strip().upper()
+    if not raiz:
+        raise HTTPException(status_code=422, detail="hace falta el folio base")
+    filas = (
+        db.query(OCRecibida.folio_externo, OCRecibida.archivo_nombre)
+        .filter(OCRecibida.tenant_id == ctx.tenant_id,
+                OCRecibida.folio_externo.like(f"{raiz}-%"),
+                OCRecibida.estado != "DESCARTADA")
+        .all()
+    )
+    usados: dict[int, set] = {}
+    for folio, archivo_nombre in filas:
+        m = _RE_SUFIJO_APARTE.match((folio or "").strip().upper())
+        if m and m.group(1) == raiz:
+            usados.setdefault(int(m.group(2)), set()).add(archivo_nombre or "")
+    mio = sorted(n for n, archs in usados.items() if archivo and archivo in archs)
+    return {"ok": True, "base": raiz,
+            "usados": sorted(usados),
+            "reuso": mio[0] if mio else None,
+            "siguiente": (mio[0] if mio else max([1, *usados]) + 1)}
+
+
 def _detectar_cambio(db: Session, oc: OCRecibida, data: dict, ctx: AuthContext) -> None:
     """La orden ya tiene remisión y llegó otra versión de su documento.
 

@@ -269,6 +269,49 @@ def test_el_lote_de_la_partida_se_guarda(client, env, auth_as):
     assert lineas[1]["lote"] == "REPOSICION"
 
 
+def test_el_contador_de_sufijos_aparte_sale_de_la_bandeja(client, env, auth_as):
+    """Una entrega APARTE del mismo hospital y día lleva sufijo para no chocar
+    con la principal. Ese contador sale hoy del Master de EHMO, y es la pieza
+    que hace únicos esos folios — sin ella los otros candados no sirven.
+
+    Es el modo de falla que el retiro INTRODUCE por su cuenta: sin la hoja, el
+    contador arrancaría en 2 siempre y la segunda entrega aparte del día
+    BORRARÍA a la primera, porque comparten `origen_externo`.
+
+    Dos reglas, las mismas del original: el mismo archivo reprocesado reusa su
+    sufijo, y si no, el siguiente libre.
+    """
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    base = "HO-39ACT-LUN"
+
+    def sufijos(archivo=None):
+        p = {"base": base}
+        if archivo:
+            p["archivo"] = archivo
+        r = client.get("/api/v1/oc-recibidas/sufijos-aparte", headers=h, params=p)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    # sin ninguna aparte todavía, la primera es la 2
+    assert sufijos()["siguiente"] == 2 and sufijos()["usados"] == []
+
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo=f"{base}-2", archivo_nombre="foto-a.jpg"))
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo=f"{base}-3", archivo_nombre="foto-b.jpg"))
+
+    assert sufijos()["usados"] == [2, 3]
+    assert sufijos()["siguiente"] == 4               # un archivo nuevo toma el libre
+    assert sufijos("foto-a.jpg")["reuso"] == 2       # reprocesar la misma foto reusa
+    assert sufijos("foto-a.jpg")["siguiente"] == 2
+    assert sufijos("foto-z.jpg")["reuso"] is None    # una foto que nunca se vio, no
+
+    # el folio base a secas no cuenta como aparte
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(folio_externo=base))
+    assert sufijos()["usados"] == [2, 3]
+
+
 def test_un_folio_repetido_con_otra_fecha_no_pisa_la_orden_anterior(client, env, auth_as):
     """El primero de los cinco candados del Master de EHMO, mudado aquí.
 

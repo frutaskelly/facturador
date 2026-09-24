@@ -30460,6 +30460,90 @@
     ]
    }
   },
+  "/api/v1/oc-recibidas/sufijos-aparte": {
+   "get": {
+    "description": "Qué sufijos «aparte» ya se usaron para ese folio base, y cuál toca.\n\nUna entrega APARTE del mismo hospital y el mismo día lleva un sufijo\n(`HO-39ACT-LUN-2`) para no chocar con la principal. Ese contador sale hoy\ndel Master de EHMO, y es la pieza que hace únicos a esos folios — sin ella\nlos otros candados no sirven de nada.\n\nES EL MODO DE FALLA QUE EL RETIRO INTRODUCE POR SU CUENTA, y por eso se\nmueve junto con el candado de folio repetido: sin la hoja, el contador\narrancaría en 2 siempre y toda entrega aparte del día reusaría el mismo\nfolio. Como el `origen_externo` se arma con el folio, la segunda entrega\naparte del día BORRARÍA a la primera, en silencio.\n\nDos reglas, las mismas del original:\n  · El MISMO archivo reprocesado reusa su sufijo. Reprocesar una foto no\n    puede crear una entrega nueva cada vez.\n  · Si no, el siguiente libre: `max(usados) + 1`, empezando en 2.",
+    "operationId": "sufijos_aparte_api_v1_oc_recibidas_sufijos_aparte_get",
+    "parameters": [
+     {
+      "description": "El folio base, sin sufijo: «HO-39ACT-LUN»",
+      "in": "query",
+      "name": "base",
+      "required": true,
+      "schema": {
+       "description": "El folio base, sin sufijo: «HO-39ACT-LUN»",
+       "maxLength": 60,
+       "title": "Base",
+       "type": "string"
+      }
+     },
+     {
+      "description": "El archivo que se está procesando",
+      "in": "query",
+      "name": "archivo",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 254,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "El archivo que se está procesando",
+       "title": "Archivo"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Sufijos Aparte",
+    "tags": [
+     "bandeja de OC"
+    ]
+   }
+  },
   "/api/v1/oc-recibidas/{oc_id}": {
    "get": {
     "operationId": "detalle_api_v1_oc_recibidas__oc_id__get",
