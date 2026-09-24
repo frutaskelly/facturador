@@ -2256,6 +2256,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oc-recibidas/sufijos-aparte": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sufijos Aparte
+         * @description Qué sufijos «aparte» ya se usaron para ese folio base, y cuál toca.
+         *
+         *     Una entrega APARTE del mismo hospital y el mismo día lleva un sufijo
+         *     (`HO-39ACT-LUN-2`) para no chocar con la principal. Ese contador sale hoy
+         *     del Master de EHMO, y es la pieza que hace únicos a esos folios — sin ella
+         *     los otros candados no sirven de nada.
+         *
+         *     ES EL MODO DE FALLA QUE EL RETIRO INTRODUCE POR SU CUENTA, y por eso se
+         *     mueve junto con el candado de folio repetido: sin la hoja, el contador
+         *     arrancaría en 2 siempre y toda entrega aparte del día reusaría el mismo
+         *     folio. Como el `origen_externo` se arma con el folio, la segunda entrega
+         *     aparte del día BORRARÍA a la primera, en silencio.
+         *
+         *     Dos reglas, las mismas del original:
+         *       · El MISMO archivo reprocesado reusa su sufijo. Reprocesar una foto no
+         *         puede crear una entrega nueva cada vez.
+         *       · Si no, el siguiente libre: `max(usados) + 1`, empezando en 2.
+         */
+        get: operations["sufijos_aparte_api_v1_oc_recibidas_sufijos_aparte_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/oc-recibidas/{oc_id}": {
         parameters: {
             query?: never;
@@ -16704,6 +16740,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProcesarPendientesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sufijos_aparte_api_v1_oc_recibidas_sufijos_aparte_get: {
+        parameters: {
+            query: {
+                /** @description El folio base, sin sufijo: «HO-39ACT-LUN» */
+                base: string;
+                /** @description El archivo que se está procesando */
+                archivo?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
