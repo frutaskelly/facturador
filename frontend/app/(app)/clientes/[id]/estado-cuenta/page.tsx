@@ -11,13 +11,12 @@ import { ArrowLeft, FileSpreadsheet } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
 import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
-import { ApiError, apiDownload, apiFetch } from "@/lib/api";
+import { ApiError, apiDownloadPost, apiFetch } from "@/lib/api";
 import { fmtDate, fmtMoney } from "@/lib/format";
 
 type Doc = {
@@ -49,6 +48,17 @@ const BUCKETS: { key: keyof EstadoCuenta["antiguedad"]; label: string }[] = [
   { key: "d90_mas", label: "90+ días" },
 ];
 
+type Bucket = keyof EstadoCuenta["antiguedad"];
+
+// La misma cubeta que calcula el backend (`_bucket` en cobranza.py).
+function bucketDe(diasVencida: number): Bucket {
+  if (diasVencida <= 0) return "por_vencer";
+  if (diasVencida <= 30) return "d1_30";
+  if (diasVencida <= 60) return "d31_60";
+  if (diasVencida <= 90) return "d61_90";
+  return "d90_mas";
+}
+
 function query(serie: string, corte: string, enCancelacion = false): string {
   const p = new URLSearchParams();
   if (serie) p.set("serie", serie);
@@ -67,6 +77,10 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
   const [corte, setCorte] = useState("");
   const [verEnCancelacion, setVerEnCancelacion] = useState(false);
   const [bajando, setBajando] = useState(false);
+  // Cajas de antigüedad marcadas (vacío = todas): filtran la tabla.
+  const [buckets, setBuckets] = useState<Bucket[]>([]);
+  // Lo que la tabla deja ver tras TODOS sus filtros: es lo que se descarga.
+  const [visibles, setVisibles] = useState<Doc[]>([]);
 
   useEffect(() => {
     let vivo = true;
@@ -76,18 +90,25 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
     return () => { vivo = false; };
   }, [id, serie, corte, verEnCancelacion]);
 
-  const bajarExcel = async () => {
+  const bajarEstadoCuenta = async () => {
     if (!data || bajando) return;
     setBajando(true);
     try {
       const nombre = `estado-cuenta${serie ? `-${serie}` : ""}-${data.corte.replaceAll("-", "")}.xlsx`;
-      await apiDownload(`/api/v1/cobranza/estado-cuenta/${id}/xlsx${query(serie, corte, verEnCancelacion)}`, nombre);
+      await apiDownloadPost(
+        `/api/v1/cobranza/estado-cuenta/${id}/xlsx${query(serie, corte, verEnCancelacion)}`,
+        { facturas: visibles.map((d) => d.factura_id) },
+        nombre,
+      );
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo generar el Excel.");
+      toast.error(e instanceof ApiError ? e.message : "No se pudo generar el estado de cuenta.");
     } finally {
       setBajando(false);
     }
   };
+
+  const toggleBucket = (b: Bucket) =>
+    setBuckets((prev) => (prev.includes(b) ? prev.filter((x) => x !== b) : [...prev, b]));
 
   // Antes de los returns tempranos: es un hook, y no depende de `data`.
   const cols = useMemo<Column<Doc>[]>(() => [
@@ -143,9 +164,6 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
         subtitle={`Crédito: ${fmtMoney(data.limite_credito)} · ${data.dias_credito} días · corte ${fmtDate(data.corte)}`}
         actions={
           <div className="flex items-center gap-2">
-            <Button onClick={bajarExcel} disabled={bajando}>
-              <FileSpreadsheet size={16} /> {bajando ? "Generando…" : "Excel"}
-            </Button>
             <Link href="/clientes" className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-surface-2">
               <ArrowLeft size={16} /> Clientes
             </Link>
@@ -186,27 +204,59 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
         )}
       </div>
 
-      {/* Antigüedad de saldos */}
+      {/* Antigüedad de saldos: cada caja es un filtro de la tabla (una o
+          varias; ninguna marcada = todas). */}
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
-        {BUCKETS.map((b) => (
-          <Card key={b.key}>
-            <div className="text-xs text-muted">{b.label}</div>
-            <div className="text-lg font-semibold tabular-nums">{fmtMoney(data.antiguedad[b.key])}</div>
-          </Card>
-        ))}
+        {BUCKETS.map((b) => {
+          const activo = buckets.includes(b.key);
+          return (
+            <button key={b.key} type="button" aria-pressed={activo}
+                    onClick={() => toggleBucket(b.key)}
+                    className={`rounded-xl border p-4 text-left transition ${activo
+                      ? "border-accent bg-accent/5 ring-1 ring-accent"
+                      : "border-border bg-background hover:bg-surface-2"}`}>
+              <div className="text-xs text-muted">{b.label}</div>
+              <div className="text-lg font-semibold tabular-nums">{fmtMoney(data.antiguedad[b.key])}</div>
+            </button>
+          );
+        })}
       </div>
 
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-medium">
           Facturas PPD con saldo{serie ? ` · serie ${serie}` : ""}
+          {buckets.length > 0 && (
+            <button type="button" className="ml-2 text-xs font-normal text-accent hover:underline"
+                    onClick={() => setBuckets([])}>
+              Quitar filtro de antigüedad
+            </button>
+          )}
         </div>
-        <div className="text-sm">Saldo total: <span className="font-semibold tabular-nums">{fmtMoney(data.saldo_total)}</span></div>
+        <div className="text-sm">
+          Saldo total: <span className="font-semibold tabular-nums">{fmtMoney(data.saldo_total)}</span>
+          {visibles.length !== data.facturas.length && (
+            <span className="ml-2 text-muted">
+              · filtrado: <span className="font-semibold tabular-nums text-foreground">
+                {fmtMoney(visibles.reduce((t, d) => t + Number(d.saldo_insoluto), 0))}
+              </span>
+            </span>
+          )}
+        </div>
       </div>
       <DataTableSmart
         rows={data.facturas}
         rowKey={(d) => d.factura_id}
         columns={cols}
         storageKey="estado-cuenta-facturas"
+        rowFilter={buckets.length ? (d) => buckets.includes(bucketDe(d.dias_vencida)) : undefined}
+        rowFilterKey={buckets.join(",")}
+        onFilteredRowsChange={setVisibles}
+        toolbarExtra={
+          <Button onClick={bajarEstadoCuenta} disabled={bajando || visibles.length === 0}
+                  title="Descargar el estado de cuenta (formato SAE) de las facturas filtradas">
+            <FileSpreadsheet size={16} /> {bajando ? "Generando…" : "Estado de cuenta"}
+          </Button>
+        }
         empty="El cliente no tiene saldos pendientes."
       />
     </div>

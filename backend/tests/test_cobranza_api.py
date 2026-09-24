@@ -275,6 +275,23 @@ def test_estado_cuenta_xlsx(client, env, auth):
     assert any(isinstance(v, str) and v.startswith("=SUM(") for v in ultima)
 
 
+def test_estado_cuenta_xlsx_solo_las_filtradas(client, env, auth):
+    """El POST baja solo las facturas que la pantalla deja ver tras filtrar."""
+    import io
+
+    from openpyxl import load_workbook
+
+    fid = _factura_ppd_timbrada(env, total=1500, dias_atras=40, folio=7, serie="ZEH")
+    _factura_ppd_timbrada(env, total=500, dias_atras=1, folio=8, serie="ZEH")
+
+    r = client.post(f"/api/v1/cobranza/estado-cuenta/{env['cli']}/xlsx",
+                    json={"facturas": [fid]}, headers=_h(env))
+    assert r.status_code == 200, r.text
+    ws = load_workbook(io.BytesIO(r.content)).active
+    celdas = {c.value for row in ws.iter_rows() for c in row if c.value is not None}
+    assert "ZEH 7" in celdas and "ZEH 8" not in celdas
+
+
 # ── Recibos de Pago (REP) F2 ─────────────────────────────────────────────────
 import app.api.v1.cobranza as cobranza_mod
 

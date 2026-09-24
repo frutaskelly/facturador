@@ -409,6 +409,12 @@ export type DataTableProps<T> = {
   rowFilterKey?: string | number;
   /** Clases extra por fila (p. ej. resaltar en rojo las que faltan por completar). */
   rowClassName?: (row: T) => string | undefined;
+  /** Botones propios de la pantalla en la barra de la tabla, a la izquierda
+   *  del botón "Excel". */
+  toolbarExtra?: ReactNode;
+  /** Se llama con las filas que quedan tras TODOS los filtros (externo,
+   *  por columna y buscador), p. ej. para descargar exactamente lo que se ve. */
+  onFilteredRowsChange?: (rows: T[]) => void;
 };
 
 export function DataTable<T>({
@@ -447,6 +453,8 @@ export function DataTable<T>({
   rowFilter,
   rowFilterKey,
   rowClassName,
+  toolbarExtra,
+  onFilteredRowsChange,
 }: DataTableProps<T>) {
   // ── identidad estable de cada columna ──
   const cols = useMemo(() => {
@@ -738,6 +746,9 @@ export function DataTable<T>({
     // de identidad en cada render y recalcularía este memo siempre.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedRows, deferredSearch, cols, byId, rowFilterKey, onSearchChange, colFilters, colConds]);
+  const onFilteredRef = useRef(onFilteredRowsChange);
+  onFilteredRef.current = onFilteredRowsChange;
+  useEffect(() => { onFilteredRef.current?.(filteredRows); }, [filteredRows]);
 
   // Filas de referencia para la LISTA de valores del popup: lo cargado, con el
   // filtro externo y los filtros de las DEMÁS columnas aplicados (como Excel:
@@ -926,7 +937,7 @@ export function DataTable<T>({
   }
 
   const customized = order.length > 0 || hidden.length > 0 || Object.keys(widths).length > 0 || actionOrder.length > 0 || actionHidden.length > 0;
-  const hasToolbar = searchable || columnsMenu || exportable;
+  const hasToolbar = searchable || columnsMenu || exportable || toolbarExtra != null;
 
   // Quita una entrada de un record de filtros (dejar la clave con [] ya no es
   // «sin filtro»: significa «ningún valor», como en Excel).
@@ -993,6 +1004,7 @@ export function DataTable<T>({
         )}
       </div>
       <div className="flex shrink-0 gap-2">
+      {toolbarExtra}
       {exportable && (
         <button
           type="button"
