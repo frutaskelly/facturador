@@ -178,12 +178,18 @@ def cartera(
         fila = filas.setdefault(etiqueta, {
             "saldo": ZERO, "vencido": ZERO, "facturas": 0,
             "cliente_id": str(fila_cliente_id), "serie": f.serie,
+            # El reparto por cubeta de CADA fila: deja que la pantalla filtre
+            # por antigüedad sin volver a pedir el reporte.
+            "antiguedad": {c: ZERO for c in _CUBETAS},
+            "facturas_por_cubeta": {c: 0 for c in _CUBETAS},
         })
         fila["saldo"] += saldo
         fila["facturas"] += 1
         f_fecha = f.fecha.date() if isinstance(f.fecha, datetime) else f.fecha
         dias_vencida = (hoy - (f_fecha + timedelta(days=int(dias_credito or 0)))).days
         antiguedad[_cubeta(dias_vencida)] += saldo
+        fila["antiguedad"][_cubeta(dias_vencida)] += saldo
+        fila["facturas_por_cubeta"][_cubeta(dias_vencida)] += 1
         total += saldo
         if dias_vencida > 0:
             fila["vencido"] += saldo
