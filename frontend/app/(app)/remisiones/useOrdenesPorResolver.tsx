@@ -183,6 +183,7 @@ export function useOrdenesPorResolver(
   const procesarTodo = useCallback(async () => {
     setProcesando(true);
     let creadas = 0;
+    let fallidas = 0;
     try {
       for (let i = 0; i < 20; i++) {
         const r = await apiFetch<{ creadas: number; fallidas: number; restantes: number }>(
@@ -195,9 +196,18 @@ export function useOrdenesPorResolver(
           { timeoutMs: 120_000 },
         );
         creadas += r.creadas;
-        if (r.creadas === 0) break; // sin avance: lo que queda necesita una mano
+        fallidas += r.fallidas;
+        // Una fallida también es avance: queda con su motivo y el lote ya no
+        // la vuelve a tomar. Cortar solo con `creadas` detenía el bucle cuando
+        // la cabeza de la fila eran cinco que necesitaban una mano, y las
+        // convertibles de atrás esperaban otro clic.
+        if (r.creadas + r.fallidas === 0) break; // nada más que intentar
       }
-      if (creadas > 0) toast.success(`${creadas} orden${creadas === 1 ? "" : "es"} pasaron a remisiones (por revisar).`);
+      const quedaron = fallidas > 0
+        ? ` ${fallidas} quedaron con su motivo para revisarlas a mano.`
+        : "";
+      if (creadas > 0) toast.success(`${creadas} orden${creadas === 1 ? "" : "es"} pasaron a remisiones (por revisar).${quedaron}`);
+      else if (fallidas > 0) toast.info(`Ninguna pasó en automático.${quedaron}`);
       else toast.info("Nada que procesar en automático: lo que queda necesita una mano.");
       recargar();
       if (creadas > 0) onCambio();
