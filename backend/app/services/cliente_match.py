@@ -114,27 +114,65 @@ def buscar_equivalencia(
     *,
     solo_confirmadas: bool = False,
     cliente_id: Optional[UUID] = None,
+    heredar: bool = False,
 ) -> Optional[ClienteExterno]:
     """La equivalencia registrada para esa clave, o None.
 
     Para los sistemas de CONTEXTO hay que decir de qué cliente se quiere la fila:
     la misma clave existe una vez por cada razón social que la comparte.
 
+    `heredar=True` deja que una clave con perfil hijo caiga en la de su padre
+    (ver `claves_heredadas`). Es solo para RESOLVER: quien registra o reapunta
+    una equivalencia necesita la fila exacta, o corregiría la del padre.
+
     El filtro de `tenant_id` es explícito y NO se delega a la RLS: los scripts de
     mantenimiento abren la sesión como owner (la RLS está ENABLE, no FORCE) y sin
     él verían —y reapuntarían— las filas de otro inquilino.
     """
-    norm = normalizar_clave(sistema, clave)
-    if not norm:
+    if sistema in CONTEXTO and cliente_id is None:
+        # Sin cliente la clave es ambigua por diseño: hay una fila por cada
+        # razón social que comparte ese grupo o ese punto de entrega.
         return None
-    q = _filtrar(db, tenant_id, sistema, norm, solo_confirmadas)
-    if sistema in CONTEXTO:
-        if cliente_id is None:
-            # Sin cliente la clave es ambigua por diseño: hay una fila por cada
-            # razón social que comparte ese grupo o ese punto de entrega.
-            return None
-        q = q.filter(ClienteExterno.cliente_id == cliente_id)
-    return q.one_or_none()
+    claves = claves_heredadas(sistema, clave) if heredar else [clave]
+    for c in claves:
+        norm = normalizar_clave(sistema, c)
+        if not norm:
+            continue
+        q = _filtrar(db, tenant_id, sistema, norm, solo_confirmadas)
+        if sistema in CONTEXTO:
+            q = q.filter(ClienteExterno.cliente_id == cliente_id)
+        hit = q.one_or_none()
+        if hit is not None:
+            return hit
+    return None
+
+
+# Sistemas cuya clave va namespaceada con el perfil del bot («perfil:texto»).
+_CON_PERFIL = ("PROYECTO", "UBICACION")
+
+
+def claves_heredadas(sistema: str, clave: str) -> list[str]:
+    """La clave tal cual y, detrás, la misma con el perfil de sus padres.
+
+    En el bot un perfil puede HEREDAR de otro: «ehmo-pachuca» es exactamente
+    «ehmo» salvo por el cliente del grupo, y se nombra padre-hijo. Las
+    equivalencias de PROYECTO y UBICACION se aprendieron con «ehmo:»; cuando el
+    grupo de Pachuca pasó a mandar «ehmo-pachuca» (23-sep-2026) ninguna cruzó y
+    30 órdenes se quedaron sin cliente. La del hijo manda si existe —así se
+    puede corregir solo para él—; si no, vale la del padre.
+
+        claves_heredadas("PROYECTO", "ehmo-pachuca:HOSPITALES")
+        → ["ehmo-pachuca:HOSPITALES", "ehmo:HOSPITALES"]
+    """
+    if sistema.upper() not in _CON_PERFIL or ":" not in (clave or ""):
+        return [clave]
+    perfil, texto = clave.split(":", 1)
+    claves = [clave]
+    while "-" in perfil:
+        perfil = perfil.rsplit("-", 1)[0]
+        if perfil:
+            claves.append(f"{perfil}:{texto}")
+    return claves
 
 
 def _filtrar(db: Session, tenant_id: UUID, sistema: str, norm: str, solo_confirmadas: bool):
@@ -179,7 +217,8 @@ def _buscar(
     como inexistente la manda a PENDIENTE, que es lo correcto.
     """
     hit = buscar_equivalencia(
-        db, tenant_id, sistema, clave, solo_confirmadas=True, cliente_id=cliente_id
+        db, tenant_id, sistema, clave, solo_confirmadas=True, cliente_id=cliente_id,
+        heredar=True,
     )
     if hit is None:
         return None

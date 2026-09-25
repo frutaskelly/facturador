@@ -141,7 +141,8 @@ def _proyecto_de(db: Session, tenant_id, payload: dict, *, cliente_id, sucursal_
     if not perfil or not proyecto:
         return None
     fila = cliente_match.buscar_equivalencia(
-        db, tenant_id, "PROYECTO", f"{perfil}:{proyecto}", solo_confirmadas=True
+        db, tenant_id, "PROYECTO", f"{perfil}:{proyecto}", solo_confirmadas=True,
+        heredar=True,
     )
     if fila is None or fila.proyecto_id is None:
         return None
