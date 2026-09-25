@@ -487,7 +487,12 @@ export interface paths {
          */
         get: operations["estado_cuenta_xlsx_api_v1_cobranza_estado_cuenta__cliente_id__xlsx_get"];
         put?: never;
-        post?: never;
+        /**
+         * Estado Cuenta Xlsx Filtrado
+         * @description El mismo Excel, pero solo con las facturas que la pantalla deja ver tras
+         *     sus filtros (van en el body: pueden ser cientos de ids).
+         */
+        post: operations["estado_cuenta_xlsx_filtrado_api_v1_cobranza_estado_cuenta__cliente_id__xlsx_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7226,6 +7231,11 @@ export interface components {
             /** Tipo Ieps */
             tipo_ieps?: ("TASA" | "CUOTA") | null;
         };
+        /** EstadoCuentaFiltradoIn */
+        EstadoCuentaFiltradoIn: {
+            /** Facturas */
+            facturas: string[];
+        };
         /** ExistenciaRow */
         ExistenciaRow: {
             /**
@@ -13026,6 +13036,50 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    estado_cuenta_xlsx_filtrado_api_v1_cobranza_estado_cuenta__cliente_id__xlsx_post: {
+        parameters: {
+            query?: {
+                /** @description Fecha de corte (default hoy) */
+                corte?: string | null;
+                /** @description Acotar a una serie */
+                serie?: string | null;
+                /** @description Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen) */
+                incluir_en_cancelacion?: boolean;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                cliente_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstadoCuentaFiltradoIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

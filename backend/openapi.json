@@ -6093,6 +6093,24 @@
     "title": "EsquemaImpuestoUpdate",
     "type": "object"
    },
+   "EstadoCuentaFiltradoIn": {
+    "properties": {
+     "facturas": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "maxItems": 5000,
+      "title": "Facturas",
+      "type": "array"
+     }
+    },
+    "required": [
+     "facturas"
+    ],
+    "title": "EstadoCuentaFiltradoIn",
+    "type": "object"
+   },
    "ExistenciaRow": {
     "properties": {
      "almacen_id": {
@@ -22668,6 +22686,127 @@
      }
     ],
     "summary": "Estado Cuenta Xlsx",
+    "tags": [
+     "cobranza"
+    ]
+   },
+   "post": {
+    "description": "El mismo Excel, pero solo con las facturas que la pantalla deja ver tras\nsus filtros (van en el body: pueden ser cientos de ids).",
+    "operationId": "estado_cuenta_xlsx_filtrado_api_v1_cobranza_estado_cuenta__cliente_id__xlsx_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "cliente_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Cliente Id",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Fecha de corte (default hoy)",
+      "in": "query",
+      "name": "corte",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Fecha de corte (default hoy)",
+       "title": "Corte"
+      }
+     },
+     {
+      "description": "Acotar a una serie",
+      "in": "query",
+      "name": "serie",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 10,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Acotar a una serie",
+       "title": "Serie"
+      }
+     },
+     {
+      "description": "Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)",
+      "in": "query",
+      "name": "incluir_en_cancelacion",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)",
+       "title": "Incluir En Cancelacion",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EstadoCuentaFiltradoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Estado Cuenta Xlsx Filtrado",
     "tags": [
      "cobranza"
     ]
