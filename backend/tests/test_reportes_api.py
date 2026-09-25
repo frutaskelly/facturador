@@ -245,6 +245,9 @@ def test_pagos_por_fecha_de_pago_sin_borradores(client, env, auth):
     assert [i["folio"] for i in d["items"]] == [1, 2]
     rel = d["items"][0]["facturas"]
     assert rel[0]["serie"] == "ZEHMOTG" and rel[0]["folio"] == 71
+    # desglose fiscal de la factura abonada (para el detalle desplegable)
+    assert float(rel[0]["total"]) == 500.0
+    assert {"subtotal", "ieps", "iva", "descuento", "fecha"} <= rel[0].keys()
     assert d["items"][0]["cliente"]
 
     ajeno = client.get("/api/v1/reportes/pagos", params={"cliente_id": env["otro"]},

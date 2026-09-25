@@ -10,11 +10,17 @@ import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
-import { folioRelacionado, type Recibo } from "@/lib/cobranza";
+import { folioRelacionado, type Recibo, type ReciboFactura } from "@/lib/cobranza";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { useResource } from "@/lib/hooks";
 
-type Comprobante = Recibo & { cliente: string };
+// El reporte agrega a cada factura abonada su desglose fiscal (null si SAE
+// abonó a una factura que aquí no está).
+type FacturaAbonada = ReciboFactura & {
+  fecha: string | null; subtotal: string | null; descuento: string | null;
+  ieps: string | null; iva: string | null; total: string | null;
+};
+type Comprobante = Omit<Recibo, "facturas"> & { cliente: string; facturas: FacturaAbonada[] };
 type Pagos = {
   desde: string; hasta: string; items: Comprobante[];
   total: string; comprobantes: number; total_cancelado: string; cancelados: number;
@@ -22,6 +28,63 @@ type Pagos = {
 
 const relacionadas = (r: Comprobante) =>
   r.facturas.map(folioRelacionado).join(", ");
+
+const suma = (fs: FacturaAbonada[], k: "subtotal" | "ieps" | "iva" | "total" | "importe_pagado") =>
+  fs.reduce((t, f) => t + Number(f[k] ?? 0), 0);
+const dinero = (v: string | number | null) => (v === null ? "—" : fmtMoney(v));
+
+/** El detalle que se despliega bajo el comprobante: cada factura que abona. */
+function DetalleFacturas({ r }: { r: Comprobante }) {
+  if (r.facturas.length === 0) {
+    return <p className="px-4 py-3 text-sm text-muted">El comprobante no trae facturas relacionadas.</p>;
+  }
+  const num = "px-3 py-1.5 text-right tabular-nums";
+  return (
+    <div className="overflow-x-auto px-4 py-3">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border text-xs uppercase tracking-wide text-muted">
+            <th className="px-3 py-1.5 text-left font-medium">Factura</th>
+            <th className="px-3 py-1.5 text-left font-medium">Fecha</th>
+            <th className={`${num} font-medium`}>Subtotal</th>
+            <th className={`${num} font-medium`}>IEPS</th>
+            <th className={`${num} font-medium`}>IVA</th>
+            <th className={`${num} font-medium`}>Total</th>
+            <th className={`${num} font-medium`}>Pagado</th>
+            <th className={`${num} font-medium`}>Saldo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {r.facturas.map((f, i) => (
+            <tr key={f.factura_id ?? `${f.factura_ref}-${i}`} className="border-b border-border/60">
+              <td className="whitespace-nowrap px-3 py-1.5 font-medium">{folioRelacionado(f)}</td>
+              <td className="whitespace-nowrap px-3 py-1.5 text-muted">{f.fecha ? fmtDate(f.fecha) : "—"}</td>
+              <td className={num}>{dinero(f.subtotal)}</td>
+              <td className={num}>{dinero(f.ieps)}</td>
+              <td className={num}>{dinero(f.iva)}</td>
+              <td className={num}>{dinero(f.total)}</td>
+              <td className={`${num} font-medium`}>{dinero(f.importe_pagado)}</td>
+              <td className={`${num} text-muted`}>{dinero(f.saldo_insoluto)}</td>
+            </tr>
+          ))}
+        </tbody>
+        {r.facturas.length > 1 && (
+          <tfoot>
+            <tr className="font-semibold">
+              <td className="px-3 py-1.5" colSpan={2}>{r.facturas.length} facturas</td>
+              <td className={num}>{fmtMoney(suma(r.facturas, "subtotal"))}</td>
+              <td className={num}>{fmtMoney(suma(r.facturas, "ieps"))}</td>
+              <td className={num}>{fmtMoney(suma(r.facturas, "iva"))}</td>
+              <td className={num}>{fmtMoney(suma(r.facturas, "total"))}</td>
+              <td className={num}>{fmtMoney(suma(r.facturas, "importe_pagado"))}</td>
+              <td />
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+  );
+}
 
 export function ComprobantesPago({
   filtros, rango, clienteNombre,
@@ -98,6 +161,7 @@ export function ComprobantesPago({
               rows={d.items}
               rowKey={(r) => r.id}
               columns={cols}
+              renderExpanded={(r) => <DetalleFacturas r={r} />}
               empty="Sin comprobantes de pago en el rango."
               exportable
               exportFilename="comprobantes-de-pago"
