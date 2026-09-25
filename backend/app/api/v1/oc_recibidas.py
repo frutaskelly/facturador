@@ -481,6 +481,84 @@ def _candado_misma_entrega_otra_semana(db: Session, ctx: AuthContext, payload) -
         )
 
 
+_RE_SEMANA_FOLIO = re.compile(r"^([A-Z]{2,3})-(\d{2})")
+_MINIMO_FIRMA = 5
+
+
+def _firma_entrega(lineas) -> frozenset:
+    """La identidad de una entrega por su CONTENIDO: {(clave, cantidad)}.
+
+    Sin folio, sin fecha, sin hospital. Es lo que permite reconocer la misma
+    entrega cuando volvió a llegar bajo otro folio. La clave manda; si la
+    partida no la trae, se usa la descripción normalizada, que es lo que hace
+    el original.
+    """
+    out = set()
+    for ln in (lineas or []):
+        if isinstance(ln, dict):
+            clave, desc, cant = ln.get("clave"), ln.get("descripcion"), ln.get("cantidad")
+        else:
+            clave, desc, cant = (getattr(ln, "clave", None), getattr(ln, "descripcion", None),
+                                 getattr(ln, "cantidad", None))
+        ident = (str(clave or "").strip() or " ".join(str(desc or "").upper().split()))
+        try:
+            out.add((ident, round(float(cant or 0), 3)))
+        except (TypeError, ValueError):
+            continue
+    return frozenset(out)
+
+
+def _candado_antigemela(db: Session, ctx: AuthContext, payload) -> None:
+    """La misma entrega registrada dos veces bajo folios distintos.
+
+    Quinto y último candado del Master de EHMO, y el que más dinero ha
+    salvado: SSP, 17-ago-2026. La misma foto se reenvió sin caption, cayó en
+    LUNES en vez de JUEVES —esa tabla no trae columna de día— y creó una
+    gemela con 40 de 40 productos idénticos: $29,604 contados dos veces.
+
+    ES EL ÚNICO DE LOS CINCO QUE COMPARA CONTENIDO Y NO IDENTIFICADORES. Por
+    eso atrapa lo que los otros cuatro no pueden ver: un folio distinto, otro
+    día, otro hospital incluso.
+
+    TRES PROPIEDADES DEL ORIGINAL QUE NO SE DEDUCEN DE SU NOMBRE, y que se
+    copian enteras porque son las que deciden cuándo dispara:
+
+    1. Compara por IGUALDAD EXACTA de conjuntos, no por parecido. Un gramo de
+       diferencia y no dispara. Es deliberado: el umbral nunca se ha calibrado
+       contra falsos positivos, y aflojarlo de paso sería cambiar su
+       comportamiento a ciegas.
+    2. Solo actúa con CINCO partidas o más. Dos entregas chicas pueden
+       coincidir por casualidad; cinco ya no.
+    3. Mira la SEMANA del folio, y nada más: ni hospital, ni día. Un pedido de
+       varios días nunca iguala a uno de un día, así que en la práctica
+       protege a los de un día — que es justo el caso que lo originó.
+    """
+    if getattr(payload, "forzar", False):
+        return
+    firma = _firma_entrega(getattr(payload, "lineas", None))
+    if len(firma) < _MINIMO_FIRMA:
+        return
+    m = _RE_SEMANA_FOLIO.match((payload.folio_externo or "").strip().upper())
+    if not m:
+        return
+    prefijo, semana = m.group(1), m.group(2)
+    for oc in (db.query(OCRecibida)
+               .filter(OCRecibida.tenant_id == ctx.tenant_id,
+                       OCRecibida.folio_externo.like(f"{prefijo}-{semana}%"),
+                       OCRecibida.origen_externo != payload.origen_externo,
+                       OCRecibida.estado != "DESCARTADA")
+               .all()):
+        if _firma_entrega((oc.payload or {}).get("lineas")) != firma:
+            continue
+        raise HTTPException(
+            status_code=409,
+            detail=(f"Esta entrega es idéntica a {oc.folio_externo}: los mismos "
+                    f"{len(firma)} productos con las mismas cantidades. "
+                    "Suele ser la misma foto reenviada sin decir de qué día es. "
+                    "Si de verdad son dos entregas iguales, confírmalo."),
+        )
+
+
 def _detectar_cambio(db: Session, oc: OCRecibida, data: dict, ctx: AuthContext) -> None:
     """La orden ya tiene remisión y llegó otra versión de su documento.
 
@@ -591,6 +669,7 @@ def ingesta(
     _candado_folio_repetido(db, ctx, payload)
     _candado_antirreemplazo(db, ctx, payload)
     _candado_misma_entrega_otra_semana(db, ctx, payload)
+    _candado_antigemela(db, ctx, payload)
     existente = (
         db.query(OCRecibida)
         .filter(OCRecibida.origen_externo == payload.origen_externo)
