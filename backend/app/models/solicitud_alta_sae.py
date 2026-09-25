@@ -25,6 +25,7 @@ from .base import tenant_fk, uuid_pk
 # PARCIAL = alguna empresa quedó creada y alguna falló. No es OK (falta trabajo)
 # ni ERROR (algo sí se creó, y eso no se puede volver a intentar).
 ALTA_SAE_ESTADOS = ("PENDIENTE", "EN_CURSO", "OK", "PARCIAL", "ERROR")
+ALTA_SAE_TIPOS = ("ALTA", "CAMBIO")
 
 
 class SolicitudAltaSae(Base):
@@ -33,6 +34,9 @@ class SolicitudAltaSae(Base):
     id = uuid_pk()
     tenant_id = tenant_fk()
     estado = Column(String(10), nullable=False, server_default="PENDIENTE")
+    # ALTA = crear el artículo · CAMBIO = modificar uno que ya existe (0089).
+    # En un CAMBIO, `datos` lleva sólo los campos a cambiar.
+    tipo = Column(String(8), nullable=False, server_default="ALTA")
     # WHATSAPP = lo pidió el bot · UI = alguien desde la pantalla de catálogo
     origen = Column(String(12), nullable=False, server_default="UI")
     # El producto del catálogo que se está dando de alta allá. Puede venir vacío

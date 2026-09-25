@@ -45,9 +45,8 @@ class Settings(BaseSettings):
     # ─── Aspel SAE (solo lectura) ───────────────────────────────────────────────
     # El acceso propio del Facturador a SAE (24-sep-2026). Sin estas variables
     # la puerta no existe y el backend se comporta igual que ayer: quien
-    # pregunta recibe «no tengo acceso a SAE», no un error. Las escrituras NO
-    # pasan por aquí: siguen siendo del bot y de su cola, porque la regla de
-    # que una escritura a SAE jamás se reintenta se sostiene con UN escritor.
+    # pregunta recibe «no tengo acceso a SAE», no un error. Las escrituras
+    # tienen su propia puerta, con otro usuario: ver SAE_ESCRITURA_* abajo.
     SAE_SERVER: str = ""        # host,puerto
     SAE_USER: str = ""
     SAE_PASSWORD: str = ""
@@ -67,6 +66,16 @@ class Settings(BaseSettings):
     # cada medio minuto: correrlos en cada vuelta sería pedirle a SAE cuatro
     # consultas para nada.
     ESPEJO_SAE_COBRANZA_CADA_SEG: int = 300
+    # ─── Aspel SAE (escritura) ──────────────────────────────────────────────────
+    # El Facturador como ÚNICO escritor de SAE (26-sep-2026): altas y cambios de
+    # producto que antes aplicaba el bot. Usuario APARTE del de lectura, con
+    # permiso sólo sobre las tablas que se tocan (INVE, PRECIO_X_PROD). En 0 el
+    # reloj no corre y la cola la sigue atendiendo el conector del bot; al
+    # encenderlo, el bot ya no puede reclamar nada (ver alta-sae/pendiente):
+    # dos escritores no se coordinan con un comentario.
+    SAE_ESCRITURA_USER: str = ""
+    SAE_ESCRITURA_PASSWORD: str = ""
+    SAE_ESCRITURA_INTERVALO_SEG: int = 0
 
     # ─── Integrations ───────────────────────────────────────────────────────────
     ANTHROPIC_API_KEY: str = ""

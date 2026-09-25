@@ -514,6 +514,7 @@ class AltaSaeOut(ORMModel):
     """Una alta pedida: en qué estado va y qué contestó SAE por empresa."""
     id: uuid.UUID
     estado: str            # PENDIENTE | EN_CURSO | OK | PARCIAL | ERROR
+    tipo: str = "ALTA"     # ALTA | CAMBIO
     origen: str
     clave: str
     producto_id: Optional[uuid.UUID] = None
@@ -524,6 +525,22 @@ class AltaSaeOut(ORMModel):
     terminada_at: Optional[datetime] = None
     resultado: Optional[dict] = None
     motivo: Optional[str] = None
+
+
+class CambioSaeIn(BaseModel):
+    """Pide cambiar un artículo que ya existe en SAE. Sólo viajan los campos
+    que cambian; al menos uno. `empresas` vacío = las cuatro."""
+    clave: str = Field(min_length=1, max_length=20)
+    producto_id: Optional[uuid.UUID] = None
+    descripcion: Optional[str] = Field(default=None, max_length=60)
+    linea: Optional[str] = Field(default=None, max_length=10)
+    unidad: Optional[str] = Field(default=None, max_length=20)
+    esquema: Optional[int] = None
+    sat: Optional[str] = Field(default=None, max_length=20)
+    # Pasa el artículo de baja ('B') a activo ('A'). Lo contrario no existe.
+    reactivar: bool = False
+    empresas: list[str] = Field(default_factory=list)
+    origen: str = Field(default="UI", max_length=12)
 
 
 class AltaSaeReporteIn(BaseModel):

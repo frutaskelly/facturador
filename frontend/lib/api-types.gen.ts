@@ -3339,12 +3339,16 @@ export interface paths {
         };
         /**
          * Reclamar Alta Sae
-         * @description El conector pregunta si hay una alta que aplicar. Reclamar la marca
-         *     EN_CURSO con `skip_locked`: dos conectores no pueden tomar la misma y
-         *     escribirla dos veces en SAE.
+         * @description La puerta del conector del BOT: pregunta si hay algo que aplicar.
          *
-         *     Reclama UNA a la vez a propósito: si el proceso muere a media alta, hay que
-         *     poder decir exactamente de qué clave hay que ir a ver en SAE.
+         *     UN SOLO ESCRITOR. Con la escritura del Facturador encendida
+         *     (`sae_escritura.activo()`), esta puerta ya no entrega nada: el bot
+         *     contesta «no hay altas pendientes» y el que escribe es el Facturador. Si
+         *     las dos puertas repartieran, dos escritores se tomarían la cola a la vez y
+         *     la garantía de no duplicar dependería de la suerte.
+         *
+         *     Y sólo entrega ALTAS: el aplicador del bot no sabe hacer cambios, y
+         *     reclamarle uno sería cerrarlo como hecho sin haberlo escrito.
          */
         get: operations["reclamar_alta_sae_api_v1_productos_alta_sae_pendiente_get"];
         put?: never;
@@ -3378,6 +3382,37 @@ export interface paths {
          *     que SAE no haya confirmado.
          */
         post: operations["reportar_alta_sae_api_v1_productos_alta_sae__solicitud_id__reporte_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/productos/cambio-sae": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pedir Cambio Sae
+         * @description Pide cambiar un artículo que YA existe en SAE: descripción, línea,
+         *     unidad, esquema de impuestos, clave SAT, o reactivarlo.
+         *
+         *     Entra a la misma cola que las altas y con sus mismas reglas. Lo escribe el
+         *     Facturador (`sae_escritura`); el bot sólo lo pide. Dar de baja y cambiar
+         *     precio NO están aquí a propósito: la baja nunca es por iniciativa propia
+         *     (regla del dueño) y los precios quedaron fuera del alcance autorizado.
+         *
+         *     Una sola viva por clave, pero un cambio que todavía nadie tomó ABSORBE al
+         *     nuevo: «cámbiale la línea» y luego «y la unidad» son un solo UPDATE, no dos
+         *     solicitudes peleando por la misma clave. Si ya se está escribiendo, se
+         *     contesta 409: mezclarlo a medio camino no se sabe si alcanzó a entrar.
+         */
+        post: operations["pedir_cambio_sae_api_v1_productos_cambio_sae_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5445,6 +5480,11 @@ export interface components {
             solicitada_at: string;
             /** Terminada At */
             terminada_at?: string | null;
+            /**
+             * Tipo
+             * @default ALTA
+             */
+            tipo: string;
         };
         /**
          * AltaSaeReporteIn
@@ -5644,6 +5684,39 @@ export interface components {
         CambiarPasswordIn: {
             /** Password */
             password: string;
+        };
+        /**
+         * CambioSaeIn
+         * @description Pide cambiar un artículo que ya existe en SAE. Sólo viajan los campos
+         *     que cambian; al menos uno. `empresas` vacío = las cuatro.
+         */
+        CambioSaeIn: {
+            /** Clave */
+            clave: string;
+            /** Descripcion */
+            descripcion?: string | null;
+            /** Empresas */
+            empresas?: string[];
+            /** Esquema */
+            esquema?: number | null;
+            /** Linea */
+            linea?: string | null;
+            /**
+             * Origen
+             * @default UI
+             */
+            origen: string;
+            /** Producto Id */
+            producto_id?: string | null;
+            /**
+             * Reactivar
+             * @default false
+             */
+            reactivar: boolean;
+            /** Sat */
+            sat?: string | null;
+            /** Unidad */
+            unidad?: string | null;
         };
         /** CancelarFacturaIn */
         CancelarFacturaIn: {
@@ -19004,6 +19077,7 @@ export interface operations {
             query?: {
                 estado?: string | null;
                 clave?: string | null;
+                tipo?: string;
                 limit?: number;
                 offset?: number;
             };
@@ -19120,6 +19194,41 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AltaSaeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pedir_cambio_sae_api_v1_productos_cambio_sae_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CambioSaeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

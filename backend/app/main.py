@@ -70,6 +70,12 @@ async def lifespan(app: FastAPI):
         from .services.espejo_sae import reloj
         tarea_espejo = asyncio.create_task(reloj(settings.ESPEJO_SAE_INTERVALO_SEG))
         log.info("espejo SAE: reloj cada %ss", settings.ESPEJO_SAE_INTERVALO_SEG)
+    tarea_escritura = None
+    if settings.SAE_ESCRITURA_INTERVALO_SEG:
+        import asyncio
+        from .services.sae_escritura import reloj as reloj_escritura
+        tarea_escritura = asyncio.create_task(reloj_escritura(settings.SAE_ESCRITURA_INTERVALO_SEG))
+        log.info("escritura SAE: reloj cada %ss", settings.SAE_ESCRITURA_INTERVALO_SEG)
     tarea_cobranza = None
     if settings.COBRANZA_AUTO_INTERVALO_SEG:
         import asyncio
@@ -79,6 +85,8 @@ async def lifespan(app: FastAPI):
     yield
     if tarea_cobranza:
         tarea_cobranza.cancel()
+    if tarea_escritura:
+        tarea_escritura.cancel()
     if tarea_espejo:
         tarea_espejo.cancel()
     log.info("Shutting down")

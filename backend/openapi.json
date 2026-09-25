@@ -774,6 +774,11 @@
        }
       ],
       "title": "Terminada At"
+     },
+     "tipo": {
+      "default": "ALTA",
+      "title": "Tipo",
+      "type": "string"
      }
     },
     "required": [
@@ -1231,6 +1236,111 @@
      "password"
     ],
     "title": "CambiarPasswordIn",
+    "type": "object"
+   },
+   "CambioSaeIn": {
+    "description": "Pide cambiar un artículo que ya existe en SAE. Sólo viajan los campos\nque cambian; al menos uno. `empresas` vacío = las cuatro.",
+    "properties": {
+     "clave": {
+      "maxLength": 20,
+      "minLength": 1,
+      "title": "Clave",
+      "type": "string"
+     },
+     "descripcion": {
+      "anyOf": [
+       {
+        "maxLength": 60,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Descripcion"
+     },
+     "empresas": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Empresas",
+      "type": "array"
+     },
+     "esquema": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Esquema"
+     },
+     "linea": {
+      "anyOf": [
+       {
+        "maxLength": 10,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Linea"
+     },
+     "origen": {
+      "default": "UI",
+      "maxLength": 12,
+      "title": "Origen",
+      "type": "string"
+     },
+     "producto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
+     },
+     "reactivar": {
+      "default": false,
+      "title": "Reactivar",
+      "type": "boolean"
+     },
+     "sat": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sat"
+     },
+     "unidad": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad"
+     }
+    },
+    "required": [
+     "clave"
+    ],
+    "title": "CambioSaeIn",
     "type": "object"
    },
    "CancelarFacturaIn": {
@@ -34931,6 +35041,17 @@
      },
      {
       "in": "query",
+      "name": "tipo",
+      "required": false,
+      "schema": {
+       "default": "ALTA",
+       "pattern": "^(ALTA|CAMBIO|TODAS)$",
+       "title": "Tipo",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
       "name": "limit",
       "required": false,
       "schema": {
@@ -35067,7 +35188,7 @@
   },
   "/api/v1/productos/alta-sae/pendiente": {
    "get": {
-    "description": "El conector pregunta si hay una alta que aplicar. Reclamar la marca\nEN_CURSO con `skip_locked`: dos conectores no pueden tomar la misma y\nescribirla dos veces en SAE.\n\nReclama UNA a la vez a propósito: si el proceso muere a media alta, hay que\npoder decir exactamente de qué clave hay que ir a ver en SAE.",
+    "description": "La puerta del conector del BOT: pregunta si hay algo que aplicar.\n\nUN SOLO ESCRITOR. Con la escritura del Facturador encendida\n(`sae_escritura.activo()`), esta puerta ya no entrega nada: el bot\ncontesta «no hay altas pendientes» y el que escribe es el Facturador. Si\nlas dos puertas repartieran, dos escritores se tomarían la cola a la vez y\nla garantía de no duplicar dependería de la suerte.\n\nY sólo entrega ALTAS: el aplicador del bot no sabe hacer cambios, y\nreclamarle uno sería cerrarlo como hecho sin haberlo escrito.",
     "operationId": "reclamar_alta_sae_api_v1_productos_alta_sae_pendiente_get",
     "parameters": [
      {
@@ -35198,6 +35319,71 @@
      }
     ],
     "summary": "Reportar Alta Sae",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/cambio-sae": {
+   "post": {
+    "description": "Pide cambiar un artículo que YA existe en SAE: descripción, línea,\nunidad, esquema de impuestos, clave SAT, o reactivarlo.\n\nEntra a la misma cola que las altas y con sus mismas reglas. Lo escribe el\nFacturador (`sae_escritura`); el bot sólo lo pide. Dar de baja y cambiar\nprecio NO están aquí a propósito: la baja nunca es por iniciativa propia\n(regla del dueño) y los precios quedaron fuera del alcance autorizado.\n\nUna sola viva por clave, pero un cambio que todavía nadie tomó ABSORBE al\nnuevo: «cámbiale la línea» y luego «y la unidad» son un solo UPDATE, no dos\nsolicitudes peleando por la misma clave. Si ya se está escribiendo, se\ncontesta 409: mezclarlo a medio camino no se sabe si alcanzó a entrar.",
+    "operationId": "pedir_cambio_sae_api_v1_productos_cambio_sae_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CambioSaeIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AltaSaeOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Pedir Cambio Sae",
     "tags": [
      "productos"
     ]
