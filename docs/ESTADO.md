@@ -14,6 +14,26 @@ repo del bot (`SmartSupply/bot/docs/ESTADO.md`); aquí queda lo que toca a este 
 > entraron 91 PRs y 16 migraciones de otras sesiones que nadie resumió aquí. Para ese tramo
 > manda `git log 9021dfa..main --oneline`, no este archivo.
 
+## 25-sep: cobranza — filtros de antigüedad, detalle de REP y cobranza automática
+
+Desplegado en prod (`e399a1b`):
+
+- **#242 / #248 / #249** — las cajas de antigüedad filtran la tabla, en el estado de cuenta y en
+  Reportes → Cuentas por cobrar (selección múltiple). El botón «Estado de cuenta» baja el Excel
+  SAE solo con lo filtrado (`POST /cobranza/estado-cuenta/{id}/xlsx`). La liga de Reportes
+  lleva `?serie=&antiguedad=`; el estado de cuenta los lee con `useSearchParams` (con `<Link>`
+  `window.location` todavía trae la URL vieja) y los escribe de vuelta con `replaceState`.
+- **#245** — Comprobantes de pago: cada REP se despliega con sus facturas (subtotal, IEPS, IVA,
+  total, pagado, saldo).
+- **#256** — **Cobranza automática** en `/cobranza/automatica`, migración `0088`: config por
+  tenant, contactos por cliente/serie con pausa, cola + bitácora. Reloj en el API cada 300 s
+  (`COBRANZA_AUTO_INTERVALO_SEG`). Candado: no manda si el espejo SAE no reportó OK en
+  `espejo_max_horas`. Nace **apagada**.
+
+**Pendiente (del dueño):** capturar los correos de cobranza en la pestaña Contactos, encenderla
+en modo revisión, armar la primera cola y aprobar los primeros envíos a mano antes de pasar a
+automático.
+
 ## Lo que entró para cerrar las metas del bot (PRs #212 a #218)
 
 | ruta nueva | para qué |
