@@ -30711,6 +30711,78 @@
     ]
    }
   },
+  "/api/v1/oc-recibidas/ubicaciones": {
+   "get": {
+    "description": "Los puntos de entrega que ya existen, con el prefijo de folio que usan.\n\nHasta hoy este catálogo salía del Master de EHMO: de cada renglón se tomaba\nla ubicación y las dos primeras letras de su folio. No es un catálogo a\nmano sino HISTORIA — si el equipo abrió un hospital nuevo el mes pasado, ya\naparece —, y de él hereda una OC creada a mano su prefijo, y con el prefijo\nsu proyecto y su lista de precios.\n\nES EL ÚNICO QUE PUEDE MORDER EN SILENCIO al retirar la hoja: sin él, una OC\nnueva nace con el proyecto por omisión y cotiza contra la lista\nequivocada, y eso no da error, da precios en cero.\n\nSe deriva de la bandeja, que es la misma historia vista desde el lado que\nse queda. Medido antes de moverlo (25-sep-2026): la hoja de Villahermosa\nconoce 21 ubicaciones y la bandeja 22 con prefijo VH, ninguna que exista\nsolo en la hoja y ningún prefijo en conflicto.\n\nSi una ubicación llegó a usar dos prefijos, gana el más reciente: es el que\nel equipo usa hoy.",
+    "operationId": "ubicaciones_conocidas_api_v1_oc_recibidas_ubicaciones_get",
+    "parameters": [
+     {
+      "description": "Prefijo del origen externo, p. ej. «EHMO:villahermosa»",
+      "in": "query",
+      "name": "origen",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 40,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Prefijo del origen externo, p. ej. «EHMO:villahermosa»",
+       "title": "Origen"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Ubicaciones Conocidas",
+    "tags": [
+     "bandeja de OC"
+    ]
+   }
+  },
   "/api/v1/oc-recibidas/{oc_id}": {
    "get": {
     "operationId": "detalle_api_v1_oc_recibidas__oc_id__get",

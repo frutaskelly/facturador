@@ -559,6 +559,52 @@ def _candado_antigemela(db: Session, ctx: AuthContext, payload) -> None:
         )
 
 
+@router.get("/ubicaciones")
+def ubicaciones_conocidas(
+    origen: Optional[str] = Query(default=None, max_length=40,
+                                  description="Prefijo del origen externo, p. ej. «EHMO:villahermosa»"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Los puntos de entrega que ya existen, con el prefijo de folio que usan.
+
+    Hasta hoy este catálogo salía del Master de EHMO: de cada renglón se tomaba
+    la ubicación y las dos primeras letras de su folio. No es un catálogo a
+    mano sino HISTORIA — si el equipo abrió un hospital nuevo el mes pasado, ya
+    aparece —, y de él hereda una OC creada a mano su prefijo, y con el prefijo
+    su proyecto y su lista de precios.
+
+    ES EL ÚNICO QUE PUEDE MORDER EN SILENCIO al retirar la hoja: sin él, una OC
+    nueva nace con el proyecto por omisión y cotiza contra la lista
+    equivocada, y eso no da error, da precios en cero.
+
+    Se deriva de la bandeja, que es la misma historia vista desde el lado que
+    se queda. Medido antes de moverlo (25-sep-2026): la hoja de Villahermosa
+    conoce 21 ubicaciones y la bandeja 22 con prefijo VH, ninguna que exista
+    solo en la hoja y ningún prefijo en conflicto.
+
+    Si una ubicación llegó a usar dos prefijos, gana el más reciente: es el que
+    el equipo usa hoy.
+    """
+    q = (db.query(OCRecibida.punto_entrega, OCRecibida.folio_externo, OCRecibida.recibida_at)
+         .filter(OCRecibida.tenant_id == ctx.tenant_id,
+                 OCRecibida.estado != "DESCARTADA",
+                 OCRecibida.punto_entrega.isnot(None),
+                 OCRecibida.folio_externo.isnot(None)))
+    if origen:
+        q = q.filter(OCRecibida.origen_externo.like(f"{origen.strip()}:%"))
+    vistas: dict[str, dict] = {}
+    for punto, folio, cuando in q.order_by(OCRecibida.recibida_at.desc()).all():
+        nombre = " ".join((punto or "").upper().split())
+        prefijo = (folio or "").strip().upper()[:2]
+        if not nombre or len(prefijo) < 2 or not prefijo.isalpha() or nombre in vistas:
+            continue
+        vistas[nombre] = {"ubicacion": nombre, "prefijo": prefijo,
+                          "ultima": cuando.date().isoformat() if cuando else None}
+    return {"ok": True, "total": len(vistas),
+            "ubicaciones": sorted(vistas.values(), key=lambda u: u["ubicacion"])}
+
+
 def _detectar_cambio(db: Session, oc: OCRecibida, data: dict, ctx: AuthContext) -> None:
     """La orden ya tiene remisión y llegó otra versión de su documento.
 

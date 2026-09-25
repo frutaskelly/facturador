@@ -274,6 +274,31 @@ def _lineas(n, desde=1):
             for i in range(desde, desde + n)]
 
 
+def test_el_catalogo_de_ubicaciones_sale_de_la_bandeja(client, env, auth_as):
+    """Hasta hoy salía del Master: de cada renglón, la ubicación y el prefijo
+    de su folio. De él hereda una OC creada a mano su proyecto y su lista de
+    precios, y sin él nace con el proyecto por omisión y cotiza contra la lista
+    equivocada — sin dar error. Es el único del retiro que muerde en silencio.
+
+    Si una ubicación usó dos prefijos, gana el más reciente."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="VH-39PAL-LUN", ubicacion="palenque"))
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39ACT-LUN", ubicacion="ACTOPAN"))
+    # la misma ubicación, después, con otro prefijo: manda el reciente
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="CE-39PAL-MAR", ubicacion="Palenque"))
+
+    r = client.get("/api/v1/oc-recibidas/ubicaciones", headers=h)
+    assert r.status_code == 200, r.text
+    por_nombre = {u["ubicacion"]: u["prefijo"] for u in r.json()["ubicaciones"]}
+    assert por_nombre["ACTOPAN"] == "HO"
+    assert por_nombre["PALENQUE"] == "CE"             # el más reciente
+    assert "palenque" not in por_nombre               # normalizado a mayúsculas
+
+
 def test_la_misma_entrega_con_otro_folio_no_se_registra_dos_veces(client, env, auth_as):
     """SSP, 17-ago-2026: la misma foto se reenvió sin caption, cayó en LUNES en
     vez de JUEVES —esa tabla no trae columna de día— y creó una gemela con 40
