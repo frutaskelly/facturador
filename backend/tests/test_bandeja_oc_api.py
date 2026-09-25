@@ -274,6 +274,66 @@ def _lineas(n, desde=1):
             for i in range(desde, desde + n)]
 
 
+def test_la_misma_entrega_con_otro_folio_no_se_registra_dos_veces(client, env, auth_as):
+    """SSP, 17-ago-2026: la misma foto se reenvió sin caption, cayó en LUNES en
+    vez de JUEVES —esa tabla no trae columna de día— y creó una gemela con 40
+    de 40 productos idénticos. $29,604 contados dos veces.
+
+    Es el único candado que compara CONTENIDO y no identificadores: por eso
+    atrapa lo que los otros cuatro no ven — otro folio, otro día, otro
+    hospital incluso.
+    """
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+
+    r1 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39SSP-JUE", ubicacion="SSP", fecha_entrega="2026-09-24",
+        lineas=_lineas(8)))
+    assert r1.status_code == 201, r1.text
+
+    # la misma foto, otro día y otro folio: mismos productos y cantidades
+    r2 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39SSP-LUN", ubicacion="SSP", fecha_entrega="2026-09-21",
+        lineas=_lineas(8)))
+    assert r2.status_code == 409, r2.text
+    assert "HO-39SSP-JUE" in r2.json()["detail"]
+
+    # `forzar` entra: si de verdad se entregó lo mismo dos veces, una persona lo dice
+    r3 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-39SSP-LUN", ubicacion="SSP", fecha_entrega="2026-09-21",
+        lineas=_lineas(8), forzar=True))
+    assert r3.status_code == 201, r3.text
+
+
+def test_el_antigemela_copia_sus_tres_propiedades_del_original(client, env, auth_as):
+    """Las tres que no se deducen de su nombre y deciden cuándo dispara:
+    igualdad EXACTA (un gramo y no dispara), mínimo de CINCO partidas (dos
+    entregas chicas coinciden por casualidad), y la ventana es la SEMANA del
+    folio, no el hospital ni el día."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+
+    # 1. menos de cinco partidas: no actúa
+    chico = dict(ubicacion="CHICO", fecha_entrega="2026-09-24", lineas=_lineas(4))
+    assert client.post("/api/v1/oc-recibidas", headers=h,
+                       json=_oc(folio_externo="HO-40CHI-LUN", **chico)).status_code == 201
+    assert client.post("/api/v1/oc-recibidas", headers=h,
+                       json=_oc(folio_externo="HO-40CHI-MAR", **chico)).status_code == 201
+
+    # 2. un gramo de diferencia y no dispara
+    base = _lineas(6)
+    assert client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-41GRA-LUN", ubicacion="GRAMO", lineas=base)).status_code == 201
+    casi = [dict(l) for l in base]
+    casi[0] = dict(casi[0], cantidad="5.001")
+    assert client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-41GRA-MAR", ubicacion="GRAMO", lineas=casi)).status_code == 201
+
+    # 3. otra semana: fuera de la ventana, no dispara
+    assert client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="HO-42GRA-LUN", ubicacion="GRAMO", lineas=base)).status_code == 201
+
+
 def test_la_misma_entrega_con_otro_numero_de_semana_no_se_registra_dos_veces(client, env, auth_as):
     """El 13-sep-2026 cambió el corte de semana y las entregas del 14 al 18
     llegaron una vez como semana 37 y otra como 38. Medido el 24-sep sobre la
