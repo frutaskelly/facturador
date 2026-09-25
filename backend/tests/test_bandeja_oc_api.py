@@ -359,6 +359,25 @@ def test_el_antigemela_copia_sus_tres_propiedades_del_original(client, env, auth
         folio_externo="HO-42GRA-LUN", ubicacion="GRAMO", lineas=base)).status_code == 201
 
 
+def test_un_documento_no_es_gemelo_de_si_mismo(client, env, auth_as):
+    """Cada día de una foto llega como su propia orden. Una foto que pide lo
+    mismo el lunes y el martes no es una gemela: es el mismo documento. La foto
+    REENVIADA —el caso de SSP, $29,604— es otro archivo, y ésa sí se frena."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    base = _lineas(6)
+    for folio in ("VH-38ROV-LUN-B", "VH-38ROV-MAR-B"):
+        r = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+            folio_externo=folio, ubicacion="ROVIROSA", archivo_nombre="foto-lunes-martes.jpg",
+            lineas=base))
+        assert r.status_code == 201, r.text
+    otra_foto = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="VH-38ROV-MIE-B", ubicacion="ROVIROSA", archivo_nombre="reenvio.jpg",
+        lineas=base))
+    assert otra_foto.status_code == 409, otra_foto.text
+    assert "idéntica" in otra_foto.json()["detail"]
+
+
 def test_la_misma_entrega_con_otro_numero_de_semana_no_se_registra_dos_veces(client, env, auth_as):
     """El 13-sep-2026 cambió el corte de semana y las entregas del 14 al 18
     llegaron una vez como semana 37 y otra como 38. Medido el 24-sep sobre la
