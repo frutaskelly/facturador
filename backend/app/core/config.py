@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # las mismas facturas solo se estorban. Se enciende en el mismo movimiento
     # en que se apaga el del bot.
     ESPEJO_SAE_INTERVALO_SEG: int = 0
+    # Cada cuánto revisa la cobranza automática si ya toca armar la cola o
+    # mandar lo aprobado. 0 = apagada (lo que se configure en pantalla no corre).
+    COBRANZA_AUTO_INTERVALO_SEG: int = 300
     ESPEJO_SAE_TENANT_ID: str = ""
     ESPEJO_SAE_EMPRESAS: str = "02,03,04"
     # Cada cuánto se traen los REP y las notas de crédito. Llegan de a poco, no

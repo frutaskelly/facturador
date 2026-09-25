@@ -11,6 +11,7 @@ from .grupo_whatsapp import GrupoWhatsapp
 from .import_productos_log import ImportProductosLog
 from .conversion import ConversionProducto
 from .esquema_impuesto import EsquemaImpuesto
+from .cobranza_auto import CobranzaConfig, CobranzaContacto, CobranzaEnvio
 from .espejo_sync import EspejoSync
 from .devolucion import Devolucion, LineaDevolucion
 from .factura import Factura, LineaFactura, TimbradoIntento
@@ -49,6 +50,9 @@ __all__ = [
     "CategoriaProducto",
     "EsquemaImpuesto",
     "EspejoSync",
+    "CobranzaConfig",
+    "CobranzaContacto",
+    "CobranzaEnvio",
     "SolicitudAltaSae",
     "Ticket",
     "Producto",
