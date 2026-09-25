@@ -15,7 +15,7 @@ import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtMoney } from "@/lib/format";
-import { useMutation, useResource, type Page } from "@/lib/hooks";
+import { useListadoCompleto, useMutation, useResource, type Page } from "@/lib/hooks";
 import type {
   Almacen,
   Cliente,
@@ -64,7 +64,7 @@ export default function SucursalesPage() {
   // ── catálogos (una sola carga) ──
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=500");
   const sucursalesRes = useResource<Page<Sucursal>>("/api/v1/sucursales?limit=1000");
-  const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=1000");
+  const productosRes = useListadoCompleto<Producto>("/api/v1/productos");
   const almacenesRes = useResource<Page<Almacen>>("/api/v1/almacenes?limit=200");
   const seriesFacRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
   const seriesRemRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=REMISION&activa=true&limit=200");
