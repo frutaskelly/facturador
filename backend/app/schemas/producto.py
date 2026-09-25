@@ -176,12 +176,17 @@ class AliasOut(BaseModel):
 class AliasReapuntarIn(BaseModel):
     """Corrige una fila del vocabulario: el texto, el producto, o los dos.
 
-    El ALCANCE no se toca aquí: pasar el alias de un cliente al global
+    El CLIENTE no se toca aquí: pasar el alias de un cliente al global
     convertiría su corrección en una regla para todos, y esa es otra decisión
     (con otro permiso). Para eso se quita y se vuelve a escribir.
+
+    La SUCURSAL sí, dentro del mismo cliente: mandarla con valor acota la regla
+    a esa plaza; mandarla en `null` la abre a todas las sucursales del cliente.
+    Omitirla la deja como está (por eso se distingue ausente de `null`).
     """
     texto: Optional[str] = Field(default=None, min_length=1, max_length=254)
     producto_id: Optional[uuid.UUID] = None
+    sucursal_id: Optional[uuid.UUID] = None
 
 
 class VocabularioOut(BaseModel):

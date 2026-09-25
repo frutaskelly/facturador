@@ -102,6 +102,7 @@ from ...services.producto_match import (
     productos_activos,
     sugerir_con_ia,
 )
+from ...services.sucursales import es_sucursal_de
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 logger = logging.getLogger(__name__)
@@ -638,7 +639,7 @@ def reapuntar_alias(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    """Corrige el renglón: el texto, el producto, o los dos."""
+    """Corrige el renglón: el texto, el producto y/o la sucursal del cliente."""
     alias = _alias_editable(db, alias_id, ctx)
     if payload.producto_id is not None:
         ensure_fk(db, Producto, payload.producto_id, "producto_id")
@@ -649,6 +650,19 @@ def reapuntar_alias(
             raise HTTPException(status_code=422, detail="El texto no puede quedar vacío")
         alias.alias = payload.texto.strip()[:254]
         alias.alias_normalizado = norm
+    if "sucursal_id" in payload.model_fields_set and payload.sucursal_id != alias.sucursal_id:
+        if alias.cliente_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Una regla de todos los clientes no se puede acotar a una sucursal",
+            )
+        if payload.sucursal_id is not None:
+            ensure_fk(db, Sucursal, payload.sucursal_id, "sucursal_id")
+            if not es_sucursal_de(db, payload.sucursal_id, alias.cliente_id):
+                raise HTTPException(
+                    status_code=422, detail="Esa sucursal no surte a este cliente",
+                )
+        alias.sucursal_id = payload.sucursal_id
     alias.origen = "MANUAL"        # lo decidió una persona: deja de ser importado
     # El índice único es (tenant, cliente, sucursal, texto normalizado): al
     # reescribir el texto se puede chocar con otro renglón del MISMO alcance.

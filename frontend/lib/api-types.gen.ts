@@ -3098,7 +3098,7 @@ export interface paths {
         head?: never;
         /**
          * Reapuntar Alias
-         * @description Corrige el renglón: el texto, el producto, o los dos.
+         * @description Corrige el renglón: el texto, el producto y/o la sucursal del cliente.
          */
         patch: operations["reapuntar_alias_api_v1_productos_alias__alias_id__patch"];
         trace?: never;
@@ -5025,13 +5025,19 @@ export interface components {
          * AliasReapuntarIn
          * @description Corrige una fila del vocabulario: el texto, el producto, o los dos.
          *
-         *     El ALCANCE no se toca aquí: pasar el alias de un cliente al global
+         *     El CLIENTE no se toca aquí: pasar el alias de un cliente al global
          *     convertiría su corrección en una regla para todos, y esa es otra decisión
          *     (con otro permiso). Para eso se quita y se vuelve a escribir.
+         *
+         *     La SUCURSAL sí, dentro del mismo cliente: mandarla con valor acota la regla
+         *     a esa plaza; mandarla en `null` la abre a todas las sucursales del cliente.
+         *     Omitirla la deja como está (por eso se distingue ausente de `null`).
          */
         AliasReapuntarIn: {
             /** Producto Id */
             producto_id?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
             /** Texto */
             texto?: string | null;
         };

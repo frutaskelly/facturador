@@ -801,6 +801,60 @@ def test_alias_con_sucursal_inexistente_es_422(client, env, auth_as):
     assert r.status_code == 422
 
 
+def test_editar_la_equivalencia_mueve_la_sucursal_dentro_del_cliente(client, env, auth_as):
+    """La sucursal se cambia al editar: con valor acota la regla a esa plaza,
+    en null la abre a todas las sucursales del cliente, y omitirla no la toca.
+    El cliente no se mueve, y el global no se acota a una plaza."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+
+    def _fila(texto):
+        return next(i for i in client.get(f"/api/v1/productos/vocabulario?q={texto}",
+                                          headers=h).json()["items"] if i["texto"] == texto)
+
+    client.post("/api/v1/productos/alias", headers=h, json={
+        "texto": "cilantrito", "producto_id": env["cilantro"], "cliente_id": env["ehmo"]})
+    fila = _fila("cilantrito")
+    assert fila["sucursal_id"] is None
+
+    # A la plaza de Tabasco.
+    r = client.patch(f"/api/v1/productos/alias/{fila['id']}", headers=h,
+                     json={"sucursal_id": env["suc_tab"]})
+    assert r.status_code == 204
+    fila = _fila("cilantrito")
+    assert fila["sucursal_id"] == env["suc_tab"] and fila["sucursal_nombre"] == "Tabasco"
+    assert fila["cliente_id"] == env["ehmo"]
+
+    # Cambiar sólo el producto no suelta la plaza.
+    client.patch(f"/api/v1/productos/alias/{fila['id']}", headers=h,
+                 json={"producto_id": env["serrano"]})
+    assert _fila("cilantrito")["sucursal_id"] == env["suc_tab"]
+
+    # null = todas las sucursales del cliente.
+    r = client.patch(f"/api/v1/productos/alias/{fila['id']}", headers=h,
+                     json={"sucursal_id": None})
+    assert r.status_code == 204
+    assert _fila("cilantrito")["sucursal_id"] is None
+
+    # Una plaza que no surte a ese cliente no se acepta.
+    db = SessionLocal()
+    try:
+        otra = crear_sucursal(db, tenant_id=uuid.UUID(env["tenant"]),
+                              cliente_id=uuid.UUID(env["balles"]), codigo="PAC", nombre="Pachuca")
+        db.commit(); otra_id = str(otra.id)
+    finally:
+        db.close()
+    r = client.patch(f"/api/v1/productos/alias/{fila['id']}", headers=h,
+                     json={"sucursal_id": otra_id})
+    assert r.status_code == 422
+
+    # Y el global no se acota a una plaza.
+    client.post("/api/v1/productos/alias", headers=h,
+                json={"texto": "cilantrote", "producto_id": env["cilantro"]})
+    r = client.patch(f"/api/v1/productos/alias/{_fila('cilantrote')['id']}", headers=h,
+                     json={"sucursal_id": env["suc_tab"]})
+    assert r.status_code == 422
+
+
 def test_el_clic_respeta_el_almacen_elegido(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
     client.post("/api/v1/clientes/externos", headers=h, json={
