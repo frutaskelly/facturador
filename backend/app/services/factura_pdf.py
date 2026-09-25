@@ -50,8 +50,159 @@ _ESTILO_TIT = ParagraphStyle("tit", fontName="Helvetica-Bold", fontSize=8, leadi
 # Paragraph gana sobre el TEXTCOLOR de la tabla, por eso se define aquí).
 _ESTILO_TH = ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, leading=10,
                             textColor=colors.HexColor("#334155"))
+_ESTILO_CELDA_IMP = ParagraphStyle("imp", fontName="Helvetica", fontSize=7, leading=8.5,
+                                   textColor=colors.HexColor("#475569"))
 _ESTILO_NOTE = ParagraphStyle("note", fontName="Helvetica", fontSize=8, leading=11,
                               textColor=colors.HexColor("#475569"))
+
+
+# ── Importe con letra ───────────────────────────────────────────────────────────
+# Lo pedía el dueño y el bot ya lo imprimía (21-sep-2026): un documento que se firma
+# a mano se revisa contra la cantidad escrita, no contra los dígitos.
+_UNI = ("", "UN", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE", "DIEZ",
+        "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISEIS", "DIECISIETE", "DIECIOCHO",
+        "DIECINUEVE", "VEINTE")
+_DEC = ("", "", "VEINTE", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA",
+        "NOVENTA")
+_CEN = ("", "CIENTO", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS", "SEISCIENTOS",
+        "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS")
+
+
+def _centenas(n: int) -> str:
+    if n == 0:
+        return ""
+    if n == 100:
+        return "CIEN"
+    out = []
+    c, r = divmod(n, 100)
+    if c:
+        out.append(_CEN[c])
+    if r:
+        if r <= 20:
+            out.append(_UNI[r])
+        else:
+            d, u = divmod(r, 10)
+            if d == 2 and u:
+                out.append("VEINTI" + _UNI[u])
+            else:
+                out.append(_DEC[d] + (" Y " + _UNI[u] if u else ""))
+    return " ".join(x for x in out if x)
+
+
+def numero_a_letra(monto) -> str:
+    """7199.85 -> 'SIETE MIL CIENTO NOVENTA Y NUEVE PESOS 85/100 M.N.'"""
+    centavos = int((Decimal(monto or 0) * 100).to_integral_value())
+    ent, cts = divmod(abs(centavos), 100)
+    if ent == 0:
+        letras = "CERO"
+    else:
+        millones, resto = divmod(ent, 1_000_000)
+        miles, unidades = divmod(resto, 1000)
+        partes = []
+        if millones:
+            partes.append("UN MILLON" if millones == 1 else _centenas(millones) + " MILLONES")
+        if miles:
+            partes.append("MIL" if miles == 1 else _centenas(miles) + " MIL")
+        if unidades:
+            partes.append(_centenas(unidades))
+        letras = " ".join(partes)
+    return f"{letras} PESOS {cts:02d}/100 M.N."
+
+
+def _tasa(importe, impuesto) -> Decimal:
+    """Tasa efectiva de una línea, en %. La remisión guarda el importe del impuesto pero
+    no su tasa, así que se deriva; en la factura hay tasa propia y esto no se usa."""
+    base = Decimal(importe or 0)
+    if not base:
+        return Decimal(0)
+    return (Decimal(impuesto or 0) / base * 100).quantize(Decimal("0.01"))
+
+
+def celda_impuesto(pct, monto) -> str:
+    """'16% $12.48' cuando aplica, '—' cuando la partida no causa ese impuesto.
+
+    La tasa va junto al monto para ver de un vistazo si un producto quedó con el esquema
+    de impuestos equivocado (misma celda que imprime el bot desde agosto de 2026)."""
+    pct, monto = Decimal(pct or 0), Decimal(monto or 0)
+    if not pct and not monto:
+        return "—"
+    return f"{pct.normalize():f}% {_money(monto)}"
+
+
+def marca_documento(datos: dict):
+    """Flowable invisible que le dice al canvas de qué documento es la página que empieza.
+    Sin esto, en un PDF con varias facturas no hay forma de saber a cuál pertenece cada
+    hoja cuando toca dibujar el pie."""
+    from reportlab.platypus import Flowable
+
+    class _Marca(Flowable):
+        def __init__(self):
+            Flowable.__init__(self)
+            self.width = self.height = 0
+
+        def wrap(self, *a):
+            return (0, 0)
+
+        def draw(self):
+            self.canv._marca = dict(datos)
+
+    return _Marca()
+
+
+def canvas_folio():
+    """Canvas que estampa el folio y «Página n de m» SOLO cuando un documento ocupa más de
+    una hoja.
+
+    En una sola hoja el documento no cambia en nada. Cuando son varias —una factura de 60
+    partidas son tres— el cliente tiene que poder saber de qué documento es cada hoja y si
+    le falta alguna: hasta hoy las páginas 2 y 3 salían sin folio (21-sep-2026)."""
+    from reportlab.pdfgen.canvas import Canvas
+
+    class _CanvasFolio(Canvas):
+        def __init__(self, *a, **k):
+            Canvas.__init__(self, *a, **k)
+            self._paginas = []
+
+        def showPage(self):
+            self._paginas.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            cuenta: dict = {}
+            for st in self._paginas:
+                i = (st.get("_marca") or {}).get("id")
+                cuenta[i] = cuenta.get(i, 0) + 1
+            visto: dict = {}
+            for st in self._paginas:
+                self.__dict__.update(st)
+                m = st.get("_marca") or {}
+                i = m.get("id")
+                if i is not None and cuenta.get(i, 1) > 1:
+                    visto[i] = visto.get(i, 0) + 1
+                    self.setFont("Helvetica", 7)
+                    self.setFillColor(colors.HexColor("#64748b"))
+                    self.drawString(15 * mm, 8 * mm, m.get("texto", ""))
+                    self.drawRightString(self._pagesize[0] - 15 * mm, 8 * mm,
+                                         f"Página {visto[i]} de {cuenta[i]}")
+                    self.setFillColor(colors.black)
+                Canvas.showPage(self)
+            Canvas.save(self)
+
+    return _CanvasFolio
+
+
+def _fecha(valor) -> str:
+    """dd/mm/aaaa. El XML del SAT trae '2026-09-15T12:00:00' y el modelo un date/datetime;
+    el documento que lee una persona los enseña igual (21-sep-2026)."""
+    if valor is None or valor == "":
+        return ""
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%d/%m/%Y")
+    texto = str(valor)
+    cabeza = texto[:10]
+    if len(cabeza) == 10 and cabeza[4] == "-" and cabeza[7] == "-":
+        return f"{cabeza[8:10]}/{cabeza[5:7]}/{cabeza[0:4]}"
+    return texto
 
 
 def _money(v) -> str:
@@ -146,7 +297,7 @@ def build_factura_pdf(factura, tenant, cliente) -> bytes:
         leftMargin=15 * mm, rightMargin=15 * mm, topMargin=12 * mm, bottomMargin=12 * mm,
         title=f"Factura {folio_negocio}",
     )
-    doc.build(_factura_story(doc, factura, tenant, cliente))
+    doc.build(_factura_story(doc, factura, tenant, cliente), canvasmaker=canvas_folio())
     return buf.getvalue()
 
 
@@ -162,17 +313,17 @@ def build_facturas_pdf(items: list, tenant) -> bytes:
     for i, (factura, cliente) in enumerate(items):
         if i > 0:
             story.append(PageBreak())
-        story.extend(_factura_story(doc, factura, tenant, cliente))
-    doc.build(story)
+        story.extend(_factura_story(doc, factura, tenant, cliente, i))
+    doc.build(story, canvasmaker=canvas_folio())
     return buf.getvalue()
 
 
-def _factura_story(doc, factura, tenant, cliente) -> list:
+def _factura_story(doc, factura, tenant, cliente, indice: int = 0) -> list:
     fx = _parse_xml(getattr(factura, "xml", None))
     tfd = fx.get("tfd")
     timbrada = bool(tfd and tfd.get("uuid"))
     folio_negocio = f"{factura.serie or ''}{factura.folio}"
-    story: list = []
+    story: list = [marca_documento({"id": indice, "texto": f"Factura {folio_negocio}"})]
 
     # ── Encabezado: emisor (izq) + logo (der) ──
     emisor_dom = _domicilio(tenant.domicilio_fiscal or {}, tenant.domicilio_fiscal_cp or "")
@@ -198,9 +349,12 @@ def _factura_story(doc, factura, tenant, cliente) -> list:
     # ── Banda de folio ──
     efecto = _TIPO_COMPROBANTE.get(fx.get("tipo_comprobante", "I"), "I - Ingreso")
     estado_txt = "" if timbrada else "  ·  BORRADOR — SIN VALIDEZ FISCAL"
+    # Sin timbrar no hay XML: la fecha sale del propio registro, que para eso la guarda.
+    # Antes la banda del borrador decía "Fecha de emisión:" y nada.
+    fecha_txt = _fecha(fx.get("fecha") or getattr(factura, "fecha", None))
     banda = Table(
         [[_p(f"<b>FACTURA {folio_negocio}</b>", _ESTILO_TIT),
-          _p(f"Fecha de emisión: {fx.get('fecha', '') or ''}  ·  Efecto: {efecto}{estado_txt}")]],
+          _p(f"Fecha de emisión: {fecha_txt}  ·  Efecto: {efecto}{estado_txt}")]],
         colWidths=[doc.width * 0.35, doc.width * 0.65],
     )
     banda.setStyle(TableStyle([
@@ -250,21 +404,36 @@ def _factura_story(doc, factura, tenant, cliente) -> list:
         story.append(Spacer(1, 8))
 
     # ── Conceptos ──
+    lineas = sorted(factura.lineas, key=lambda x: x.numero_linea)
+    # El desglose por partida solo aparece si alguna línea causa impuesto: una factura de
+    # puro producto exento no gana nada con dos columnas de guiones (21-sep-2026).
+    con_imp = any(Decimal(ln.iva_importe or 0) or Decimal(ln.ieps_importe or 0)
+                  for ln in lineas)
     head = ["Cant.", "Unidad", "Clave SAT", "Descripción", "P. Unitario", "Importe"]
+    if con_imp:
+        head += ["I.E.P.S.", "I.V.A."]
     data = [[_p(h, _ESTILO_TH) for h in head]]
-    for ln in sorted(factura.lineas, key=lambda x: x.numero_linea):
-        data.append([
+    for ln in lineas:
+        fila = [
             _p(f"{Decimal(ln.cantidad):g}"),
             _p(ln.clave_unidad or ""),
             _p(ln.clave_prod_serv or ""),
             _p(_esc(ln.descripcion)),
             _p(_money(ln.valor_unitario)),
             _p(_money(ln.importe)),
-        ])
-    tabla = Table(data, colWidths=[
-        doc.width * 0.09, doc.width * 0.10, doc.width * 0.13,
-        doc.width * 0.44, doc.width * 0.12, doc.width * 0.12,
-    ], repeatRows=1)
+        ]
+        if con_imp:
+            # El IEPS puede ser TASA o CUOTA: con cuota no hay porcentaje que enseñar, así
+            # que se deriva del importe igual que en la remisión.
+            ieps_pct = (Decimal(ln.ieps_valor or 0) * 100 if ln.ieps_tipo == "TASA"
+                        else _tasa(ln.importe, ln.ieps_importe))
+            fila += [_p(celda_impuesto(ieps_pct, ln.ieps_importe), _ESTILO_CELDA_IMP),
+                     _p(celda_impuesto(Decimal(ln.iva_tasa or 0) * 100, ln.iva_importe),
+                        _ESTILO_CELDA_IMP)]
+        data.append(fila)
+    anchos = ([0.08, 0.09, 0.12, 0.30, 0.10, 0.10, 0.105, 0.105] if con_imp
+              else [0.09, 0.10, 0.13, 0.44, 0.12, 0.12])
+    tabla = Table(data, colWidths=[doc.width * a for a in anchos], repeatRows=1)
     tabla.setStyle(TableStyle([
         # Encabezado claro con texto oscuro (legible) y una regla que lo define.
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef2f7")),
@@ -273,7 +442,7 @@ def _factura_story(doc, factura, tenant, cliente) -> list:
         ("LINEBELOW", (0, 1), (-1, -1), 0.3, colors.HexColor("#e2e8f0")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ALIGN", (0, 1), (0, -1), "RIGHT"),
-        ("ALIGN", (4, 1), (5, -1), "RIGHT"),
+        ("ALIGN", (4, 1), (-1, -1), "RIGHT"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
         ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
         ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
@@ -301,6 +470,8 @@ def _factura_story(doc, factura, tenant, cliente) -> list:
         ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
     story.append(tot)
+    story.append(Spacer(1, 8))
+    story.append(_p(numero_a_letra(factura.total), _ESTILO_TIT))
     story.append(Spacer(1, 10))
 
     # ── Bloque fiscal (solo timbrada) ──

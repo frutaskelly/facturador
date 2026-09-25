@@ -890,7 +890,9 @@ def test_el_pdf_imprime_el_nombre_y_la_clave_del_cliente(client, env, auth_as):
     try:
         rem = db.query(Remision).filter(Remision.id == uuid.UUID(rem_id)).one()
         nombres = _nombres_para_pdf(db, [rem])[rem.id]
-        assert nombres[uuid.UUID(env["cilantro"])] == "CILA-FRUT-145 — CILANTRO MANOJO DE 1 KG"
+        # Desde el 21-sep-2026 van separados: la clave es una COLUMNA del PDF, igual
+        # que en la factura, no un prefijo pegado a la descripción.
+        assert nombres[uuid.UUID(env["cilantro"])] == ("CILA-FRUT-145", "CILANTRO MANOJO DE 1 KG")
     finally:
         db.close()
     # Y el endpoint del PDF sigue respondiendo.
