@@ -82,6 +82,11 @@ type Ventas = {
 // El mismo orden en ventas y en cartera: la pregunta primera es «¿quién?».
 const AGRUPAR: Agrupar[] = ["cliente", "sucursal", "proyecto"];
 
+// Mismos cortes, con otro nombre, que las cajas del estado de cuenta.
+const CUBETA_EN_ESTADO_CUENTA: Record<CubetaKey, string> = {
+  por_vencer: "por_vencer", mes_1: "d1_30", mes_2: "d31_60", mes_3: "d61_90", mes_4_mas: "d90_mas",
+};
+
 // Mismos cortes que el backend (`_cubeta` en reportes.py).
 const CUBETAS: { key: CubetaKey; label: string; detalle: string; clase: string }[] = [
   { key: "por_vencer", label: "Por vencer", detalle: "", clase: "bg-success/70" },
@@ -205,8 +210,15 @@ export default function ReportesPage() {
   if (ventasRes.error) return <Alert tone="danger">No se pudieron cargar los reportes.</Alert>;
 
   const unidad = PASOS.find((p) => p.key === ventas?.granularidad)?.unidad ?? "periodo";
-  const destino = (f: { cliente_id: string | null; serie: string | null }) =>
-    f.cliente_id ? `/clientes/${f.cliente_id}/estado-cuenta${f.serie ? `?serie=${f.serie}` : ""}` : null;
+  const destino = (f: { cliente_id: string | null; serie: string | null }, cubetas: CubetaKey[] = []) => {
+    if (!f.cliente_id) return null;
+    const qs = new URLSearchParams();
+    if (f.serie) qs.set("serie", f.serie);
+    // Las cajas marcadas viajan al estado de cuenta con sus nombres de allá.
+    if (cubetas.length) qs.set("antiguedad", cubetas.map((c) => CUBETA_EN_ESTADO_CUENTA[c]).join(","));
+    const s = qs.toString();
+    return `/clientes/${f.cliente_id}/estado-cuenta${s ? `?${s}` : ""}`;
+  };
   const filasVenta: FilaSumario[] = (sumario?.filas ?? []).map((f) => ({
     etiqueta: f.etiqueta, monto: f.total, facturas: f.facturas, href: destino(f),
   }));
@@ -221,7 +233,7 @@ export default function ReportesPage() {
     : (cartera?.filas ?? [])
         .map((f) => ({
           etiqueta: f.etiqueta, monto: sumaSel(f.antiguedad), facturas: sumaSel(f.facturas_por_cubeta),
-          href: destino(f), alerta: sumaSel(f.antiguedad, true),
+          href: destino(f, cubetasSel), alerta: sumaSel(f.antiguedad, true),
         }))
         .filter((f) => f.monto > 0)
         .sort((a, b) => b.monto - a.monto);
