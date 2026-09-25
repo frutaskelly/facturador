@@ -312,7 +312,7 @@ def _candado_folio_repetido(db: Session, ctx: AuthContext, payload) -> None:
     )
 
 
-_RE_SUFIJO_APARTE = re.compile(r"^(.*-[A-Z]{2,3})-(\d{1,2})$")
+_RE_SUFIJO_APARTE = re.compile(r"^(.*-[A-Z]{2,3}(?:-B)?)-(\d{1,2})$")
 
 
 @router.get("/sufijos-aparte")
@@ -422,7 +422,11 @@ def _candado_antirreemplazo(db: Session, ctx: AuthContext, payload) -> None:
 # El folio de EHMO lleva la SEMANA adentro: «VH-37AMA-LUN» es Amatán, lunes,
 # semana 37. Quitarle los dos dígitos deja la identidad de la entrega —hospital
 # y día— sin la semana, que es justo lo que cambió y produjo los dobles.
-_RE_SEMANA_EN_FOLIO = re.compile(r"^([A-Z]{2,3}-)(\d{2})([A-Z]{2,4}-[A-Z]{3})$")
+# La «-B» es la semana repetida del corte de 25-sep-2026 (VH-38ROV-LUN-B): se
+# quita junto con el número, porque también es parte de la semana — así la
+# entrega VH-38ROV-LUN-B y un reenvío viejo como VH-39ROV-LUN se reconocen como
+# la misma.
+_RE_SEMANA_EN_FOLIO = re.compile(r"^([A-Z]{2,3}-)(\d{2})([A-Z]{2,4}-[A-Z]{3})(?:-B)?$")
 
 
 def _folio_sin_semana(folio: str) -> Optional[str]:

@@ -33,7 +33,10 @@ from .series import resolver_serie
 _RE_OC_OBS = re.compile(r"\bOC[\s:]+([A-Z0-9][A-Z0-9\-\/\.]*)")
 # El folio interno de una entrega EHMO/MAFAN: dos letras del proyecto, la
 # semana, el punto y el día — HO-33PAC-LUN, SN-33NER-JUE, VH-35SAL-VIE.
-_RE_FOLIO_INTERNO = re.compile(r"\b([A-Z]{2}-\d{1,2}[A-Z]{2,4}(?:-[A-Z]{3})?)\b")
+# La «-B» final es la semana repetida del corte (25-sep-2026): VH-38ROV-LUN-B es
+# la entrega del 21-sep, VH-38ROV-LUN la del 14. Sin leerla, la factura de una
+# semana se amarraba a la remisión de la otra.
+_RE_FOLIO_INTERNO = re.compile(r"\b([A-Z]{2}-\d{1,2}[A-Z]{2,4}(?:-[A-Z]{3})?(?:-B)?)\b")
 # La semana de entrega, para el estado de cuenta: o viene dicha con todas sus
 # letras en la observación de SAE ("SEMANA 33 SECRETARIO NERI …") o embebida en
 # el folio interno (HO-34VIL-MIE, CEN-35HUA-EMB — ahí el número ES la semana).
