@@ -4269,6 +4269,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reportes/master-facturas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Master Facturas
+         * @description Master de facturas: una fila por factura emitida en el rango, con
+         *     remisión, OC (y la liga al documento original), cobranza, notas de crédito,
+         *     cancelación y el estado real (siete, no los tres de la columna).
+         */
+        get: operations["master_facturas_api_v1_reportes_master_facturas_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reportes/master-facturas/xlsx": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Master Facturas Xlsx
+         * @description El mismo master en Excel: hoja «Master» con autofiltro, liga a la OC y
+         *     pie de totales que respeta el filtro, más la hoja «OC por factura».
+         */
+        get: operations["master_facturas_xlsx_api_v1_reportes_master_facturas_xlsx_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reportes/notas-credito": {
         parameters: {
             query?: never;
@@ -20423,6 +20466,82 @@ export interface operations {
                 hasta?: string | null;
                 /** @description Acota el reporte a un cliente */
                 cliente_id?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    master_facturas_api_v1_reportes_master_facturas_get: {
+        parameters: {
+            query?: {
+                /** @description Inicio del rango (por omisión, hace 30 días) */
+                desde?: string | null;
+                /** @description Fin del rango (por omisión, hoy) */
+                hasta?: string | null;
+                /** @description Acota el reporte a un cliente */
+                cliente_id?: string | null;
+                /** @description Estados del master a incluir (por omisión, todos) */
+                estado?: string[] | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    master_facturas_xlsx_api_v1_reportes_master_facturas_xlsx_get: {
+        parameters: {
+            query?: {
+                desde?: string | null;
+                hasta?: string | null;
+                cliente_id?: string | null;
+                estado?: string[] | null;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
