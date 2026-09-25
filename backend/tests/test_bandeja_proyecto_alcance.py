@@ -283,3 +283,53 @@ def test_asignacion_de_precios_respeta_el_alcance(client, env, auth_as):
     r = client.post("/api/v1/asignaciones-precios", headers=h, json={
         "lista_id": lista, "cliente_id": env["ehmo"], "proyecto_id": proy_pac})
     assert r.status_code == 201, r.text
+
+
+# ─── perfil que hereda ───────────────────────────────────────────────────────
+
+def test_claves_heredadas():
+    from app.services.cliente_match import claves_heredadas
+    assert claves_heredadas("PROYECTO", "ehmo-pachuca:HOSPITALES") == [
+        "ehmo-pachuca:HOSPITALES", "ehmo:HOSPITALES"]
+    assert claves_heredadas("UBICACION", "ehmo:ACTOPAN") == ["ehmo:ACTOPAN"]
+    # Fuera de los sistemas con perfil no se toca nada: «02:5» es una clave SAE.
+    assert claves_heredadas("SAE", "02-x:5") == ["02-x:5"]
+
+
+def test_perfil_hijo_resuelve_con_las_equivalencias_del_padre(client, env, auth_as):
+    """El caso del 23-sep-2026: el grupo de Pachuca pasó de «ehmo» a
+    «ehmo-pachuca» y 30 órdenes HO-39… se quedaron sin cliente, porque las
+    equivalencias PROYECTO y UBICACION se habían aprendido con «ehmo:». Sin RFC
+    en el documento, el perfil hijo debe caer en las del padre."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    proy = _setup(client, env, sucursal_id=env["pachuca"])
+    oc1 = client.post("/api/v1/oc-recibidas", headers=h,
+                      json=_oc(perfil="ehmo", ubicacion="ACTOPAN")).json()
+    _aprender(client, h, oc1["id"], cliente=env["ehmo"], sucursal=env["pachuca"], proyecto=proy)
+
+    oc2 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        perfil="ehmo-pachuca", rfc=None, ubicacion="ACTOPAN",
+        folio_externo="HO-39ACT-VIE")).json()
+    assert oc2["cliente_id"] == env["ehmo"]
+    assert oc2["sucursal_id"] == env["pachuca"]
+    assert oc2["proyecto_id"] == proy
+
+
+def test_la_equivalencia_del_hijo_manda_sobre_la_del_padre(client, env, auth_as):
+    """Heredar es el respaldo, no la regla: si el hijo ya aprendió su propio
+    destino, ése gana — así se corrige Pachuca sin mover lo del padre."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    proy = _setup(client, env, sucursal_id=None)
+    oc1 = client.post("/api/v1/oc-recibidas", headers=h,
+                      json=_oc(perfil="ehmo", ubicacion="ACTOPAN")).json()
+    _aprender(client, h, oc1["id"], cliente=env["ehmo"], sucursal=env["pachuca"], proyecto=proy)
+    oc2 = client.post("/api/v1/oc-recibidas", headers=h,
+                      json=_oc(perfil="ehmo-pachuca", ubicacion="ACTOPAN")).json()
+    _aprender(client, h, oc2["id"], cliente=env["ehmo"], sucursal=env["tabasco"], proyecto=proy)
+
+    hijo = client.post("/api/v1/oc-recibidas", headers=h,
+                       json=_oc(perfil="ehmo-pachuca", ubicacion="ACTOPAN")).json()
+    padre = client.post("/api/v1/oc-recibidas", headers=h,
+                        json=_oc(perfil="ehmo", ubicacion="ACTOPAN")).json()
+    assert hijo["sucursal_id"] == env["tabasco"]
+    assert padre["sucursal_id"] == env["pachuca"]
