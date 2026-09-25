@@ -5,7 +5,8 @@
 // se timbra el REP ante el SAT. Estilo SAE. Un REP timbrado se puede descargar
 // (PDF/XML), enviar por correo y cancelar (revierte el saldo de las facturas).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Ban, Download, FileText, Mail, Plus, Stamp } from "lucide-react";
+import Link from "next/link";
+import { Ban, Download, FileText, Mail, MailCheck, Plus, Stamp } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -176,7 +177,14 @@ export default function Page() {
       <PageHeader
         title="Cobranza"
         subtitle="Facturas PPD por cobrar y sus complementos de pago (REP)"
-        actions={canWrite ? <Button onClick={() => setNuevo(true)}><Plus size={16} /> Registrar pago</Button> : undefined}
+        actions={
+          <div className="flex items-center gap-2">
+            <Link href="/cobranza/automatica" className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-surface-2">
+              <MailCheck size={16} /> Cobranza automática
+            </Link>
+            {canWrite && <Button onClick={() => setNuevo(true)}><Plus size={16} /> Registrar pago</Button>}
+          </div>
+        }
       />
 
       {/* ── 1. Facturas pendientes de pago (la mesa de trabajo) ── */}

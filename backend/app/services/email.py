@@ -106,6 +106,7 @@ def send_email(
     html: str,
     attachments: Optional[list[tuple[str, bytes, str]]] = None,
     reply_to: Optional[str] = None,
+    cc: Optional[list[str]] = None,
 ) -> None:
     """Envía un correo HTML a `to` usando la config SMTP `cfg`.
 
@@ -132,6 +133,8 @@ def send_email(
     msg["Subject"] = subject
     msg["From"] = formataddr((from_name, from_email)) if from_name else from_email
     msg["To"] = ", ".join(to)
+    if cc:
+        msg["Cc"] = ", ".join(cc)
     if reply_to:
         msg["Reply-To"] = reply_to
     msg.set_content(

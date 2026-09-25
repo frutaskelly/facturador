@@ -73,6 +73,7 @@ def _armar_estado_cuenta(
     db: Session, ctx: AuthContext, cliente_id: UUID, corte: date | None,
     serie: str | None = None, incluir_en_cancelacion: bool = False,
     solo_facturas: set[UUID] | None = None,
+    excluir_series: set[str] | None = None,
 ) -> dict:
     """El cálculo del estado de cuenta, uno solo para el JSON, el PDF, el Excel
     y el correo.
@@ -124,6 +125,10 @@ def _armar_estado_cuenta(
         s["saldo"] += Decimal(f.saldo_insoluto)
     if serie:
         facturas = [f for f in facturas if (f.serie or "") == serie]
+    if excluir_series:
+        # La cobranza automática: el contacto «todas las series» de un cliente
+        # cubre las que no tienen contacto propio.
+        facturas = [f for f in facturas if (f.serie or "") not in excluir_series]
     if solo_facturas is not None:
         facturas = [f for f in facturas if f.id in solo_facturas]
 

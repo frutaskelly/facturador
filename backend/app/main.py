@@ -14,6 +14,7 @@ from .api.v1 import (
     categorias,
     clientes,
     cobranza,
+    cobranza_auto,
     contacto,
     conexiones,
     conversiones,
@@ -69,7 +70,15 @@ async def lifespan(app: FastAPI):
         from .services.espejo_sae import reloj
         tarea_espejo = asyncio.create_task(reloj(settings.ESPEJO_SAE_INTERVALO_SEG))
         log.info("espejo SAE: reloj cada %ss", settings.ESPEJO_SAE_INTERVALO_SEG)
+    tarea_cobranza = None
+    if settings.COBRANZA_AUTO_INTERVALO_SEG:
+        import asyncio
+        from .services.cobranza_auto import reloj as reloj_cobranza
+        tarea_cobranza = asyncio.create_task(reloj_cobranza(settings.COBRANZA_AUTO_INTERVALO_SEG))
+        log.info("cobranza automática: reloj cada %ss", settings.COBRANZA_AUTO_INTERVALO_SEG)
     yield
+    if tarea_cobranza:
+        tarea_cobranza.cancel()
     if tarea_espejo:
         tarea_espejo.cancel()
     log.info("Shutting down")
@@ -129,6 +138,7 @@ app.include_router(proyectos.router, prefix="/api/v1")
 # el espejo de REP y notas de crédito que emite SAE (antes que cobranza: rutas literales)
 app.include_router(espejo_cobranza.router, prefix="/api/v1")
 app.include_router(cobranza.router, prefix="/api/v1")
+app.include_router(cobranza_auto.router, prefix="/api/v1")
 app.include_router(reportes.router, prefix="/api/v1")
 # Phase 4 — operaciones
 app.include_router(proveedores.router, prefix="/api/v1")

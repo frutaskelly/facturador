@@ -17,6 +17,7 @@ import {
   Palette,
   Percent,
   HandCoins,
+  MailCheck,
   Inbox,
   Receipt,
   Repeat,
@@ -62,6 +63,7 @@ export const NAV: NavSection[] = [
       { label: "Buzón de tickets", href: "/tickets", perm: "menu:tickets", icon: Inbox },
       { label: "Facturas", href: "/facturas", perm: "menu:facturas", icon: Receipt },
       { label: "Cobranza (REP)", href: "/cobranza", perm: "menu:facturas", icon: HandCoins },
+      { label: "Cobranza automática", href: "/cobranza/automatica", perm: "menu:facturas", icon: MailCheck },
       // Los cortes del negocio (saldos por proyecto y los que vengan). Mismo
       // permiso que cobranza: ver reportes de saldos ES ver cobranza.
       { label: "Reportes", href: "/reportes", perm: "menu:facturas", icon: BarChart3 },

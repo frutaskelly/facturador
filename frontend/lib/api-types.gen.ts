@@ -366,6 +366,141 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cobranza/automatica/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Leer Config */
+        get: operations["leer_config_api_v1_cobranza_automatica_config_get"];
+        /** Guardar Config */
+        put: operations["guardar_config_api_v1_cobranza_automatica_config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/contactos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Listar Contactos
+         * @description Cada cliente con saldo PPD (o con contacto capturado), sus series con
+         *     saldo y sus contactos: la pantalla arma de aquí la tabla por cliente.
+         */
+        get: operations["listar_contactos_api_v1_cobranza_automatica_contactos_get"];
+        /**
+         * Guardar Contacto
+         * @description Alta o cambio del contacto de (cliente, serie). serie vacía = todas.
+         */
+        put: operations["guardar_contacto_api_v1_cobranza_automatica_contactos_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/contactos/{contacto_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Borrar Contacto */
+        delete: operations["borrar_contacto_api_v1_cobranza_automatica_contactos__contacto_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/envios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listar Envios */
+        get: operations["listar_envios_api_v1_cobranza_automatica_envios_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/envios/descartar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Descartar Envios */
+        post: operations["descartar_envios_api_v1_cobranza_automatica_envios_descartar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/envios/enviar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enviar Envios
+         * @description Aprueba y manda. Cada envío se confirma por separado: si el 10 falla, los
+         *     9 que ya salieron quedan registrados como enviados.
+         */
+        post: operations["enviar_envios_api_v1_cobranza_automatica_envios_enviar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/generar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generar Ahora
+         * @description Arma la cola de HOY sin esperar al día programado (no la envía).
+         */
+        post: operations["generar_ahora_api_v1_cobranza_automatica_generar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cobranza/espejo/nota-credito": {
         parameters: {
             query?: never;
@@ -6177,6 +6312,40 @@ export interface components {
             /** Uso Cfdi Default */
             uso_cfdi_default?: string | null;
         };
+        /** CobranzaConfigIn */
+        CobranzaConfigIn: {
+            /** Activo */
+            activo: boolean;
+            /** Adjuntar Excel */
+            adjuntar_excel: boolean;
+            /** Adjuntar Pdf */
+            adjuntar_pdf: boolean;
+            /** Asunto */
+            asunto?: string | null;
+            /** Cc Siempre */
+            cc_siempre?: string[];
+            /** Dia Semana */
+            dia_semana: number;
+            /** Escalar Cc */
+            escalar_cc?: string[];
+            /** Escalar Dias */
+            escalar_dias: number;
+            /** Espejo Max Horas */
+            espejo_max_horas: number;
+            /** Hora */
+            hora: number;
+            /** Incluir Por Vencer */
+            incluir_por_vencer: boolean;
+            /** Mensaje */
+            mensaje?: string | null;
+            /**
+             * Modo
+             * @enum {string}
+             */
+            modo: "REVISION" | "AUTOMATICO";
+            /** Saldo Minimo */
+            saldo_minimo: number | string;
+        };
         /** CobrarIn */
         CobrarIn: {
             /** Pagos */
@@ -6264,23 +6433,6 @@ export interface components {
             permitir_negativos: boolean;
             /** Pesos */
             pesos?: components["schemas"]["PesoLinea"][] | null;
-        };
-        /** ContactoIn */
-        ContactoIn: {
-            /** Correo */
-            correo?: string | null;
-            /** Empresa */
-            empresa?: string | null;
-            /** Mensaje */
-            mensaje: string;
-            /** Nombre */
-            nombre: string;
-            /** Telefono */
-            telefono?: string | null;
-            /** Turnstile Token */
-            turnstile_token?: string | null;
-            /** Website */
-            website?: string | null;
         };
         /** ContactoOut */
         ContactoOut: {
@@ -7787,6 +7939,11 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** IdsIn */
+        IdsIn: {
+            /** Ids */
+            ids: string[];
         };
         /**
          * ImportCategoriaMatch
@@ -11843,6 +12000,44 @@ export interface components {
             /** Texto */
             texto: string;
         };
+        /** ContactoIn */
+        app__api__v1__cobranza_auto__ContactoIn: {
+            /** Cc */
+            cc?: string[];
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Correos */
+            correos?: string[];
+            /** Motivo Pausa */
+            motivo_pausa?: string | null;
+            /**
+             * Pausado
+             * @default false
+             */
+            pausado: boolean;
+            /** Serie */
+            serie?: string | null;
+        };
+        /** ContactoIn */
+        app__schemas__contacto__ContactoIn: {
+            /** Correo */
+            correo?: string | null;
+            /** Empresa */
+            empresa?: string | null;
+            /** Mensaje */
+            mensaje: string;
+            /** Nombre */
+            nombre: string;
+            /** Telefono */
+            telefono?: string | null;
+            /** Turnstile Token */
+            turnstile_token?: string | null;
+            /** Website */
+            website?: string | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -12912,6 +13107,309 @@ export interface operations {
             };
         };
     };
+    leer_config_api_v1_cobranza_automatica_config_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    guardar_config_api_v1_cobranza_automatica_config_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CobranzaConfigIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listar_contactos_api_v1_cobranza_automatica_contactos_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    guardar_contacto_api_v1_cobranza_automatica_contactos_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["app__api__v1__cobranza_auto__ContactoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    borrar_contacto_api_v1_cobranza_automatica_contactos__contacto_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                contacto_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listar_envios_api_v1_cobranza_automatica_envios_get: {
+        parameters: {
+            query?: {
+                /** @description PENDIENTE, ENVIADO, ERROR…; vacío = todos */
+                estado?: string | null;
+                cliente_id?: string | null;
+                /** @description Solo cortes de los últimos N días */
+                dias?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    descartar_envios_api_v1_cobranza_automatica_envios_descartar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enviar_envios_api_v1_cobranza_automatica_envios_enviar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generar_ahora_api_v1_cobranza_automatica_generar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     nota_credito_espejo_api_v1_cobranza_espejo_nota_credito_post: {
         parameters: {
             query?: never;
@@ -13811,7 +14309,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ContactoIn"];
+                "application/json": components["schemas"]["app__schemas__contacto__ContactoIn"];
             };
         };
         responses: {

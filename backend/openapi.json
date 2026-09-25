@@ -3224,6 +3224,125 @@
     "title": "ClienteUpdate",
     "type": "object"
    },
+   "CobranzaConfigIn": {
+    "properties": {
+     "activo": {
+      "title": "Activo",
+      "type": "boolean"
+     },
+     "adjuntar_excel": {
+      "title": "Adjuntar Excel",
+      "type": "boolean"
+     },
+     "adjuntar_pdf": {
+      "title": "Adjuntar Pdf",
+      "type": "boolean"
+     },
+     "asunto": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Asunto"
+     },
+     "cc_siempre": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Cc Siempre",
+      "type": "array"
+     },
+     "dia_semana": {
+      "maximum": 6.0,
+      "minimum": 0.0,
+      "title": "Dia Semana",
+      "type": "integer"
+     },
+     "escalar_cc": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Escalar Cc",
+      "type": "array"
+     },
+     "escalar_dias": {
+      "maximum": 365.0,
+      "minimum": 0.0,
+      "title": "Escalar Dias",
+      "type": "integer"
+     },
+     "espejo_max_horas": {
+      "maximum": 168.0,
+      "minimum": 0.0,
+      "title": "Espejo Max Horas",
+      "type": "integer"
+     },
+     "hora": {
+      "maximum": 23.0,
+      "minimum": 0.0,
+      "title": "Hora",
+      "type": "integer"
+     },
+     "incluir_por_vencer": {
+      "title": "Incluir Por Vencer",
+      "type": "boolean"
+     },
+     "mensaje": {
+      "anyOf": [
+       {
+        "maxLength": 4000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mensaje"
+     },
+     "modo": {
+      "enum": [
+       "REVISION",
+       "AUTOMATICO"
+      ],
+      "title": "Modo",
+      "type": "string"
+     },
+     "saldo_minimo": {
+      "anyOf": [
+       {
+        "maximum": 10000000.0,
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "string"
+       }
+      ],
+      "title": "Saldo Minimo"
+     }
+    },
+    "required": [
+     "activo",
+     "modo",
+     "dia_semana",
+     "hora",
+     "incluir_por_vencer",
+     "saldo_minimo",
+     "escalar_dias",
+     "adjuntar_pdf",
+     "adjuntar_excel",
+     "espejo_max_horas"
+    ],
+    "title": "CobranzaConfigIn",
+    "type": "object"
+   },
    "CobrarIn": {
     "properties": {
      "pagos": {
@@ -3433,88 +3552,6 @@
      }
     },
     "title": "ConfirmarRemisionIn",
-    "type": "object"
-   },
-   "ContactoIn": {
-    "properties": {
-     "correo": {
-      "anyOf": [
-       {
-        "maxLength": 254,
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Correo"
-     },
-     "empresa": {
-      "anyOf": [
-       {
-        "maxLength": 160,
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Empresa"
-     },
-     "mensaje": {
-      "maxLength": 4000,
-      "minLength": 5,
-      "title": "Mensaje",
-      "type": "string"
-     },
-     "nombre": {
-      "maxLength": 120,
-      "minLength": 2,
-      "title": "Nombre",
-      "type": "string"
-     },
-     "telefono": {
-      "anyOf": [
-       {
-        "maxLength": 40,
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Telefono"
-     },
-     "turnstile_token": {
-      "anyOf": [
-       {
-        "maxLength": 4096,
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Turnstile Token"
-     },
-     "website": {
-      "anyOf": [
-       {
-        "maxLength": 254,
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Website"
-     }
-    },
-    "required": [
-     "nombre",
-     "mensaje"
-    ],
-    "title": "ContactoIn",
     "type": "object"
    },
    "ContactoOut": {
@@ -7499,6 +7536,25 @@
      }
     },
     "title": "HTTPValidationError",
+    "type": "object"
+   },
+   "IdsIn": {
+    "properties": {
+     "ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "maxItems": 500,
+      "minItems": 1,
+      "title": "Ids",
+      "type": "array"
+     }
+    },
+    "required": [
+     "ids"
+    ],
+    "title": "IdsIn",
     "type": "object"
    },
    "ImportCategoriaMatch": {
@@ -19702,6 +19758,147 @@
     ],
     "title": "VocabularioOut",
     "type": "object"
+   },
+   "app__api__v1__cobranza_auto__ContactoIn": {
+    "properties": {
+     "cc": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Cc",
+      "type": "array"
+     },
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "correos": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Correos",
+      "type": "array"
+     },
+     "motivo_pausa": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo Pausa"
+     },
+     "pausado": {
+      "default": false,
+      "title": "Pausado",
+      "type": "boolean"
+     },
+     "serie": {
+      "anyOf": [
+       {
+        "maxLength": 10,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie"
+     }
+    },
+    "required": [
+     "cliente_id"
+    ],
+    "title": "ContactoIn",
+    "type": "object"
+   },
+   "app__schemas__contacto__ContactoIn": {
+    "properties": {
+     "correo": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Correo"
+     },
+     "empresa": {
+      "anyOf": [
+       {
+        "maxLength": 160,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Empresa"
+     },
+     "mensaje": {
+      "maxLength": 4000,
+      "minLength": 5,
+      "title": "Mensaje",
+      "type": "string"
+     },
+     "nombre": {
+      "maxLength": 120,
+      "minLength": 2,
+      "title": "Nombre",
+      "type": "string"
+     },
+     "telefono": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Telefono"
+     },
+     "turnstile_token": {
+      "anyOf": [
+       {
+        "maxLength": 4096,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Turnstile Token"
+     },
+     "website": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Website"
+     }
+    },
+    "required": [
+     "nombre",
+     "mensaje"
+    ],
+    "title": "ContactoIn",
+    "type": "object"
    }
   },
   "securitySchemes": {
@@ -22103,6 +22300,573 @@
     ]
    }
   },
+  "/api/v1/cobranza/automatica/config": {
+   "get": {
+    "operationId": "leer_config_api_v1_cobranza_automatica_config_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Leer Config",
+    "tags": [
+     "cobranza"
+    ]
+   },
+   "put": {
+    "operationId": "guardar_config_api_v1_cobranza_automatica_config_put",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CobranzaConfigIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Guardar Config",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/contactos": {
+   "get": {
+    "description": "Cada cliente con saldo PPD (o con contacto capturado), sus series con\nsaldo y sus contactos: la pantalla arma de aquí la tabla por cliente.",
+    "operationId": "listar_contactos_api_v1_cobranza_automatica_contactos_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar Contactos",
+    "tags": [
+     "cobranza"
+    ]
+   },
+   "put": {
+    "description": "Alta o cambio del contacto de (cliente, serie). serie vacía = todas.",
+    "operationId": "guardar_contacto_api_v1_cobranza_automatica_contactos_put",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/app__api__v1__cobranza_auto__ContactoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Guardar Contacto",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/contactos/{contacto_id}": {
+   "delete": {
+    "operationId": "borrar_contacto_api_v1_cobranza_automatica_contactos__contacto_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "contacto_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Contacto Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Borrar Contacto",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/envios": {
+   "get": {
+    "operationId": "listar_envios_api_v1_cobranza_automatica_envios_get",
+    "parameters": [
+     {
+      "description": "PENDIENTE, ENVIADO, ERROR…; vacío = todos",
+      "in": "query",
+      "name": "estado",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "PENDIENTE, ENVIADO, ERROR…; vacío = todos",
+       "title": "Estado"
+      }
+     },
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "description": "Solo cortes de los últimos N días",
+      "in": "query",
+      "name": "dias",
+      "required": false,
+      "schema": {
+       "default": 60,
+       "description": "Solo cortes de los últimos N días",
+       "maximum": 730,
+       "minimum": 1,
+       "title": "Dias",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar Envios",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/envios/descartar": {
+   "post": {
+    "operationId": "descartar_envios_api_v1_cobranza_automatica_envios_descartar_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/IdsIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Descartar Envios",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/envios/enviar": {
+   "post": {
+    "description": "Aprueba y manda. Cada envío se confirma por separado: si el 10 falla, los\n9 que ya salieron quedan registrados como enviados.",
+    "operationId": "enviar_envios_api_v1_cobranza_automatica_envios_enviar_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/IdsIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Enviar Envios",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/generar": {
+   "post": {
+    "description": "Arma la cola de HOY sin esperar al día programado (no la envía).",
+    "operationId": "generar_ahora_api_v1_cobranza_automatica_generar_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Generar Ahora",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
   "/api/v1/cobranza/espejo/nota-credito": {
    "post": {
     "description": "Refleja una nota de crédito (CFDI de egreso) de SAE con sus aplicaciones.",
@@ -24085,7 +24849,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/ContactoIn"
+        "$ref": "#/components/schemas/app__schemas__contacto__ContactoIn"
        }
       }
      },

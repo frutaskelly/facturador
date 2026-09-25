@@ -11,11 +11,18 @@ import { useFavorites } from "@/lib/favorites";
 import { useSidebarColapsado } from "@/lib/sidebar";
 import { NAV, type NavItem } from "@/lib/nav";
 
+const TODOS_HREF: string[] = NAV.flatMap((sec) => sec.items.map((i) => i.href));
+
 /** ¿La ruta actual es este item? Un `startsWith` pelado marcaría `/pos` como
  *  activo estando en `/pos-algo`; hoy ninguna ruta colisiona, pero es la
  *  trampa que espera a la primera que sí. */
 function esActivo(pathname: string, href: string) {
-  return pathname === href || pathname.startsWith(`${href}/`);
+  if (pathname === href) return true;
+  if (!pathname.startsWith(`${href}/`)) return false;
+  // Si una sub-ruta tiene su propio item (/cobranza/automatica), el padre
+  // (/cobranza) no se marca también.
+  return !TODOS_HREF.some((h) => h !== href && h.startsWith(`${href}/`)
+    && (pathname === h || pathname.startsWith(`${h}/`)));
 }
 
 /** `forzarExpandido`: el cajón móvil siempre enseña el menú completo — el
