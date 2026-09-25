@@ -1851,3 +1851,172 @@ def test_folio_sin_semana_quita_la_b():
     m = _RE_SUFIJO_APARTE.match("VH-38ROV-LUN-B-2")
     assert m and m.group(1) == "VH-38ROV-LUN-B" and m.group(2) == "2"
     assert _RE_SUFIJO_APARTE.match("VH-38ROV-LUN-B") is None
+
+
+# ─── el lote también destraba las órdenes SIN CLIENTE (26-sep-2026) ──────────
+# El grupo de Pachuca pasó a perfil «ehmo-pachuca» y 30 órdenes entraron sin
+# cliente. Arreglado el cruce, el botón «Procesar órdenes» no las veía: solo
+# tomaba las que ya tenían cliente. Y tres de ellas eran reenvíos de entregas
+# que ya eran remisión bajo el ancla vieja: convertirlas duplicaba.
+
+def test_el_lote_destraba_las_ordenes_sin_cliente(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        rfc=None, proyecto="HOSPITALES", folio_externo="VH-39JUA-LUN")).json()
+    assert oc["estado"] == "PENDIENTE" and oc["cliente_id"] is None
+
+    # Se aprende DESPUÉS de que la orden llegó: es lo que el lote debe recoger.
+    _externo(client, h, "PROYECTO", "villahermosa:HOSPITALES", env["ehmo"])
+    _externo(client, h, "UBICACION", "villahermosa:JUAN GRAHAM", env["ehmo"],
+             sucursal_id=env["suc"])
+
+    r = client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=h).json()
+    assert r["creadas"] == 1 and r["restantes"] == 0
+    hecha = client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()
+    assert hecha["cliente_id"] == env["ehmo"] and hecha["sucursal_id"] == env["suc"]
+    assert hecha["estado"] == "ASIGNADA" and hecha["remision_id"]
+
+
+def test_el_lote_con_alcance_no_toca_las_ordenes_sin_cliente(client, env, auth_as):
+    """Quien tiene alcance por cliente no ve las órdenes sin cliente en la
+    franja: el lote tampoco se las asigna ni se las convierte."""
+    from app.core.rbac import invalidate_auth_cache
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        rfc=None, proyecto="HOSPITALES", folio_externo="VH-39JUA-LUN")).json()
+    assert oc["cliente_id"] is None
+    _externo(client, h, "PROYECTO", "villahermosa:HOSPITALES", env["ehmo"])
+    _externo(client, h, "UBICACION", "villahermosa:JUAN GRAHAM", env["ehmo"],
+             sucursal_id=env["suc"])
+
+    db = SessionLocal()
+    sub = f"sub-oc-scope-{uuid.uuid4().hex[:8]}"
+    u = m = None
+    try:
+        rol = db.query(Role).filter(Role.nombre == "ADMIN", Role.es_preset.is_(True)).one()
+        u = User(email=f"{sub}@t.test", auth_user_id=sub, full_name="scope")
+        db.add(u); db.flush()
+        m = Membership(tenant_id=env["admin_a"]["tenant_id"], user_id=u.id, role_id=rol.id,
+                       cliente_scope=[uuid.UUID(env["ehmo"])])
+        db.add(m); db.commit()
+        invalidate_auth_cache()
+        atado = {"sub": sub, "email": u.email, "tenant_id": env["admin_a"]["tenant_id"]}
+
+        auth_as(atado)
+        r = client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=_hdr(atado)).json()
+        assert r == {"creadas": 0, "fallidas": 0, "restantes": 0}
+        auth_as(env["admin_a"])
+        sigue = client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()
+        assert sigue["cliente_id"] is None and sigue["remision_id"] is None
+    finally:
+        if m is not None:
+            db.query(Membership).filter(Membership.id == m.id).delete()
+        if u is not None:
+            db.query(User).filter(User.id == u.id).delete()
+        db.commit(); db.close()
+        invalidate_auth_cache()
+
+
+def test_la_misma_entrega_con_otra_ancla_no_se_remisiona_dos_veces(client, env, auth_as):
+    """El caso CE-38CER: la entrega ya era remisión bajo «EHMO:ehmo:…» y el bot
+    la reenvió como «EHMO:ehmo-pachuca:…». Mismo folio, fecha y cliente: el
+    camino automático no genera la segunda; queda para una persona, con el
+    folio de la remisión que ya existe en el motivo."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    _externo(client, h, "UBICACION", "ehmo:JUAN GRAHAM", env["ehmo"], sucursal_id=env["suc"])
+    base = dict(folio_externo="CE-38CER-LUN", fecha_entrega="2026-09-21")
+
+    primera = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        perfil="ehmo", origen_externo="EHMO:ehmo:CE-38CER-LUN", **base)).json()
+    assert primera["estado"] == "ASIGNADA" and primera["remision_folio"]
+
+    # Llegó sin cliente (antes de la herencia de perfil) y sin pasar por los
+    # candados de ingesta de hoy — `forzar` reproduce eso.
+    reenvio = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        perfil="ehmo-pachuca", origen_externo="EHMO:ehmo-pachuca:CE-38CER-LUN",
+        rfc=None, proyecto="HOSPITALES", forzar=True, **base)).json()
+    assert reenvio["estado"] == "PENDIENTE" and reenvio["cliente_id"] is None
+
+    _externo(client, h, "PROYECTO", "ehmo:HOSPITALES", env["ehmo"])
+    r = client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=h).json()
+    assert r["creadas"] == 0 and r["fallidas"] == 1
+
+    quieta = client.get(f"/api/v1/oc-recibidas/{reenvio['id']}", headers=h).json()
+    assert quieta["cliente_id"] == env["ehmo"]          # sí se resolvió…
+    assert quieta["estado"] == "PENDIENTE" and quieta["remision_id"] is None  # …pero no se duplicó
+    assert quieta["motivo"].startswith("No se pudo pasar a remisiones en automático")
+    assert primera["remision_folio"] in quieta["motivo"]
+    assert client.get("/api/v1/remisiones", headers=h).json()["total"] == 1
+
+    # Ya explicada, el siguiente lote no la vuelve a intentar.
+    r = client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=h).json()
+    assert r == {"creadas": 0, "fallidas": 0, "restantes": 0}
+
+
+def test_la_misma_entrega_se_vuelve_a_remisionar_si_la_anterior_se_cancelo(client, env, auth_as):
+    """Una remisión cancelada no cuenta como la entrega hecha: ahí la nueva sí
+    hace falta y el candado no estorba."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    _externo(client, h, "UBICACION", "ehmo:JUAN GRAHAM", env["ehmo"], sucursal_id=env["suc"])
+    base = dict(folio_externo="CE-38CER-LUN", fecha_entrega="2026-09-21")
+    primera = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        perfil="ehmo", origen_externo="EHMO:ehmo:CE-38CER-LUN", **base)).json()
+    assert primera["remision_id"]
+
+    db = SessionLocal()
+    try:
+        db.execute(text("UPDATE remisiones SET estado = 'CANCELADA' WHERE id = :id"),
+                   {"id": primera["remision_id"]})
+        db.commit()
+    finally:
+        db.close()
+
+    reenvio = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        perfil="ehmo-pachuca", origen_externo="EHMO:ehmo-pachuca:CE-38CER-LUN",
+        forzar=True, **base)).json()
+    assert reenvio["estado"] == "ASIGNADA" and reenvio["remision_id"], reenvio["motivo"]
+
+
+def test_el_lote_no_revive_lo_que_se_descarto_mientras_corria(client, env, auth_as, monkeypatch):
+    """La lista del lote se arma al principio; una orden descartada DESPUÉS
+    —mientras el botón corre— no puede volver a PENDIENTE ni convertirse.
+    Se simula el descarte concurrente justo antes de que el lote bloquee la
+    fila, que es la ventana real."""
+    from app.api.v1 import oc_recibidas as mod
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        rfc=None, proyecto="HOSPITALES", folio_externo="VH-39JUA-LUN")).json()
+    _externo(client, h, "PROYECTO", "villahermosa:HOSPITALES", env["ehmo"])
+    _externo(client, h, "UBICACION", "villahermosa:JUAN GRAHAM", env["ehmo"],
+             sucursal_id=env["suc"])
+
+    original = mod.get_or_404
+    ya = []
+
+    def descarta_antes_del_candado(db, model, obj_id, *a, **kw):
+        # Una sola vez: sin el arreglo el lote vuelve a bloquear la fila al
+        # convertirla, y un segundo UPDATE desde aquí esperaría ese candado
+        # para siempre (la prueba se colgaría en vez de fallar).
+        if (not ya and model is mod.OCRecibida and str(obj_id) == oc["id"]
+                and kw.get("for_update")):
+            ya.append(1)
+            otra = SessionLocal()
+            try:
+                otra.execute(text("UPDATE oc_recibidas SET estado = 'DESCARTADA', "
+                                  "motivo = 'basura' WHERE id = :id"), {"id": oc["id"]})
+                otra.commit()
+            finally:
+                otra.close()
+        return original(db, model, obj_id, *a, **kw)
+
+    monkeypatch.setattr(mod, "get_or_404", descarta_antes_del_candado)
+    r = client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=h).json()
+    monkeypatch.setattr(mod, "get_or_404", original)
+
+    assert r["creadas"] == 0
+    sigue = client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()
+    assert sigue["estado"] == "DESCARTADA" and sigue["motivo"] == "basura"
+    assert sigue["remision_id"] is None
+    assert client.get("/api/v1/remisiones", headers=h).json()["total"] == 0

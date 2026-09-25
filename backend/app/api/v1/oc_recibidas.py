@@ -710,6 +710,48 @@ def _puede_intentarse(oc: OCRecibida) -> bool:
 _AUTO_PREFIJO = "No se pudo pasar a remisiones en automático: "
 
 
+def _gemela_remisionada(db: Session, oc: OCRecibida) -> Optional[str]:
+    """La misma entrega que ya es remisión, llegada antes bajo OTRA ancla.
+
+    El ancla (`origen_externo`) lleva el perfil del grupo adentro. El 23-sep-2026
+    el grupo de Pachuca pasó de «ehmo» a «ehmo-pachuca» y el bot reenvió
+    CE-38CER-LUN/MAR/MIE, que ya eran RFMAFAN32-34: con el ancla nueva entraron
+    como órdenes nuevas, y convertirlas habría duplicado las tres remisiones.
+    El candado de `crear_remision` no lo ve, porque solo compara folios
+    numéricos.
+
+    Mismo folio, misma fecha de entrega y mismo cliente es la misma entrega: el
+    folio de EHMO sale de hospital + semana + día, y lo que se entrega aparte
+    lleva sufijo (-1, -2). Medido antes de ponerlo (26-sep-2026): sobre toda la
+    bandeja dispara exactamente en esos tres casos. No descarta nada —eso lo
+    decide una persona—, solo impide que el camino AUTOMÁTICO genere la segunda.
+    Una remisión cancelada no cuenta: ahí la nueva sí hace falta.
+    """
+    folio = (oc.folio_externo or "").strip().upper()
+    if not folio or oc.fecha_entrega is None or oc.cliente_id is None:
+        return None
+    fila = (
+        db.query(OCRecibida.origen_externo, Remision.folio_interno)
+        .join(Remision, Remision.id == OCRecibida.remision_id)
+        .filter(
+            OCRecibida.tenant_id == oc.tenant_id,
+            OCRecibida.id != oc.id,
+            func.upper(func.trim(OCRecibida.folio_externo)) == folio,
+            OCRecibida.fecha_entrega == oc.fecha_entrega,
+            Remision.cliente_facturacion_id == oc.cliente_id,
+            Remision.deleted_at.is_(None),
+            Remision.estado != "CANCELADA",
+        )
+        .order_by(Remision.created_at)
+        .first()
+    )
+    if fila is None:
+        return None
+    origen, remision = fila
+    return (f"esta entrega ya es la remisión {remision} (llegó antes como {origen}). "
+            "Si es la misma, descarta esta orden; si de verdad es otra, pásala a mano.")
+
+
 def _intentar_remision_auto(db: Session, ctx: AuthContext, oc: OCRecibida) -> bool:
     """Intenta que la orden nazca remisión «por revisar», sin detener a nadie.
 
@@ -720,6 +762,10 @@ def _intentar_remision_auto(db: Session, ctx: AuthContext, oc: OCRecibida) -> bo
     un error aquí no puede costarle la orden.
     """
     if not _puede_intentarse(oc):
+        return False
+    gemela = _gemela_remisionada(db, oc)
+    if gemela is not None:
+        oc.motivo = (_AUTO_PREFIJO + gemela)[:500]
         return False
     try:
         with db.begin_nested():
@@ -2045,6 +2091,14 @@ def procesar_pendientes(
     hospital que alguien acaba de mapear a su sucursal destraba de una vez todas
     las órdenes acumuladas de ese hospital, sin abrirlas una por una.
 
+    Eso incluye las que llegaron SIN CLIENTE (26-sep-2026). Antes el lote solo
+    miraba las que ya tenían uno, así que una equivalencia aprendida después —o
+    un arreglo del cruce, como la herencia de perfil «ehmo-pachuca» → «ehmo»—
+    nunca destrababa las órdenes que ya estaban esperando: 30 se quedaron
+    huérfanas con el botón a un lado. Solo sin alcance por cliente: quien lo
+    tiene no ve las órdenes sin cliente en la franja, y el lote no le asigna
+    ni le convierte lo que no ve.
+
     Se saltan las que un intento previo ya explicó (su motivo trae el prefijo
     del intento automático — se reintentan una por una desde la franja, ya con
     la causa corregida) y las marcadas EN DUDA por un humano: esa duda la puso
@@ -2057,11 +2111,12 @@ def procesar_pendientes(
         q = db.query(OCRecibida).filter(
             OCRecibida.estado == "PENDIENTE",
             OCRecibida.remision_id.is_(None),
-            OCRecibida.cliente_id.isnot(None),
             ~func.coalesce(OCRecibida.motivo, "").ilike("EN DUDA%"),
             ~func.coalesce(OCRecibida.motivo, "").like(f"{_AUTO_PREFIJO}%"),
         )
         if ctx.cliente_scope:
+            # El IN deja fuera a las que no tienen cliente (NULL no está en
+            # ninguna lista): el candado del portal se mantiene tal cual.
             q = q.filter(OCRecibida.cliente_id.in_(ctx.cliente_scope))
         return q
 
@@ -2086,6 +2141,18 @@ def procesar_pendientes(
         # El candado por fila (no al armar la lista): otro request pudo
         # convertirla o descartarla mientras el lote avanzaba.
         oc = get_or_404(db, OCRecibida, fila.id, soft=False, for_update=True)
+        # Y con el candado puesto se vuelve a mirar: la lista se armó al
+        # principio y la fila pudo cambiar desde entonces. Sin esto el lote
+        # re-resolvía una orden que alguien acababa de descartar —
+        # `_resolver_y_aplicar` la regresa a PENDIENTE— y podía hasta
+        # convertirla, quemando un folio en algo que una persona rechazó. Pesa
+        # más desde que el lote toma las órdenes sin cliente, que son justo
+        # las que se descartan a mano mientras el botón corre.
+        motivo = oc.motivo or ""
+        if (oc.estado != "PENDIENTE" or oc.remision_id is not None
+                or motivo.upper().startswith("EN DUDA")
+                or motivo.startswith(_AUTO_PREFIJO)):
+            continue
         if oc.resuelto_via != "MANUAL":
             _resolver_y_aplicar(db, oc)
         if not _puede_intentarse(oc):
