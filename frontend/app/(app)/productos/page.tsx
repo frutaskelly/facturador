@@ -18,7 +18,7 @@ import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { SatClaveCombobox } from "@/components/SatClaveCombobox";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
-import { useMutation, useResource, type Page } from "@/lib/hooks";
+import { useListadoCompleto, useMutation, useResource, type Page } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import type { Categoria, EsquemaImpuesto, Producto } from "@/lib/types";
 
@@ -141,8 +141,8 @@ export default function ProductosPage() {
 
   // Se carga la lista completa: DataTableSmart se encarga de la paginación,
   // búsqueda y orden en cliente sobre todas las filas.
-  const { data, loading, error, reload } = useResource<Page<Producto>>(
-    "/api/v1/productos?limit=1000"
+  const { data, loading, error, reload } = useListadoCompleto<Producto>(
+    "/api/v1/productos"
   );
   const rows = data?.items ?? [];
 

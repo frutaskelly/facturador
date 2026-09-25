@@ -16,7 +16,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { fmtNumber } from "@/lib/format";
-import { useResource, type Page } from "@/lib/hooks";
+import { useListadoCompleto, useResource, type Page } from "@/lib/hooks";
 import { usePosPulse } from "@/lib/usePosPulse";
 import type { Cliente, Producto, Remision, RemisionDetail } from "@/lib/types";
 
@@ -34,7 +34,7 @@ export default function Page() {
     () => Object.fromEntries((clientesRes.data?.items ?? []).map((c) => [c.id, c.legal_name])),
     [clientesRes.data],
   );
-  const prodRes = useResource<Page<Producto>>("/api/v1/productos?limit=1000");
+  const prodRes = useListadoCompleto<Producto>("/api/v1/productos");
   const prodById = useMemo(
     () => Object.fromEntries((prodRes.data?.items ?? []).map((p) => [p.id, p])),
     [prodRes.data],

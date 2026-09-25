@@ -15,7 +15,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { fmtMoney } from "@/lib/format";
-import { useMutation, useResource, type Page } from "@/lib/hooks";
+import { useListadoCompleto, useMutation, useResource, type Page } from "@/lib/hooks";
 import {
   COTIZACIONES_A_LA_VEZ, enPool,
   fetchFiscalPreview, lineaDesdePegado, matchPresentacion,
@@ -58,7 +58,7 @@ export function FacturaDirectaForm({ ambiente, editar, onClose, onSaved }: Props
   // catálogos
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=200");
   const almacenesRes = useResource<Page<Almacen>>("/api/v1/almacenes?limit=200");
-  const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=1000");
+  const productosRes = useListadoCompleto<Producto>("/api/v1/productos");
   const seriesRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
   const clientes = clientesRes.data?.items ?? [];
   const almacenes = almacenesRes.data?.items ?? [];

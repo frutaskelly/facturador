@@ -218,8 +218,8 @@ export default function RemisionesPage() {
   const almacenesRes = useResource<Page<Almacen>>(
     can(me, "menu:inventario") ? "/api/v1/almacenes?limit=200" : null,
   );
-  const productosRes = useResource<Page<Producto>>(
-    can(me, "menu:productos") ? "/api/v1/productos?limit=1000" : null,
+  const productosRes = useListadoCompleto<Producto>(
+    can(me, "menu:productos") ? "/api/v1/productos" : null,
   );
   const clientes = clientesRes.data?.items ?? [];
   const almacenes = almacenesRes.data?.items ?? [];

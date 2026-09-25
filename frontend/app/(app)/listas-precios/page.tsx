@@ -19,7 +19,7 @@ import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiDownload, apiFetch, apiOpenInTab } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtMoney } from "@/lib/format";
-import { useMutation, useResource, type Page } from "@/lib/hooks";
+import { useListadoCompleto, useMutation, useResource, type Page } from "@/lib/hooks";
 import type { Categoria, ListaPrecios, Precio, Producto } from "@/lib/types";
 
 const WRITE = "lista_precios:gestionar";
@@ -54,7 +54,7 @@ export default function ListasPreciosPage() {
   const { post, patch, del, loading: saving } = useMutation();
 
   const listasRes = useResource<Page<ListaPrecios>>("/api/v1/listas-precios?limit=200");
-  const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=1000");
+  const productosRes = useListadoCompleto<Producto>("/api/v1/productos");
   const categoriasRes = useResource<Page<Categoria>>("/api/v1/categorias?limit=200");
   const listas = listasRes.data?.items ?? [];
   const productos = productosRes.data?.items ?? [];
