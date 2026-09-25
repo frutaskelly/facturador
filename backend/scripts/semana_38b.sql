@@ -12,6 +12,8 @@
 --     «SEM 38-B …». Una entrega aparte queda VH-38PAL-MIE-B-2.
 --   · La semana del 28-sep al 4-oct pasa de 40 a 39 para TODOS: desde ahí la
 --     numeración ya queda alineada y no lleva marca.
+--   · Cinco borradores de Pachuca del 14-19 que salieron con 38 cuando Pachuca
+--     contaba esa semana como 37 vuelven a 37 (lista cerrada, `v_sueltos_38`).
 --
 -- Qué toca: remisiones EN BORRADOR (su_pedido, notas, origen_externo) y las
 -- órdenes recibidas de esas semanas (folio_externo, origen_externo y las mismas
@@ -41,6 +43,10 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $f$
       regexp_replace(
         regexp_replace(t, '\m([A-Z]{2,3}-)39([A-Z]{2,4}-[A-Z]{3})', '\138\2', 'g'),
         '\m(SEM(ANA)?\.?\s*)39\M', '\138', 'gi')
+    WHEN sem = 38 THEN
+      regexp_replace(
+        regexp_replace(t, '\m([A-Z]{2,3}-)38([A-Z]{2,4}-[A-Z]{3})', '\137\2', 'g'),
+        '\m(SEM(ANA)?\.?\s*)38\M', '\137', 'gi')
     WHEN sem = 40 THEN
       regexp_replace(
         regexp_replace(t, '\m([A-Z]{2,3}-)40([A-Z]{2,4}-[A-Z]{3})', '\139\2', 'g'),
@@ -57,6 +63,7 @@ DECLARE
     n_oc int := 0;
     n int;
     v_sem int;
+    v_sueltos_38 text[] := ARRAY['HO-38IMS-LUN','HO-38MAT-JUE','HO-38MAT-SAB','HO-38MEZ-JUE','SP-38SSP-JUE'];
 BEGIN
     RAISE NOTICE 'Modo: %', CASE WHEN v_solo_diagnostico THEN 'DIAGNÓSTICO (no aplica nada)' ELSE 'APLICAR' END;
 
@@ -67,7 +74,8 @@ BEGIN
     FROM remisiones
     WHERE tenant_id = v_tenant AND deleted_at IS NULL AND estado = 'BORRADOR'
       AND ((su_pedido ~* '^[A-Z]{2,3}-39[A-Z]' AND fecha_entrega BETWEEN '2026-09-21' AND '2026-09-27')
-        OR (su_pedido ~* '^[A-Z]{2,3}-40[A-Z]' AND fecha_entrega BETWEEN '2026-09-28' AND '2026-10-04'));
+        OR (su_pedido ~* '^[A-Z]{2,3}-40[A-Z]' AND fecha_entrega BETWEEN '2026-09-28' AND '2026-10-04')
+        OR (upper(su_pedido) = ANY (v_sueltos_38) AND fecha_entrega BETWEEN '2026-09-14' AND '2026-09-20'));
 
     CREATE TEMP TABLE _oc ON COMMIT DROP AS
     SELECT o.id, o.folio_externo, o.origen_externo, o.estado, o.fecha_entrega,
@@ -78,7 +86,8 @@ BEGIN
     WHERE o.tenant_id = v_tenant
       AND (o.remision_id IS NULL OR (rm.estado = 'BORRADOR' AND rm.deleted_at IS NULL))
       AND ((o.folio_externo ~* '^[A-Z]{2,3}-39[A-Z]' AND o.fecha_entrega BETWEEN '2026-09-21' AND '2026-09-27')
-        OR (o.folio_externo ~* '^[A-Z]{2,3}-40[A-Z]' AND o.fecha_entrega BETWEEN '2026-09-28' AND '2026-10-04'));
+        OR (o.folio_externo ~* '^[A-Z]{2,3}-40[A-Z]' AND o.fecha_entrega BETWEEN '2026-09-28' AND '2026-10-04')
+        OR (upper(o.folio_externo) = ANY (v_sueltos_38) AND o.fecha_entrega BETWEEN '2026-09-14' AND '2026-09-20'));
 
     FOR r IN SELECT sem, es_vh, count(*) n FROM _rem GROUP BY 1, 2 ORDER BY 1, 2 LOOP
         RAISE NOTICE 'remisiones  sem % %: %', r.sem, CASE WHEN r.es_vh THEN 'VH' ELSE 'resto' END, r.n;
@@ -104,10 +113,10 @@ BEGIN
         RAISE NOTICE 'notas: «%»  →  «%»', r.notas, pg_temp.sem_corte(r.notas, r.sem, r.es_vh);
     END LOOP;
 
-    -- Dos pasadas, primero la 39 y luego la 40: VH-40ROV-LUN pasa a VH-39ROV-LUN,
+    -- Tres pasadas: los sueltos 38→37, luego la 39 y al final la 40: VH-40ROV-LUN pasa a VH-39ROV-LUN,
     -- que sólo queda libre cuando la 39 de hoy ya se movió a 38-B (el índice único
     -- de origen_externo se revisa renglón por renglón, no al final).
-    FOR v_sem IN SELECT unnest(ARRAY[39, 40]) LOOP
+    FOR v_sem IN SELECT unnest(ARRAY[38, 39, 40]) LOOP
     UPDATE remisiones x SET
         su_pedido      = pg_temp.sem_corte(x.su_pedido, t.sem, t.es_vh),
         notas          = pg_temp.sem_corte(x.notas, t.sem, t.es_vh),
