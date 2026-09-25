@@ -37,8 +37,11 @@ type Fila = {
 };
 
 type Cliente = { id: string; legal_name: string };
+type Sucursal = { id: string; nombre: string };
 
 const GLOBAL = "__global__";
+// En el selector de sucursal: la regla vale para el cliente en TODAS sus plazas.
+const TODAS = "__todas__";
 // El vocabulario entero se trae de una vez (hoy ~1.4k renglones) para que la
 // tabla busque, ordene y EXPORTE sobre todo, no sobre la página que se ve. El
 // tope existe por si un tenant crece de más: la nota lo dice en pantalla.
@@ -104,12 +107,29 @@ export default function VocabularioPage() {
   const [editar, setEditar] = useState<Fila | null>(null);
   const [edTexto, setEdTexto] = useState("");
   const [edProducto, setEdProducto] = useState<ProductoPick | null>(null);
+  const [edSucursal, setEdSucursal] = useState(TODAS);
 
   // Alta: «lo que escriben» = «qué es», para quién.
   const [alta, setAlta] = useState(false);
   const [nuevoTexto, setNuevoTexto] = useState("");
   const [nuevoAlcance, setNuevoAlcance] = useState(GLOBAL);
   const [nuevoProducto, setNuevoProducto] = useState<ProductoPick | null>(null);
+  const [nuevaSucursal, setNuevaSucursal] = useState(TODAS);
+
+  // Las plazas que surten al cliente del modal abierto (alta o edición).
+  const clienteModal = editar ? editar.cliente_id : alta && nuevoAlcance !== GLOBAL ? nuevoAlcance : null;
+  const sucursalesRes = useResource<Page<Sucursal>>(
+    clienteModal ? `/api/v1/sucursales?cliente_id=${clienteModal}&limit=200` : null
+  );
+  const sucursales = useMemo(() => {
+    const lista = sucursalesRes.data?.items ?? [];
+    // Si la regla ya está en una plaza que dejó de surtir al cliente, que se
+    // siga viendo en el selector en vez de brincar en silencio a «Todas».
+    if (editar?.sucursal_id && !lista.some((x) => x.id === editar.sucursal_id)) {
+      return [...lista, { id: editar.sucursal_id, nombre: editar.sucursal_nombre ?? "Sucursal" }];
+    }
+    return lista;
+  }, [sucursalesRes.data, editar]);
 
   const editable = useCallback(
     (f: Fila) => f.cliente_id !== null || puedeGlobal,
@@ -120,16 +140,19 @@ export default function VocabularioPage() {
     setEditar(f);
     setEdTexto(f.texto);
     setEdProducto(null);
+    setEdSucursal(f.sucursal_id ?? TODAS);
   }, []);
 
   async function guardarEdicion() {
     if (!editar) return;
     const texto = edTexto.trim();
-    const body: { texto?: string; producto_id?: string } = {};
+    const body: { texto?: string; producto_id?: string; sucursal_id?: string | null } = {};
     if (texto && texto !== editar.texto) body.texto = texto;
     if (edProducto && edProducto.producto_id !== editar.producto_id) {
       body.producto_id = edProducto.producto_id;
     }
+    const sucursal = edSucursal === TODAS ? null : edSucursal;
+    if (editar.cliente_id && sucursal !== editar.sucursal_id) body.sucursal_id = sucursal;
     if (Object.keys(body).length === 0) {
       setEditar(null);
       return;
@@ -139,7 +162,9 @@ export default function VocabularioPage() {
       toast.success(
         body.producto_id
           ? `«${texto || editar.texto}» ahora es otro producto`
-          : `Ahora también se reconoce «${texto}»`
+          : body.texto
+            ? `Ahora también se reconoce «${texto}»`
+            : "Sucursal actualizada"
       );
       setEditar(null);
       void cargar();
@@ -152,6 +177,7 @@ export default function VocabularioPage() {
     setNuevoTexto("");
     setNuevoProducto(null);
     setNuevoAlcance(puedeGlobal ? GLOBAL : (clientes[0]?.id ?? GLOBAL));
+    setNuevaSucursal(TODAS);
     setAlta(true);
   }
 
@@ -170,6 +196,8 @@ export default function VocabularioPage() {
         texto,
         producto_id: nuevoProducto.producto_id,
         cliente_id: nuevoAlcance === GLOBAL ? null : nuevoAlcance,
+        sucursal_id:
+          nuevoAlcance === GLOBAL || nuevaSucursal === TODAS ? null : nuevaSucursal,
       });
       toast.success(`«${texto}» agregado al vocabulario`);
       setAlta(false);
@@ -235,21 +263,14 @@ export default function VocabularioPage() {
       cell: (f) => <span className="text-xs text-muted">{f.producto_sku}</span>,
     },
     {
-      header: "Alcance",
-      key: "alcance",
+      header: "Cliente",
+      key: "cliente",
       sortable: true,
       sortValue: (f) => f.cliente_nombre ?? "",
       exportValue: (f) => f.cliente_nombre ?? "Todos los clientes",
       cell: (f) =>
         f.cliente_id ? (
-          <>
-            <span className="font-medium">{f.cliente_nombre}</span>
-            {f.sucursal_nombre && (
-              <span className="ml-1">
-                <Badge tone="warning">{f.sucursal_nombre}</Badge>
-              </span>
-            )}
-          </>
+          <span className="font-medium">{f.cliente_nombre}</span>
         ) : (
           <Badge tone="accent">Todos los clientes</Badge>
         ),
@@ -257,11 +278,16 @@ export default function VocabularioPage() {
     {
       header: "Sucursal",
       key: "sucursal",
-      hiddenByDefault: true,
       sortable: true,
       sortValue: (f) => f.sucursal_nombre ?? "",
-      exportValue: (f) => f.sucursal_nombre ?? "",
-      cell: (f) => <span className="text-muted">{f.sucursal_nombre ?? "—"}</span>,
+      exportValue: (f) => f.sucursal_nombre ?? "Todas las sucursales",
+      // Sin plaza, la regla vale para el cliente (o para todos) en todas sus sucursales.
+      cell: (f) =>
+        f.sucursal_nombre ? (
+          <Badge tone="warning">{f.sucursal_nombre}</Badge>
+        ) : (
+          <span className="text-muted">Todas las sucursales</span>
+        ),
     },
     {
       header: "Origen",
@@ -392,16 +418,23 @@ export default function VocabularioPage() {
       >
         <div className="space-y-3">
           <div className="text-sm text-muted">
-            Alcance:{" "}
-            {editar?.cliente_id ? (
-              <b>
-                {editar.cliente_nombre}
-                {editar.sucursal_nombre ? ` · ${editar.sucursal_nombre}` : ""}
-              </b>
-            ) : (
-              <b>todos los clientes</b>
-            )}
+            Cliente: <b>{editar?.cliente_id ? editar.cliente_nombre : "todos los clientes"}</b>
           </div>
+          {editar?.cliente_id && (
+            <Field
+              label="Sucursal"
+              hint="«Todas las sucursales» = aplica al cliente en todas sus plazas"
+            >
+              <Select value={edSucursal} onChange={(e) => setEdSucursal(e.target.value)}>
+                <option value={TODAS}>Todas las sucursales</option>
+                {sucursales.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.nombre}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
           <Field label="Si la orden dice…">
             <Input
               value={edTexto}
@@ -442,14 +475,42 @@ export default function VocabularioPage() {
         }
       >
         <div className="space-y-3">
-          <Field label="Para quién">
-            <Select value={nuevoAlcance} onChange={(e) => setNuevoAlcance(e.target.value)}>
+          <Field label="Cliente">
+            <Select
+              value={nuevoAlcance}
+              onChange={(e) => {
+                setNuevoAlcance(e.target.value);
+                setNuevaSucursal(TODAS);
+              }}
+            >
               {puedeGlobal && <option value={GLOBAL}>Todos los clientes</option>}
               {clientes.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.legal_name}
                 </option>
               ))}
+            </Select>
+          </Field>
+          <Field
+            label="Sucursal"
+            hint={
+              nuevoAlcance === GLOBAL
+                ? "Una regla de todos los clientes vale en todas las sucursales"
+                : "«Todas las sucursales» = aplica al cliente en todas sus plazas"
+            }
+          >
+            <Select
+              value={nuevoAlcance === GLOBAL ? TODAS : nuevaSucursal}
+              onChange={(e) => setNuevaSucursal(e.target.value)}
+              disabled={nuevoAlcance === GLOBAL}
+            >
+              <option value={TODAS}>Todas las sucursales</option>
+              {nuevoAlcance !== GLOBAL &&
+                sucursales.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.nombre}
+                  </option>
+                ))}
             </Select>
           </Field>
           <Field label="Si la orden dice…">
@@ -476,7 +537,9 @@ export default function VocabularioPage() {
         title="Quitar del vocabulario"
         message={
           aQuitar?.cliente_id
-            ? `«${aQuitar?.texto}» dejará de reconocerse para ${aQuitar?.cliente_nombre}.`
+            ? `«${aQuitar?.texto}» dejará de reconocerse para ${aQuitar?.cliente_nombre}${
+                aQuitar?.sucursal_nombre ? ` en ${aQuitar.sucursal_nombre}` : ""
+              }.`
             : `«${aQuitar?.texto}» dejará de reconocerse para TODOS los clientes.`
         }
         onConfirm={quitar}

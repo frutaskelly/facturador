@@ -213,7 +213,7 @@
     "type": "object"
    },
    "AliasReapuntarIn": {
-    "description": "Corrige una fila del vocabulario: el texto, el producto, o los dos.\n\nEl ALCANCE no se toca aquí: pasar el alias de un cliente al global\nconvertiría su corrección en una regla para todos, y esa es otra decisión\n(con otro permiso). Para eso se quita y se vuelve a escribir.",
+    "description": "Corrige una fila del vocabulario: el texto, el producto, o los dos.\n\nEl CLIENTE no se toca aquí: pasar el alias de un cliente al global\nconvertiría su corrección en una regla para todos, y esa es otra decisión\n(con otro permiso). Para eso se quita y se vuelve a escribir.\n\nLa SUCURSAL sí, dentro del mismo cliente: mandarla con valor acota la regla\na esa plaza; mandarla en `null` la abre a todas las sucursales del cliente.\nOmitirla la deja como está (por eso se distingue ausente de `null`).",
     "properties": {
      "producto_id": {
       "anyOf": [
@@ -226,6 +226,18 @@
        }
       ],
       "title": "Producto Id"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
      },
      "texto": {
       "anyOf": [
@@ -33821,7 +33833,7 @@
     ]
    },
    "patch": {
-    "description": "Corrige el renglón: el texto, el producto, o los dos.",
+    "description": "Corrige el renglón: el texto, el producto y/o la sucursal del cliente.",
     "operationId": "reapuntar_alias_api_v1_productos_alias__alias_id__patch",
     "parameters": [
      {
