@@ -90,6 +90,81 @@ export function useResource<T>(path: string | null) {
   return { data, loading, error, reload, setData };
 }
 
+/** Como `useResource`, pero trae TODO el listado, en lotes de `lote` filas.
+ *
+ * `path` es el listado SIN limit/offset. La primera página se pinta en cuanto
+ * llega (la tabla no espera al histórico entero) y el resto se va sumando;
+ * `progreso` dice cuántas van de cuántas mientras `completo` es false. Antes
+ * las pantallas pedían `limit=200` y lo demás se perdía sin avisar. */
+export function useListadoCompleto<T>(path: string | null, lote = 1000) {
+  const clave = path === null ? null : `todo:${path}`;
+  const [data, setData] = useState<Page<T> | null>(
+    () => (clave !== null ? (cacheFresca(clave) as Page<T> | undefined) ?? null : null)
+  );
+  const [loading, setLoading] = useState(() => clave !== null && cacheFresca(clave) === undefined);
+  const [completo, setCompleto] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const seqRef = useRef(0);
+
+  const load = useCallback(async (usarCache: boolean) => {
+    const seq = ++seqRef.current;
+    if (path === null || clave === null) {
+      setData(null);
+      setLoading(false);
+      setCompleto(true);
+      return;
+    }
+    if (usarCache) {
+      const hit = cacheFresca(clave);
+      if (hit !== undefined) {
+        setData(hit as Page<T>);
+        setError(null);
+        setLoading(false);
+        setCompleto(true);
+        return;
+      }
+    }
+    setLoading(true);
+    setError(null);
+    const sep = path.includes("?") ? "&" : "?";
+    try {
+      let items: T[] = [];
+      let total = 0;
+      do {
+        const p = await apiFetch<Page<T>>(`${path}${sep}limit=${lote}&offset=${items.length}`);
+        if (seq !== seqRef.current) return; // cambió el filtro a medio camino
+        items = items.concat(p.items);
+        total = p.total;
+        const parcial = { items, total, limit: items.length, offset: 0 };
+        setData(parcial);
+        setLoading(false);
+        // Página vacía = el total se movió bajo nuestros pies (alguien borró
+        // filas): se corta en vez de pedir para siempre.
+        if (p.items.length === 0) break;
+        setCompleto(items.length >= total);
+      } while (items.length < total);
+      setCompleto(true);
+      cacheGet.set(clave, { data: { items, total: items.length, limit: items.length, offset: 0 }, ts: Date.now() });
+    } catch (e) {
+      if (seq !== seqRef.current) return;
+      setError(e instanceof ApiError ? e.message : "Error al cargar");
+      setData(null);
+      setCompleto(true);
+    } finally {
+      if (seq === seqRef.current) setLoading(false);
+    }
+  }, [path, clave, lote]);
+
+  const reload = useCallback(() => load(false), [load]);
+
+  useEffect(() => {
+    load(true);
+  }, [load]);
+
+  const progreso = completo ? null : { cargadas: data?.items.length ?? 0, total: data?.total ?? 0 };
+  return { data, loading, completo, progreso, error, reload, setData };
+}
+
 /** Imperative create/update/delete helper. Throws on error so callers can toast. */
 export function useMutation() {
   const [loading, setLoading] = useState(false);

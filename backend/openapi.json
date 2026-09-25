@@ -26400,7 +26400,7 @@
       "required": false,
       "schema": {
        "default": 50,
-       "maximum": 200,
+       "maximum": 1000,
        "minimum": 1,
        "title": "Limit",
        "type": "integer"
@@ -36531,7 +36531,7 @@
       "required": false,
       "schema": {
        "default": 50,
-       "maximum": 200,
+       "maximum": 1000,
        "minimum": 1,
        "title": "Limit",
        "type": "integer"

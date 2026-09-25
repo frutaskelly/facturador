@@ -8,6 +8,7 @@ import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobo
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
 import { CrearProductoModal, type ProductoCreado } from "@/components/CrearProductoModal";
 import { ClaveSaeInline } from "@/components/ClaveSaeInline";
+import { PeriodoFiltro, esPeriodo, rangoDePeriodo, type Periodo } from "@/components/PeriodoFiltro";
 import { CambioOCPanel } from "./CambioOCPanel";
 import { AprenderPreciosDialog, divergentes, type PrecioDivergente } from "@/components/AprenderPreciosDialog";
 import { NuevaPresentacionDialog } from "@/components/NuevaPresentacionDialog";
@@ -29,7 +30,7 @@ import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiDownloadPost, apiFetch, apiOpenInTab } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
-import { useMutation, useResource, type Page } from "@/lib/hooks";
+import { useListadoCompleto, useMutation, useResource, type Page } from "@/lib/hooks";
 import {
   COTIZACIONES_A_LA_VEZ, LOTE_A_LA_VEZ, enPool, enPoolMap, enPoolSettled,
   fetchFiscalPreview, lineaDesdePegado, matchPresentacion,
@@ -39,6 +40,10 @@ import {
 import type { Almacen, Cliente, ContextoPrecios, Factura, LineaPegada, LineaRemision, MatchResult, OCRecibida, Producto, Proyecto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "remision:gestionar";
+// Este año, no este mes: las remisiones son menos (cientos, no miles) y los
+// borradores de meses anteriores siguen siendo trabajo pendiente — con «Este
+// mes» se esconderían el día 1.
+const PERIODO_DEFAULT: Periodo = "anio";
 
 // Valor especial del selector de presentación: "no está en el producto, darla de alta".
 const NUEVA_PRESENTACION = "__nueva_pres__";
@@ -243,6 +248,9 @@ export default function RemisionesPage() {
 
   // ── filtros de lista (server-side: el backend filtra sobre TODO el
   // historial, no solo la página cargada — decisión 2026-07-29 #6) ──
+  // El periodo acota lo que se descarga; fDesde/fHasta son solo las fechas
+  // del periodo «Rango». Ver PERIODO_DEFAULT.
+  const [periodo, setPeriodo] = useState<Periodo>(PERIODO_DEFAULT);
   const [fDesde, setFDesde] = useState("");
   const [fHasta, setFHasta] = useState("");
   const [fCliente, setFCliente] = useState("");
@@ -265,61 +273,84 @@ export default function RemisionesPage() {
   // en otra pestaña (el ?q= además es el deep-link de la bandeja de OC). Se
   // hidratan al montar (client-only) y cada cambio se refleja con
   // history.replaceState — sin navegación ni pérdida de scroll.
-  const filtrosHidratados = useRef(false);
+  // La lista no se pide hasta hidratar: si no, salía primero la del periodo
+  // por defecto y enseguida la de la URL (dos descargas, la tabla brincando).
+  const [hidratado, setHidratado] = useState(false);
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const q = p.get("q");
     if (q) { setBusca(q); setBuscaAplicada(q.trim()); }
+    const per = p.get("periodo");
+    if (esPeriodo(per)) setPeriodo(per);
+    // Ligas viejas traen desde/hasta sin periodo: son un rango.
+    else if (p.get("desde") || p.get("hasta")) setPeriodo("rango");
     if (p.get("desde")) setFDesde(p.get("desde")!);
     if (p.get("hasta")) setFHasta(p.get("hasta")!);
     if (p.get("cliente")) setFCliente(p.get("cliente")!);
     if (p.get("revisar") === "1") setFPorRevisar(true);
     if (p.get("estado")) setFEstado(p.get("estado")!);
     if (p.get("sucursal")) setFSucursal(p.get("sucursal")!);
-    filtrosHidratados.current = true;
+    setHidratado(true);
   }, []);
   useEffect(() => {
-    if (!filtrosHidratados.current) return;
+    if (!hidratado) return;
     const p = new URLSearchParams(window.location.search);
     const setOrDel = (k: string, v: string) => { if (v) p.set(k, v); else p.delete(k); };
     setOrDel("q", buscaAplicada);
-    setOrDel("desde", fDesde);
-    setOrDel("hasta", fHasta);
+    setOrDel("periodo", periodo === PERIODO_DEFAULT ? "" : periodo);
+    setOrDel("desde", periodo === "rango" ? fDesde : "");
+    setOrDel("hasta", periodo === "rango" ? fHasta : "");
     setOrDel("cliente", fCliente);
     setOrDel("revisar", fPorRevisar ? "1" : "");
     setOrDel("estado", fEstado);
     setOrDel("sucursal", fSucursal);
     const qs = p.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [buscaAplicada, fDesde, fHasta, fCliente, fPorRevisar, fEstado, fSucursal]);
+  }, [hidratado, buscaAplicada, periodo, fDesde, fHasta, fCliente, fPorRevisar, fEstado, fSucursal]);
+  // Buscar un folio y la cola «por revisar» miran TODO el historial: con el
+  // periodo encima, la remisión de marzo «no existía» y lo pendiente de un mes
+  // anterior se escondía de quien tiene que atenderlo.
+  const periodoIgnorado = buscaAplicada
+    ? "La búsqueda recorre todo el historial"
+    : fPorRevisar
+      ? "«Por revisar» recorre todo el historial"
+      : undefined;
+  const rangoEfectivo = periodoIgnorado
+    ? { desde: "", hasta: "" }
+    : rangoDePeriodo(periodo, fDesde, fHasta);
   const listPath = useMemo(() => {
-    const p = new URLSearchParams({ limit: "200" });
-    if (fDesde) p.set("fecha_desde", fDesde);
-    if (fHasta) p.set("fecha_hasta", fHasta);
+    if (!hidratado) return null;
+    const p = new URLSearchParams();
+    if (rangoEfectivo.desde) p.set("fecha_desde", rangoEfectivo.desde);
+    if (rangoEfectivo.hasta) p.set("fecha_hasta", rangoEfectivo.hasta);
     if (fCliente) p.set("cliente_id", fCliente);
     if (fPorRevisar) p.set("revision_pendiente", "true");
     if (fEstado) p.set("estado", fEstado);
     if (fSucursal) p.set("sucursal_id", fSucursal);
     if (buscaAplicada) p.set("q", buscaAplicada);
-    return `/api/v1/remisiones?${p.toString()}`;
-  }, [fDesde, fHasta, fCliente, fPorRevisar, fEstado, fSucursal, buscaAplicada]);
+    const qs = p.toString();
+    return qs ? `/api/v1/remisiones?${qs}` : "/api/v1/remisiones";
+  }, [hidratado, rangoEfectivo.desde, rangoEfectivo.hasta, fCliente, fPorRevisar, fEstado, fSucursal, buscaAplicada]);
   // UNA sola regla para «hay filtros»: el conteo, el botón Limpiar y el
   // estado vacío la comparten (antes cada uno tenía su propia lista).
-  const hayFiltros = Boolean(busca || buscaAplicada || fDesde || fHasta || fCliente || fPorRevisar || fEstado || fSucursal);
+  const hayFiltros = Boolean(
+    busca || buscaAplicada || periodo !== PERIODO_DEFAULT || fCliente || fPorRevisar || fEstado || fSucursal,
+  );
   const limpiarFiltros = () => {
     setBusca(""); setBuscaAplicada("");
+    setPeriodo(PERIODO_DEFAULT);
     setFDesde(""); setFHasta(""); setFCliente("");
     setFPorRevisar(false); setFEstado(""); setFSucursal("");
   };
 
   // lista
-  const { data, loading, error, reload } = useResource<Page<Remision>>(listPath);
+  const { data, loading, progreso, error, reload } = useListadoCompleto<Remision>(listPath);
   const rows = data?.items ?? EMPTY_REMISIONES;
 
   // Lo que llegó por WhatsApp/correo y no pudo volverse remisión solo. No tiene
   // pantalla propia: entra en esta misma tabla con los mismos filtros.
   const porResolver = useOrdenesPorResolver({
-    filtros: { desde: fDesde, hasta: fHasta, clienteId: fCliente, q: buscaAplicada },
+    filtros: { desde: rangoEfectivo.desde, hasta: rangoEfectivo.hasta, clienteId: fCliente, q: buscaAplicada },
     onCambio: reload,
   });
   // Arriba las órdenes: son la cola de trabajo, y el histórico de remisiones las
@@ -3362,12 +3393,15 @@ export default function RemisionesPage() {
 
       {/* Filtros */}
       <div className="mb-3 flex flex-wrap items-end gap-3">
-        <Field label="Desde">
-          <Input type="date" value={fDesde} onChange={(e) => setFDesde(e.target.value)} />
-        </Field>
-        <Field label="Hasta">
-          <Input type="date" value={fHasta} onChange={(e) => setFHasta(e.target.value)} />
-        </Field>
+        <PeriodoFiltro
+          periodo={periodo}
+          onPeriodo={setPeriodo}
+          desde={fDesde}
+          hasta={fHasta}
+          onDesde={setFDesde}
+          onHasta={setFHasta}
+          ignorado={periodoIgnorado}
+        />
         <Field label="Cliente">
           <Select className="min-w-64" value={fCliente} onChange={(e) => setFCliente(e.target.value)} aria-label="Filtrar por cliente">
             <option value="">Todos</option>
@@ -3406,14 +3440,21 @@ export default function RemisionesPage() {
             Limpiar filtros
           </Button>
         )}
-        {hayFiltros && !loading && (() => {
+        {!loading && data && (() => {
           // Las órdenes por resolver son filas de la tabla: cuentan. Y el
-          // conteo sale con CUALQUIER filtro, no solo con la búsqueda —
-          // filtrar por cliente/fecha/estado también acota resultados.
-          const n = (data?.total ?? 0) + porResolver.ordenes.length;
+          // conteo sale SIEMPRE: con el periodo acotando, «¿cuántas son?» es
+          // la pregunta de cualquier vistazo, filtre o no.
+          if (progreso) {
+            return (
+              <span className="pb-2 text-sm text-muted">
+                Cargando {fmtNumber(progreso.cargadas, 0)} de {fmtNumber(progreso.total, 0)}<LoadingDots />
+              </span>
+            );
+          }
+          const n = data.total + porResolver.ordenes.length;
           return (
             <span className="pb-2 text-sm text-muted">
-              {n} resultado{n === 1 ? "" : "s"}
+              {fmtNumber(n, 0)} resultado{n === 1 ? "" : "s"}
             </span>
           );
         })()}
@@ -3490,7 +3531,7 @@ export default function RemisionesPage() {
               action={<Button variant="secondary" onClick={limpiarFiltros}>Limpiar filtros</Button>}
             />
           ) : (
-            "Sin remisiones"
+            "Sin remisiones en este periodo"
           )
         }
         rowKey={(f) => f.id}

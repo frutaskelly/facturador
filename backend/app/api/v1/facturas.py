@@ -267,7 +267,9 @@ def list_facturas(
     # operación— el folio interno de la entrega ("SN-33NER-JUE"), que vive en
     # las observaciones porque es la llave con la que el equipo concilia.
     q: Optional[str] = Query(default=None, max_length=120),
-    limit: int = Query(default=50, ge=1, le=200),
+    # La pantalla trae el periodo completo en lotes de 1000 (ver
+    # useListadoCompleto): con 200 el histórico se cortaba sin avisar.
+    limit: int = Query(default=50, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
