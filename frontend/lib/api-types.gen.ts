@@ -2297,6 +2297,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oc-recibidas/ubicaciones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ubicaciones Conocidas
+         * @description Los puntos de entrega que ya existen, con el prefijo de folio que usan.
+         *
+         *     Hasta hoy este catálogo salía del Master de EHMO: de cada renglón se tomaba
+         *     la ubicación y las dos primeras letras de su folio. No es un catálogo a
+         *     mano sino HISTORIA — si el equipo abrió un hospital nuevo el mes pasado, ya
+         *     aparece —, y de él hereda una OC creada a mano su prefijo, y con el prefijo
+         *     su proyecto y su lista de precios.
+         *
+         *     ES EL ÚNICO QUE PUEDE MORDER EN SILENCIO al retirar la hoja: sin él, una OC
+         *     nueva nace con el proyecto por omisión y cotiza contra la lista
+         *     equivocada, y eso no da error, da precios en cero.
+         *
+         *     Se deriva de la bandeja, que es la misma historia vista desde el lado que
+         *     se queda. Medido antes de moverlo (25-sep-2026): la hoja de Villahermosa
+         *     conoce 21 ubicaciones y la bandeja 22 con prefijo VH, ninguna que exista
+         *     solo en la hoja y ningún prefijo en conflicto.
+         *
+         *     Si una ubicación llegó a usar dos prefijos, gana el más reciente: es el que
+         *     el equipo usa hoy.
+         */
+        get: operations["ubicaciones_conocidas_api_v1_oc_recibidas_ubicaciones_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/oc-recibidas/{oc_id}": {
         parameters: {
             query?: never;
@@ -16830,6 +16868,40 @@ export interface operations {
                 base: string;
                 /** @description El archivo que se está procesando */
                 archivo?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ubicaciones_conocidas_api_v1_oc_recibidas_ubicaciones_get: {
+        parameters: {
+            query?: {
+                /** @description Prefijo del origen externo, p. ej. «EHMO:villahermosa» */
+                origen?: string | null;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
