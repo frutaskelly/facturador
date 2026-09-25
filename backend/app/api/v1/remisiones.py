@@ -951,6 +951,15 @@ def reporte_armado(
                 "partidas": len([x for x in ((oc.payload or {}).get("lineas") or [])
                                  if isinstance(x, dict)]),
                 "bodega": (oc.payload or {}).get("fecha_entrega"),
+                # ¿Trae algún renglón que NO sea extra ni reposición? (25-sep-2026)
+                # Una OC de puros extras no es el pedido del día: si el bot la
+                # contara como «ya pidió», callaría el aviso de FALTAN PEDIDOS
+                # de un hospital que todavía no manda su pedido base.
+                "con_base": any(
+                    isinstance(x, dict)
+                    and not str(x.get("lote") or "").strip().upper().replace("Ó", "O")
+                    .startswith(("EXTRA", "REPOSICION"))
+                    for x in ((oc.payload or {}).get("lineas") or [])),
             })
 
     sin_fecha = []

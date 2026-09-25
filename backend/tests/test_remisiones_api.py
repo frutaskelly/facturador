@@ -1122,6 +1122,31 @@ def test_reporte_armado_origen_acota_el_carril(client, env, auth_as):
     assert len(r3.json()["remisiones"]) == 4
 
 
+def test_sin_remision_dice_si_la_oc_trae_pedido_base(client, env, auth_as):
+    """Una OC de puros extras o reposiciones no es el pedido del día: el bot no
+    puede contarla como «ya pidió», o callaría el aviso de FALTAN PEDIDOS."""
+    from app.models.oc_recibida import OCRecibida
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    with SessionLocal() as s:
+        for folio, lineas in (
+            ("VH-38NIN-SAB-B", [{"descripcion": "KIWI", "cantidad": "1", "lote": "EXTRA"},
+                                {"descripcion": "MANGO", "cantidad": "2", "lote": "REPOSICIÓN"}]),
+            ("VH-38TEA-SAB-B", [{"descripcion": "AJO", "cantidad": "3"},
+                                {"descripcion": "KIWI", "cantidad": "1", "lote": "EXTRAS"}]),
+        ):
+            s.add(OCRecibida(
+                tenant_id=env["admin_a"]["tenant_id"], canal="WHATSAPP",
+                origen_externo=f"EHMO:villahermosa:{folio}", folio_externo=folio,
+                estado="PENDIENTE", payload={"fecha_entrega": "2031-08-02", "lineas": lineas}))
+        s.commit()
+    r = client.get("/api/v1/remisiones/reporte-armado"
+                   "?fechas=2031-08-02&origen=EHMO:villahermosa:", headers=h)
+    assert r.status_code == 200, r.text
+    con_base = {x["folio"]: x["con_base"] for x in r.json()["sin_remision"]}
+    assert con_base == {"VH-38NIN-SAB-B": False, "VH-38TEA-SAB-B": True}, con_base
+
+
 def test_reporte_armado_avisa_las_oc_sin_remision(client, env, auth_as):
     """La OC que entró a la bandeja y nunca se cruzó no tiene remisión, así que
     no sale en ninguna consulta del reporte — y la hoja saldría sin ella sin

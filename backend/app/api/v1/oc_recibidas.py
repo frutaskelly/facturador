@@ -579,12 +579,20 @@ def _candado_antigemela(db: Session, ctx: AuthContext, payload) -> None:
     if not m:
         return
     prefijo, semana = m.group(1), m.group(2)
+    # UN DOCUMENTO NO ES GEMELO DE SÍ MISMO (25-sep-2026). En la hoja la firma
+    # cubría todos los días de la foto a la vez; aquí cada día llega como su
+    # propia orden, así que una foto que pide lo mismo el lunes y el martes
+    # frenaba el martes como «gemela» del lunes que acababa de entrar. La foto
+    # reenviada —el caso de SSP— es OTRO archivo, y ése sigue frenándose.
+    archivo = (getattr(payload, "archivo_nombre", None) or "").strip()
     for oc in (db.query(OCRecibida)
                .filter(OCRecibida.tenant_id == ctx.tenant_id,
                        OCRecibida.folio_externo.like(f"{prefijo}-{semana}%"),
                        OCRecibida.origen_externo != payload.origen_externo,
                        OCRecibida.estado != "DESCARTADA")
                .all()):
+        if archivo and (oc.archivo_nombre or "").strip() == archivo:
+            continue
         if _firma_entrega((oc.payload or {}).get("lineas")) != firma:
             continue
         raise HTTPException(
