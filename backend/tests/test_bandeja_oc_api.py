@@ -511,6 +511,60 @@ def test_el_contador_de_sufijos_aparte_sale_de_la_bandeja(client, env, auth_as):
     assert sufijos()["usados"] == [2, 3]
 
 
+def test_los_candados_ven_el_ancla_determinista_del_bot(client, env, auth_as):
+    """El bot manda `EHMO:<perfil>:<folio>`: el mismo folio trae la MISMA ancla.
+
+    Las pruebas de los candados usaban anclas al azar y por eso no vieron que
+    folio repetido y antirreemplazo excluían la propia ancla: con la del bot,
+    el choque caía en la rama de actualización y pisaba la orden. Con el ancla
+    determinista, los dos frenan; `forzar` —una persona que ya miró— los salta;
+    y el reenvío de siempre (misma fecha, mismo tamaño) entra.
+    """
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    folio = "VH-38ROV-LUN-B"
+    ancla = f"EHMO:villahermosa:{folio}"
+    base = dict(origen_externo=ancla, folio_externo=folio, ubicacion="HOSPITAL ROVIROSA",
+                fecha_entrega="2026-09-21")
+
+    r1 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(lineas=_lineas(10), **base))
+    assert r1.status_code == 201, r1.text
+
+    # el reenvío de siempre: misma fecha, mismo tamaño → entra
+    igual = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(lineas=_lineas(10), **base))
+    assert igual.status_code in (200, 201), igual.text
+
+    # folio repetido: la misma ancla con OTRA fecha → se frena
+    otra_fecha = client.post("/api/v1/oc-recibidas", headers=h,
+                             json=_oc(lineas=_lineas(10), **dict(base, fecha_entrega="2026-09-28")))
+    assert otra_fecha.status_code == 409, otra_fecha.text
+    assert "otra fecha" in otra_fecha.json()["detail"]
+
+    # antirreemplazo: la misma ancla mutilada (10 → 2) → se frena
+    mutilada = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(lineas=_lineas(2), **base))
+    assert mutilada.status_code == 409, mutilada.text
+    assert "10 registrados" in mutilada.json()["detail"]
+
+    # una edición que pidió una persona llega con forzar → pasa
+    editada = client.post("/api/v1/oc-recibidas", headers=h,
+                          json=_oc(lineas=_lineas(2), forzar=True, **dict(base, fecha_entrega="2026-09-22")))
+    assert editada.status_code in (200, 201), editada.text
+
+
+def test_un_ancla_que_no_sale_del_folio_sigue_pudiendo_reenviarse(client, env, auth_as):
+    """Fuera de EHMO el ancla es el documento: su reenvío con otra fecha es una
+    corrección del mismo documento, no un choque. Eso no cambia."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    base = dict(origen_externo="WA:grupo@g.us:77001", folio_externo="77001",
+                ubicacion="HOSPITAL OTRO", fecha_entrega="2026-09-21")
+    assert client.post("/api/v1/oc-recibidas", headers=h,
+                       json=_oc(lineas=_lineas(10), **base)).status_code == 201
+    r = client.post("/api/v1/oc-recibidas", headers=h,
+                    json=_oc(lineas=_lineas(10), **dict(base, fecha_entrega="2026-09-23")))
+    assert r.status_code in (200, 201), r.text
+
+
 def test_una_aparte_descartada_sigue_ocupando_su_sufijo(client, env, auth_as):
     """Una OC descartada sigue ocupando su `origen_externo`: la ingesta la
     devuelve intacta y no guarda lo nuevo. Si el contador la diera por libre,
@@ -1284,6 +1338,38 @@ def test_sin_revisar_pasa_lo_que_cruza_y_conserva_lo_que_no(client, env, auth_as
     assert "Revisar:" in notas
     # Sin lista de precios, el precio que entra es el del documento (anotado).
     assert float(rem["lineas"][0]["precio_unitario"]) == 18.5
+
+
+def test_la_reposicion_entra_en_cero_y_con_su_marca(client, env, auth_as):
+    """Una REPOSICIÓN se surte y NO se cobra (regla del dueño, 17-ago-2026).
+
+    El lote lo manda el bot con la partida y la conversión lo ignoraba: la
+    cobraba a precio de lista. Ahora entra en cero, y las dos marcas van al
+    PRINCIPIO de la nota, que es donde las buscan la nota de remisión, el armado
+    y el pronóstico del bot. Un EXTRA sí se cobra: solo lleva su marca.
+    """
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(lineas=[
+        {"descripcion": "JITOMATE SALADET", "cantidad": "25", "unidad": "KG",
+         "precio": "18.50", "lote": "REPOSICIÓN"},
+        {"descripcion": "JITOMATE SALADET", "cantidad": "5", "unidad": "KG",
+         "precio": "18.50", "lote": "EXTRAS"},
+    ])).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+    r = client.post(
+        f"/api/v1/oc-recibidas/{oc['id']}/crear-remision-sin-revisar?almacen_id={env['alm']}",
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    rem = client.get(f"/api/v1/remisiones/{r.json()['remision_id']}", headers=h).json()
+    por_cant = {float(l["cantidad_solicitada"]): l for l in rem["lineas"]}
+    repo, extra = por_cant[25.0], por_cant[5.0]
+    assert float(repo["precio_unitario"]) == 0
+    assert (repo["notas"] or "").startswith("REPOSICIÓN — se surte, no se cobra")
+    assert float(extra["precio_unitario"]) == 18.5
+    assert (extra["notas"] or "").startswith("EXTRA")
 
 
 def test_sin_revisar_no_le_ensena_nada_al_catalogo(client, env, auth_as):

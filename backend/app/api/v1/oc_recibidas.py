@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
@@ -263,6 +264,19 @@ def _fecha_entrega(payload) -> Optional[date]:
         return None
 
 
+def _ancla_por_folio(origen_externo: Optional[str]) -> bool:
+    """¿El ancla de esta orden se arma con su folio?
+
+    Las de EHMO sí: el bot manda `EHMO:<perfil>:<folio>`, y el folio lo genera
+    él mismo con hospital + semana + día. Ahí la misma ancla NO es «el mismo
+    documento otra vez»: dos entregas distintas pueden generar el mismo folio,
+    y por lo tanto la misma ancla. Los candados que excluyen la propia ancla
+    para dejar pasar un reenvío nunca veían ese choque (revisión del
+    25-sep-2026: las pruebas usaban anclas al azar y no lo notaron).
+    """
+    return (origen_externo or "").upper().startswith("EHMO:")
+
+
 def _candado_folio_repetido(db: Session, ctx: AuthContext, payload) -> None:
     """Un folio que ya existe CON OTRA FECHA DE ENTREGA no se pisa: se frena.
 
@@ -292,16 +306,23 @@ def _candado_folio_repetido(db: Session, ctx: AuthContext, payload) -> None:
     nueva = _fecha_entrega(payload)
     if getattr(payload, "forzar", False) or not folio or nueva is None:
         return
-    choque = (
+    q = (
         db.query(OCRecibida)
         .filter(OCRecibida.tenant_id == ctx.tenant_id,
                 OCRecibida.folio_externo == folio,
-                OCRecibida.origen_externo != payload.origen_externo,
                 OCRecibida.fecha_entrega.isnot(None),
                 OCRecibida.fecha_entrega != nueva,
                 OCRecibida.estado != "DESCARTADA")
-        .first()
     )
+    # LA MISMA ANCLA TAMBIÉN CHOCA EN EHMO (25-sep-2026). Allá el ancla sale del
+    # folio: el mismo folio con otra fecha llega con la MISMA ancla, y excluirla
+    # dejaba pasar justo el choque que este candado existe para frenar — caía en
+    # la rama de actualización y pisaba la orden (o abría una incidencia sobre
+    # su remisión). Una edición que una persona pidió, como mover la fecha,
+    # llega con `forzar`.
+    if not _ancla_por_folio(payload.origen_externo):
+        q = q.filter(OCRecibida.origen_externo != payload.origen_externo)
+    choque = q.first()
     if choque is None:
         return
     raise HTTPException(
@@ -402,15 +423,20 @@ def _candado_antirreemplazo(db: Session, ctx: AuthContext, payload) -> None:
     folio = (payload.folio_externo or "").strip().upper()
     if not punto or fecha is None or _RE_SUFIJO_APARTE.match(folio):
         return
-    previos_oc = (
+    q = (
         db.query(OCRecibida)
         .filter(OCRecibida.tenant_id == ctx.tenant_id,
                 func.upper(func.trim(OCRecibida.punto_entrega)) == punto.upper(),
                 OCRecibida.fecha_entrega == fecha,
-                OCRecibida.origen_externo != payload.origen_externo,
                 OCRecibida.estado != "DESCARTADA")
-        .all()
     )
+    # En EHMO el reenvío del mismo hospital y día trae la MISMA ancla (sale del
+    # folio), así que la orden que reemplazaría ES la de la propia ancla. Así se
+    # perdió Otomí; excluirla hacía que este candado no viera nunca el caso del
+    # bot (25-sep-2026). Las ediciones que pide una persona llegan con `forzar`.
+    if not _ancla_por_folio(payload.origen_externo):
+        q = q.filter(OCRecibida.origen_externo != payload.origen_externo)
+    previos_oc = q.all()
     previos = sum(len((oc.payload or {}).get("lineas") or []) for oc in previos_oc
                   if not _RE_SUFIJO_APARTE.match((oc.folio_externo or "").strip().upper()))
     if previos < 8 or nuevos >= previos * 0.5:
@@ -1075,6 +1101,10 @@ def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
             "clave": ln.get("clave"),
             "precio": ln.get("precio"),
             "notas": ln.get("notas"),
+            # EXTRA / REPOSICIÓN (25-sep-2026). Lo manda el bot con la partida y
+            # nadie lo leía: la conversión cobraba una reposición a precio de
+            # lista. Viaja aquí para que las dos conversiones lo apliquen.
+            "lote": ln.get("lote"),
             # El schema Out solo entrega lo que este literal arma: agregarlo al
             # schema sin agregarlo aquí lo dejaría en None para siempre.
             "desc_pct": ln.get("desc_pct"),
@@ -1129,6 +1159,26 @@ def _cand_de(p: Producto, score: int, origen: str):
 # coincidencia exacta. El difuso y la IA sugieren pero jamás deciden — regla
 # del catálogo multicliente (el falso positivo papa/papaya es la razón).
 _ORIGENES_DETERMINISTAS = {"codigo_cliente", "alias", "exacto"}
+
+
+def _lote_de(ln: dict) -> Optional[str]:
+    """«EXTRA», «REPOSICION» o None. Las mismas dos familias que el bot
+    (`_lote_norm`): EXTRAS es EXTRA y REPOSICIONES es REPOSICION."""
+    n = unicodedata.normalize("NFKD", str(ln.get("lote") or "")).encode("ascii", "ignore").decode().strip().upper()
+    if n.startswith("EXTRA"):
+        return "EXTRA"
+    if n.startswith("REPOSICION"):
+        return "REPOSICION"
+    return None
+
+
+# La marca que el bot escribe en la nota de la línea (`_linea_extra`) y que su
+# nota de remisión, el armado y el pronóstico reconocen por el PRINCIPIO de la
+# nota. Tiene que ser la misma aquí, o la reposición deja de verse como tal.
+_MARCA_LOTE = {
+    "REPOSICION": "REPOSICIÓN — se surte, no se cobra",
+    "EXTRA": "EXTRA",
+}
 
 
 def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> dict:
@@ -1252,6 +1302,24 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
     for (ln, prod, pres), res in zip(pendientes, resultados, strict=True):
         etiqueta = f"«{(ln.get('descripcion') or ln.get('clave') or '')[:60]}»"
         top = (ln.get("candidatos") or [])[0]
+        lote = _lote_de(ln)
+        if lote == "REPOSICION":
+            # Se surte y NO se cobra (regla del dueño, 17-ago-2026): no hay
+            # precio que resolver ni conflicto que preguntar.
+            out_lineas.append({
+                "numero": ln["numero"],
+                "producto_id": str(prod.id),
+                "nombre": prod.nombre,
+                "presentacion": pres,
+                "cantidad": str(ln.get("cantidad") or 1),
+                "precio_unitario": "0",
+                "precio_origen": "reposicion",
+                "texto_original": ln.get("descripcion"),
+                "clave": ln.get("clave"),
+                "cruzo_por": top["origen"],
+                "notas": _MARCA_LOTE["REPOSICION"],
+            })
+            continue
         if res is None:
             falla(ln, "sin_precio",
                   f"La partida {ln['numero']} {etiqueta} no tiene precio en ninguna lista")
@@ -1287,6 +1355,7 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
             "texto_original": ln.get("descripcion"),
             "clave": ln.get("clave"),
             "cruzo_por": top["origen"],
+            "notas": _MARCA_LOTE["EXTRA"] if lote == "EXTRA" else None,
         })
     if problemas:
         # En orden de partida: las dos pasadas los generan desordenados, y el
@@ -1733,6 +1802,7 @@ def crear_remision_auto(
                 precio_unitario=Decimal(l["precio_unitario"]),
                 texto_original=(l.get("texto_original") or None),
                 clave=(l.get("clave") or None),
+                notas=(l.get("notas") or None),
             )
             for l in auto["lineas"]
         ],
@@ -1854,7 +1924,11 @@ def _sin_revisar_de(db: Session, oc: OCRecibida, lineas: list[dict]) -> tuple[li
     out: list = []
     for (ln, prod, pres, motivos), res in zip(pendientes, resultados, strict=True):
         precio_doc = ln.get("precio")
-        if res is not None and res.get("precio") is not None:
+        lote = _lote_de(ln)
+        if lote == "REPOSICION":
+            # Se surte y NO se cobra: en cero y sin preguntar por el precio.
+            precio = Decimal("0")
+        elif res is not None and res.get("precio") is not None:
             precio = Decimal(str(res["precio"]))
             if res.get("origen") == "lista_base":
                 motivos.append("el precio sale de la lista base, no de una negociada")
@@ -1874,7 +1948,8 @@ def _sin_revisar_de(db: Session, oc: OCRecibida, lineas: list[dict]) -> tuple[li
 
         venia = (ln.get("descripcion") or "").strip()
         clave = (ln.get("clave") or "").strip()
-        partes = []
+        # La marca del lote va PRIMERO: quien la reconoce mira el principio.
+        partes = [_MARCA_LOTE[lote]] if lote else []
         if venia or clave:
             partes.append(
                 "Como venía: «" + (venia or "sin descripción") + "»"
