@@ -6,6 +6,7 @@
 // corte, y descargable como el Excel que SAE le manda al cliente (con la
 // semana de entrega derivada de las observaciones, ya sin capturarla a mano).
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { use, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, FileSpreadsheet } from "lucide-react";
 
@@ -60,14 +61,13 @@ function bucketDe(diasVencida: number): Bucket {
 }
 
 // ?serie=…&antiguedad=d1_30,d90_mas — así llega desde Reportes → Cuentas por
-// cobrar, con la fila y las cajas que se tenían marcadas.
-function paramInicial(nombre: string): string {
-  if (typeof window === "undefined") return "";
-  return new URLSearchParams(window.location.search).get(nombre) ?? "";
-}
-function bucketsIniciales(): Bucket[] {
+// cobrar, con la fila y las cajas que se tenían marcadas, y así se queda la
+// URL al cambiar los filtros (para compartirla o recargar sin perderlos).
+// Se lee con useSearchParams y no con window.location: en una navegación con
+// <Link> la página se pinta ANTES de que Next cambie la URL del navegador.
+function bucketsDe(valor: string | null): Bucket[] {
   const validos = BUCKETS.map((b) => b.key);
-  return paramInicial("antiguedad").split(",").filter((k): k is Bucket => validos.includes(k as Bucket));
+  return (valor ?? "").split(",").filter((k): k is Bucket => validos.includes(k as Bucket));
 }
 
 function query(serie: string, corte: string, enCancelacion = false): string {
@@ -84,12 +84,24 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
   const toast = useToast();
   const [data, setData] = useState<EstadoCuenta | null>(null);
   const [error, setError] = useState(false);
-  const [serie, setSerie] = useState(() => paramInicial("serie"));
+  const sp = useSearchParams();
+  const [serie, setSerie] = useState(() => sp.get("serie") ?? "");
   const [corte, setCorte] = useState("");
   const [verEnCancelacion, setVerEnCancelacion] = useState(false);
   const [bajando, setBajando] = useState(false);
   // Cajas de antigüedad marcadas (vacío = todas): filtran la tabla.
-  const [buckets, setBuckets] = useState<Bucket[]>(bucketsIniciales);
+  const [buckets, setBuckets] = useState<Bucket[]>(() => bucketsDe(sp.get("antiguedad")));
+
+  // Los filtros viven también en la URL (replaceState: no llena el historial).
+  useEffect(() => {
+    const qs = new URLSearchParams(window.location.search);
+    if (serie) qs.set("serie", serie); else qs.delete("serie");
+    if (buckets.length) qs.set("antiguedad", buckets.join(",")); else qs.delete("antiguedad");
+    const nueva = `${window.location.pathname}${qs.size ? `?${qs.toString().replaceAll("%2C", ",")}` : ""}`;
+    if (nueva !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState(window.history.state, "", nueva);
+    }
+  }, [serie, buckets]);
   // Lo que la tabla deja ver tras TODOS sus filtros: es lo que se descarga.
   const [visibles, setVisibles] = useState<Doc[]>([]);
 
