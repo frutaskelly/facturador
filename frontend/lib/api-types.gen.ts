@@ -2287,6 +2287,14 @@ export interface paths {
          *       · El MISMO archivo reprocesado reusa su sufijo. Reprocesar una foto no
          *         puede crear una entrega nueva cada vez.
          *       · Si no, el siguiente libre: `max(usados) + 1`, empezando en 2.
+         *
+         *     LAS DESCARTADAS TAMBIÉN CUENTAN (25-sep-2026, revisión adversarial). Una
+         *     OC descartada sigue ocupando su `origen_externo`, y la ingesta la devuelve
+         *     intacta sin guardar lo nuevo. Si el contador la diera por libre, la
+         *     siguiente entrega aparte del día caería sobre ella y desaparecería sin
+         *     aviso; la hoja le daba el sufijo siguiente, porque el descarte no borra el
+         *     renglón. Contándola, el mismo archivo sigue cayendo sobre su descartada —se
+         *     respeta el descarte, como en la hoja— y uno nuevo toma el siguiente libre.
          */
         get: operations["sufijos_aparte_api_v1_oc_recibidas_sufijos_aparte_get"];
         put?: never;
