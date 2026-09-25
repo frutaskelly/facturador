@@ -292,7 +292,9 @@ def list_remisiones(
     # porque el buscador de la tabla solo ve la página cargada y las remisiones
     # viejas se le escapan.
     q: Optional[str] = Query(default=None, max_length=120),
-    limit: int = Query(default=50, ge=1, le=200),
+    # La pantalla trae el periodo completo en lotes de 1000 (ver
+    # useListadoCompleto): con 200 el histórico se cortaba sin avisar.
+    limit: int = Query(default=50, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),

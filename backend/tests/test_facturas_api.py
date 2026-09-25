@@ -250,6 +250,17 @@ def test_lista_facturas_expone_remision_ligada(client, env, auth_as):
     assert row["remisiones_folios"] == [folio]
 
 
+def test_listas_aceptan_lotes_de_1000(client, env, auth_as):
+    """La pantalla trae el periodo en lotes de 1000: con el tope viejo (200)
+    el histórico se cortaba sin avisar. Más de 1000 sigue rechazado."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    for ruta in ("/api/v1/facturas", "/api/v1/remisiones"):
+        r = client.get(f"{ruta}?limit=1000&offset=0", headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json()["limit"] == 1000
+        assert client.get(f"{ruta}?limit=1001", headers=h).status_code == 422
+
+
 def test_descartar_factura_borrador_libera_remisiones(client, env, auth_as):
     """Descartar una factura en BORRADOR regresa sus remisiones a CONFIRMADA y
     permite refacturarlas (rompe el deadlock de la factura nunca timbrada)."""
