@@ -603,3 +603,15 @@ def x_ok(f):
     """Campos que la tabla necesita sí o sí."""
     return all(k in f for k in ("serie", "folio", "cliente_id", "fecha",
                                 "vencimiento", "total", "saldo_insoluto", "estado_pago"))
+
+
+def test_extraer_oc_semana_repetida_b():
+    """La semana repetida del corte (25-sep-2026) lleva «-B» al final:
+    VH-38ROV-LUN-B no es la VH-38ROV-LUN de la semana anterior, y amarrarla
+    a ésa ligaría la factura con la remisión equivocada."""
+    from app.services.espejo_cruce import extraer_oc, extraer_semana
+
+    assert extraer_oc("SEM 38-B HOSPITAL ROVIROSA 21 SEPTIEMBRE 2026. VH-38ROV-LUN-B") == "VH-38ROV-LUN-B"
+    assert extraer_oc("SEM 38 HOSPITAL ROVIROSA 14 SEPTIEMBRE 2026. VH-38ROV-LUN") == "VH-38ROV-LUN"
+    assert extraer_oc("ENTREGA VH-38BAL-LUN-BAÑOS") == "VH-38BAL-LUN"
+    assert extraer_semana("SEM 38-B HOSPITAL ROVIROSA", "VH-38ROV-LUN-B") == 38

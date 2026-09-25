@@ -422,13 +422,13 @@ def test_un_reenvio_mutilado_no_reemplaza_la_entrega_completa(client, env, auth_
 
     # el reenvío mutilado: 4 donde había 27
     r2 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
-        folio_externo="HO-39OTO-JUE-B", lineas=_lineas(4, 100), **comun))
+        folio_externo="HO-39OTO-JUE-R", lineas=_lineas(4, 100), **comun))
     assert r2.status_code == 409, r2.text
     assert "27" in r2.json()["detail"] and "OTOMI" in r2.json()["detail"].upper()
 
     # con `forzar` entra: quien miró la foto manda
     r3 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
-        folio_externo="HO-39OTO-JUE-B", lineas=_lineas(4, 100), forzar=True, **comun))
+        folio_externo="HO-39OTO-JUE-R", lineas=_lineas(4, 100), forzar=True, **comun))
     assert r3.status_code == 201, r3.text
 
 
@@ -444,7 +444,7 @@ def test_el_antirreemplazo_respeta_sus_dos_huecos_conocidos(client, env, auth_as
     client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
         folio_externo="HO-39CHI-JUE", lineas=_lineas(7), **chico))
     r = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
-        folio_externo="HO-39CHI-JUE-B", lineas=_lineas(1, 50), **chico))
+        folio_externo="HO-39CHI-JUE-R", lineas=_lineas(1, 50), **chico))
     assert r.status_code == 201, r.text
 
     # la mitad justa de 10 es 5, y `nuevos < previos*0.5` es falso: pasa
@@ -452,7 +452,7 @@ def test_el_antirreemplazo_respeta_sus_dos_huecos_conocidos(client, env, auth_as
     client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
         folio_externo="HO-39MED-JUE", lineas=_lineas(10), **medio))
     r2 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
-        folio_externo="HO-39MED-JUE-B", lineas=_lineas(5, 60), **medio))
+        folio_externo="HO-39MED-JUE-R", lineas=_lineas(5, 60), **medio))
     assert r2.status_code == 201, r2.text
 
 
@@ -1700,3 +1700,16 @@ def test_una_orden_descartada_que_cambia_no_revive(client, env, auth_as):
         lineas=[{"descripcion": "OTRA COSA", "cantidad": "1", "unidad": "PZ"}])).json()
     assert again["estado"] == "DESCARTADA"
     assert again["cambio_abierto"] is False
+
+
+def test_folio_sin_semana_quita_la_b():
+    """La «-B» es parte de la semana: la entrega VH-38ROV-LUN-B y un reenvío
+    viejo de la misma como VH-39ROV-LUN deben reconocerse como la misma."""
+    from app.api.v1.oc_recibidas import _RE_SUFIJO_APARTE, _folio_sin_semana
+
+    assert _folio_sin_semana("VH-38ROV-LUN-B") == "VH-ROV-LUN"
+    assert _folio_sin_semana("VH-39ROV-LUN") == "VH-ROV-LUN"
+    assert _folio_sin_semana("VH-38ROV-LUN-2") is None
+    m = _RE_SUFIJO_APARTE.match("VH-38ROV-LUN-B-2")
+    assert m and m.group(1) == "VH-38ROV-LUN-B" and m.group(2) == "2"
+    assert _RE_SUFIJO_APARTE.match("VH-38ROV-LUN-B") is None
