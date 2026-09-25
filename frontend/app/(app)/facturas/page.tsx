@@ -770,6 +770,14 @@ export default function FacturasPage() {
     { header: "Subtotal", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.subtotal) },
     { header: "IVA", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.iva_trasladado) },
     { header: "Total", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.total) },
+    // Remisión(es) ligada(s); sin vínculo la celda queda en blanco.
+    { header: "Remisión", truncate: true, sortable: true,
+      exportValue: (f) => (f.remisiones_folios ?? []).join(", "),
+      sortValue: (f) => (f.remisiones_folios ?? []).join(", "),
+      cell: (f) => {
+        const t = (f.remisiones_folios ?? []).join(", ");
+        return <span title={t}>{t}</span>;
+      } },
     { header: "Su pedido", truncate: true, exportValue: (f) => f.su_pedido ?? "",
       cell: (f) => <span title={f.su_pedido ?? ""}>{f.su_pedido ?? "—"}</span> },
     { header: "Nota", truncate: true, exportValue: (f) => f.notas ?? "", cell: (f) => <span title={f.notas ?? ""}>{f.notas ?? "—"}</span> },

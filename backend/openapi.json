@@ -6474,6 +6474,14 @@
       ],
       "title": "Proyecto Id"
      },
+     "remisiones_folios": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Remisiones Folios",
+      "type": "array"
+     },
      "ret_isr": {
       "title": "Ret Isr",
       "type": "string"
@@ -7068,6 +7076,14 @@
        }
       ],
       "title": "Proyecto Id"
+     },
+     "remisiones_folios": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Remisiones Folios",
+      "type": "array"
      },
      "ret_isr": {
       "title": "Ret Isr",

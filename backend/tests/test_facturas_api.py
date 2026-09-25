@@ -239,6 +239,17 @@ def test_remision_expone_factura_en_lista(client, env, auth_as):
     assert row["factura_estado"] == "BORRADOR"
 
 
+def test_lista_facturas_expone_remision_ligada(client, env, auth_as):
+    """La lista de facturas trae el folio interno de la remisión ligada."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem_id = _remision_confirmada(client, h, env, qty="2", precio="20")
+    fac = client.post("/api/v1/facturas/desde-remisiones", headers=h, json={"remision_ids": [rem_id]}).json()
+    folio = client.get(f"/api/v1/remisiones/{rem_id}", headers=h).json()["folio_interno"]
+    lista = client.get("/api/v1/facturas?limit=200", headers=h).json()["items"]
+    row = next(x for x in lista if x["id"] == fac["id"])
+    assert row["remisiones_folios"] == [folio]
+
+
 def test_descartar_factura_borrador_libera_remisiones(client, env, auth_as):
     """Descartar una factura en BORRADOR regresa sus remisiones a CONFIRMADA y
     permite refacturarlas (rompe el deadlock de la factura nunca timbrada)."""

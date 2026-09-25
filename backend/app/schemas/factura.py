@@ -268,6 +268,9 @@ class FacturaOut(ORMModel):
     pdf_url: Optional[str] = None
     notas: Optional[str] = None
     su_pedido: Optional[str] = None
+    # Folios internos de las remisiones que ampara (la columna «Remisión» de la
+    # lista). Solo lo hidrata GET /facturas; en el resto viaja vacío.
+    remisiones_folios: List[str] = []
     created_at: datetime
     updated_at: datetime
 

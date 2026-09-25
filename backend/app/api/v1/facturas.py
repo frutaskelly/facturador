@@ -302,7 +302,46 @@ def list_facturas(
             condiciones.append(Factura.folio == int(digitos))
         query = query.filter(or_(*condiciones))
     query = query.order_by(Factura.fecha.desc(), Factura.folio.desc())
-    return paginate(query, FacturaOut, limit, offset)
+    return paginate(query, FacturaOut, limit, offset,
+                    preparar=lambda rows: _con_remisiones(db, rows))
+
+
+def _con_remisiones(db: Session, rows: list[Factura]) -> None:
+    """Cuelga a cada factura de la página los folios de sus remisiones, en dos
+    consultas para toda la página. El vínculo es `remision.factura_id`; a una
+    espejo se le suma la remisión que la reclama sólo por la marca capturada a
+    mano (`factura_sae` = 'ZHGO 233', con ceros o sin espacio) y que el espejo
+    todavía no ligó por id."""
+    from ...services.export_sae import parsear_marca
+
+    if not rows:
+        return
+    folios: dict = {f.id: [] for f in rows}
+    for fid, folio in (
+        db.query(Remision.factura_id, Remision.folio_interno)
+        .filter(Remision.factura_id.in_(list(folios)), Remision.deleted_at.is_(None))
+        .order_by(Remision.folio_interno)
+        .all()
+    ):
+        folios[fid].append(folio)
+    espejo = {(f.serie, f.folio): f.id for f in rows if f.origen == "ESPEJO_SAE"}
+    if espejo:
+        series = {s for s, _ in espejo}
+        for marca, folio in (
+            db.query(Remision.factura_sae, Remision.folio_interno)
+            .filter(
+                Remision.tenant_id == rows[0].tenant_id,
+                Remision.factura_id.is_(None),
+                or_(*[Remision.factura_sae.ilike(f"{s}%") for s in series]),
+                Remision.deleted_at.is_(None),
+            )
+            .all()
+        ):
+            fid = espejo.get(parsear_marca(marca or ""))
+            if fid is not None and folio not in folios[fid]:
+                folios[fid].append(folio)
+    for f in rows:
+        f.remisiones_folios = folios[f.id]
 
 
 @router.get("/pdf")
