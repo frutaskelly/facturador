@@ -7360,6 +7360,11 @@ export interface components {
             pdf_url?: string | null;
             /** Proyecto Id */
             proyecto_id?: string | null;
+            /**
+             * Remisiones Folios
+             * @default []
+             */
+            remisiones_folios: string[];
             /** Ret Isr */
             ret_isr: string;
             /** Ret Iva */
@@ -7541,6 +7546,11 @@ export interface components {
             pdf_url?: string | null;
             /** Proyecto Id */
             proyecto_id?: string | null;
+            /**
+             * Remisiones Folios
+             * @default []
+             */
+            remisiones_folios: string[];
             /** Ret Isr */
             ret_isr: string;
             /** Ret Iva */

@@ -340,6 +340,23 @@ def test_espejo_liga_estampas_de_captura_manual(client, env, auth_as, sin_sesion
     assert det["estado"] == "FACTURADA"
 
 
+def test_lista_facturas_remision_por_marca_o_en_blanco(client, env, auth_as, sin_sesion):
+    """Espejo sin remisión → columna vacía; una estampa a mano posterior
+    ('ZHGO0821', aún sin factura_id) ya la muestra ligada en la lista."""
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    f = client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(folio=821)).json()
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    lista = client.get("/api/v1/facturas?limit=200", headers=h).json()["items"]
+    assert next(x for x in lista if x["id"] == f["id"])["remisiones_folios"] == []
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"],
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 100}]}).json()
+    client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"factura_sae": "ZHGO0821"})
+    lista = client.get("/api/v1/facturas?limit=200", headers=h).json()["items"]
+    assert next(x for x in lista if x["id"] == f["id"])["remisiones_folios"] == [rem["folio_interno"]]
+
+
 def test_espejo_liga_por_oc_sin_estampa_previa(client, env, auth_as, sin_sesion):
     """El camino NORMAL desde que el export no estampa: la factura de SAE trae
     "OC <su pedido>" en observaciones; si UNA remisión libre del cliente espera
