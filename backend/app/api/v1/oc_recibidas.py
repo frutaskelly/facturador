@@ -341,6 +341,14 @@ def sufijos_aparte(
       · El MISMO archivo reprocesado reusa su sufijo. Reprocesar una foto no
         puede crear una entrega nueva cada vez.
       · Si no, el siguiente libre: `max(usados) + 1`, empezando en 2.
+
+    LAS DESCARTADAS TAMBIÉN CUENTAN (25-sep-2026, revisión adversarial). Una
+    OC descartada sigue ocupando su `origen_externo`, y la ingesta la devuelve
+    intacta sin guardar lo nuevo. Si el contador la diera por libre, la
+    siguiente entrega aparte del día caería sobre ella y desaparecería sin
+    aviso; la hoja le daba el sufijo siguiente, porque el descarte no borra el
+    renglón. Contándola, el mismo archivo sigue cayendo sobre su descartada —se
+    respeta el descarte, como en la hoja— y uno nuevo toma el siguiente libre.
     """
     raiz = (base or "").strip().upper()
     if not raiz:
@@ -348,8 +356,7 @@ def sufijos_aparte(
     filas = (
         db.query(OCRecibida.folio_externo, OCRecibida.archivo_nombre)
         .filter(OCRecibida.tenant_id == ctx.tenant_id,
-                OCRecibida.folio_externo.like(f"{raiz}-%"),
-                OCRecibida.estado != "DESCARTADA")
+                OCRecibida.folio_externo.like(f"{raiz}-%"))
         .all()
     )
     usados: dict[int, set] = {}

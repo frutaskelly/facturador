@@ -511,6 +511,39 @@ def test_el_contador_de_sufijos_aparte_sale_de_la_bandeja(client, env, auth_as):
     assert sufijos()["usados"] == [2, 3]
 
 
+def test_una_aparte_descartada_sigue_ocupando_su_sufijo(client, env, auth_as):
+    """Una OC descartada sigue ocupando su `origen_externo`: la ingesta la
+    devuelve intacta y no guarda lo nuevo. Si el contador la diera por libre,
+    la siguiente aparte del día caería sobre ella y desaparecería sin aviso.
+    La hoja le daba el sufijo siguiente, porque el descarte no borra el renglón.
+    """
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    base = "VH-38PAL-MIE-B"
+
+    def sufijos(archivo=None):
+        p = {"base": base}
+        if archivo:
+            p["archivo"] = archivo
+        r = client.get("/api/v1/oc-recibidas/sufijos-aparte", headers=h, params=p)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    a = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo=f"{base}-2", archivo_nombre="foto-a.jpg")).json()
+    r = client.post(f"/api/v1/oc-recibidas/{a['id']}/descartar", headers=h,
+                    params={"motivo": "prueba"})
+    assert r.status_code == 200 and r.json()["estado"] == "DESCARTADA"
+
+    assert sufijos()["usados"] == [2]
+    assert sufijos("foto-b.jpg")["siguiente"] == 3     # una foto nueva no cae sobre la descartada
+    assert sufijos("foto-a.jpg")["reuso"] == 2         # la misma foto respeta su descarte
+
+    b = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo=f"{base}-3", archivo_nombre="foto-b.jpg"))
+    assert b.status_code == 201 and b.json()["estado"] != "DESCARTADA", b.text
+
+
 def test_un_folio_repetido_con_otra_fecha_no_pisa_la_orden_anterior(client, env, auth_as):
     """El primero de los cinco candados del Master de EHMO, mudado aquí.
 
