@@ -59,6 +59,17 @@ function bucketDe(diasVencida: number): Bucket {
   return "d90_mas";
 }
 
+// ?serie=…&antiguedad=d1_30,d90_mas — así llega desde Reportes → Cuentas por
+// cobrar, con la fila y las cajas que se tenían marcadas.
+function paramInicial(nombre: string): string {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get(nombre) ?? "";
+}
+function bucketsIniciales(): Bucket[] {
+  const validos = BUCKETS.map((b) => b.key);
+  return paramInicial("antiguedad").split(",").filter((k): k is Bucket => validos.includes(k as Bucket));
+}
+
 function query(serie: string, corte: string, enCancelacion = false): string {
   const p = new URLSearchParams();
   if (serie) p.set("serie", serie);
@@ -73,12 +84,12 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
   const toast = useToast();
   const [data, setData] = useState<EstadoCuenta | null>(null);
   const [error, setError] = useState(false);
-  const [serie, setSerie] = useState("");
+  const [serie, setSerie] = useState(() => paramInicial("serie"));
   const [corte, setCorte] = useState("");
   const [verEnCancelacion, setVerEnCancelacion] = useState(false);
   const [bajando, setBajando] = useState(false);
   // Cajas de antigüedad marcadas (vacío = todas): filtran la tabla.
-  const [buckets, setBuckets] = useState<Bucket[]>([]);
+  const [buckets, setBuckets] = useState<Bucket[]>(bucketsIniciales);
   // Lo que la tabla deja ver tras TODOS sus filtros: es lo que se descarga.
   const [visibles, setVisibles] = useState<Doc[]>([]);
 
