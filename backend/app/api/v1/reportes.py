@@ -571,6 +571,15 @@ def pagos(
         ).all()
     } if detalle else {}
 
+    # El desglose fiscal de cada factura abonada, para el detalle que se
+    # despliega en la fila del comprobante (una sola consulta).
+    fiscal = {
+        f.id: f for f in db.query(
+            Factura.id, Factura.fecha, Factura.subtotal, Factura.descuento,
+            Factura.ieps_trasladado, Factura.iva_trasladado, Factura.total,
+        ).filter(Factura.id.in_({d.factura_id for d in detalle if d.factura_id})).all()
+    } if any(d.factura_id for d in detalle) else {}
+
     total = cancelado = ZERO
     vigentes = cancelados = 0
     items = []
@@ -581,10 +590,18 @@ def pagos(
         else:
             cancelado += Decimal(r.monto)
             cancelados += 1
-        items.append({
-            **_recibo_out(db, r, filas_pre=por_recibo.get(r.id, []), folios_pre=folios),
-            "cliente": nombre_cliente,
-        })
+        out = _recibo_out(db, r, filas_pre=por_recibo.get(r.id, []), folios_pre=folios)
+        for fr in out["facturas"]:
+            f = fiscal.get(UUID(fr["factura_id"])) if fr["factura_id"] else None
+            fr.update({
+                "fecha": f.fecha if f else None,
+                "subtotal": f.subtotal if f else None,
+                "descuento": f.descuento if f else None,
+                "ieps": f.ieps_trasladado if f else None,
+                "iva": f.iva_trasladado if f else None,
+                "total": f.total if f else None,
+            })
+        items.append({**out, "cliente": nombre_cliente})
 
     return {
         "desde": desde,
