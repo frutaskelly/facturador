@@ -38426,6 +38426,260 @@
     ]
    }
   },
+  "/api/v1/reportes/master-facturas": {
+   "get": {
+    "description": "Master de facturas: una fila por factura emitida en el rango, con\nremisión, OC (y la liga al documento original), cobranza, notas de crédito,\ncancelación y el estado real (siete, no los tres de la columna).",
+    "operationId": "master_facturas_api_v1_reportes_master_facturas_get",
+    "parameters": [
+     {
+      "description": "Inicio del rango (por omisión, hace 30 días)",
+      "in": "query",
+      "name": "desde",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Inicio del rango (por omisión, hace 30 días)",
+       "title": "Desde"
+      }
+     },
+     {
+      "description": "Fin del rango (por omisión, hoy)",
+      "in": "query",
+      "name": "hasta",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Fin del rango (por omisión, hoy)",
+       "title": "Hasta"
+      }
+     },
+     {
+      "description": "Acota el reporte a un cliente",
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Acota el reporte a un cliente",
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "description": "Estados del master a incluir (por omisión, todos)",
+      "in": "query",
+      "name": "estado",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Estados del master a incluir (por omisión, todos)",
+       "title": "Estado"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Master Facturas",
+    "tags": [
+     "reportes"
+    ]
+   }
+  },
+  "/api/v1/reportes/master-facturas/xlsx": {
+   "get": {
+    "description": "El mismo master en Excel: hoja «Master» con autofiltro, liga a la OC y\npie de totales que respeta el filtro, más la hoja «OC por factura».",
+    "operationId": "master_facturas_xlsx_api_v1_reportes_master_facturas_xlsx_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "desde",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Desde"
+      }
+     },
+     {
+      "in": "query",
+      "name": "hasta",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Hasta"
+      }
+     },
+     {
+      "in": "query",
+      "name": "cliente_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cliente Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "estado",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Estado"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Master Facturas Xlsx",
+    "tags": [
+     "reportes"
+    ]
+   }
+  },
   "/api/v1/reportes/notas-credito": {
    "get": {
     "description": "Notas de crédito del rango con las facturas a las que se aplicaron. El\ntotal es lo VIGENTE; lo cancelado se informa aparte.",

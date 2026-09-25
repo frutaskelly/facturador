@@ -33,13 +33,15 @@ import {
   presetDe, rangoPreset, type PresetKey, type Rango,
 } from "./rango";
 import { ComprobantesPago } from "./ComprobantesPago";
+import { MasterFacturas } from "./MasterFacturas";
 import { NotasCredito } from "./NotasCredito";
 import { SumarioAgrupado, type Agrupar, type FilaSumario } from "./SumarioAgrupado";
 
-type Pestana = "ventas" | "pagos" | "notas" | "cartera";
+type Pestana = "ventas" | "master" | "pagos" | "notas" | "cartera";
 
 const PESTANAS: { key: Pestana; label: string }[] = [
   { key: "ventas", label: "Ventas" },
+  { key: "master", label: "Master de facturas" },
   { key: "pagos", label: "Comprobantes de pago" },
   { key: "notas", label: "Notas de crédito" },
   { key: "cartera", label: "Cuentas por cobrar" },
@@ -368,6 +370,10 @@ export default function ReportesPage() {
             {clienteNombre && <> · solo <span className="font-medium text-foreground">{clienteNombre}</span></>}
           </p>
         </Card>
+
+        {pestana === "master" && (
+          <MasterFacturas filtros={filtros} rango={etiquetaRango(rango)} clienteNombre={clienteNombre} />
+        )}
 
         {pestana === "notas" && (
           <NotasCredito filtros={filtros} rango={etiquetaRango(rango)} clienteNombre={clienteNombre} />

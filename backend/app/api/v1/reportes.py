@@ -705,3 +705,83 @@ def notas_credito(
         "total_cancelado": cancelado,
         "canceladas": canceladas,
     }
+
+
+# ── Master de facturas ───────────────────────────────────────────────────────
+#
+# Una fila por factura con su remisión, su OC, su cobranza y sus NC. El armado
+# vive en services/master_facturas.py; aquí solo el rango, los candados y los
+# dos rescates (plaza y proyecto por serie) que ya usa la cartera.
+
+def _master(db: Session, ctx: AuthContext, desde, hasta, cliente_id, estado):
+    from ...services import master_facturas as mf
+
+    hoy = datetime.now(timezone.utc).date()
+    if cliente_id is not None and not ctx.cliente_permitido(cliente_id):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    desde, hasta = _rango_pedido(desde, hasta, hoy)
+    validos = {k for k, _ in mf.ESTADOS}
+    pedidos = {e.strip().upper() for e in (estado or []) if e.strip()}
+    if pedidos - validos:
+        raise HTTPException(status_code=400, detail=f"Estado desconocido: {', '.join(sorted(pedidos - validos))}")
+    serie_plaza = _serie_a_plaza(db, ctx.tenant_id)
+    plaza_unica = _plaza_unica(db, ctx.tenant_id)
+    filas = mf.construir(
+        db, ctx, desde=desde, hasta=hasta, cliente_id=cliente_id, estados=pedidos or None,
+        plaza_de=lambda f, cid: serie_plaza.get(f.serie or "") or plaza_unica.get(cid),
+        proyecto_de_serie=_fila_de_reporte,
+    )
+    return desde, hasta, filas
+
+
+@router.get("/master-facturas")
+def master_facturas(
+    desde: date | None = Query(default=None, description="Inicio del rango (por omisión, hace 30 días)"),
+    hasta: date | None = Query(default=None, description="Fin del rango (por omisión, hoy)"),
+    cliente_id: UUID | None = Query(default=None, description="Acota el reporte a un cliente"),
+    estado: list[str] | None = Query(default=None, description="Estados del master a incluir (por omisión, todos)"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Master de facturas: una fila por factura emitida en el rango, con
+    remisión, OC (y la liga al documento original), cobranza, notas de crédito,
+    cancelación y el estado real (siete, no los tres de la columna)."""
+    from ...services.master_facturas import ESTADOS
+
+    desde, hasta, filas = _master(db, ctx, desde, hasta, cliente_id, estado)
+    conteo = {k: 0 for k, _ in ESTADOS}
+    for f in filas:
+        conteo[f["estado"]] += 1
+    return {
+        "desde": desde,
+        "hasta": hasta,
+        "cliente_id": cliente_id,
+        "estados": [{"clave": k, "etiqueta": e, "facturas": conteo[k]} for k, e in ESTADOS],
+        "items": filas,
+    }
+
+
+@router.get("/master-facturas/xlsx")
+def master_facturas_xlsx(
+    desde: date | None = Query(default=None),
+    hasta: date | None = Query(default=None),
+    cliente_id: UUID | None = Query(default=None),
+    estado: list[str] | None = Query(default=None),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """El mismo master en Excel: hoja «Master» con autofiltro, liga a la OC y
+    pie de totales que respeta el filtro, más la hoja «OC por factura»."""
+    from fastapi import Response
+
+    from ...services.master_facturas import generar_xlsx
+
+    desde, hasta, filas = _master(db, ctx, desde, hasta, cliente_id, estado)
+    contenido = generar_xlsx(
+        filas, titulo=f"MASTER DE FACTURAS · {desde:%d/%m/%Y} al {hasta:%d/%m/%Y}")
+    nombre = f"master-facturas_{desde:%Y%m%d}-{hasta:%Y%m%d}.xlsx"
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
