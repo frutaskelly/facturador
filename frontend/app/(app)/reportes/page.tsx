@@ -46,14 +46,17 @@ const PESTANAS: { key: Pestana; label: string }[] = [
 ];
 type Granularidad = "dia" | "semana" | "mes";
 
+type CubetaKey = "por_vencer" | "mes_1" | "mes_2" | "mes_3" | "mes_4_mas";
 type FilaCartera = {
   etiqueta: string; saldo: string; vencido: string; facturas: number;
   cliente_id: string | null; serie: string | null;
+  antiguedad: Record<CubetaKey, string>;
+  facturas_por_cubeta: Record<CubetaKey, number>;
 };
 type Cartera = {
   corte: string; agrupar: Agrupar; filas: FilaCartera[];
   saldo_total: string; vencido_total: string;
-  antiguedad: { por_vencer: string; mes_1: string; mes_2: string; mes_3: string; mes_4_mas: string };
+  antiguedad: Record<CubetaKey, string>;
   saldo_en_cancelacion: string;
 };
 type FilaVenta = {
@@ -79,13 +82,14 @@ type Ventas = {
 // El mismo orden en ventas y en cartera: la pregunta primera es «¿quién?».
 const AGRUPAR: Agrupar[] = ["cliente", "sucursal", "proyecto"];
 
-const CUBETAS = [
-  { key: "por_vencer", label: "Por vencer", clase: "bg-success/70" },
-  { key: "mes_1", label: "1 mes", clase: "bg-favorite/80" },
-  { key: "mes_2", label: "2 meses", clase: "bg-favorite" },
-  { key: "mes_3", label: "3 meses", clase: "bg-danger/70" },
-  { key: "mes_4_mas", label: "4+ meses", clase: "bg-danger" },
-] as const;
+// Mismos cortes que el backend (`_cubeta` en reportes.py).
+const CUBETAS: { key: CubetaKey; label: string; detalle: string; clase: string }[] = [
+  { key: "por_vencer", label: "Por vencer", detalle: "", clase: "bg-success/70" },
+  { key: "mes_1", label: "1 mes", detalle: "1-30 días", clase: "bg-favorite/80" },
+  { key: "mes_2", label: "2 meses", detalle: "31-60 días", clase: "bg-favorite" },
+  { key: "mes_3", label: "3 meses", detalle: "61-90 días", clase: "bg-danger/70" },
+  { key: "mes_4_mas", label: "4+ meses", detalle: "91+ días", clase: "bg-danger" },
+];
 
 const PASOS: { key: Granularidad; label: string; unidad: string }[] = [
   { key: "dia", label: "Día", unidad: "día" },
@@ -143,6 +147,10 @@ export default function ReportesPage() {
   const [agrupar, setAgrupar] = useState<Agrupar>("cliente");
   const [agruparVentas, setAgruparVentas] = useState<Agrupar>("cliente");
   const [pestana, setPestana] = useState<Pestana>("ventas");
+  // Cajas de antigüedad marcadas en la cartera (vacío = todas).
+  const [cubetasSel, setCubetasSel] = useState<CubetaKey[]>([]);
+  const toggleCubeta = (k: string) => setCubetasSel((prev) =>
+    prev.includes(k as CubetaKey) ? prev.filter((x) => x !== k) : [...prev, k as CubetaKey]);
 
   const dias = diasDe(rango);
   const preset = presetDe(rango, hoy);
@@ -202,9 +210,23 @@ export default function ReportesPage() {
   const filasVenta: FilaSumario[] = (sumario?.filas ?? []).map((f) => ({
     etiqueta: f.etiqueta, monto: f.total, facturas: f.facturas, href: destino(f),
   }));
-  const filasCartera: FilaSumario[] = (cartera?.filas ?? []).map((f) => ({
-    etiqueta: f.etiqueta, monto: f.saldo, facturas: f.facturas, href: destino(f), alerta: f.vencido,
-  }));
+  // Con cajas marcadas, cada fila suma solo esas cubetas (el vencido, las
+  // que no son «por vencer») y se van las que quedan en cero.
+  const sumaSel = (a: Record<CubetaKey, string | number>, soloVencido = false) =>
+    cubetasSel.reduce((t, k) => (soloVencido && k === "por_vencer" ? t : t + Number(a[k] ?? 0)), 0);
+  const filasCartera: FilaSumario[] = cubetasSel.length === 0
+    ? (cartera?.filas ?? []).map((f) => ({
+        etiqueta: f.etiqueta, monto: f.saldo, facturas: f.facturas, href: destino(f), alerta: f.vencido,
+      }))
+    : (cartera?.filas ?? [])
+        .map((f) => ({
+          etiqueta: f.etiqueta, monto: sumaSel(f.antiguedad), facturas: sumaSel(f.facturas_por_cubeta),
+          href: destino(f), alerta: sumaSel(f.antiguedad, true),
+        }))
+        .filter((f) => f.monto > 0)
+        .sort((a, b) => b.monto - a.monto);
+  const totalCartera = cubetasSel.length === 0 ? cartera?.saldo_total : cartera && sumaSel(cartera.antiguedad);
+  const vencidoCartera = cubetasSel.length === 0 ? cartera?.vencido_total : cartera && sumaSel(cartera.antiguedad, true);
 
   return (
     <div className="space-y-4">
@@ -479,10 +501,14 @@ export default function ReportesPage() {
                 <BarraSegmentada
                   titulo="Antigüedad de la cartera"
                   tramos={CUBETAS.map((c) => ({
+                    key: c.key,
                     etiqueta: c.label,
+                    detalle: c.detalle,
                     valor: Number(cartera.antiguedad[c.key]),
                     clase: c.clase,
                   }))}
+                  seleccion={cubetasSel}
+                  onToggle={toggleCubeta}
                 />
               </div>
 
@@ -494,9 +520,15 @@ export default function ReportesPage() {
                   cargando={carteraRes.loading}
                   total={
                     <>
-                      Total: <span className="font-semibold tabular-nums">{fmtMoney(cartera.saldo_total)}</span>
+                      {cubetasSel.length > 0 && (
+                        <button type="button" className="mr-3 text-xs text-accent hover:underline"
+                                onClick={() => setCubetasSel([])}>
+                          Quitar filtro de antigüedad
+                        </button>
+                      )}
+                      Total: <span className="font-semibold tabular-nums">{fmtMoney(totalCartera ?? 0)}</span>
                       <span className="ml-2 text-danger">
-                        vencido <span className="font-semibold tabular-nums">{fmtMoney(cartera.vencido_total)}</span>
+                        vencido <span className="font-semibold tabular-nums">{fmtMoney(vencidoCartera ?? 0)}</span>
                       </span>
                     </>
                   }

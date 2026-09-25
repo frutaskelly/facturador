@@ -72,6 +72,7 @@ def _bucket(dias_vencida: int) -> str:
 def _armar_estado_cuenta(
     db: Session, ctx: AuthContext, cliente_id: UUID, corte: date | None,
     serie: str | None = None, incluir_en_cancelacion: bool = False,
+    solo_facturas: set[UUID] | None = None,
 ) -> dict:
     """El cálculo del estado de cuenta, uno solo para el JSON, el PDF, el Excel
     y el correo.
@@ -83,6 +84,10 @@ def _armar_estado_cuenta(
     con la suya: ZEHMOHOS ≠ ZEHMOVH, y mezclarlas haría un solo reporte de dos
     proyectos). El resumen `series` sale SIEMPRE de todas las facturas con
     saldo, para que la pantalla pueda ofrecer el filtro completo.
+
+    `solo_facturas` acota a lo que la pantalla deja ver tras sus filtros
+    (antigüedad, columnas, buscador): saldo y antigüedad se recalculan sobre
+    ese subconjunto, para que el Excel diga lo mismo que la tabla.
     """
     if not ctx.cliente_permitido(cliente_id):
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
@@ -119,6 +124,8 @@ def _armar_estado_cuenta(
         s["saldo"] += Decimal(f.saldo_insoluto)
     if serie:
         facturas = [f for f in facturas if (f.serie or "") == serie]
+    if solo_facturas is not None:
+        facturas = [f for f in facturas if f.id in solo_facturas]
 
     # La semana y el proyecto viven en la remisión ligada (`su_pedido`,
     # `proyecto_id`) o en las observaciones que el espejo trae de SAE
@@ -474,6 +481,21 @@ def estado_cuenta_pdf(
     )
 
 
+def _responder_xlsx(db: Session, ctx: AuthContext, cliente_id: UUID, datos: dict):
+    from fastapi import Response
+
+    from ...services.estado_cuenta_xlsx import generar as generar_xlsx
+
+    cliente = get_or_404(db, Cliente, cliente_id)
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    contenido = generar_xlsx(tenant, cliente, datos)
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{_nombre_estado_cuenta(datos)}.xlsx"'},
+    )
+
+
 @router.get("/estado-cuenta/{cliente_id}/xlsx")
 def estado_cuenta_xlsx(
     cliente_id: UUID,
@@ -486,20 +508,31 @@ def estado_cuenta_xlsx(
     """El estado de cuenta en Excel con el layout del que SAE le manda a los
     clientes (encabezado con crédito, columnas SEM/PROYECTO/VENCIDO y total),
     para que el corte a facturación nativa no les cambie el formato."""
-    from fastapi import Response
-
-    from ...services.estado_cuenta_xlsx import generar as generar_xlsx
-
     datos = _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie,
                                 incluir_en_cancelacion=incluir_en_cancelacion)
-    cliente = get_or_404(db, Cliente, cliente_id)
-    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
-    contenido = generar_xlsx(tenant, cliente, datos)
-    return Response(
-        content=contenido,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{_nombre_estado_cuenta(datos)}.xlsx"'},
-    )
+    return _responder_xlsx(db, ctx, cliente_id, datos)
+
+
+class EstadoCuentaFiltradoIn(BaseModel):
+    facturas: list[UUID] = Field(max_length=5000)
+
+
+@router.post("/estado-cuenta/{cliente_id}/xlsx")
+def estado_cuenta_xlsx_filtrado(
+    cliente_id: UUID,
+    payload: EstadoCuentaFiltradoIn,
+    corte: date | None = Query(default=None, description="Fecha de corte (default hoy)"),
+    serie: str | None = Query(default=None, max_length=10, description="Acotar a una serie"),
+    incluir_en_cancelacion: bool = Query(default=False, description="Incluir las facturas cuya cancelación ya se pidió al SAT (por omisión se excluyen)"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """El mismo Excel, pero solo con las facturas que la pantalla deja ver tras
+    sus filtros (van en el body: pueden ser cientos de ids)."""
+    datos = _armar_estado_cuenta(db, ctx, cliente_id, corte, serie=serie,
+                                incluir_en_cancelacion=incluir_en_cancelacion,
+                                solo_facturas=set(payload.facturas))
+    return _responder_xlsx(db, ctx, cliente_id, datos)
 
 
 class EnviarEstadoCuentaIn(BaseModel):

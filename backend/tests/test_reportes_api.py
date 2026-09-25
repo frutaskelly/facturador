@@ -46,6 +46,10 @@ def test_cartera_agrupa_y_reparte_la_antiguedad(client, env, auth):
     filas = {f["etiqueta"]: f for f in d["filas"]}
     assert float(filas["HOSPITALES TUXTLA"]["saldo"]) == 1500.0
     assert filas["HOSPITALES TUXTLA"]["facturas"] == 2
+    # reparto por cubeta de cada fila: con él la pantalla filtra por antigüedad
+    assert float(filas["HOSPITALES TUXTLA"]["antiguedad"]["mes_1"]) == 1000.0
+    assert float(filas["HOSPITALES TUXTLA"]["antiguedad"]["mes_3"]) == 500.0
+    assert filas["HOSPITALES TUXTLA"]["facturas_por_cubeta"]["mes_3"] == 1
     # la suma de las filas ES el total: si divergen, una fila se perdió
     assert sum(float(f["saldo"]) for f in d["filas"]) == float(d["saldo_total"])
 

@@ -186,10 +186,15 @@ export function SerieTiempo({
   );
 }
 
-export type Tramo = { etiqueta: string; valor: number; clase: string };
+export type Tramo = { etiqueta: string; valor: number; clase: string; key?: string; detalle?: string };
 
-/** Barra segmentada: la antigüedad de la cartera de un vistazo. */
-export function BarraSegmentada({ tramos, titulo }: { tramos: Tramo[]; titulo: string }) {
+/** Barra segmentada: la antigüedad de la cartera de un vistazo. Con
+ *  `onToggle`, cada tramo de la leyenda es una caja que se marca y desmarca
+ *  (una o varias) para filtrar lo de abajo. */
+export function BarraSegmentada({ tramos, titulo, seleccion = [], onToggle }: {
+  tramos: Tramo[]; titulo: string;
+  seleccion?: string[]; onToggle?: (key: string) => void;
+}) {
   const total = tramos.reduce((s, t) => s + t.valor, 0);
   if (total <= 0) return null;
   return (
@@ -199,13 +204,35 @@ export function BarraSegmentada({ tramos, titulo }: { tramos: Tramo[]; titulo: s
           t.valor <= 0 ? null : (
             <div
               key={t.etiqueta}
-              className={t.clase}
+              className={`${t.clase} transition-opacity ${
+                seleccion.length > 0 && !seleccion.includes(t.key ?? t.etiqueta) ? "opacity-25" : ""}`}
               style={{ width: `${(t.valor / total) * 100}%` }}
               title={`${t.etiqueta}: ${fmtMoney(t.valor)}`}
             />
           ),
         )}
       </div>
+      {onToggle ? (
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {tramos.map((t) => {
+            const k = t.key ?? t.etiqueta;
+            const activo = seleccion.includes(k);
+            return (
+              <button key={k} type="button" aria-pressed={activo} onClick={() => onToggle(k)}
+                      className={`rounded-xl border px-3 py-2.5 text-left transition ${activo
+                        ? "border-accent bg-accent/5 ring-1 ring-accent"
+                        : "border-border bg-background hover:bg-surface-2"}`}>
+                <div className="flex items-center gap-1.5 text-[11px] text-muted">
+                  <span className={`h-2 w-2 shrink-0 rounded-sm ${t.clase}`} aria-hidden />
+                  {t.etiqueta}
+                  {t.detalle && <span className="ml-auto">{t.detalle}</span>}
+                </div>
+                <div className="mt-0.5 text-sm font-medium tabular-nums">{fmtMoney(t.valor)}</div>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-5">
         {tramos.map((t) => (
           <div key={t.etiqueta}>
@@ -217,6 +244,7 @@ export function BarraSegmentada({ tramos, titulo }: { tramos: Tramo[]; titulo: s
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }
