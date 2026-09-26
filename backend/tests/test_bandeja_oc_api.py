@@ -1947,11 +1947,65 @@ def test_la_misma_entrega_con_otra_ancla_no_se_remisiona_dos_veces(client, env, 
     assert quieta["estado"] == "PENDIENTE" and quieta["remision_id"] is None  # …pero no se duplicó
     assert quieta["motivo"].startswith("No se pudo pasar a remisiones en automático")
     assert primera["remision_folio"] in quieta["motivo"]
+    assert "descarta esta orden" in quieta["motivo"]      # mismo contenido: es el reenvío
     assert client.get("/api/v1/remisiones", headers=h).json()["total"] == 1
 
     # Ya explicada, el siguiente lote no la vuelve a intentar.
     r = client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=h).json()
     assert r == {"creadas": 0, "fallidas": 0, "restantes": 0}
+
+
+@pytest.mark.parametrize("lineas, cuantas", [
+    # El caso real: otro archivo, otra semana, más partidas.
+    ([{"descripcion": "JITOMATE SALADET", "cantidad": "40", "unidad": "KG"},
+      {"descripcion": "CEBOLLA BLANCA", "cantidad": "10", "unidad": "KG"},
+      {"descripcion": "CHILE SERRANO", "cantidad": "5", "unidad": "KG"}],
+     "3 vs 1 partidas"),
+    # Mismas partidas en número, otra cantidad: tampoco es la misma entrega.
+    ([{"descripcion": "JITOMATE SALADET", "cantidad": "30", "unidad": "KG"}],
+     "1 partida cada una"),
+])
+def test_mismo_folio_y_fecha_con_otro_contenido_no_se_manda_a_descartar(
+        client, env, auth_as, lineas, cuantas):
+    """CE-38CER-LUN/MAR/MIE, 26-sep-2026: el folio y la fecha coincidían con
+    RFMAFAN32-34, pero eran la semana 39 con fechas de la 38 y otro contenido.
+    Se sigue frenando el camino automático, pero el motivo ya no dice
+    «descártala»: dice que es otro pedido y que la fecha está mal."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    _externo(client, h, "UBICACION", "ehmo:JUAN GRAHAM", env["ehmo"], sucursal_id=env["suc"])
+    base = dict(folio_externo="CE-38CER-LUN", fecha_entrega="2026-09-21")
+
+    primera = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        perfil="ehmo", origen_externo="EHMO:ehmo:CE-38CER-LUN", **base)).json()
+    assert primera["estado"] == "ASIGNADA" and primera["remision_folio"]
+
+    otra = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        perfil="ehmo-pachuca", origen_externo="EHMO:ehmo-pachuca:CE-38CER-LUN",
+        rfc=None, proyecto="HOSPITALES", forzar=True, lineas=lineas, **base)).json()
+    assert otra["estado"] == "PENDIENTE" and otra["cliente_id"] is None
+
+    _externo(client, h, "PROYECTO", "ehmo:HOSPITALES", env["ehmo"])
+    r = client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=h).json()
+    assert r["creadas"] == 0 and r["fallidas"] == 1
+
+    quieta = client.get(f"/api/v1/oc-recibidas/{otra['id']}", headers=h).json()
+    assert quieta["estado"] == "PENDIENTE" and quieta["remision_id"] is None
+    motivo = quieta["motivo"]
+    assert motivo.startswith("No se pudo pasar a remisiones en automático")
+    assert primera["remision_folio"] in motivo
+    assert "otro contenido" in motivo and cuantas in motivo
+    assert "fecha mal puesta" in motivo
+    assert "descarta esta orden" not in motivo
+
+    db = SessionLocal()
+    try:
+        vivas = db.execute(text(
+            "SELECT count(*) FROM remisiones WHERE tenant_id = :t AND deleted_at IS NULL"),
+            {"t": env["admin_a"]["tenant_id"]}).scalar()
+    finally:
+        db.close()
+    assert vivas == 1
 
 
 def test_la_misma_entrega_se_vuelve_a_remisionar_si_la_anterior_se_cancelo(client, env, auth_as):
