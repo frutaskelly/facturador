@@ -63,6 +63,12 @@ UNIDADES = {
     "PAQUETE": ("PQ", "XPK"), "PAQUETES": ("PQ", "XPK"), "PQ": ("PQ", "XPK"),
 }
 
+# Las unidades como se OFRECEN (GET /sae/catalogos): una por unidad de SAE, sin
+# plurales ni abreviaturas. Las demás llaves de UNIDADES se aceptan al pedir,
+# pero ofrecerlas sería enseñarle al bot cinco maneras de decir «kilo».
+UNIDADES_CANONICAS = ("CAJA", "KILO", "LITRO", "PAQUETE", "PIEZA")
+assert all(u in UNIDADES for u in UNIDADES_CANONICAS)
+
 # Los campos que un CAMBIO puede traer. Es la lista blanca de arriba.
 CAMPOS_CAMBIO = ("descripcion", "linea", "unidad", "esquema", "sat", "reactivar")
 
@@ -233,7 +239,12 @@ def alta(empresa: str, clave: str, datos: dict) -> dict[str, Any]:
                         "WHERE LTRIM(RTRIM(CVE_ART)) = %s", (clave,))
             if cur.fetchall():
                 con.rollback()
-                return {"ok": True, "clave": clave, "ya_existia": True}
+                # Lo que SAE tiene de esa clave va en el reporte: una que ya
+                # existía DE BAJA no puede entrar al espejo como activa sólo
+                # porque alguien pidió darla de alta (26-sep-2026). Se lee con
+                # el candado ya suelto (rollback): aquí no se escribió nada.
+                return {"ok": True, "clave": clave, "ya_existia": True,
+                        **_leer_de_vuelta(con, inve, clave)}
             cur.execute(
                 f"INSERT INTO {inve} (CVE_ART, DESCR, LIN_PROD, UNI_MED, UNI_EMP, UNI_ALT,"
                 " CVE_ESQIMPU, STATUS, EXIST, MAN_IEPS, CUOTA_IEPS, APL_MAN_IEPS, CVE_PRODSERV,"
@@ -260,7 +271,9 @@ def alta(empresa: str, clave: str, datos: dict) -> dict[str, Any]:
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:180]}"}
     finally:
         con.close()
-    return {"ok": True, "clave": clave}
+    # Lo que quedó escrito, tal cual: de aquí sale la fila del espejo de claves
+    # sin esperar a la siguiente lectura de INVE.
+    return {"ok": True, "clave": clave, "descripcion": desc, "activa": True}
 
 
 # ── Cambio ───────────────────────────────────────────────────────────────────
@@ -324,9 +337,50 @@ def cambio(empresa: str, clave: str, cambios: dict) -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             pass
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:180]}"}
+    else:
+        # Cómo quedó (descripción y si está activa), que es lo que el cierre
+        # pone en el espejo de claves. Se lee DESPUÉS del commit, nunca entre
+        # el UPDATE y el commit: ver `_leer_de_vuelta` (26-sep-2026).
+        leido = _leer_de_vuelta(con, inve, clave)
     finally:
         con.close()
-    return {"ok": True, "clave": clave, "campos": sorted(cambios)}
+    return {"ok": True, "clave": clave, "campos": sorted(cambios), **leido}
+
+
+def _leer_de_vuelta(con, inve: str, clave: str) -> dict[str, Any]:
+    """{"descripcion", "activa"} de una clave como SAE la tiene AHORA, con la
+    misma conexión pero en una lectura APARTE: sólo se llama cuando la
+    transacción de escritura ya se cerró (commit, o rollback si no se escribió).
+
+    Es un extra del reporte, nunca una condición: si la lectura falla o no
+    encuentra exactamente una fila, devuelve {} y lo escrito sigue escrito.
+
+    Por qué después y no dentro (26-sep-2026): leída entre el UPDATE del cambio
+    y el commit, y tragándose su error, pierde cambios en silencio. Ese SELECT
+    recorre INVE entero (LTRIM(RTRIM(CVE_ART)) no usa índice) con el candado X
+    del UPDATE puesto; si SQL Server lo elige víctima de un deadlock (1205)
+    deshace TODA la transacción, UPDATE incluido, y el commit() de pymssql
+    («IF @@TRANCOUNT > 0 COMMIT TRAN») no se queja de no tener nada que
+    confirmar: el cambio saldría ok sin estar en SAE, y por diseño nadie lo
+    reintenta. Leída después, lo peor que pasa es un reporte sin estos dos
+    datos (el cierre usa entonces lo pedido, que sí quedó escrito), y de paso
+    el candado X no se queda puesto durante el recorrido.
+    """
+    try:
+        with con.cursor() as cur:
+            cur.execute(f"SELECT STATUS, DESCR FROM {inve} WHERE LTRIM(RTRIM(CVE_ART)) = %s",
+                        (clave,))
+            filas = cur.fetchall() or []
+    except Exception as e:  # noqa: BLE001
+        log.warning("SAE (escritura): no pude leer de vuelta %s: %s: %s",
+                    clave, type(e).__name__, e)
+        return {}
+    if len(filas) != 1:
+        return {}
+    fila = filas[0]
+    status, descr = (fila.get("STATUS"), fila.get("DESCR")) if isinstance(fila, dict) else fila[:2]
+    return {"descripcion": sae_lectura.descripcion_inve(descr),
+            "activa": sae_lectura.status_activo(status)}
 
 
 # ── El reloj ─────────────────────────────────────────────────────────────────

@@ -19,7 +19,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field as PydField
@@ -33,7 +33,6 @@ from ...core.ratelimit import enforce
 from ...core.rbac import AuthContext, get_auth_context, get_tenant_db, require_permission
 from ...models import (
     Almacen,
-    ClaveSae,
     Cliente,
     ClienteExterno,
     EspejoSync,
@@ -52,8 +51,8 @@ from ...models import (
     Tenant,
     TimbradoIntento,
 )
-from ...models.clave_sae import norm_clave
 from ...schemas.clave_sae import ClavesSaeIn, ClavesSaeResult
+from ...services.claves_sae import CatalogoEncogido, CatalogoVacio, reemplazar_catalogo
 from ...schemas.common import Page
 from ...schemas.factura import (
     CancelarFacturaIn,
@@ -1093,10 +1092,13 @@ def solicitar_espejo_sync(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(_puede_pedir_sync),
 ):
-    """El botón «Sincronizar SAE». El backend no ve SAE: aquí solo queda la
-    solicitud; el conector (que sí consulta SAE por sqlcmd) la reclama en su
-    siguiente vuelta, corre el espejo y reporta. Idempotente: si ya hay una
-    viva, se devuelve esa en vez de encolar otra."""
+    """El botón «Sincronizar SAE». Aquí solo queda la solicitud; quien lee SAE
+    la reclama en su siguiente vuelta, corre el espejo y reporta. Desde el
+    24-sep-2026 ése es el reloj del propio Facturador (`espejo_sae.
+    pasada_programada`, que además fuerza cuadre, cobranza y —desde el
+    26-sep— el catálogo de artículos); antes era el conector del bot por
+    sqlcmd. Idempotente: si ya hay una viva, se devuelve esa en vez de encolar
+    otra."""
     _expirar_syncs_muertas(db, ctx.tenant_id)
     viva = (db.query(EspejoSync)
             .filter(EspejoSync.tenant_id == ctx.tenant_id,
@@ -1176,83 +1178,31 @@ def depositar_claves_sae(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission("factura:espejo")),
 ):
-    """El conector deposita el catálogo de artículos que SAE tiene HOY.
+    """Deposita el catálogo de artículos que SAE tiene HOY (INVE de una empresa).
 
     Con esto el preview del masivo puede decir «esa clave SAE no la conoce»
     ANTES de generar el archivo. Hasta el 14-sep-2026 solo se comprobaba que el
     producto tuviera código de cliente: FRESADOMOPZ pasó el preview y SAE no
     creó la factura.
 
+    Desde el 26-sep-2026 el Facturador lee INVE él mismo, desde el reloj del
+    espejo (`claves_sae.sincronizar_catalogo`), y esta ruta queda para quien
+    todavía lo mande por HTTP (el `sync_claves_sae.py` del bot mientras se
+    apaga, o una carga a mano con `forzar`). Las dos entradas pasan por el
+    MISMO depósito (`claves_sae.reemplazar_catalogo`): una sola lógica, con sus
+    candados.
+
     REEMPLAZA el catálogo de esa empresa (es un espejo, no un acumulado): lo que
     ya no está en SAE deja de estar aquí. La única salvaguarda es contra una
     lectura incompleta — ver `forzar` en el schema.
     """
-    empresa = payload.empresa.strip()
-    recibidas = {
-        norm_clave(i.clave): i for i in payload.claves if norm_clave(i.clave)
-    }
-    if not recibidas:
-        raise HTTPException(status_code=422, detail="No llegó ninguna clave utilizable")
-
-    actuales = {
-        c.clave: c for c in db.query(ClaveSae).filter(
-            ClaveSae.tenant_id == ctx.tenant_id, ClaveSae.empresa == empresa
-        ).with_for_update()
-    }
-    # Un catálogo que se encoge a menos de la mitad es casi siempre una lectura
-    # cortada, no un inventario vaciado. Bloquear aquí evita convertir cientos
-    # de claves buenas en "no existe en SAE" y trabar exports legítimos.
-    if actuales and len(recibidas) * 2 < len(actuales) and not payload.forzar:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Llegaron {len(recibidas)} claves para la empresa {empresa} y había "
-                f"{len(actuales)}: parece una lectura incompleta de SAE. Si el catálogo "
-                "de verdad encogió así, repite con forzar=true"
-            ),
-        )
-
-    ahora = datetime.now(timezone.utc)
-    nuevas: list[dict] = []
-    actualizadas = 0
-    for clave, item in recibidas.items():
-        desc = (item.descripcion or "").strip()[:254] or None
-        fila = actuales.get(clave)
-        if fila is None:
-            nuevas.append({
-                "id": uuid4(), "tenant_id": ctx.tenant_id, "empresa": empresa,
-                "clave": clave, "descripcion": desc, "activa": item.activa,
-                "sincronizado_at": ahora,
-            })
-        elif fila.activa != item.activa or fila.descripcion != desc:
-            fila.activa = item.activa
-            fila.descripcion = desc
-            actualizadas += 1
-
-    sobrantes = [c for c in actuales if c not in recibidas]
-    if sobrantes:
-        db.query(ClaveSae).filter(
-            ClaveSae.tenant_id == ctx.tenant_id,
-            ClaveSae.empresa == empresa,
-            ClaveSae.clave.in_(sobrantes),
-        ).delete(synchronize_session=False)
-    if nuevas:
-        db.bulk_insert_mappings(ClaveSae, nuevas)
-    # El sello de sincronización, en UN solo UPDATE. Ponerlo fila por fila
-    # ensuciaba las ~2,000 de la empresa y el depósito tardaba más que el
-    # timeout del conector (30 s): el espejo se quedaba días sin actualizar y
-    # nadie se enteraba, porque el bot reportaba «FALLÓ el depósito» en su log
-    # y el Facturador seguía enseñando el catálogo viejo (18-sep-2026).
-    db.query(ClaveSae).filter(
-        ClaveSae.tenant_id == ctx.tenant_id, ClaveSae.empresa == empresa,
-    ).update({ClaveSae.sincronizado_at: ahora}, synchronize_session=False)
-    db.flush()
-    creadas = len(nuevas)
-
-    return ClavesSaeResult(
-        empresa=empresa, recibidas=len(recibidas), creadas=creadas,
-        actualizadas=actualizadas, eliminadas=len(sobrantes), total=len(recibidas),
-    )
+    try:
+        return reemplazar_catalogo(db, ctx.tenant_id, payload.empresa, payload.claves,
+                                   forzar=payload.forzar)
+    except CatalogoVacio as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    except CatalogoEncogido as e:
+        raise HTTPException(status_code=409, detail=str(e)) from None
 
 
 @router.get("/espejo/clientes", response_model=EspejoClientesSaeOut)

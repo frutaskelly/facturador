@@ -1561,12 +1561,19 @@ export interface paths {
         put?: never;
         /**
          * Depositar Claves Sae
-         * @description El conector deposita el catálogo de artículos que SAE tiene HOY.
+         * @description Deposita el catálogo de artículos que SAE tiene HOY (INVE de una empresa).
          *
          *     Con esto el preview del masivo puede decir «esa clave SAE no la conoce»
          *     ANTES de generar el archivo. Hasta el 14-sep-2026 solo se comprobaba que el
          *     producto tuviera código de cliente: FRESADOMOPZ pasó el preview y SAE no
          *     creó la factura.
+         *
+         *     Desde el 26-sep-2026 el Facturador lee INVE él mismo, desde el reloj del
+         *     espejo (`claves_sae.sincronizar_catalogo`), y esta ruta queda para quien
+         *     todavía lo mande por HTTP (el `sync_claves_sae.py` del bot mientras se
+         *     apaga, o una carga a mano con `forzar`). Las dos entradas pasan por el
+         *     MISMO depósito (`claves_sae.reemplazar_catalogo`): una sola lógica, con sus
+         *     candados.
          *
          *     REEMPLAZA el catálogo de esa empresa (es un espejo, no un acumulado): lo que
          *     ya no está en SAE deja de estar aquí. La única salvaguarda es contra una
@@ -1659,10 +1666,13 @@ export interface paths {
         put?: never;
         /**
          * Solicitar Espejo Sync
-         * @description El botón «Sincronizar SAE». El backend no ve SAE: aquí solo queda la
-         *     solicitud; el conector (que sí consulta SAE por sqlcmd) la reclama en su
-         *     siguiente vuelta, corre el espejo y reporta. Idempotente: si ya hay una
-         *     viva, se devuelve esa en vez de encolar otra.
+         * @description El botón «Sincronizar SAE». Aquí solo queda la solicitud; quien lee SAE
+         *     la reclama en su siguiente vuelta, corre el espejo y reporta. Desde el
+         *     24-sep-2026 ése es el reloj del propio Facturador (`espejo_sae.
+         *     pasada_programada`, que además fuerza cuadre, cobranza y —desde el
+         *     26-sep— el catálogo de artículos); antes era el conector del bot por
+         *     sqlcmd. Idempotente: si ya hay una viva, se devuelve esa en vez de encolar
+         *     otra.
          */
         post: operations["solicitar_espejo_sync_api_v1_facturas_espejo_sync_post"];
         delete?: never;
@@ -3444,6 +3454,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/claves-sae": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Buscar Claves Sae
+         * @description ¿Existe esta clave en SAE, en qué empresas, y qué producto la lleva?
+         *
+         *     Es la pregunta que el bot hace ANTES de pedir un alta o un cambio
+         *     (26-sep-2026): si la clave no existe en ninguna empresa, es un alta; si
+         *     existe, es un cambio, y `empresas` son justo las que hay que mandarle a
+         *     `POST /productos/cambio-sae` — mandarlo a las cuatro sale PARCIAL donde no
+         *     existe.
+         *
+         *     Sale del espejo `claves_sae`, no de SAE en vivo: es instantáneo y lo que el
+         *     Facturador acaba de escribir allá ya está reflejado. Agrupa por clave y va
+         *     primero la coincidencia exacta.
+         */
+        get: operations["buscar_claves_sae_api_v1_productos_claves_sae_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/importar": {
         parameters: {
             query?: never;
@@ -4632,6 +4672,35 @@ export interface paths {
         get?: never;
         /** Set Role Permissions */
         put: operations["set_role_permissions_api_v1_roles__role_id__permissions_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sae/catalogos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Catalogos
+         * @description Las líneas, los esquemas de impuestos y las unidades de SAE para esa
+         *     empresa: con qué se puede dar de alta o cambiar un artículo (26-sep-2026).
+         *
+         *     Líneas y esquemas salen EN VIVO de SAE (CLIN e IMPU), porque ahí se crean y
+         *     el espejo no los trae; con quince minutos de caché. Las unidades no son de
+         *     SAE sino del escritor: las que `sae_escritura` sabe traducir a UNI_MED y a
+         *     la clave de unidad del SAT, una por unidad.
+         *
+         *     Sin SAE contesta 503 con el motivo: el bot le dice al usuario que SAE no
+         *     está, en vez de ofrecerle una lista vieja o vacía como si fuera la buena.
+         */
+        get: operations["catalogos_api_v1_sae_catalogos_get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -5933,6 +6002,39 @@ export interface components {
             conexion: components["schemas"]["ConexionOut"];
             /** Instruccion Whatsapp */
             instruccion_whatsapp: string;
+        };
+        /**
+         * ClaveSaeBuscadaOut
+         * @description Una clave de SAE con todas las empresas donde existe y el producto del
+         *     Facturador que la lleva (si alguno).
+         *
+         *     Es la respuesta de `GET /productos/claves-sae`, la búsqueda con la que el
+         *     bot decide si algo se da de ALTA (no existe en ninguna) o se CAMBIA (existe,
+         *     y entonces `empresas` son justo las que hay que mandar en el cambio).
+         */
+        ClaveSaeBuscadaOut: {
+            /** Clave */
+            clave: string;
+            /** Descripcion */
+            descripcion?: string | null;
+            /** Empresas */
+            empresas?: {
+                [key: string]: components["schemas"]["ClaveSaeEnEmpresa"];
+            };
+            /** Producto Id */
+            producto_id?: string | null;
+            /** Producto Nombre */
+            producto_nombre?: string | null;
+        };
+        /**
+         * ClaveSaeEnEmpresa
+         * @description Cómo está una clave en UNA empresa de SAE, según el espejo.
+         */
+        ClaveSaeEnEmpresa: {
+            /** Activa */
+            activa: boolean;
+            /** Descripcion */
+            descripcion?: string | null;
         };
         /**
          * ClaveSaeEnUso
@@ -7553,6 +7655,21 @@ export interface components {
             /** Tipo Ieps */
             tipo_ieps?: ("TASA" | "CUOTA") | null;
         };
+        /**
+         * EsquemaSaeOut
+         * @description Un esquema de impuestos de SAE (IMPU). IVA e IEPS en PORCENTAJE:
+         *     16.0 es 16 %, no 0.16.
+         */
+        EsquemaSaeOut: {
+            /** Codigo */
+            codigo: number;
+            /** Descripcion */
+            descripcion: string;
+            /** Ieps */
+            ieps: number;
+            /** Iva */
+            iva: number;
+        };
         /** EstadoCuentaFiltradoIn */
         EstadoCuentaFiltradoIn: {
             /** Facturas */
@@ -8746,6 +8863,16 @@ export interface components {
             producto_nombre?: string | null;
             /** Sin Clave Sae */
             sin_clave_sae?: boolean | null;
+        };
+        /**
+         * LineaSaeOut
+         * @description Una línea de producto de SAE (CLIN): su clave y su nombre.
+         */
+        LineaSaeOut: {
+            /** Codigo */
+            codigo: string;
+            /** Nombre */
+            nombre: string;
         };
         /** ListaAsignacionCreate */
         ListaAsignacionCreate: {
@@ -11370,6 +11497,20 @@ export interface components {
             permissions?: string[] | null;
             /** Vertical */
             vertical?: string | null;
+        };
+        /**
+         * SaeCatalogosOut
+         * @description Con qué se puede dar de alta o cambiar un artículo en esa empresa.
+         */
+        SaeCatalogosOut: {
+            /** Empresa */
+            empresa: string;
+            /** Esquemas */
+            esquemas: components["schemas"]["EsquemaSaeOut"][];
+            /** Lineas */
+            lineas: components["schemas"]["LineaSaeOut"][];
+            /** Unidades */
+            unidades: string[];
         };
         /** SatClaveOpcion */
         SatClaveOpcion: {
@@ -19282,6 +19423,46 @@ export interface operations {
             };
         };
     };
+    buscar_claves_sae_api_v1_productos_claves_sae_get: {
+        parameters: {
+            query?: {
+                /** @description Clave exacta; se compara en MAYÚSCULAS y sin espacios */
+                clave?: string | null;
+                /** @description Texto que se busca en la clave y en la descripción */
+                q?: string | null;
+                /** @description Sólo esa empresa de SAE (02, 03, 04, 05) */
+                empresa?: string | null;
+                solo_activas?: boolean;
+                limit?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaveSaeBuscadaOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     importar_productos_api_v1_productos_importar_post: {
         parameters: {
             query?: never;
@@ -21532,6 +21713,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoleDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    catalogos_api_v1_sae_catalogos_get: {
+        parameters: {
+            query?: {
+                /** @description Empresa de SAE: 02, 03, 04, 05 */
+                empresa?: string;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaeCatalogosOut"];
                 };
             };
             /** @description Validation Error */

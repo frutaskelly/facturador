@@ -481,8 +481,10 @@ class ImpuestoDeClaveOut(BaseModel):
     activo: bool = True
 
 
-# ── Altas en SAE: la cola entre el Facturador y el conector ──────────────────
-# El backend no ve SAE; el conector sí. Mismo reparto que el espejo de facturas.
+# ── Altas y cambios en SAE: la cola de escrituras ────────────────────────────
+# Desde el 26-sep-2026 el que escribe es el Facturador (`sae_escritura`); el
+# conector del bot sólo atiende altas si ese escritor está apagado. La cola se
+# queda porque es lo que garantiza UN solo escritor y ningún reintento.
 
 class AltaSaeIn(BaseModel):
     """Pide crear un producto en SAE. `clave` es la identidad de la alta (CVE_ART).

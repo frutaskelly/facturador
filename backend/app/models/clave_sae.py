@@ -1,10 +1,16 @@
 """Espejo del catálogo de artículos de SAE (INVE02 / INVE03…).
 
-Solo entra información: el bot deposita las claves que SAE tiene por empresa y
-aquí nadie las inventa. Sirve para UNA cosa — que el masivo avise ANTES de
-generarse cuando una partida lleva una clave que SAE no conoce, en vez de que
-el operador lo descubra tras importar, con la factura ya emitida a medias
-(caso FRESADOMOPZ, 14-sep-2026).
+Solo entra lo que SAE dice; aquí nadie inventa claves. Desde el 26-sep-2026 el
+Facturador lee INVE él mismo (el reloj del espejo, `claves_sae.
+sincronizar_catalogo`) y, cuando ACABA de escribir un alta o un cambio en SAE,
+refleja aquí lo que SAE confirmó (`reflejar_escritura`). Antes lo depositaba el
+bot por HTTP; esa ruta sigue abierta y pasa por el mismo depósito.
+
+Nació para una cosa — que el masivo avise ANTES de generarse cuando una partida
+lleva una clave que SAE no conoce, en vez de que el operador lo descubra tras
+importar, con la factura ya emitida a medias (caso FRESADOMOPZ, 14-sep-2026) —
+y hoy también es el candado «esa clave ya existe en SAE» de las altas y la
+búsqueda de claves del bot (`GET /productos/claves-sae`).
 
 `activa` refleja el STATUS de SAE: una clave dada de baja EXISTE pero no
 factura, así que se reporta distinto — el operador necesita saber cuál de los

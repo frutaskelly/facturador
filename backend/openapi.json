@@ -1883,6 +1883,86 @@
     "title": "ClaveNuevaOut",
     "type": "object"
    },
+   "ClaveSaeBuscadaOut": {
+    "description": "Una clave de SAE con todas las empresas donde existe y el producto del\nFacturador que la lleva (si alguno).\n\nEs la respuesta de `GET /productos/claves-sae`, la búsqueda con la que el\nbot decide si algo se da de ALTA (no existe en ninguna) o se CAMBIA (existe,\ny entonces `empresas` son justo las que hay que mandar en el cambio).",
+    "properties": {
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "descripcion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Descripcion"
+     },
+     "empresas": {
+      "additionalProperties": {
+       "$ref": "#/components/schemas/ClaveSaeEnEmpresa"
+      },
+      "title": "Empresas",
+      "type": "object"
+     },
+     "producto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
+     },
+     "producto_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Nombre"
+     }
+    },
+    "required": [
+     "clave"
+    ],
+    "title": "ClaveSaeBuscadaOut",
+    "type": "object"
+   },
+   "ClaveSaeEnEmpresa": {
+    "description": "Cómo está una clave en UNA empresa de SAE, según el espejo.",
+    "properties": {
+     "activa": {
+      "title": "Activa",
+      "type": "boolean"
+     },
+     "descripcion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Descripcion"
+     }
+    },
+    "required": [
+     "activa"
+    ],
+    "title": "ClaveSaeEnEmpresa",
+    "type": "object"
+   },
    "ClaveSaeEnUso": {
     "description": "Una clave que ESTE producto ya trae puesta en algún lado — el catálogo de\notro cliente, la fila de otra plaza, o su propia clave base.\n\nEs lo primero que hay que ver al resolver un «sin clave»: casi nunca falta\nla clave, está guardada donde no ampara (el CILANTRO de EHMO tenía\nCILANTROKG amarrado a Tabasco y la remisión era de Pachuca).",
     "properties": {
@@ -6240,6 +6320,35 @@
     "title": "EsquemaImpuestoUpdate",
     "type": "object"
    },
+   "EsquemaSaeOut": {
+    "description": "Un esquema de impuestos de SAE (IMPU). IVA e IEPS en PORCENTAJE:\n16.0 es 16 %, no 0.16.",
+    "properties": {
+     "codigo": {
+      "title": "Codigo",
+      "type": "integer"
+     },
+     "descripcion": {
+      "title": "Descripcion",
+      "type": "string"
+     },
+     "ieps": {
+      "title": "Ieps",
+      "type": "number"
+     },
+     "iva": {
+      "title": "Iva",
+      "type": "number"
+     }
+    },
+    "required": [
+     "codigo",
+     "descripcion",
+     "iva",
+     "ieps"
+    ],
+    "title": "EsquemaSaeOut",
+    "type": "object"
+   },
    "EstadoCuentaFiltradoIn": {
     "properties": {
      "facturas": {
@@ -9551,6 +9660,25 @@
      "importe"
     ],
     "title": "LineaRemisionOut",
+    "type": "object"
+   },
+   "LineaSaeOut": {
+    "description": "Una línea de producto de SAE (CLIN): su clave y su nombre.",
+    "properties": {
+     "codigo": {
+      "title": "Codigo",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     }
+    },
+    "required": [
+     "codigo",
+     "nombre"
+    ],
+    "title": "LineaSaeOut",
     "type": "object"
    },
    "ListaAsignacionCreate": {
@@ -17786,6 +17914,44 @@
      }
     },
     "title": "RoleUpdate",
+    "type": "object"
+   },
+   "SaeCatalogosOut": {
+    "description": "Con qué se puede dar de alta o cambiar un artículo en esa empresa.",
+    "properties": {
+     "empresa": {
+      "title": "Empresa",
+      "type": "string"
+     },
+     "esquemas": {
+      "items": {
+       "$ref": "#/components/schemas/EsquemaSaeOut"
+      },
+      "title": "Esquemas",
+      "type": "array"
+     },
+     "lineas": {
+      "items": {
+       "$ref": "#/components/schemas/LineaSaeOut"
+      },
+      "title": "Lineas",
+      "type": "array"
+     },
+     "unidades": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Unidades",
+      "type": "array"
+     }
+    },
+    "required": [
+     "empresa",
+     "lineas",
+     "esquemas",
+     "unidades"
+    ],
+    "title": "SaeCatalogosOut",
     "type": "object"
    },
    "SatClaveOpcion": {
@@ -27599,7 +27765,7 @@
   },
   "/api/v1/facturas/espejo/claves": {
    "post": {
-    "description": "El conector deposita el catálogo de artículos que SAE tiene HOY.\n\nCon esto el preview del masivo puede decir «esa clave SAE no la conoce»\nANTES de generar el archivo. Hasta el 14-sep-2026 solo se comprobaba que el\nproducto tuviera código de cliente: FRESADOMOPZ pasó el preview y SAE no\ncreó la factura.\n\nREEMPLAZA el catálogo de esa empresa (es un espejo, no un acumulado): lo que\nya no está en SAE deja de estar aquí. La única salvaguarda es contra una\nlectura incompleta — ver `forzar` en el schema.",
+    "description": "Deposita el catálogo de artículos que SAE tiene HOY (INVE de una empresa).\n\nCon esto el preview del masivo puede decir «esa clave SAE no la conoce»\nANTES de generar el archivo. Hasta el 14-sep-2026 solo se comprobaba que el\nproducto tuviera código de cliente: FRESADOMOPZ pasó el preview y SAE no\ncreó la factura.\n\nDesde el 26-sep-2026 el Facturador lee INVE él mismo, desde el reloj del\nespejo (`claves_sae.sincronizar_catalogo`), y esta ruta queda para quien\ntodavía lo mande por HTTP (el `sync_claves_sae.py` del bot mientras se\napaga, o una carga a mano con `forzar`). Las dos entradas pasan por el\nMISMO depósito (`claves_sae.reemplazar_catalogo`): una sola lógica, con sus\ncandados.\n\nREEMPLAZA el catálogo de esa empresa (es un espejo, no un acumulado): lo que\nya no está en SAE deja de estar aquí. La única salvaguarda es contra una\nlectura incompleta — ver `forzar` en el schema.",
     "operationId": "depositar_claves_sae_api_v1_facturas_espejo_claves_post",
     "parameters": [
      {
@@ -27962,7 +28128,7 @@
     ]
    },
    "post": {
-    "description": "El botón «Sincronizar SAE». El backend no ve SAE: aquí solo queda la\nsolicitud; el conector (que sí consulta SAE por sqlcmd) la reclama en su\nsiguiente vuelta, corre el espejo y reporta. Idempotente: si ya hay una\nviva, se devuelve esa en vez de encolar otra.",
+    "description": "El botón «Sincronizar SAE». Aquí solo queda la solicitud; quien lee SAE\nla reclama en su siguiente vuelta, corre el espejo y reporta. Desde el\n24-sep-2026 ése es el reloj del propio Facturador (`espejo_sae.\npasada_programada`, que además fuerza cuadre, cobranza y —desde el\n26-sep— el catálogo de artículos); antes era el conector del bot por\nsqlcmd. Idempotente: si ya hay una viva, se devuelve esa en vez de encolar\notra.",
     "operationId": "solicitar_espejo_sync_api_v1_facturas_espejo_sync_post",
     "parameters": [
      {
@@ -35454,6 +35620,144 @@
     ]
    }
   },
+  "/api/v1/productos/claves-sae": {
+   "get": {
+    "description": "¿Existe esta clave en SAE, en qué empresas, y qué producto la lleva?\n\nEs la pregunta que el bot hace ANTES de pedir un alta o un cambio\n(26-sep-2026): si la clave no existe en ninguna empresa, es un alta; si\nexiste, es un cambio, y `empresas` son justo las que hay que mandarle a\n`POST /productos/cambio-sae` — mandarlo a las cuatro sale PARCIAL donde no\nexiste.\n\nSale del espejo `claves_sae`, no de SAE en vivo: es instantáneo y lo que el\nFacturador acaba de escribir allá ya está reflejado. Agrupa por clave y va\nprimero la coincidencia exacta.",
+    "operationId": "buscar_claves_sae_api_v1_productos_claves_sae_get",
+    "parameters": [
+     {
+      "description": "Clave exacta; se compara en MAYÚSCULAS y sin espacios",
+      "in": "query",
+      "name": "clave",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 50,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Clave exacta; se compara en MAYÚSCULAS y sin espacios",
+       "title": "Clave"
+      }
+     },
+     {
+      "description": "Texto que se busca en la clave y en la descripción",
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 80,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Texto que se busca en la clave y en la descripción",
+       "title": "Q"
+      }
+     },
+     {
+      "description": "Sólo esa empresa de SAE (02, 03, 04, 05)",
+      "in": "query",
+      "name": "empresa",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "pattern": "^\\d{2}$",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Sólo esa empresa de SAE (02, 03, 04, 05)",
+       "title": "Empresa"
+      }
+     },
+     {
+      "in": "query",
+      "name": "solo_activas",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Solo Activas",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 20,
+       "maximum": 100,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ClaveSaeBuscadaOut"
+         },
+         "title": "Response Buscar Claves Sae Api V1 Productos Claves Sae Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Buscar Claves Sae",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
   "/api/v1/productos/importar": {
    "post": {
     "description": "Aplica el preview confirmado. Ver `_ejecutar_import`.\n\nSe intenta en modo LOTE (un flush para todo: con 500 productos es la\ndiferencia entre 2 segundos y varios minutos contra una base en la nube).\nSi el lote choca contra una restricción, se rehace fila por fila —dentro de\nun savepoint, para no perder el scope de RLS de la transacción— y así se\npuede señalar CUÁL fila falló conservando las demás.",
@@ -40485,6 +40789,74 @@
     "summary": "Set Role Permissions",
     "tags": [
      "roles"
+    ]
+   }
+  },
+  "/api/v1/sae/catalogos": {
+   "get": {
+    "description": "Las líneas, los esquemas de impuestos y las unidades de SAE para esa\nempresa: con qué se puede dar de alta o cambiar un artículo (26-sep-2026).\n\nLíneas y esquemas salen EN VIVO de SAE (CLIN e IMPU), porque ahí se crean y\nel espejo no los trae; con quince minutos de caché. Las unidades no son de\nSAE sino del escritor: las que `sae_escritura` sabe traducir a UNI_MED y a\nla clave de unidad del SAT, una por unidad.\n\nSin SAE contesta 503 con el motivo: el bot le dice al usuario que SAE no\nestá, en vez de ofrecerle una lista vieja o vacía como si fuera la buena.",
+    "operationId": "catalogos_api_v1_sae_catalogos_get",
+    "parameters": [
+     {
+      "description": "Empresa de SAE: 02, 03, 04, 05",
+      "in": "query",
+      "name": "empresa",
+      "required": false,
+      "schema": {
+       "default": "02",
+       "description": "Empresa de SAE: 02, 03, 04, 05",
+       "pattern": "^\\d{2}$",
+       "title": "Empresa",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SaeCatalogosOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Catalogos",
+    "tags": [
+     "sae"
     ]
    }
   },

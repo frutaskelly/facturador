@@ -20,12 +20,19 @@ class _SAEFalso:
     """INVE por empresa como conjuntos de claves, con transacción de a de veras:
     lo que no se confirma no queda."""
 
-    def __init__(self, claves=None, fallan=(), contesta=True):
+    def __init__(self, claves=None, fallan=(), contesta=True, estado=None, lectura_aborta=False):
         self.inve = {e: set(v) for e, v in (claves or {}).items()}
         self.fallan = set(fallan)
         self.contesta = contesta
-        self.sql = []          # (sql, params) de todo lo que se mandó
+        self.sql = []          # (sql, params) de todo lo que se mandó, y COMMIT
         self.lineas = {"FRUVE", "ABARR"}
+        # {(empresa, clave): [STATUS, DESCR]}. En None, la lectura de vuelta
+        # del escritor no encuentra nada — como un SAE que no la contesta —, y
+        # el reporte sale sin `activa`/`descripcion`.
+        self.estado = estado
+        # La lectura de vuelta sale víctima de un deadlock (Msg 1205): SQL
+        # Server deshace TODA la transacción abierta, no sólo esa sentencia.
+        self.lectura_aborta = lectura_aborta
 
     def conectar(self):
         if not self.contesta:
@@ -38,18 +45,25 @@ class _SAEFalso:
 
 class _Con:
     def __init__(self, sae):
-        self.sae, self.pend = sae, []
+        # pend: claves insertadas; pend_estado: filas de `estado` tocadas por
+        # INSERT/UPDATE. Nada de eso existe para los demás hasta el commit.
+        self.sae, self.pend, self.pend_estado = sae, [], {}
 
     def cursor(self):
         return _Cur(self)
 
     def commit(self):
+        # Como el «IF @@TRANCOUNT > 0 COMMIT TRAN» de pymssql: sin nada
+        # pendiente no se queja, simplemente no confirma nada.
+        self.sae.sql.append(("COMMIT", ()))
         for emp, clave in self.pend:
             self.sae.inve.setdefault(emp, set()).add(clave)
-        self.pend = []
+        if self.sae.estado is not None:
+            self.sae.estado.update(self.pend_estado)
+        self.pend, self.pend_estado = [], {}
 
     def rollback(self):
-        self.pend = []
+        self.pend, self.pend_estado = [], {}
 
     def close(self):
         pass
@@ -78,12 +92,32 @@ class _Cur:
             self.rows = [(1,)] if params[0] in self.sae.lineas else []
         elif up.startswith("SELECT 1 FROM IMPU"):
             self.rows = [(1,)]
+        elif up.startswith("SELECT STATUS, DESCR FROM INVE"):
+            if self.sae.lectura_aborta:
+                self.con.rollback()
+                raise RuntimeError("Msg 1205: Transaction was deadlocked ... chosen as the deadlock victim")
+            llave = (emp, params[0])
+            est = self.con.pend_estado.get(llave) or (self.sae.estado or {}).get(llave)
+            if self.sae.estado is not None and (params[0] in self.sae.inve.get(emp, set())
+                                                or llave in self.con.pend):
+                self.rows = [tuple(est or ("A", params[0]))]
         elif up.startswith("INSERT INTO INVE"):
             if emp in self.sae.fallan:
                 raise RuntimeError("Msg 2627 violation")
             self.con.pend.append((emp, params[0]))
+            if self.sae.estado is not None:
+                self.con.pend_estado[(emp, params[0])] = ["A", params[1]]
         elif up.startswith("UPDATE INVE"):
             self.rowcount = 1 if params[-1] in self.sae.inve.get(emp, set()) else 0
+            if self.rowcount == 1 and self.sae.estado is not None:
+                llave = (emp, params[-1])
+                fila = list(self.con.pend_estado.get(llave) or self.sae.estado.get(llave)
+                            or ["A", params[-1]])
+                if "DESCR = %s" in sql:
+                    fila[1] = params[0]
+                if "STATUS = 'A'" in sql:
+                    fila[0] = "A"
+                self.con.pend_estado[llave] = fila
 
     def fetchall(self):
         return self.rows
@@ -243,3 +277,129 @@ def test_linea_que_no_existe_en_sae_no_se_escribe(client, env, auth_as, escritor
     out = _get(client, h, sol["id"])
     assert out["estado"] == "ERROR" and "NUEVA no existe" in out["resultado"]["02"]["error"]
     assert sae.escrituras("UPDATE") == []
+
+
+# ── El espejo de claves se entera de lo que el Facturador escribió ───────────
+
+def _espejo(env, clave="AJOKG"):
+    from app.core.db import SessionLocal
+    from app.models import ClaveSae
+    with SessionLocal() as s:
+        return {c.empresa: (c.descripcion, c.activa) for c in s.query(ClaveSae).filter(
+            ClaveSae.tenant_id == env["tenant_id"], ClaveSae.clave == clave).all()}
+
+
+def test_el_alta_escrita_entra_al_espejo_y_cierra_el_candado(client, env, auth_as, escritor):
+    """Lo que SAE confirmó entra YA a `claves_sae`: sin esperar la lectura de
+    INVE (horas), otra alta de la misma clave pasaba el candado 409."""
+    escritor(_SAEFalso(estado={}))
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    _pedir(client, h, empresas=["02", "03"])
+    sae_escritura.pasada()
+    assert _espejo(env) == {"02": ("AJO KILO", True), "03": ("AJO KILO", True)}
+    r = _pedir(client, h, clave="AJOKG")
+    assert r.status_code == 409 and "ya existe en SAE" in r.json()["detail"]
+
+
+def test_una_clave_que_ya_existia_de_baja_no_se_vuelve_activa_en_el_espejo(
+        client, env, auth_as, escritor):
+    """`ya_existia` dice que la clave está en SAE, no que esté viva. El escritor
+    la lee de vuelta: una de baja entra al espejo DE BAJA, que es lo que le
+    dice al bot que hay que reactivarla y no darla de alta."""
+    escritor(_SAEFalso(claves={"02": {"AJOKG"}}, estado={("02", "AJOKG"): ["B", "AJO VIEJO"]}))
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    sol = _pedir(client, h, empresas=["02", "03"]).json()
+    sae_escritura.pasada()
+    out = _get(client, h, sol["id"])
+    assert out["estado"] == "OK"
+    assert out["resultado"]["02"]["ya_existia"] is True and out["resultado"]["02"]["activa"] is False
+    assert _espejo(env) == {"02": ("AJO VIEJO", False), "03": ("AJO KILO", True)}
+
+
+def test_sin_lectura_de_vuelta_ya_existia_no_pisa_el_espejo(client, env, auth_as, conector):
+    """El reporte del conector del bot no trae cómo quedó la clave. En un
+    `ya_existia` no se afirma nada: la fila de baja se queda de baja."""
+    from app.core.db import SessionLocal
+    from app.models import ClaveSae
+    with SessionLocal() as s:
+        s.add(ClaveSae(tenant_id=env["tenant_id"], empresa="02", clave="AJOKG",
+                       descripcion="AJO VIEJO", activa=False))
+        s.commit()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    sol = _pedir(client, h, empresas=["02", "03", "04"]).json()   # de baja: sí se puede pedir
+    auth_as(conector)
+    assert client.get("/api/v1/productos/alta-sae/pendiente", headers=h).json()["id"] == sol["id"]
+    rep = client.post(f"/api/v1/productos/alta-sae/{sol['id']}/reporte", headers=h,
+                      json={"por_empresa": {"02": {"ok": True, "clave": "AJOKG", "ya_existia": True},
+                                            "03": {"ok": True, "clave": "AJOKG"},
+                                            "04": {"ok": False, "error": "timeout"}}})
+    assert rep.status_code == 200 and rep.json()["estado"] == "PARCIAL"
+    # la 02 no cambia, la 03 nace con lo pedido, la 04 (falló) no entra
+    assert _espejo(env) == {"02": ("AJO VIEJO", False), "03": ("AJO KILO", True)}
+
+
+def test_el_cambio_que_reactiva_o_renombra_se_refleja(client, env, auth_as, escritor):
+    escritor(_SAEFalso(claves={"02": {"AJOKG"}, "03": {"AJOKG"}},
+                       estado={("02", "AJOKG"): ["B", "AJO"], ("03", "AJOKG"): ["B", "AJO"]}))
+    from app.core.db import SessionLocal
+    from app.models import ClaveSae
+    with SessionLocal() as s:
+        for emp in ("02", "03"):
+            s.add(ClaveSae(tenant_id=env["tenant_id"], empresa=emp, clave="AJOKG",
+                           descripcion="AJO", activa=False))
+        s.commit()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    # la 02 se reactiva y se renombra; la 03 sólo se renombra: sigue de baja
+    _cambio(client, h, descripcion="Ajo morado", reactivar=True, empresas=["02"])
+    sae_escritura.pasada()
+    _cambio(client, h, descripcion="Ajo morado", empresas=["03"])
+    sae_escritura.pasada()
+    assert _espejo(env) == {"02": ("AJO MORADO", True), "03": ("AJO MORADO", False)}
+
+
+def test_un_cambio_de_linea_no_toca_el_espejo(client, env, auth_as, escritor):
+    """Línea, unidad, esquema y SAT no viven en `claves_sae`: no hay nada que
+    reflejar, y una fila inventada ahí sería una clave que el espejo no vio."""
+    escritor(_SAEFalso(claves={"02": {"AJOKG"}}, estado={}))
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    sol = _cambio(client, h, linea="FRUVE", empresas=["02"]).json()
+    sae_escritura.pasada()
+    assert _get(client, h, sol["id"])["estado"] == "OK"
+    assert _espejo(env) == {}
+
+
+def test_la_lectura_de_vuelta_va_despues_del_commit(client, env, auth_as, escritor):
+    """26-sep-2026: leer cómo quedó la clave entre el UPDATE y el commit, y
+    tragarse el error, perdía cambios en silencio. Si SQL Server elegía esa
+    lectura víctima de un deadlock (1205) deshacía el UPDATE, el commit() no se
+    quejaba y el cambio cerraba OK sin estar en SAE — y nadie lo reintenta.
+    Ahora se lee con la escritura ya confirmada: si la lectura falla, lo escrito
+    sigue escrito y el espejo toma lo pedido, que es lo que SAE tiene."""
+    sae = escritor(_SAEFalso(claves={"02": {"AJOKG"}}, estado={("02", "AJOKG"): ["B", "AJO"]},
+                             lectura_aborta=True))
+    from app.core.db import SessionLocal
+    from app.models import ClaveSae
+    with SessionLocal() as s:
+        s.add(ClaveSae(tenant_id=env["tenant_id"], empresa="02", clave="AJOKG",
+                       descripcion="AJO", activa=False))
+        s.commit()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    sol = _cambio(client, h, descripcion="Ajo morado", reactivar=True, empresas=["02"]).json()
+    sae_escritura.pasada()
+
+    assert sae.estado[("02", "AJOKG")] == ["A", "AJO MORADO"]   # el UPDATE quedó en SAE
+    orden = [q.lstrip().split()[0] for q, _ in sae.sql if not q.lstrip().upper().startswith("SELECT 1")]
+    assert orden == ["UPDATE", "COMMIT", "SELECT"]          # lectura DESPUÉS del commit
+    out = _get(client, h, sol["id"])
+    assert out["estado"] == "OK"
+    assert "activa" not in out["resultado"]["02"]           # sin lectura, no se inventa
+    assert _espejo(env) == {"02": ("AJO MORADO", True)}
+
+
+def test_cambio_lee_de_vuelta_lo_confirmado(escritor):
+    """Sin fallas, el reporte trae cómo quedó en SAE ya confirmado."""
+    sae = escritor(_SAEFalso(claves={"02": {"AJOKG"}}, estado={("02", "AJOKG"): ["B", "AJO"]}))
+    r = sae_escritura.cambio("02", "AJOKG", {"descripcion": "Ajo morado"})
+    assert r == {"ok": True, "clave": "AJOKG", "campos": ["descripcion"],
+                 "descripcion": "AJO MORADO", "activa": False}
+    assert sae.estado[("02", "AJOKG")] == ["B", "AJO MORADO"]

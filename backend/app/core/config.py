@@ -42,11 +42,13 @@ class Settings(BaseSettings):
     SUPABASE_SECRET_KEY: str = ""  # service-role; backend only
     SUPABASE_JWKS_URL: str = ""
 
-    # ─── Aspel SAE (solo lectura) ───────────────────────────────────────────────
-    # El acceso propio del Facturador a SAE (24-sep-2026). Sin estas variables
-    # la puerta no existe y el backend se comporta igual que ayer: quien
-    # pregunta recibe «no tengo acceso a SAE», no un error. Las escrituras
-    # tienen su propia puerta, con otro usuario: ver SAE_ESCRITURA_* abajo.
+    # ─── Aspel SAE (lectura) ────────────────────────────────────────────────────
+    # El acceso propio del Facturador a SAE (24-sep-2026): el Facturador LEE
+    # SAE él mismo —facturas, cobranza, catálogo de artículos— y ya no depende
+    # de que el bot se lo traiga. Sin estas variables la puerta no existe y el
+    # backend se comporta igual que antes: quien pregunta recibe «no tengo
+    # acceso a SAE», no un error. El Facturador también ESCRIBE en SAE, pero
+    # por su propia puerta y con otro usuario: ver SAE_ESCRITURA_* abajo.
     SAE_SERVER: str = ""        # host,puerto
     SAE_USER: str = ""
     SAE_PASSWORD: str = ""
@@ -66,6 +68,18 @@ class Settings(BaseSettings):
     # cada medio minuto: correrlos en cada vuelta sería pedirle a SAE cuatro
     # consultas para nada.
     ESPEJO_SAE_COBRANZA_CADA_SEG: int = 300
+    # El catálogo de artículos (INVE → claves_sae), leído por el Facturador
+    # desde el 26-sep-2026; antes lo depositaba el bot con launchd dos veces al
+    # día. Cambia poco y leerlo entero cuesta, así que va con su propio paso:
+    # cada 4 horas, y también cuando alguien presiona «Sincronizar SAE». Cuelga
+    # del reloj del espejo, así que con ESPEJO_SAE_INTERVALO_SEG en 0 tampoco
+    # corre. En 0 no se lee desde aquí (ni con el botón): es la palanca si el
+    # bot tuviera que volver a hacerlo.
+    ESPEJO_SAE_CLAVES_CADA_SEG: int = 14400
+    # Empresas APARTE de ESPEJO_SAE_EMPRESAS, a propósito: la 05 no tiene
+    # facturas que espejar, pero el alta de productos escribe en ella y el
+    # candado «esa clave ya existe en SAE» pregunta contra su catálogo.
+    ESPEJO_SAE_CLAVES_EMPRESAS: str = "02,03,04,05"
     # ─── Aspel SAE (escritura) ──────────────────────────────────────────────────
     # El Facturador como ÚNICO escritor de SAE (26-sep-2026): altas y cambios de
     # producto que antes aplicaba el bot. Usuario APARTE del de lectura, con
