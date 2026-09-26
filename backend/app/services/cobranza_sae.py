@@ -47,7 +47,7 @@ def _dinero(v: float) -> str:
 
 
 def _partir(ref: str) -> Optional[tuple[str, int]]:
-    """'ZHGO 370' -> ('ZHGO', 370) · 'ZCH5C 12' -> ('ZCH5C', 12). None si no
+    r"""'ZHGO 370' -> ('ZHGO', 370) · 'ZCH5C 12' -> ('ZCH5C', 12). None si no
     tiene forma de documento.
 
     BUG DEL 24 AL 26-SEP-2026: aquí se partía con «letras y luego dígitos»
