@@ -1,0 +1,182 @@
+"""/sae/* lee EL SAE del despliegue, y ese SAE es de un solo tenant.
+
+La conexión a SAE (`SAE_SERVER`…) es global, no del tenant. Hasta el
+26-sep-2026 lo único que cuidaba estas rutas era el permiso `factura:espejo`,
+y `require_permission` le deja pasar todo al OWNER: el OWNER de cualquier otro
+tenant —o quien se registrara por el signup público, que nace OWNER— leía en
+vivo las facturas y pedidos del SAE ajeno. Lo que se prueba aquí es que sólo el
+tenant de `ESPEJO_SAE_TENANT_ID` pasa, por cualquier puerta (sesión o clave de
+conexión) y en TODAS las rutas del router, incluidas las que se agreguen.
+"""
+import uuid
+
+import pytest
+from sqlalchemy import text
+
+from app.api.v1 import sae as sae_api
+from app.core.auth import Principal, get_principal
+from app.core.db import SessionLocal
+from app.main import app
+from app.models import Membership, Role, Tenant, User
+from app.services import espejo_sae, sae_lectura
+
+# Las que existían cuando se puso el candado; si alguna cambia de nombre, que
+# la prueba lo diga en vez de quedarse revisando una lista vacía.
+_CONOCIDAS = {
+    ("GET", "/api/v1/sae/salud"), ("GET", "/api/v1/sae/facturas"),
+    ("GET", "/api/v1/sae/partidas"), ("GET", "/api/v1/sae/catalogos"),
+    ("POST", "/api/v1/sae/espejo/jalar"), ("POST", "/api/v1/sae/espejo/cuadre"),
+}
+# Parámetros válidos para todas: una fuga no debe poder esconderse detrás de un 422.
+_PARAMS = {"empresa": "02", "q": "OC-123", "docs": "ZEHMOVH 1442"}
+
+
+def _rutas_sae():
+    for r in app.routes:
+        if getattr(r, "path", "").startswith("/api/v1/sae/"):
+            for m in sorted(r.methods - {"HEAD", "OPTIONS"}):
+                yield m, r.path
+
+
+def _pedir(client, metodo, ruta, headers):
+    return client.request(metodo, ruta, headers=headers, params=_PARAMS)
+
+
+@pytest.fixture
+def dos(db_engine):
+    """Dos tenants con su OWNER: el dueño de SAE y uno cualquiera."""
+    suffix = uuid.uuid4().hex[:8]
+    db = SessionLocal()
+    created = {"memberships": [], "users": [], "tenants": []}
+    try:
+        owner_role = db.query(Role).filter(Role.nombre == "OWNER", Role.es_preset.is_(True)).one()
+
+        def _tenant_con_owner(s):
+            t = Tenant(slug=f"sae-{s}-{suffix}", legal_name=f"SAE {s} SA",
+                       rfc=f"S{s[:2].upper()}{suffix.upper()}"[:13], regimen_fiscal_sat="601",
+                       domicilio_fiscal_cp="44100", tier="PRINCIPAL", status="ACTIVE")
+            db.add(t); db.flush(); created["tenants"].append(t.id)
+            sub = f"sub-sae-{s}-{suffix}"
+            u = User(email=f"sae-{s}-{suffix}@t.test", auth_user_id=sub, full_name=s)
+            db.add(u); db.flush(); created["users"].append(u.id)
+            m = Membership(tenant_id=t.id, user_id=u.id, role_id=owner_role.id)
+            db.add(m); db.flush(); created["memberships"].append(m.id)
+            return {"sub": sub, "email": u.email, "tenant_id": t.id}
+
+        suyo, ajeno = _tenant_con_owner("suyo"), _tenant_con_owner("ajeno")
+        db.commit()
+        yield {"suyo": suyo, "ajeno": ajeno}
+    finally:
+        for tid in created["tenants"]:
+            db.execute(text("DELETE FROM conexiones WHERE tenant_id = :tid"), {"tid": tid})
+        for mid in created["memberships"]:
+            db.query(Membership).filter(Membership.id == mid).delete()
+        for uid in created["users"]:
+            db.query(User).filter(User.id == uid).delete()
+        for tid in created["tenants"]:
+            db.query(Tenant).filter(Tenant.id == tid).delete()
+        db.commit(); db.close()
+
+
+@pytest.fixture
+def auth_as():
+    def _set(user):
+        app.dependency_overrides[get_principal] = lambda: Principal(
+            auth_user_id=user["sub"], email=user["email"], role="authenticated",
+            claims={"sub": user["sub"]})
+    yield _set
+    app.dependency_overrides.pop(get_principal, None)
+
+
+@pytest.fixture
+def sae(monkeypatch, dos):
+    """SAE falso que anota cada pregunta; el dueño es el tenant «suyo»."""
+    llamadas = []
+
+    def _consultar(sql, params=(), timeout=None):
+        llamadas.append(sql)
+        return []
+
+    def _espejo(nombre):
+        return lambda *a, **k: llamadas.append(nombre) or {}
+
+    sae_api._catalogos_cache.clear()
+    monkeypatch.setattr(sae_api.settings, "ESPEJO_SAE_TENANT_ID", str(dos["suyo"]["tenant_id"]))
+    monkeypatch.setattr(sae_lectura, "disponible", lambda: True)
+    monkeypatch.setattr(sae_lectura, "consultar", _consultar)
+    monkeypatch.setattr(espejo_sae, "sincronizar", _espejo("sincronizar"))
+    monkeypatch.setattr(espejo_sae, "cuadre", _espejo("cuadre"))
+    yield llamadas
+    sae_api._catalogos_cache.clear()
+
+
+def _hdr(u, tenant_id=None):
+    return {"X-Tenant-Id": str(tenant_id or u["tenant_id"])}
+
+
+def test_el_router_entero_esta_cubierto():
+    rutas = set(_rutas_sae())
+    assert _CONOCIDAS <= rutas, _CONOCIDAS - rutas
+
+
+def test_el_owner_de_otro_tenant_no_lee_nada(client, dos, auth_as, sae):
+    """El caso del hallazgo: OWNER (pasa cualquier permiso) de otro tenant."""
+    auth_as(dos["ajeno"])
+    for metodo, ruta in _rutas_sae():
+        r = _pedir(client, metodo, ruta, _hdr(dos["ajeno"]))
+        assert r.status_code == 403, (metodo, ruta, r.status_code, r.text)
+    assert sae == []                      # ni una pregunta llegó a SAE
+
+
+def test_tampoco_pidiendo_el_tenant_ajeno_por_encabezado(client, dos, auth_as, sae):
+    """El X-Tenant-Id no abre la puerta: sin membresía allá no hay contexto."""
+    auth_as(dos["ajeno"])
+    r = client.get("/api/v1/sae/facturas", params=_PARAMS,
+                   headers=_hdr(dos["ajeno"], dos["suyo"]["tenant_id"]))
+    assert r.status_code in (401, 403), r.text
+    assert sae == []
+
+
+def test_el_dueno_de_sae_si_lee(client, dos, auth_as, sae):
+    auth_as(dos["suyo"])
+    for metodo, ruta in _rutas_sae():
+        r = _pedir(client, metodo, ruta, _hdr(dos["suyo"]))
+        assert r.status_code == 200, (metodo, ruta, r.status_code, r.text)
+    assert any("OC-123" in str(q) or "FACTF" in str(q) for q in sae)
+    assert {"sincronizar", "cuadre"} <= set(sae)
+
+
+@pytest.mark.parametrize("configurado", ["", "   ", "no-es-un-uuid"])
+def test_sin_dueno_configurado_nadie_pasa(client, dos, auth_as, sae, monkeypatch, configurado):
+    """Falla cerrado: sin saber de quién es SAE, no se le enseña a nadie."""
+    monkeypatch.setattr(sae_api.settings, "ESPEJO_SAE_TENANT_ID", configurado)
+    auth_as(dos["suyo"])
+    for metodo, ruta in _rutas_sae():
+        assert _pedir(client, metodo, ruta, _hdr(dos["suyo"])).status_code == 403, ruta
+    assert sae == []
+
+
+def test_la_clave_de_conexion_sigue_al_tenant(client, dos, auth_as, sae):
+    """Cualquier OWNER puede generarse una clave SMART_SUPPLY, que trae
+    `factura:espejo`. La del tenant ajeno no lee SAE; la del dueño —la del bot
+    en producción— sí."""
+    claves = {}
+    for quien in ("ajeno", "suyo"):
+        auth_as(dos[quien])
+        r = client.post("/api/v1/conexiones/SMART_SUPPLY/clave", headers=_hdr(dos[quien]))
+        assert r.status_code == 201, r.text
+        claves[quien] = r.json()["clave"]
+    app.dependency_overrides.pop(get_principal, None)   # la clave viaja por el auth real
+
+    bearer = lambda c: {"Authorization": f"Bearer {c}"}    # noqa: E731
+    r = client.get("/api/v1/sae/facturas", params=_PARAMS, headers=bearer(claves["ajeno"]))
+    assert r.status_code == 403, r.text
+    # el encabezado no mueve a la clave de tenant
+    r = client.get("/api/v1/sae/facturas", params=_PARAMS,
+                   headers={**bearer(claves["ajeno"]), **_hdr(dos["suyo"])})
+    assert r.status_code == 403, r.text
+    assert sae == []
+
+    r = client.get("/api/v1/sae/facturas", params=_PARAMS, headers=bearer(claves["suyo"]))
+    assert r.status_code == 200, r.text
+    assert sae
