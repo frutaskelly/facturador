@@ -2381,6 +2381,14 @@ export interface paths {
          *     hospital que alguien acaba de mapear a su sucursal destraba de una vez todas
          *     las órdenes acumuladas de ese hospital, sin abrirlas una por una.
          *
+         *     Eso incluye las que llegaron SIN CLIENTE (26-sep-2026). Antes el lote solo
+         *     miraba las que ya tenían uno, así que una equivalencia aprendida después —o
+         *     un arreglo del cruce, como la herencia de perfil «ehmo-pachuca» → «ehmo»—
+         *     nunca destrababa las órdenes que ya estaban esperando: 30 se quedaron
+         *     huérfanas con el botón a un lado. Solo sin alcance por cliente: quien lo
+         *     tiene no ve las órdenes sin cliente en la franja, y el lote no le asigna
+         *     ni le convierte lo que no ve.
+         *
          *     Se saltan las que un intento previo ya explicó (su motivo trae el prefijo
          *     del intento automático — se reintentan una por una desde la franja, ya con
          *     la causa corregida) y las marcadas EN DUDA por un humano: esa duda la puso
