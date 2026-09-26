@@ -44,6 +44,10 @@ RapidFuzz==3.14.5
 # Lectura directa de Aspel SAE (SQL Server). La rueda trae FreeTDS adentro:
 # no hace falta ODBC ni paquetes del sistema en la imagen.
 pymssql==2.3.2
+# Aspel SAE 9 en Firebird 2.5: driver en Python puro (sin fbclient) y passlib
+# para la autenticación vieja (Legacy_Auth) que es la única que sabe el 2.5.
+firebirdsql==1.4.6
+passlib==1.7.4
 
 # ─── Tests ────────────────────────────────────────────────────────────────────
 pytest==8.3.3

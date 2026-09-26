@@ -41268,14 +41268,14 @@
       }
      },
      {
-      "description": "Más faltantes que esto no se reparan solas",
+      "description": "Más faltantes que esto no se reparan solas (en el SAE 9 se reparan de a este tanto)",
       "in": "query",
       "name": "tope",
       "required": false,
       "schema": {
        "default": 25,
-       "description": "Más faltantes que esto no se reparan solas",
-       "maximum": 200,
+       "description": "Más faltantes que esto no se reparan solas (en el SAE 9 se reparan de a este tanto)",
+       "maximum": 5000,
        "minimum": 0,
        "title": "Tope",
        "type": "integer"
@@ -41548,6 +41548,133 @@
      }
     ],
     "summary": "Facturas",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
+  "/api/v1/sae/fuentes": {
+   "get": {
+    "description": "Qué empresas de SAE alimentan a ESTE tenant, de qué servidor y con qué\ncódigo. Sin credenciales: sólo lo que hace falta para entender de dónde sale\ncada factura del espejo.",
+    "operationId": "fuentes_api_v1_sae_fuentes_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Fuentes",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
+  "/api/v1/sae/fuentes/{codigo}/clientes": {
+   "post": {
+    "description": "Da de alta (o liga por RFC) los clientes de una empresa del SAE 9 que\ntienen facturas desde su piso, con su equivalencia '91:CLAVE' y el espejo\nencendido. Sin esto el espejo del SAE 9 sale vacío: el depósito rechaza a\npropósito las facturas de un cliente que no conoce.\n\nPor omisión corre EN SECO. Nunca escribe en SAE.",
+    "operationId": "alta_clientes_sae_api_v1_sae_fuentes__codigo__clientes_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "codigo",
+      "required": true,
+      "schema": {
+       "title": "Codigo",
+       "type": "string"
+      }
+     },
+     {
+      "description": "En falso (por omisión) sólo devuelve el plan",
+      "in": "query",
+      "name": "aplicar",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "En falso (por omisión) sólo devuelve el plan",
+       "title": "Aplicar",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Alta Clientes Sae",
     "tags": [
      "sae"
     ]

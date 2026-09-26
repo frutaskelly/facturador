@@ -4833,6 +4833,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sae/fuentes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fuentes
+         * @description Qué empresas de SAE alimentan a ESTE tenant, de qué servidor y con qué
+         *     código. Sin credenciales: sólo lo que hace falta para entender de dónde sale
+         *     cada factura del espejo.
+         */
+        get: operations["fuentes_api_v1_sae_fuentes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sae/fuentes/{codigo}/clientes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Alta Clientes Sae
+         * @description Da de alta (o liga por RFC) los clientes de una empresa del SAE 9 que
+         *     tienen facturas desde su piso, con su equivalencia '91:CLAVE' y el espejo
+         *     encendido. Sin esto el espejo del SAE 9 sale vacío: el depósito rechaza a
+         *     propósito las facturas de un cliente que no conoce.
+         *
+         *     Por omisión corre EN SECO. Nunca escribe en SAE.
+         */
+        post: operations["alta_clientes_sae_api_v1_sae_fuentes__codigo__clientes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sae/partidas": {
         parameters: {
             query?: never;
@@ -21962,7 +22009,7 @@ export interface operations {
                 series?: string | null;
                 /** @description Trae las que falten, hasta el tope */
                 reparar?: boolean;
-                /** @description Más faltantes que esto no se reparan solas */
+                /** @description Más faltantes que esto no se reparan solas (en el SAE 9 se reparan de a este tanto) */
                 tope?: number;
             };
             header?: {
@@ -22047,6 +22094,73 @@ export interface operations {
                 "X-Tenant-Id"?: string | null;
             };
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fuentes_api_v1_sae_fuentes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    alta_clientes_sae_api_v1_sae_fuentes__codigo__clientes_post: {
+        parameters: {
+            query?: {
+                /** @description En falso (por omisión) sólo devuelve el plan */
+                aplicar?: boolean;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                codigo: string;
+            };
             cookie?: never;
         };
         requestBody?: never;

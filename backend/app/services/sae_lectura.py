@@ -29,10 +29,21 @@ TRES CANDADOS, y ninguno es decorativo:
 La empresa viaja en el nombre de la tabla (FACTF02, FACTF03…), que es como
 Aspel separa las empresas, así que se valida contra una lista blanca: son dos
 dígitos y nada más.
+
+DOS SAE (26-sep-2026). Además del SAE 10 (SQL Server) hay un SAE 9 en
+Firebird, en otro servidor. Quien quiera leer una empresa del SAE 9 abre
+`en_empresa(emp)`: dentro de ese bloque `tabla()` usa el número de Aspel de
+ESA empresa (su código en el Facturador es otro: 01 → 91), `consultar()` va a
+su archivo .FDB y `motor()` dice "firebird" para que cada lector use su SQL.
+Fuera del bloque todo es exactamente como antes: el SAE 10 no se entera.
 """
 from __future__ import annotations
 
+import contextvars
+import datetime as dt
 import re
+from contextlib import contextmanager
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Optional
 
 from app.core.config import settings
@@ -45,8 +56,62 @@ class SAENoDisponible(RuntimeError):
     """No hay acceso a SAE: sin configuración, sin driver o sin red."""
 
 
+class _EmpresaActiva:
+    """La empresa del SAE 9 que se está leyendo, con UNA conexión para todo el
+    bloque: cada conexión a Firebird por Tailscale cuesta medio segundo, y una
+    pasada hace una docena de consultas."""
+
+    def __init__(self, emp):
+        self.emp = emp
+        self.conexion = None
+        self.columnas: dict[str, set[str]] = {}
+        # Si conectar falló, el bloque ya no vuelve a intentarlo: cada intento
+        # contra un servidor caído cuesta segundos, y una pasada hace una
+        # docena de consultas — el SAE 10 esperaría detrás.
+        self.caida: Optional[SAENoDisponible] = None
+
+    def cerrar(self) -> None:
+        if self.conexion is not None:
+            try:
+                self.conexion.close()
+            except Exception:
+                pass
+            self.conexion = None
+
+
+_ACTIVA: contextvars.ContextVar[Optional[_EmpresaActiva]] = \
+    contextvars.ContextVar("sae_empresa_activa", default=None)
+
+
+@contextmanager
+def en_empresa(emp):
+    """Lo que se lea dentro de este bloque sale de la empresa `emp`.
+
+    Con una empresa del SAE 10 —o con None— no hace NADA: el SAE 10 sigue su
+    camino de siempre. Sólo el SAE 9 (Firebird) necesita el bloque.
+    """
+    if emp is None or not getattr(emp.servidor, "es_firebird", False):
+        yield
+        return
+    activa = _EmpresaActiva(emp)
+    token = _ACTIVA.set(activa)
+    try:
+        yield
+    finally:
+        activa.cerrar()
+        _ACTIVA.reset(token)
+
+
+def motor() -> str:
+    """"firebird" dentro de `en_empresa` de una empresa del SAE 9; si no, "mssql"."""
+    return "firebird" if _ACTIVA.get() is not None else "mssql"
+
+
 def disponible() -> bool:
     """¿Está configurada la puerta? No prueba la red: eso cuesta segundos."""
+    activa = _ACTIVA.get()
+    if activa is not None:
+        return activa.emp.servidor.configurado()
     return bool(settings.SAE_SERVER and settings.SAE_USER and settings.SAE_PASSWORD)
 
 
@@ -55,12 +120,25 @@ def tabla(nombre: str, empresa: str) -> str:
 
     La empresa NO puede venir cruda a una cadena de SQL: es lo único que se
     concatena, así que es lo único que hay que blindar.
+
+    Dentro de `en_empresa` la empresa que llega es el CÓDIGO del Facturador
+    (91) y la tabla lleva el NÚMERO de Aspel (FACTF01). Pedir otra empresa
+    dentro del bloque es un error, no una traducción: leería la tabla de una
+    empresa desde el archivo de otra.
     """
     emp = str(empresa or "").strip()
     if not _EMPRESAS_VALIDAS.match(emp):
         raise ValueError(f"empresa de SAE inválida: {empresa!r}")
     if not re.fullmatch(r"[A-Z_]+", nombre or ""):
         raise ValueError(f"tabla de SAE inválida: {nombre!r}")
+    activa = _ACTIVA.get()
+    if activa is not None:
+        if emp != activa.emp.codigo:
+            raise ValueError(f"la empresa {emp} no es la que se está leyendo "
+                             f"({activa.emp.etiqueta})")
+        emp = activa.emp.numero
+        if not _EMPRESAS_VALIDAS.match(emp):
+            raise ValueError(f"número de empresa de SAE inválido: {emp!r}")
     return f"{nombre}{emp}"
 
 
@@ -74,6 +152,9 @@ def consultar(sql: str, parametros: tuple = (), timeout: Optional[int] = None) -
         raise SAENoDisponible("el Facturador no tiene configurado el acceso a SAE")
     if not _SOLO_SELECT.match(sql or "") or ";" in (sql or ""):
         raise ValueError("solo se permite un SELECT, sin sentencias encadenadas")
+    activa = _ACTIVA.get()
+    if activa is not None:
+        return _consultar_firebird(activa, sql, parametros, timeout)
     try:
         import pymssql  # se importa aquí: sin acceso a SAE el backend no lo necesita
     except ImportError as e:  # pragma: no cover - depende de la imagen
@@ -96,6 +177,161 @@ def consultar(sql: str, parametros: tuple = (), timeout: Optional[int] = None) -
             return list(cur.fetchall() or [])
     finally:
         conexion.close()
+
+
+# ─── Firebird (SAE 9) ────────────────────────────────────────────────────────
+
+def _conectar_firebird(activa: _EmpresaActiva, timeout: Optional[int]):
+    try:
+        import firebirdsql  # aquí y no arriba: sin SAE 9 el backend no lo necesita
+    except ImportError as e:  # pragma: no cover - depende de la imagen
+        raise SAENoDisponible(f"falta el driver de Firebird: {e}") from e
+    srv = activa.emp.servidor
+    # Una sonda TCP corta antes del driver: con el servidor caído, o con
+    # Tailscale arriba pero el puerto bloqueado, el driver esperaría su timeout
+    # completo en cada intento. Cinco segundos dicen «no está» igual de bien.
+    import socket
+    try:
+        socket.create_connection((srv.host, int(srv.puerto or 3050)),
+                                 timeout=min(5, int(timeout or srv.timeout or 30))).close()
+    except OSError as e:
+        raise SAENoDisponible(f"{activa.emp.etiqueta}: {srv.clave} no contesta en "
+                              f"{srv.host}:{srv.puerto} ({type(e).__name__}: {e})") from e
+    try:
+        return firebirdsql.connect(
+            host=srv.host, port=int(srv.puerto or 3050),
+            database=srv.ruta_de(activa.emp.numero),
+            user=srv.usuario, password=srv.password, charset=srv.charset,
+            auth_plugin_name=srv.auth or None, wire_crypt=False,
+            timeout=int(timeout or srv.timeout or 30),
+            # READ ONLY + READ COMMITTED (+ rec_version): leer no detiene la
+            # limpieza de versiones viejas que hace Firebird, así que el SAE que
+            # la gente usa por TSplus no se alenta mientras el espejo lee. Y es
+            # el SERVIDOR el que rechaza cualquier escritura en esa transacción:
+            # un tercer candado, además del SELECT único y del usuario.
+            isolation_level=getattr(firebirdsql, "ISOLATION_LEVEL_READ_COMMITED_RO", 4),
+        )
+    except SAENoDisponible:
+        raise
+    except Exception as e:
+        # Sin red o sin permiso no es un bug de la consulta: es «no hay SAE».
+        raise SAENoDisponible(f"{activa.emp.etiqueta}: no pude conectar "
+                              f"({type(e).__name__}: {e})") from e
+
+
+def _valor_firebird(v: Any, charset: str) -> Any:
+    """Bytes (un BLOB sin subtipo de texto) se leen con el charset de la base."""
+    if isinstance(v, (bytes, bytearray)):
+        return bytes(v).decode(_CODEC.get(charset.upper(), "cp1252"), errors="replace")
+    return v
+
+
+_CODEC = {"WIN1252": "cp1252", "ISO8859_1": "latin-1", "UTF8": "utf-8", "NONE": "cp1252"}
+
+
+def _consultar_firebird(activa: _EmpresaActiva, sql: str, parametros: tuple,
+                        timeout: Optional[int]) -> list[dict[str, Any]]:
+    """El mismo contrato que la de SQL Server: filas como diccionarios.
+
+    Los marcadores se escriben `%s` en todos lados (así los tiene pymssql) y
+    aquí se cambian por `?`, que es lo que habla Firebird. Firebird devuelve
+    los alias en MAYÚSCULAS: se bajan para que los lectores no distingan.
+    Cada consulta cierra su transacción: una transacción larga en Firebird
+    detiene la recolección de basura y la base del SAE crece y se alenta.
+    """
+    if activa.caida is not None:
+        raise activa.caida
+    if activa.conexion is None:
+        try:
+            activa.conexion = _conectar_firebird(activa, timeout)
+        except SAENoDisponible as e:
+            activa.caida = e
+            raise
+    con = activa.conexion
+    cur = None
+    try:
+        cur = con.cursor()
+        cur.execute(sql.replace("%s", "?"), tuple(parametros or ()))
+        nombres = [str(d[0]).strip().lower() for d in (cur.description or ())]
+        charset = activa.emp.servidor.charset or "ISO8859_1"
+        filas = [{n: _valor_firebird(v, charset) for n, v in zip(nombres, fila)}
+                 for fila in (cur.fetchall() or [])]
+        con.commit()
+        return filas
+    except Exception:
+        # Una conexión que falló a medias no se reusa: la siguiente consulta
+        # abre otra limpia.
+        activa.cerrar()
+        raise
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+
+
+def columnas(tabla_sae: str) -> set[str]:
+    """Las columnas de esa tabla en la base de la empresa activa (SAE 9).
+
+    El esquema del SAE 9 no es idéntico al del 10: algunas columnas nuevas (las
+    del REP, la sustitución de CFDI) pueden no existir. Se pregunta al
+    catálogo de Firebird una vez por bloque y quien lee pide NULL en lugar de
+    una columna que no está, en vez de tronar la pasada entera.
+    """
+    activa = _ACTIVA.get()
+    if activa is None:
+        raise RuntimeError("columnas() sólo aplica dentro de en_empresa()")
+    if tabla_sae not in activa.columnas:
+        filas = consultar(
+            "SELECT TRIM(RDB$FIELD_NAME) AS campo FROM RDB$RELATION_FIELDS "
+            "WHERE RDB$RELATION_NAME = %s", (tabla_sae,))
+        activa.columnas[tabla_sae] = {str(f.get("campo") or "").strip().upper() for f in filas}
+    return activa.columnas[tabla_sae]
+
+
+def col_o_nulo(alias: str, tabla_sae: str, columna: str, largo: int = 60) -> str:
+    """`C.MSJ_CANC` si la columna existe; si no, un NULL tipado (Firebird 2.5
+    no acepta un NULL pelón en la lista del SELECT)."""
+    if columna.upper() in columnas(tabla_sae):
+        return f"{alias}.{columna}"
+    return f"CAST(NULL AS VARCHAR({int(largo)}))"
+
+
+def texto(v: Any) -> str:
+    """Un texto de SAE sin relleno. En SQL Server lo hacía RTRIM/LTRIM."""
+    return str(v).strip() if v is not None else ""
+
+
+def texto_der(v: Any) -> str:
+    """Sin relleno a la DERECHA nada más, como RTRIM: el CVE_DOC conserva lo
+    de la izquierda, que es como lo compara SAE."""
+    return str(v).rstrip() if v is not None else ""
+
+
+def fecha_hora(v: Any) -> str:
+    """'AAAA-MM-DD HH:MM:SS', lo que daba CONVERT(varchar(19), X, 120).
+
+    Sirve lo mismo si la columna es TIMESTAMP que si es texto: el esquema del
+    SAE 9 no siempre usa el mismo tipo que el 10 para las fechas del CFDI.
+    """
+    if v is None:
+        return ""
+    if isinstance(v, dt.datetime):
+        return v.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(v, dt.date):
+        return v.strftime("%Y-%m-%d 00:00:00")
+    return str(v).strip()[:19]
+
+
+def dinero(v: Any, decimales: int = 2) -> str:
+    """El número como lo daba CAST(CAST(ROUND(x, n) AS decimal(18, n)) AS varchar):
+    redondeado a mitades hacia arriba y con n decimales exactos."""
+    try:
+        d = Decimal(str(v if v is not None else 0))
+    except Exception:
+        d = Decimal(0)
+    return str(d.quantize(Decimal(1).scaleb(-decimales), rounding=ROUND_HALF_UP))
 
 
 _TABLA_POR_TIPO = {"factura": "FACTF", "pedido": "FACTP"}
@@ -252,6 +488,27 @@ def partir_documento(doc: Any) -> Optional[tuple[str, int]]:
     return serie.replace(" ", "").upper(), int(folio)
 
 
+def partir_con_series(doc: Any, series=None) -> Optional[tuple[str, int]]:
+    """`partir_documento`, y si no alcanza, contra las series QUE SE CONOCEN.
+
+    Hay SAE que guardan el documento con el folio pegado y relleno de ceros
+    ('KELLYSLP0000000123'). Sin espacio, `partir_documento` se niega a adivinar
+    —con razón—. Pero si se sabe qué series tiene la empresa, el corte deja de
+    ser adivinanza: se acepta sólo si UNA sola serie conocida es prefijo y lo
+    que sigue son puros dígitos. Dos cortes posibles ('ZCH512' con ZCH y ZCH5
+    dadas de alta) siguen sin decidirse.
+    """
+    partido = partir_documento(doc)
+    if partido is not None or not series:
+        return partido
+    texto = "".join(str(doc or "").split()).upper()
+    cortes = set()
+    for s in {"".join(str(x or "").split()).upper() for x in series}:
+        if s and texto.startswith(s) and texto[len(s):].isdigit():
+            cortes.add((s, int(texto[len(s):])))
+    return cortes.pop() if len(cortes) == 1 else None
+
+
 # Leer INVE entero tarda: con ~2,000 artículos por empresa y la red del Mini,
 # el timeout de una consulta normal (25 s) no alcanza. Es el mismo margen que
 # le daba el bot a `sync_claves_sae.py`.
@@ -276,12 +533,20 @@ def catalogo_inve(empresa: str) -> list[dict[str, Any]]:
     «SAE no tiene artículos».
     """
     inve = tabla("INVE", empresa)
-    filas = consultar(
-        "SELECT LTRIM(RTRIM(CVE_ART)) AS clave, ISNULL(DESCR,'') AS descripcion, "
-        "ISNULL(STATUS,'A') AS status "
-        f"FROM {inve} WHERE CVE_ART IS NOT NULL AND LTRIM(RTRIM(CVE_ART)) <> ''",
-        timeout=_TIMEOUT_CATALOGO,
-    )
+    if motor() == "firebird":
+        # El SAE 9: columnas crudas y la limpieza en Python (abajo ya se hace).
+        filas = consultar(
+            "SELECT I.CVE_ART AS clave, I.DESCR AS descripcion, I.STATUS AS status "
+            f"FROM {inve} I WHERE I.CVE_ART IS NOT NULL",
+            timeout=_TIMEOUT_CATALOGO,
+        )
+    else:
+        filas = consultar(
+            "SELECT LTRIM(RTRIM(CVE_ART)) AS clave, ISNULL(DESCR,'') AS descripcion, "
+            "ISNULL(STATUS,'A') AS status "
+            f"FROM {inve} WHERE CVE_ART IS NOT NULL AND LTRIM(RTRIM(CVE_ART)) <> ''",
+            timeout=_TIMEOUT_CATALOGO,
+        )
     salida = []
     for f in filas:
         clave = str(f.get("clave") or "").strip()
