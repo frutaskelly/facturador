@@ -35,6 +35,7 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .auth import Principal, get_principal
+from .config import settings
 from .db import SessionLocal, set_role_tenant
 from ..models import Membership, Permission, Role, RolePermission, Tenant, User
 
@@ -396,6 +397,30 @@ def require_permission(*needed: str):
         return ctx
 
     return _dep
+
+
+def require_duenio_de_sae(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    """Sólo el tenant dueño del SAE que lee y escribe el Facturador.
+
+    La conexión a SAE (`SAE_SERVER`…) es global, del despliegue, no del tenant:
+    los permisos dicen QUÉ puede hacer alguien en SU tenant, pero no de quién
+    es SAE. Eso lo dice `ESPEJO_SAE_TENANT_ID`, el mismo tenant en el que el
+    reloj del espejo escribe y cuya cola atiende el escritor. Sin este candado,
+    el OWNER de cualquier otro tenant —que pasa `require_permission` sin tener
+    el permiso— leía en vivo el SAE ajeno (hallazgo del 26-sep-2026).
+
+    Falla cerrado: sin `ESPEJO_SAE_TENANT_ID` (o con uno que no es UUID) no
+    pasa nadie.
+    """
+    duenio = (settings.ESPEJO_SAE_TENANT_ID or "").strip()
+    try:
+        es_suyo = bool(duenio) and UUID(duenio) == UUID(str(ctx.tenant_id))
+    except ValueError:
+        es_suyo = False
+    if not es_suyo:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Esta empresa no tiene SAE conectado")
+    return ctx
 
 
 # ─── Tenant-scoped DB session for business endpoints (Phase 3+) ──────────────

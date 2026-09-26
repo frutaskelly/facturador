@@ -784,8 +784,8 @@ def _gemela_remisionada(db: Session, oc: OCRecibida) -> Optional[str]:
                     "con otros productos o cantidades")
     return (f"{_GEMELA_OTRA} {remision} (llegó como {origen}) "
             f"pero con otro contenido ({cuantas}): probablemente es otro pedido con "
-            "la fecha mal puesta. No la descartes: pásala a mano y corrige la fecha "
-            "y el folio en la remisión.")
+            "la fecha mal puesta. No la descartes: corrígele la fecha y el folio "
+            "(«Corregir fecha y folio») y pásala.")
 
 
 def _intentar_remision_auto(db: Session, ctx: AuthContext, oc: OCRecibida) -> bool:

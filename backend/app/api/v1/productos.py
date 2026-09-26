@@ -23,7 +23,8 @@ from sqlalchemy.orm import Session
 from ...core.ratelimit import enforce
 from rapidfuzz import fuzz
 
-from ...core.rbac import AuthContext, get_auth_context, get_tenant_db, require_permission
+from ...core.rbac import (AuthContext, get_auth_context, get_tenant_db, require_duenio_de_sae,
+                          require_permission)
 from ...models import (
     CategoriaProducto,
     ClaveSae,
@@ -1893,6 +1894,12 @@ def impuestos_por_clave(
 # SAE. Un INSERT repetido duplica el producto. De ahí que reclamar sea un paso
 # aparte (marca EN_CURSO y nadie más la toma), que el resultado se guarde por
 # empresa, y que no exista ningún endpoint para «volver a intentar».
+#
+# Y la cola es SÓLO del tenant dueño de SAE (`require_duenio_de_sae`, 26-sep-2026).
+# Pedir, reclamar y reportar: el escritor nunca atiende a otro tenant, así que
+# su alta se quedaba 24 h esperando y caducaba como ERROR, y el reporte le
+# dejaba estampar una clave que SAE nunca confirmó. Mejor un 403 que lo diga.
+# Leer su propia lista (GET /alta-sae) sí puede.
 
 # Las cuatro empresas de SAE. Vacío en la petición = las cuatro: el estado que
 # hoy duele es justo el producto que quedó creado en una sola.
@@ -1949,7 +1956,8 @@ def _expirar_altas_muertas(db: Session, tenant_id) -> None:
         db.flush()
 
 
-@router.post("/alta-sae", response_model=AltaSaeOut, status_code=status.HTTP_201_CREATED)
+@router.post("/alta-sae", response_model=AltaSaeOut, status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_duenio_de_sae)])
 def pedir_alta_sae(
     payload: AltaSaeIn,
     db: Session = Depends(get_tenant_db),
@@ -2076,7 +2084,8 @@ def pedir_alta_sae(
     return sol
 
 
-@router.post("/cambio-sae", response_model=AltaSaeOut, status_code=status.HTTP_201_CREATED)
+@router.post("/cambio-sae", response_model=AltaSaeOut, status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_duenio_de_sae)])
 def pedir_cambio_sae(
     payload: CambioSaeIn,
     db: Session = Depends(get_tenant_db),
@@ -2235,7 +2244,8 @@ def reclamar_siguiente_sae(db: Session, tenant_id) -> Optional[SolicitudAltaSae]
     return sol
 
 
-@router.get("/alta-sae/pendiente", response_model=Optional[AltaSaeOut])
+@router.get("/alta-sae/pendiente", response_model=Optional[AltaSaeOut],
+            dependencies=[Depends(require_duenio_de_sae)])
 def reclamar_alta_sae(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission("factura:espejo")),
@@ -2270,7 +2280,8 @@ def reclamar_alta_sae(
     return sol
 
 
-@router.post("/alta-sae/{solicitud_id}/reporte", response_model=AltaSaeOut)
+@router.post("/alta-sae/{solicitud_id}/reporte", response_model=AltaSaeOut,
+             dependencies=[Depends(require_duenio_de_sae)])
 def reportar_alta_sae(
     solicitud_id: UUID,
     payload: AltaSaeReporteIn,

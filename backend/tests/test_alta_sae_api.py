@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import text
 
 from app.core.auth import Principal, get_principal
+from app.core.config import settings
 from app.core.db import SessionLocal
 from app.main import app
 from app.models import (ClaveSae, EsquemaImpuesto, Membership, Producto, Role,
@@ -25,7 +26,7 @@ _PURGE = ("solicitudes_alta_sae", "claves_sae", "producto_clientes", "productos"
 
 
 @pytest.fixture
-def env(db_engine):
+def env(db_engine, monkeypatch):
     suffix = uuid.uuid4().hex[:8]
     db = SessionLocal()
     created = {"memberships": [], "users": [], "tenants": []}
@@ -54,6 +55,9 @@ def env(db_engine):
         esq2 = EsquemaImpuesto(tenant_id=t.id, codigo="2", nombre="0% IVA")
         db.add_all([prod, esq2]); db.flush()
         db.commit()
+        # la cola de SAE es sólo del tenant dueño de SAE: el de estas pruebas lo es
+        # (los tenants ajenos se prueban en test_sae_solo_su_tenant)
+        monkeypatch.setattr(settings, "ESPEJO_SAE_TENANT_ID", str(t.id))
         yield {"admin": admin, "tomador": tomador, "tenant_id": t.id,
                "prod": str(prod.id), "esq2": esq2.id}
     finally:
