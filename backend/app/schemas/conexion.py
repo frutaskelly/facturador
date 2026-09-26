@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from .common import ORMModel
 
-TipoConexion = Literal["SMART_SUPPLY"]
+TipoConexion = Literal["SMART_SUPPLY", "MINI_CONTA"]
 EstadoConexion = Literal["PENDIENTE", "ACTIVA", "REVOCADA"]
 
 
@@ -40,8 +40,9 @@ class ClaveNuevaOut(BaseModel):
     """La clave en claro. Se devuelve UNA vez y no se vuelve a poder leer."""
     clave: str
     conexion: ConexionOut
-    # El comando exacto que hay que mandar por WhatsApp, ya armado.
-    instruccion_whatsapp: str
+    # El comando exacto que hay que mandar por WhatsApp, ya armado. Solo Smart
+    # Supply: la clave de Mini Conta se pega en su pantalla, no en un chat.
+    instruccion_whatsapp: Optional[str] = None
 
 
 class ActividadConexionOut(BaseModel):

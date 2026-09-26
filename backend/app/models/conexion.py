@@ -5,9 +5,13 @@ De la clave solo vive su SHA-256 (`clave_hash`) y los últimos caracteres
 enseña una vez al generarla y después no existe en ningún lado: si se pierde, se
 genera otra y la anterior deja de servir.
 
-Alcance fijo y deliberadamente corto (ver `PERMISOS_CONEXION` en core/rbac.py):
-dejar órdenes en la bandeja y leer catálogos para cruzarlas. Nada de CFDI, nada
-de borrar, nada de usuarios.
+Alcance fijo y deliberadamente corto, y distinto por tipo (ver
+`PERMISOS_POR_TIPO` en core/rbac.py): Smart Supply deja órdenes en la bandeja y
+lee catálogos para cruzarlas; Mini Conta solo lee las líneas facturadas. Nada de
+CFDI, nada de borrar, nada de usuarios.
+
+Las dos usan el mismo prefijo `fi_ss_`: auth reconoce la clave por él y el tipo
+sale de la fila, no del texto.
 """
 import hashlib
 import secrets
@@ -22,7 +26,7 @@ from .base import tenant_fk, uuid_pk
 # permite distinguirla de un JWT sin intentar verificarla.
 CLAVE_PREFIJO = "fi_ss_"
 
-TIPOS = ("SMART_SUPPLY",)
+TIPOS = ("SMART_SUPPLY", "MINI_CONTA")
 ESTADOS = ("PENDIENTE", "ACTIVA", "REVOCADA")
 
 

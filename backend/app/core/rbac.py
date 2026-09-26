@@ -85,6 +85,19 @@ PERMISOS_CONEXION = frozenset({
     "ticket:gestionar",   # y confirma las acciones que se le piden desde la pantalla
 })
 
+# Mini Conta (contabilidad por sucursal, 26-sep-2026) solo LEE lo facturado para
+# cruzarlo contra sus compras: ni bandeja, ni remisiones, ni precios. Un permiso
+# propio (`venta:leer_lineas`) en vez de reusar `menu:facturas`, que abriría
+# todas las pantallas de facturas, PDFs y XML de clientes.
+PERMISOS_MINI_CONTA = frozenset({"venta:leer_lineas"})
+
+# El alcance depende del TIPO de conexión. Un tipo que no esté aquí no recibe
+# nada: agregar un sistema nuevo obliga a escribir su alcance a propósito.
+PERMISOS_POR_TIPO: dict[str, frozenset[str]] = {
+    "SMART_SUPPLY": PERMISOS_CONEXION,
+    "MINI_CONTA": PERMISOS_MINI_CONTA,
+}
+
 
 @dataclass
 class TenantMembershipView:
@@ -295,7 +308,7 @@ def _contexto_de_conexion(principal: Principal) -> AuthContext:
             role_id=None,
             role_name=f"Conexión · {con.nombre}",
             is_owner=False,
-            permissions=set(PERMISOS_CONEXION),
+            permissions=set(PERMISOS_POR_TIPO.get(con.tipo, frozenset())),
             memberships=[],
             conexion_id=con.id,
         )

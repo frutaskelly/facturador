@@ -1871,14 +1871,20 @@
       "$ref": "#/components/schemas/ConexionOut"
      },
      "instruccion_whatsapp": {
-      "title": "Instruccion Whatsapp",
-      "type": "string"
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Instruccion Whatsapp"
      }
     },
     "required": [
      "clave",
-     "conexion",
-     "instruccion_whatsapp"
+     "conexion"
     ],
     "title": "ClaveNuevaOut",
     "type": "object"
@@ -9679,6 +9685,122 @@
      "nombre"
     ],
     "title": "LineaSaeOut",
+    "type": "object"
+   },
+   "LineaVentaOut": {
+    "properties": {
+     "cantidad": {
+      "title": "Cantidad",
+      "type": "string"
+     },
+     "clave_unidad": {
+      "title": "Clave Unidad",
+      "type": "string"
+     },
+     "descripcion": {
+      "title": "Descripcion",
+      "type": "string"
+     },
+     "factura_id": {
+      "format": "uuid",
+      "title": "Factura Id",
+      "type": "string"
+     },
+     "fecha_entrega": {
+      "format": "date",
+      "title": "Fecha Entrega",
+      "type": "string"
+     },
+     "fecha_entrega_origen": {
+      "enum": [
+       "remision",
+       "notas",
+       "factura"
+      ],
+      "title": "Fecha Entrega Origen",
+      "type": "string"
+     },
+     "fecha_factura": {
+      "format": "date",
+      "title": "Fecha Factura",
+      "type": "string"
+     },
+     "folio": {
+      "title": "Folio",
+      "type": "integer"
+     },
+     "importe": {
+      "title": "Importe",
+      "type": "string"
+     },
+     "linea_id": {
+      "format": "uuid",
+      "title": "Linea Id",
+      "type": "string"
+     },
+     "presentacion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     },
+     "producto": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto"
+     },
+     "serie": {
+      "title": "Serie",
+      "type": "string"
+     },
+     "sku": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sku"
+     },
+     "uuid_cfdi": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uuid Cfdi"
+     }
+    },
+    "required": [
+     "linea_id",
+     "factura_id",
+     "serie",
+     "folio",
+     "fecha_factura",
+     "fecha_entrega",
+     "fecha_entrega_origen",
+     "descripcion",
+     "clave_unidad",
+     "cantidad",
+     "importe"
+    ],
+    "title": "LineaVentaOut",
     "type": "object"
    },
    "ListaAsignacionCreate": {
@@ -18765,6 +18887,27 @@
     "title": "SucursalOut",
     "type": "object"
    },
+   "SucursalSeriesOut": {
+    "properties": {
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     }
+    },
+    "required": [
+     "nombre",
+     "series"
+    ],
+    "title": "SucursalSeriesOut",
+    "type": "object"
+   },
    "SucursalUpdate": {
     "properties": {
      "activo": {
@@ -19936,6 +20079,47 @@
      "type"
     ],
     "title": "ValidationError",
+    "type": "object"
+   },
+   "VentasOut": {
+    "properties": {
+     "desde": {
+      "format": "date",
+      "title": "Desde",
+      "type": "string"
+     },
+     "hasta": {
+      "format": "date",
+      "title": "Hasta",
+      "type": "string"
+     },
+     "lineas": {
+      "items": {
+       "$ref": "#/components/schemas/LineaVentaOut"
+      },
+      "title": "Lineas",
+      "type": "array"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     },
+     "sucursal": {
+      "title": "Sucursal",
+      "type": "string"
+     }
+    },
+    "required": [
+     "sucursal",
+     "series",
+     "desde",
+     "hasta",
+     "lineas"
+    ],
+    "title": "VentasOut",
     "type": "object"
    },
    "VocabularioOut": {
@@ -24869,7 +25053,7 @@
   },
   "/api/v1/conexiones/probar": {
    "get": {
-    "description": "Confirma que una clave sirve, sin escribir nada.\n\nLo llama el bot al conectarse (para poder responder «listo» en el chat) y la\npantalla con el botón «Probar conexión». Pide un permiso que TODA conexión\ntiene, así que sirve para ambas identidades.",
+    "description": "Confirma que una clave sirve, sin escribir nada.\n\nLo llama el bot al conectarse (para poder responder «listo» en el chat), Mini\nConta al guardar la clave, y la pantalla con el botón «Probar conexión».\nCualquier clave viva pasa —el alcance cambia por tipo y no todas tienen\n`menu:remisiones`—; a una persona se le sigue pidiendo ese permiso.",
     "operationId": "probar_api_v1_conexiones_probar_get",
     "parameters": [
      {
@@ -31284,6 +31468,150 @@
     "summary": "Cambiar Password",
     "tags": [
      "membresías"
+    ]
+   }
+  },
+  "/api/v1/mini-conta/sucursales": {
+   "get": {
+    "description": "Cada plaza del inquilino con las series de factura que le pertenecen.",
+    "operationId": "sucursales_api_v1_mini_conta_sucursales_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/SucursalSeriesOut"
+         },
+         "title": "Response Sucursales Api V1 Mini Conta Sucursales Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Sucursales",
+    "tags": [
+     "mini-conta"
+    ]
+   }
+  },
+  "/api/v1/mini-conta/ventas": {
+   "get": {
+    "description": "Las líneas de las facturas timbradas (ingreso, sin notas de crédito) de\nlas series de la plaza, con `desde`/`hasta` sobre la fecha de la factura\n(hora de México), ambos inclusive.",
+    "operationId": "ventas_api_v1_mini_conta_ventas_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "sucursal",
+      "required": true,
+      "schema": {
+       "minLength": 1,
+       "title": "Sucursal",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "desde",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Desde",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "hasta",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Hasta",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/VentasOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Ventas",
+    "tags": [
+     "mini-conta"
     ]
    }
   },
