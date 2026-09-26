@@ -197,7 +197,7 @@ def con_sae9(monkeypatch, dos, sae):
     """El tenant «ajeno» es dueño de la empresa 04 del SAE 9 (código 94), como
     Gerardo; el «suyo» sigue siendo el dueño del SAE 10, como Cristian."""
     import json
-    s = sae_api.settings
+    from app.core.config import settings as s   # no `sae_api.settings`: el candado se muda (#269)
     monkeypatch.setattr(s, "SAE_FB_HOST", "100.95.166.85")
     monkeypatch.setattr(s, "SAE_FB_USER", "SYSDBA")
     monkeypatch.setattr(s, "SAE_FB_PASSWORD", "x")
