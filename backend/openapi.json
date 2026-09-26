@@ -11407,6 +11407,18 @@
       "title": "Estado",
       "type": "string"
      },
+     "fecha_entrega": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha Entrega"
+     },
      "folio_externo": {
       "anyOf": [
        {
@@ -12010,6 +12022,18 @@
       "title": "Estado",
       "type": "string"
      },
+     "fecha_entrega": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha Entrega"
+     },
      "folio_externo": {
       "anyOf": [
        {
@@ -12196,6 +12220,18 @@
        }
       ],
       "title": "Cliente Id"
+     },
+     "fecha_entrega": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha Entrega"
      },
      "folio_externo": {
       "anyOf": [
@@ -32227,7 +32263,7 @@
     ]
    },
    "patch": {
-    "description": "Corrige el cliente/sucursal de una OC desde la bandeja.\n\nCon `aprender=true` (default) la corrección se guarda como equivalencia\nCONFIRMADA para todas las pistas del documento: es el momento en que el\nsistema aprende, y por eso la próxima orden igual ya no pregunta.",
+    "description": "Corrige el cliente/sucursal de una OC desde la bandeja.\n\nCon `aprender=true` (default) la corrección se guarda como equivalencia\nCONFIRMADA para todas las pistas del documento: es el momento en que el\nsistema aprende, y por eso la próxima orden igual ya no pregunta. Solo si\nel request tocó el ruteo: una fecha o un motivo no dicen de quién es la\norden, y aprender de ellos confirmaba equivalencias que nadie revisó.\n\nTambién corrige el folio y la fecha de entrega que el bot leyó mal. Esas\ncorrecciones sobreviven a los reenvíos del bot y son las que usa la\nremisión.",
     "operationId": "asignar_api_v1_oc_recibidas__oc_id__patch",
     "parameters": [
      {

@@ -104,9 +104,14 @@ class OCRecibidaUpdate(BaseModel):
     sucursal_id: Optional[uuid.UUID] = None
     proyecto_id: Optional[uuid.UUID] = None
     folio_externo: Optional[str] = Field(default=None, max_length=60)
+    # La fecha que el bot leyó mal (CE-38CER, 26-sep-2026: semana 39 fechada en
+    # la 38). Se corrige, no se quita: sin fecha el candado de gemelas no mira.
+    fecha_entrega: Optional[date] = None
     punto_entrega: Optional[str] = Field(default=None, max_length=254)
     motivo: Optional[str] = None
     # Guardar la corrección como equivalencia: la próxima OC igual ya no pregunta.
+    # Solo aplica si el request tocó el ruteo (cliente, sucursal, proyecto o
+    # punto de entrega); corregir una fecha o un motivo no enseña nada.
     aprender: bool = True
 
 
@@ -188,6 +193,9 @@ class OCRecibidaOut(ORMModel):
     canal: str
     origen_externo: str
     folio_externo: Optional[str] = None
+    # La vigente: la del documento, o la que corrigió una persona. La que leyó
+    # el bot sigue en `payload` del detalle.
+    fecha_entrega: Optional[date] = None
     remitente: Optional[str] = None
     archivo_nombre: Optional[str] = None
     archivo_url: Optional[str] = None

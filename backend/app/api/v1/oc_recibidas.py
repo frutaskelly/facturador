@@ -708,6 +708,15 @@ def _puede_intentarse(oc: OCRecibida) -> bool:
 
 
 _AUTO_PREFIJO = "No se pudo pasar a remisiones en automático: "
+# Cómo empiezan los dos motivos de `_gemela_remisionada`. El PATCH los
+# reconoce para recalcularlos cuando cambian la fecha o el folio de la orden.
+_GEMELA_MISMA = "esta entrega ya es la remisión"
+_GEMELA_OTRA = "mismo folio y fecha que la remisión"
+
+
+def _es_motivo_gemela(motivo: Optional[str]) -> bool:
+    return (motivo or "").startswith(
+        (_AUTO_PREFIJO + _GEMELA_MISMA, _AUTO_PREFIJO + _GEMELA_OTRA))
 
 
 def _gemela_remisionada(db: Session, oc: OCRecibida) -> Optional[str]:
@@ -766,14 +775,14 @@ def _gemela_remisionada(db: Session, oc: OCRecibida) -> Optional[str]:
         igual = 0
     if igual is not None:
         origen, _, remision = filas[igual]
-        return (f"esta entrega ya es la remisión {remision} (llegó antes como {origen}). "
+        return (f"{_GEMELA_MISMA} {remision} (llegó antes como {origen}). "
                 "Si es la misma, descarta esta orden; si de verdad es otra, pásala a mano.")
     origen, payload_gemela, remision = filas[0]
     n, m = len(lineas), len((payload_gemela or {}).get("lineas") or [])
     cuantas = (f"{n} vs {m} partidas" if n != m
                else f"{n} partida{'s' if n != 1 else ''} cada una, "
                     "con otros productos o cantidades")
-    return (f"mismo folio y fecha que la remisión {remision} (llegó como {origen}) "
+    return (f"{_GEMELA_OTRA} {remision} (llegó como {origen}) "
             f"pero con otro contenido ({cuantas}): probablemente es otro pedido con "
             "la fecha mal puesta. No la descartes: pásala a mano y corrige la fecha "
             "y el folio en la remisión.")
@@ -857,9 +866,19 @@ def ingesta(
             if existente.remision_id is not None:
                 _detectar_cambio(db, existente, data, ctx)
             return _detalle(db, existente)
+        # LO QUE CORRIGIÓ UNA PERSONA NO LO PISA UN REENVÍO (26-sep-2026). El
+        # payload es la versión del bot y las columnas nacen iguales a él; si
+        # una columna ya no coincide con el payload anterior es porque alguien
+        # la corrigió en el PATCH —la fecha que el bot leyó mal—, y la
+        # conciliación reenvía las pendientes cada 6 h: sin esto la
+        # corrección se deshacía sola. Medido al ponerlo: en las 806 órdenes
+        # de prod columna y payload coinciden, así que no congela ninguna.
+        previo = existente.payload or {}
         existente.payload = data
-        existente.folio_externo = payload.folio_externo
-        existente.fecha_entrega = _fecha_entrega(payload)
+        if existente.folio_externo == previo.get("folio_externo"):
+            existente.folio_externo = payload.folio_externo
+        if existente.fecha_entrega == _fecha(previo.get("fecha_entrega")):
+            existente.fecha_entrega = _fecha_entrega(payload)
         existente.remitente = payload.remitente
         # QUITAR UN DATO NUNCA ES ACTUALIZARLO (23-sep-2026). Estos dos venían
         # asignados sin condición, y la conciliación de cada 6 h llama
@@ -1497,7 +1516,13 @@ def asignar(
 
     Con `aprender=true` (default) la corrección se guarda como equivalencia
     CONFIRMADA para todas las pistas del documento: es el momento en que el
-    sistema aprende, y por eso la próxima orden igual ya no pregunta.
+    sistema aprende, y por eso la próxima orden igual ya no pregunta. Solo si
+    el request tocó el ruteo: una fecha o un motivo no dicen de quién es la
+    orden, y aprender de ellos confirmaba equivalencias que nadie revisó.
+
+    También corrige el folio y la fecha de entrega que el bot leyó mal. Esas
+    correcciones sobreviven a los reenvíos del bot y son las que usa la
+    remisión.
     """
     oc = get_or_404(db, OCRecibida, oc_id, soft=False, for_update=True)
     if oc.remision_id is not None:
@@ -1556,10 +1581,22 @@ def asignar(
             )
     if "folio_externo" in data:
         oc.folio_externo = data["folio_externo"]
+    if "fecha_entrega" in data:
+        if data["fecha_entrega"] is None:
+            raise HTTPException(
+                status_code=422, detail="La fecha de entrega se corrige, no se quita"
+            )
+        oc.fecha_entrega = data["fecha_entrega"]
     if "punto_entrega" in data:
         oc.punto_entrega = (data["punto_entrega"] or "").strip() or None
     if "motivo" in data:
         oc.motivo = data["motivo"]
+    elif ("fecha_entrega" in data or "folio_externo" in data) and _es_motivo_gemela(oc.motivo):
+        # El motivo decía «mismo folio y fecha que la remisión X». Con la fecha
+        # o el folio corregidos puede ya no ser cierto: se vuelve a mirar, y si
+        # la gemela desapareció el motivo se va y el lote la vuelve a intentar.
+        gemela = _gemela_remisionada(db, oc)
+        oc.motivo = (_AUTO_PREFIJO + gemela)[:500] if gemela else None
     elif (
         oc.sucursal_id is not None
         and oc.motivo
@@ -1572,7 +1609,8 @@ def asignar(
         oc.motivo = None
     oc.updated_by = ctx.user_id
 
-    if payload.aprender and oc.cliente_id is not None:
+    ruteo = {"cliente_id", "sucursal_id", "proyecto_id", "punto_entrega"} & data.keys()
+    if payload.aprender and ruteo and oc.cliente_id is not None:
         # El punto de entrega se aprende como DESTINO: la próxima orden que diga
         # «JUAN GRAHAM» ya sabe que se descarga en la sucursal de Tabasco. No
         # vota por el cliente — Balles y Jubran comparten sus puntos de entrega.
@@ -1733,7 +1771,10 @@ def crear_remision(
         proyecto_id=oc.proyecto_id,
         almacen_id=almacen_id,
         fecha_remision=payload.fecha_remision,
-        fecha_entrega=payload.fecha_entrega or _fecha(p.get("fecha_entrega")),
+        # La columna antes que el payload: ahí queda la corrección de una
+        # persona; el payload guarda lo que leyó el bot.
+        fecha_entrega=(payload.fecha_entrega or oc.fecha_entrega
+                       or _fecha(p.get("fecha_entrega"))),
         # El número de la OC ES «su pedido»: la referencia con la que el cliente
         # concilia. Sin esto solo vivía enterrado en las notas.
         su_pedido=folio[:30] or None,

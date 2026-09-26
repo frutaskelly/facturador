@@ -2559,7 +2559,13 @@ export interface paths {
          *
          *     Con `aprender=true` (default) la corrección se guarda como equivalencia
          *     CONFIRMADA para todas las pistas del documento: es el momento en que el
-         *     sistema aprende, y por eso la próxima orden igual ya no pregunta.
+         *     sistema aprende, y por eso la próxima orden igual ya no pregunta. Solo si
+         *     el request tocó el ruteo: una fecha o un motivo no dicen de quién es la
+         *     orden, y aprender de ellos confirmaba equivalencias que nadie revisó.
+         *
+         *     También corrige el folio y la fecha de entrega que el bot leyó mal. Esas
+         *     correcciones sobreviven a los reenvíos del bot y son las que usa la
+         *     remisión.
          */
         patch: operations["asignar_api_v1_oc_recibidas__oc_id__patch"];
         trace?: never;
@@ -9488,6 +9494,8 @@ export interface components {
             created_at: string;
             /** Estado */
             estado: string;
+            /** Fecha Entrega */
+            fecha_entrega?: string | null;
             /** Folio Externo */
             folio_externo?: string | null;
             /**
@@ -9639,6 +9647,8 @@ export interface components {
             created_at: string;
             /** Estado */
             estado: string;
+            /** Fecha Entrega */
+            fecha_entrega?: string | null;
             /** Folio Externo */
             folio_externo?: string | null;
             /**
@@ -9693,6 +9703,8 @@ export interface components {
             aprender: boolean;
             /** Cliente Id */
             cliente_id?: string | null;
+            /** Fecha Entrega */
+            fecha_entrega?: string | null;
             /** Folio Externo */
             folio_externo?: string | null;
             /** Motivo */
