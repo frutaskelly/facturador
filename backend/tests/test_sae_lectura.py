@@ -10,9 +10,10 @@ from app.services import sae_lectura
 
 
 def test_solo_pasa_un_select(monkeypatch):
-    """Lo único que este conector sabe hacer es leer. Las escrituras a SAE
-    siguen siendo del bot y de su cola: un INSERT repetido duplica una factura,
-    y esa garantía se sostiene teniendo un solo escritor."""
+    """Lo único que este conector sabe hacer es leer. Escribir en SAE va por
+    OTRA puerta (`sae_escritura`, con su usuario y su cola): un INSERT repetido
+    duplica un artículo o una factura, y esa garantía se sostiene teniendo un
+    solo escritor."""
     monkeypatch.setattr(sae_lectura.settings, "SAE_SERVER", "1.2.3.4,1433")
     monkeypatch.setattr(sae_lectura.settings, "SAE_USER", "u")
     monkeypatch.setattr(sae_lectura.settings, "SAE_PASSWORD", "p")
@@ -247,6 +248,8 @@ def test_la_pasada_reporta_aunque_nadie_haya_presionado_el_boton(monkeypatch):
     monkeypatch.setattr(sae_lectura, "disponible", lambda: True)
     monkeypatch.setattr(s, "ESPEJO_SAE_TENANT_ID", "11111111-1111-1111-1111-111111111111")
     monkeypatch.setattr(s, "ESPEJO_SAE_EMPRESAS", "")     # sin empresas: la pasada no toca SAE
+    # …ni las del catálogo de artículos, que llevan su propia lista (26-sep-2026)
+    monkeypatch.setattr(s, "ESPEJO_SAE_CLAVES_EMPRESAS", "")
     reclamos, reportes = [], []
     monkeypatch.setattr(espejo_sae, "_reclamar_solicitud", lambda t: reclamos.append(t) or None)
     monkeypatch.setattr(espejo_sae, "_reportar", lambda t, sol, tot: reportes.append((sol, tot)))

@@ -1,7 +1,8 @@
-"""Altas de producto en SAE — la cola entre el Facturador y el conector.
+"""Altas de producto en SAE — la cola de escrituras.
 
-El backend no ve SAE, así que crear un artículo allá funciona por solicitud
-(mismo reparto que el espejo de facturas). Lo que se prueba aquí es lo que hace
+Crear un artículo allá funciona por solicitud: se encola aquí y la escribe UN
+solo escritor (el Facturador desde el 26-sep-2026; antes el conector del bot).
+Lo que se prueba aquí es lo que hace
 SEGURA esa cola, porque **nunca se reintenta una escritura a SAE**: una sola
 alta viva por clave, reclamo excluyente, cierre único, y la clave estampada en
 el producto SOLO cuando SAE la confirmó.

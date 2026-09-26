@@ -6,9 +6,12 @@ del bot. Lo que solo CONTESTA sigue saliendo del espejo, que se sincroniza cada
 media hora y cuadra con SAE al peso.
 
 No es una pasarela de SQL: cada ruta arma su consulta y lo de afuera viaja como
-parámetro. Y es de SOLO LECTURA — las escrituras a SAE siguen siendo del bot y
-de su cola.
+parámetro. Y estas rutas son de SOLO LECTURA: escribir en SAE (altas y cambios
+de producto) también lo hace el Facturador desde el 26-sep-2026, pero por su
+cola y su propio usuario (`services/sae_escritura.py`), nunca desde aquí.
 """
+import threading
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -16,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, require_permission
 from ...core.rbac import get_tenant_db
+from ...schemas.sae import SaeCatalogosOut
 from ...services import espejo_sae, sae_lectura
 
 router = APIRouter(prefix="/sae", tags=["sae"])
@@ -179,3 +183,71 @@ def cuadrar_espejo(
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"el cuadre falló: {type(e).__name__}: {e}")
+
+
+# ── Catálogos de SAE para dar de alta o cambiar un producto ──────────────────
+
+# Líneas y esquemas cambian casi nunca, y el bot los pide cada vez que arma un
+# alta: sin caché, cada «dale de alta…» por WhatsApp serían dos consultas a SAE
+# por la red del Mini. Quince minutos en memoria, por empresa. Lo que falla NO
+# se guarda: la siguiente pregunta vuelve a intentar.
+_CATALOGOS_TTL_SEG = 15 * 60
+_catalogos_cache: dict[str, tuple[float, dict]] = {}
+_catalogos_lock = threading.Lock()
+
+
+def _es_de_red(e: Exception) -> bool:
+    """¿El error dice «SAE no está» más que «la consulta está mal»? Sin red, sin
+    login o con timeout pymssql lanza OperationalError/InterfaceError; se
+    reconocen por nombre porque el driver ni siquiera se importa sin SAE."""
+    return (isinstance(e, (sae_lectura.SAENoDisponible, OSError, TimeoutError))
+            or type(e).__name__ in ("OperationalError", "InterfaceError"))
+
+
+@router.get("/catalogos", response_model=SaeCatalogosOut)
+def catalogos(
+    empresa: str = Query(default="02", pattern=r"^\d{2}$",
+                         description="Empresa de SAE: 02, 03, 04, 05"),
+    ctx: AuthContext = Depends(require_permission(_LEER)),
+):
+    """Las líneas, los esquemas de impuestos y las unidades de SAE para esa
+    empresa: con qué se puede dar de alta o cambiar un artículo (26-sep-2026).
+
+    Líneas y esquemas salen EN VIVO de SAE (CLIN e IMPU), porque ahí se crean y
+    el espejo no los trae; con quince minutos de caché. Las unidades no son de
+    SAE sino del escritor: las que `sae_escritura` sabe traducir a UNI_MED y a
+    la clave de unidad del SAT, una por unidad.
+
+    Sin SAE contesta 503 con el motivo: el bot le dice al usuario que SAE no
+    está, en vez de ofrecerle una lista vieja o vacía como si fuera la buena.
+    """
+    from ...services.sae_escritura import UNIDADES_CANONICAS
+
+    ahora = time.monotonic()
+    with _catalogos_lock:
+        guardado = _catalogos_cache.get(empresa)
+    if guardado and ahora - guardado[0] < _CATALOGOS_TTL_SEG:
+        return guardado[1]
+
+    if not sae_lectura.disponible():
+        raise HTTPException(status_code=503,
+                            detail="el Facturador no tiene acceso a SAE; no puedo leer líneas ni esquemas")
+    try:
+        lineas = sae_lectura.lineas_de(empresa)
+        esquemas = sae_lectura.esquemas_de(empresa)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        if _es_de_red(e):
+            raise HTTPException(
+                status_code=503,
+                detail=f"SAE no contestó (empresa {empresa}): {type(e).__name__}: {e}")
+        # No es la red: la consulta está mal, y eso es un bug que tiene que verse
+        raise HTTPException(status_code=502,
+                            detail=f"la consulta a SAE falló: {type(e).__name__}: {e}")
+
+    salida = {"empresa": empresa, "lineas": lineas, "esquemas": esquemas,
+              "unidades": sorted(UNIDADES_CANONICAS)}
+    with _catalogos_lock:
+        _catalogos_cache[empresa] = (ahora, salida)
+    return salida

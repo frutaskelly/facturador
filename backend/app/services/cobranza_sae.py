@@ -16,6 +16,7 @@ DOS COSAS QUE NO SON OBVIAS Y VIENEN DEL ORIGINAL:
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import re
 from typing import Any, Optional
 
@@ -24,6 +25,8 @@ from sqlalchemy.orm import Session
 from ..core.rbac import AuthContext
 from ..models.cliente_externo import ClienteExterno
 from . import sae_lectura
+
+log = logging.getLogger(__name__)
 
 _LOTE = 40
 # Concepto de la CxC -> forma de pago del SAT, cuando el REP no la trae.
@@ -44,11 +47,19 @@ def _dinero(v: float) -> str:
 
 
 def _partir(ref: str) -> Optional[tuple[str, int]]:
-    """'ZHGO 370' -> ('ZHGO', 370). None si no tiene forma de documento."""
-    m = re.match(r"^\s*([A-Za-z]*)\s*(\d+)\s*$", str(ref or ""))
-    if not m:
-        return None
-    return m.group(1).upper(), int(m.group(2))
+    """'ZHGO 370' -> ('ZHGO', 370) · 'ZCH5C 12' -> ('ZCH5C', 12). None si no
+    tiene forma de documento.
+
+    BUG DEL 24 AL 26-SEP-2026: aquí se partía con «letras y luego dígitos»
+    (`^([A-Za-z]*)\s*(\d+)$`), y las series con dígitos de la empresa 04
+    —ZCH5C, MIN5C— no casaban: sus REP y notas de crédito se descartaban EN
+    SILENCIO (el renglón salía None y el pago llegaba sin facturas, o la nota
+    se contaba como omitida). El bot no lo tenía porque partía por el ÚLTIMO
+    bloque de dígitos. Ahora la regla vive en `sae_lectura.partir_documento`:
+    el folio son los dígitos después del último espacio, y un documento pegado
+    ('ZCH5C12') es ambiguo y NO se adivina.
+    """
+    return sae_lectura.partir_documento(ref)
 
 
 def clientes_con_equivalencia(db: Session, ctx: AuthContext, empresa: str) -> set[str]:
@@ -253,6 +264,11 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, dias: int = 3) -> d
     pagos = {"enviados": 0, "omitidos": 0}
     ncs = {"enviados": 0, "omitidos": 0}
     errores: list[str] = []
+    # Lo que NO se pudo partir en serie y folio. No es error (un REFER raro se
+    # quedaría gritando tres días seguidos), pero tampoco se calla: así se
+    # perdieron los pagos de ZCH5C y MIN5C del 24 al 26-sep-2026 sin que nada
+    # lo dijera.
+    descartados: list[str] = []
 
     for p in reps:
         # Sin timbre no hay comprobante: un REP que SAE todavía no mandó al PAC
@@ -266,6 +282,8 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, dias: int = 3) -> d
             d = _renglon(g["refer"], g["importe"], saldo)
             if d:
                 renglones.append(d)
+            else:
+                descartados.append(f"REP {p['cve_doc']}: renglón {g['refer']!r}")
         fecha_pago = max((g["fecha"] for g in p["renglones"]), default=p["fecha"])
         forma = p["forma_sat"] or next(
             (_FORMA_POR_CONCEPTO.get(g["concepto"]) for g in p["renglones"]
@@ -290,10 +308,20 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, dias: int = 3) -> d
         # Una nota CANCELADA ya no tiene renglones en la CxC, y sin ellos no hay
         # cliente al cual colgarla: se cuenta y se deja. Inventarle dueño sería
         # peor que no reflejarla.
-        if sf is None or not _entra(n["cliente_sae"]):
+        if not _entra(n["cliente_sae"]):
             ncs["omitidos"] += 1
             continue
-        renglones = [d for d in (_renglon(g["refer"], g["importe"]) for g in n["renglones"]) if d]
+        if sf is None:
+            ncs["omitidos"] += 1
+            descartados.append(f"NC {n['cve_doc']!r}")
+            continue
+        renglones = []
+        for g in n["renglones"]:
+            d = _renglon(g["refer"], g["importe"])
+            if d:
+                renglones.append(d)
+            else:
+                descartados.append(f"NC {n['cve_doc']}: renglón {g['refer']!r}")
         cuerpo = {
             "empresa": empresa, "cve_doc": n["cve_doc"], "serie": sf[0], "folio": sf[1],
             "cliente_sae": n["cliente_sae"], "fecha": n["fecha"].replace(" ", "T"),
@@ -308,5 +336,9 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, dias: int = 3) -> d
         except Exception as e:
             errores.append(f"NC {n['cve_doc']}: {type(e).__name__}: {e}")
 
+    if descartados:
+        log.warning("cobranza SAE %s: %d documentos sin forma de serie y folio: %s",
+                    empresa, len(descartados), "; ".join(descartados[:5]))
     return {"ok": not errores, "empresa": empresa, "pagos": pagos,
-            "notas_credito": ncs, "errores": errores[:20]}
+            "notas_credito": ncs, "errores": errores[:20],
+            "descartados": descartados[:20]}

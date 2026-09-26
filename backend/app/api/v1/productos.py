@@ -47,6 +47,7 @@ from ...schemas.producto import (
     AliasReapuntarIn,
     AltaSaeIn,
     AltaSaeOut,
+    CambioSaeIn,
     AltaSaeReporteIn,
     CandidatoOut,
     CatalogoClienteBatchIn,
@@ -77,6 +78,7 @@ from ...schemas.producto import (
     SugerirSatBatchIn,
     VocabularioOut,
 )
+from ...schemas.clave_sae import ClaveSaeBuscadaOut
 from ...schemas.common import Page
 from ...services.categoria_codigo import slugify_codigo
 from ...services.importar_productos import (
@@ -1880,11 +1882,12 @@ def impuestos_por_clave(
 
 # OJO con el orden: estas rutas van ANTES de GET /{producto_id} — FastAPI casa
 # en orden de declaración y "alta-sae" parsearía como UUID (422).
-# ── Altas en SAE ─────────────────────────────────────────────────────────────
-# El backend NO ve SAE: quien lo escribe es el conector, con sqlcmd desde la
-# Mac. Así que dar de alta un producto allá funciona por SOLICITUD, igual que el
-# espejo de facturas: aquí queda pedida, el conector la reclama y reporta qué
-# creó en cada empresa.
+# ── Altas y cambios en SAE ───────────────────────────────────────────────────
+# Dar de alta o cambiar un producto allá funciona por SOLICITUD: aquí queda
+# pedida, un escritor la reclama y reporta qué hizo en cada empresa. Ese
+# escritor es el Facturador (`services/sae_escritura.py`, 26-sep-2026) cuando
+# su reloj está encendido; si no, el conector del bot, que sólo sabe de altas.
+# Nunca los dos: ver `reclamar_alta_sae`.
 #
 # LA REGLA QUE MANDA EN TODO ESTE CAMINO: nunca se reintenta una escritura a
 # SAE. Un INSERT repetido duplica el producto. De ahí que reclamar sea un paso
@@ -1974,6 +1977,7 @@ def pedir_alta_sae(
 
     viva = (db.query(SolicitudAltaSae)
             .filter(SolicitudAltaSae.tenant_id == ctx.tenant_id,
+                    SolicitudAltaSae.tipo == "ALTA",
                     func.upper(func.btrim(SolicitudAltaSae.clave)) == clave,
                     SolicitudAltaSae.estado.in_(("PENDIENTE", "EN_CURSO")))
             .order_by(SolicitudAltaSae.solicitada_at.asc()).first())
@@ -2068,10 +2072,119 @@ def pedir_alta_sae(
     return sol
 
 
+@router.post("/cambio-sae", response_model=AltaSaeOut, status_code=status.HTTP_201_CREATED)
+def pedir_cambio_sae(
+    payload: CambioSaeIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(_puede_pedir_alta),
+):
+    """Pide cambiar un artículo que YA existe en SAE: descripción, línea,
+    unidad, esquema de impuestos, clave SAT, o reactivarlo.
+
+    Entra a la misma cola que las altas y con sus mismas reglas. Lo escribe el
+    Facturador (`sae_escritura`); el bot sólo lo pide. Dar de baja y cambiar
+    precio NO están aquí a propósito: la baja nunca es por iniciativa propia
+    (regla del dueño) y los precios quedaron fuera del alcance autorizado.
+
+    Una sola viva por clave, pero un cambio que todavía nadie tomó ABSORBE al
+    nuevo: «cámbiale la línea» y luego «y la unidad» son un solo UPDATE, no dos
+    solicitudes peleando por la misma clave. Si ya se está escribiendo, se
+    contesta 409: mezclarlo a medio camino no se sabe si alcanzó a entrar.
+    """
+    from ...services import sae_escritura
+
+    _expirar_altas_muertas(db, ctx.tenant_id)
+    clave = sae_escritura.normalizar_clave(payload.clave)
+    if not clave:
+        raise HTTPException(status_code=422,
+                            detail=f"La clave {payload.clave!r} no es una clave de SAE válida")
+    empresas = [e.strip() for e in (payload.empresas or []) if e.strip()] or list(_EMPRESAS_SAE)
+    fuera = [e for e in empresas if e not in _EMPRESAS_SAE]
+    if fuera:
+        raise HTTPException(status_code=422,
+                            detail=f"Empresa desconocida: {', '.join(fuera)}")
+    crudos = payload.model_dump(include=set(sae_escritura.CAMPOS_CAMBIO), exclude_none=True)
+    if not crudos.get("reactivar"):
+        crudos.pop("reactivar", None)
+    try:
+        cambios = sae_escritura.validar_cambios(crudos)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+
+    viva = (db.query(SolicitudAltaSae)
+            .filter(SolicitudAltaSae.tenant_id == ctx.tenant_id,
+                    SolicitudAltaSae.tipo == "CAMBIO",
+                    SolicitudAltaSae.clave == clave,
+                    SolicitudAltaSae.estado.in_(("PENDIENTE", "EN_CURSO")))
+            .with_for_update().first())
+    if viva is not None:
+        if viva.estado == "EN_CURSO":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Ya se está escribiendo un cambio a {clave} en SAE; pide este cuando termine.")
+        viva.datos = {**(viva.datos or {}), **cambios}
+        viva.empresas = sorted(set(viva.empresas or []) | set(empresas))
+        db.flush()
+        db.refresh(viva)
+        return viva
+
+    sol = SolicitudAltaSae(
+        tenant_id=ctx.tenant_id,
+        tipo="CAMBIO",
+        origen=(payload.origen or "UI").strip().upper()[:12],
+        producto_id=payload.producto_id,
+        clave=clave,
+        datos=cambios,
+        empresas=empresas,
+        solicitada_por=ctx.user_id,
+    )
+    db.add(sol)
+    flush_or_conflict(db, detail="Ya hay un cambio vivo para esa clave")
+    db.refresh(sol)
+    return sol
+
+
+@router.get("/claves-sae", response_model=list[ClaveSaeBuscadaOut])
+def buscar_claves_sae(
+    clave: Optional[str] = Query(default=None, max_length=50,
+                                 description="Clave exacta; se compara en MAYÚSCULAS y sin espacios"),
+    q: Optional[str] = Query(default=None, max_length=80,
+                             description="Texto que se busca en la clave y en la descripción"),
+    empresa: Optional[str] = Query(default=None, pattern=r"^\d{2}$",
+                                   description="Sólo esa empresa de SAE (02, 03, 04, 05)"),
+    solo_activas: bool = Query(default=False),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """¿Existe esta clave en SAE, en qué empresas, y qué producto la lleva?
+
+    Es la pregunta que el bot hace ANTES de pedir un alta o un cambio
+    (26-sep-2026): si la clave no existe en ninguna empresa, es un alta; si
+    existe, es un cambio, y `empresas` son justo las que hay que mandarle a
+    `POST /productos/cambio-sae` — mandarlo a las cuatro sale PARCIAL donde no
+    existe.
+
+    Sale del espejo `claves_sae`, no de SAE en vivo: es instantáneo y lo que el
+    Facturador acaba de escribir allá ya está reflejado. Agrupa por clave y va
+    primero la coincidencia exacta.
+    """
+    from ...services.claves_sae import buscar_claves, clave_de_busqueda
+
+    if not clave_de_busqueda(clave) and not (q or "").strip():
+        raise HTTPException(status_code=422, detail="hace falta `clave` o `q`")
+    return buscar_claves(db, ctx.tenant_id, clave=clave, q=q, empresa=empresa,
+                         solo_activas=solo_activas, limit=limit)
+
+
 @router.get("/alta-sae", response_model=Page[AltaSaeOut])
 def listar_altas_sae(
     estado: Optional[str] = Query(default=None, max_length=10),
     clave: Optional[str] = Query(default=None, max_length=20),
+    # ALTA por omisión: así contesta exactamente como antes de que la cola
+    # llevara cambios, que es lo que el acuse del bot espera al preguntar por
+    # una clave. TODAS = las dos.
+    tipo: str = Query(default="ALTA", pattern="^(ALTA|CAMBIO|TODAS)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_tenant_db),
@@ -2081,6 +2194,8 @@ def listar_altas_sae(
     acuse y lo que la pantalla de catálogo pinta como «pendiente en SAE»."""
     _expirar_altas_muertas(db, ctx.tenant_id)
     q = db.query(SolicitudAltaSae).filter(SolicitudAltaSae.tenant_id == ctx.tenant_id)
+    if tipo != "TODAS":
+        q = q.filter(SolicitudAltaSae.tipo == tipo)
     if estado:
         q = q.filter(SolicitudAltaSae.estado == estado.strip().upper())
     if clave:
@@ -2089,20 +2204,52 @@ def listar_altas_sae(
     return paginate(q, AltaSaeOut, limit, offset)
 
 
+def reclamar_siguiente_sae(db: Session, tenant_id) -> Optional[SolicitudAltaSae]:
+    """Reclama la siguiente solicitud (alta o cambio) y la marca EN_CURSO.
+
+    `skip_locked`: dos reclamos a la vez no pueden tomar la misma y escribirla
+    dos veces en SAE. Reclama UNA a la vez a propósito: si el proceso muere a
+    media escritura, hay que poder decir exactamente de qué clave hay que ir a
+    ver en SAE. La usan la puerta del bot y el escritor del Facturador.
+    """
+    _expirar_altas_muertas(db, tenant_id)
+    sol = (db.query(SolicitudAltaSae)
+           .filter(SolicitudAltaSae.tenant_id == tenant_id,
+                   SolicitudAltaSae.estado == "PENDIENTE")
+           .order_by(SolicitudAltaSae.solicitada_at.asc())
+           .with_for_update(skip_locked=True).first())
+    if sol is None:
+        return None
+    sol.estado = "EN_CURSO"
+    sol.iniciada_at = datetime.now(timezone.utc)
+    db.flush()
+    db.refresh(sol)
+    return sol
+
+
 @router.get("/alta-sae/pendiente", response_model=Optional[AltaSaeOut])
 def reclamar_alta_sae(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission("factura:espejo")),
 ):
-    """El conector pregunta si hay una alta que aplicar. Reclamar la marca
-    EN_CURSO con `skip_locked`: dos conectores no pueden tomar la misma y
-    escribirla dos veces en SAE.
+    """La puerta del conector del BOT: pregunta si hay algo que aplicar.
 
-    Reclama UNA a la vez a propósito: si el proceso muere a media alta, hay que
-    poder decir exactamente de qué clave hay que ir a ver en SAE.
+    UN SOLO ESCRITOR. Con la escritura del Facturador encendida
+    (`sae_escritura.activo()`), esta puerta ya no entrega nada: el bot
+    contesta «no hay altas pendientes» y el que escribe es el Facturador. Si
+    las dos puertas repartieran, dos escritores se tomarían la cola a la vez y
+    la garantía de no duplicar dependería de la suerte.
+
+    Y sólo entrega ALTAS: el aplicador del bot no sabe hacer cambios, y
+    reclamarle uno sería cerrarlo como hecho sin haberlo escrito.
     """
+    from ...services import sae_escritura
+    if sae_escritura.activo():
+        return None
+    _expirar_altas_muertas(db, ctx.tenant_id)
     sol = (db.query(SolicitudAltaSae)
            .filter(SolicitudAltaSae.tenant_id == ctx.tenant_id,
+                   SolicitudAltaSae.tipo == "ALTA",
                    SolicitudAltaSae.estado == "PENDIENTE")
            .order_by(SolicitudAltaSae.solicitada_at.asc())
            .with_for_update(skip_locked=True).first())
@@ -2133,8 +2280,16 @@ def reportar_alta_sae(
     misma regla que con los folios de SAE: el Facturador no se apunta una clave
     que SAE no haya confirmado.
     """
+    return cerrar_solicitud_sae(db, ctx.tenant_id, solicitud_id,
+                                payload.por_empresa, payload.motivo)
+
+
+def cerrar_solicitud_sae(db: Session, tenant_id, solicitud_id, por_empresa: Optional[dict],
+                         motivo: Optional[str]) -> SolicitudAltaSae:
+    """Cierra una solicitud con lo que contestó SAE, por empresa. Es el cierre
+    del reporte del bot y el del escritor del Facturador: una sola regla."""
     sol = (db.query(SolicitudAltaSae)
-           .filter(SolicitudAltaSae.tenant_id == ctx.tenant_id,
+           .filter(SolicitudAltaSae.tenant_id == tenant_id,
                    SolicitudAltaSae.id == solicitud_id)
            .with_for_update().one_or_none())
     if sol is None:
@@ -2146,19 +2301,20 @@ def reportar_alta_sae(
             detail=f"Esa alta ya está cerrada como {sol.estado}; no se reporta dos veces.",
         )
 
-    por_empresa = {str(k): v for k, v in (payload.por_empresa or {}).items()
+    por_empresa = {str(k): v for k, v in (por_empresa or {}).items()
                    if isinstance(v, dict)}
     pedidas = [str(e) for e in (sol.empresas or [])]
     creadas = [e for e in pedidas if (por_empresa.get(e) or {}).get("ok")]
     sol.estado = ("OK" if creadas and len(creadas) == len(pedidas)
                   else "PARCIAL" if creadas else "ERROR")
     sol.resultado = por_empresa or None
-    sol.motivo = (payload.motivo or "").strip() or None
+    sol.motivo = (motivo or "").strip() or None
     sol.terminada_at = datetime.now(timezone.utc)
 
-    if creadas and sol.producto_id:
+    # La clave se estampa sólo en un ALTA: un cambio no crea nada que ligar.
+    if creadas and sol.producto_id and sol.tipo == "ALTA":
         prod = (db.query(Producto)
-                .filter(Producto.tenant_id == ctx.tenant_id,
+                .filter(Producto.tenant_id == tenant_id,
                         Producto.id == sol.producto_id,
                         Producto.deleted_at.is_(None))
                 .one_or_none())
@@ -2168,9 +2324,62 @@ def reportar_alta_sae(
             confirmada = next((por_empresa[e].get("clave") for e in creadas
                                if (por_empresa[e].get("clave") or "").strip()), None)
             prod.clave_sae = (confirmada or sol.clave).strip().upper()[:50]
+    if creadas:
+        _reflejar_en_espejo_de_claves(db, tenant_id, sol, por_empresa, creadas)
     db.flush()
     db.refresh(sol)
     return sol
+
+
+def _reflejar_en_espejo_de_claves(db: Session, tenant_id, sol: SolicitudAltaSae,
+                                  por_empresa: dict, creadas: list[str]) -> None:
+    """Lo que SAE confirmó en cada empresa entra YA al espejo `claves_sae`.
+
+    Sin esto, un alta recién escrita no existía para el Facturador hasta la
+    siguiente lectura de INVE (horas): el candado 409 de otra alta de la misma
+    clave la dejaba pasar, y la búsqueda de claves del bot contestaba «no
+    existe» de algo que ya estaba en SAE (26-sep-2026).
+
+    Sólo empresas con `ok`. Lo que viaja es lo que SAE dijo: el escritor del
+    Facturador reporta `descripcion` y `activa` leídos de vuelta en SAE ya
+    confirmada la escritura. Si el reporte no los trae (el conector del bot, o
+    esa lectura de vuelta falló), se usa lo pedido — y en un `ya_existia` sin
+    lectura no se afirma nada: la clave existe, pero pudo estar de baja, y el
+    espejo no la vuelve activa por eso.
+
+    Un CAMBIO sólo toca el espejo si reactivó o cambió la descripción: línea,
+    unidad, esquema y SAT no viven en `claves_sae`.
+
+    Va en la MISMA transacción del cierre, pero en un SAVEPOINT: si el espejo
+    fallara, el cierre sigue. Perder el cierre por esto dejaría la solicitud
+    EN_CURSO hasta expirar como «revisa en SAE», que es mucho peor que un
+    espejo que se pone al día en la siguiente lectura.
+    """
+    from ...services import claves_sae, sae_escritura
+
+    datos = sol.datos or {}
+    if sol.tipo == "CAMBIO" and not (datos.get("reactivar") or datos.get("descripcion")):
+        return
+    for empresa in creadas:
+        r = por_empresa.get(empresa) or {}
+        clave = (r.get("clave") or sol.clave or "").strip()
+        leido = "activa" in r or "descripcion" in r
+        if leido:
+            desc, activa = r.get("descripcion"), r.get("activa")
+        elif sol.tipo == "CAMBIO":
+            desc = datos.get("descripcion")
+            activa = True if datos.get("reactivar") else None
+        elif r.get("ya_existia"):
+            desc, activa = None, None
+        else:
+            desc = sae_escritura.ascii_mayus(datos.get("descripcion") or "").strip()[:60]
+            activa = True
+        try:
+            with db.begin_nested():
+                claves_sae.reflejar_escritura(db, tenant_id, empresa, clave, desc, activa)
+        except SQLAlchemyError:
+            logger.exception("espejo de claves: no pude reflejar %s %s en la empresa %s",
+                             sol.tipo, clave, empresa)
 
 
 @router.get("/{producto_id}", response_model=ProductoOut)

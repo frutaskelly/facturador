@@ -10,11 +10,13 @@ todo (24-sep-2026).
 TRES CANDADOS, y ninguno es decorativo:
 
 1. SOLO LECTURA. `consultar()` rechaza cualquier cosa que no sea un único
-   SELECT. Las escrituras a SAE siguen siendo del bot y de su cola, porque
-   ahí vive la regla que las gobierna: una escritura a SAE NUNCA se reintenta
-   —un INSERT repetido duplica un pedido o una factura— y esa garantía se
-   sostiene teniendo UN SOLO escritor. Dos escritores no se coordinan con un
-   comentario.
+   SELECT, y el usuario con el que entra no puede escribir. Escribir en SAE
+   también lo hace el Facturador desde el 26-sep-2026, pero por OTRA puerta
+   (`sae_escritura`, con su propio usuario y su cola), porque ahí vive la regla
+   que lo gobierna: una escritura a SAE NUNCA se reintenta —un INSERT repetido
+   duplica un artículo o una factura— y esa garantía se sostiene teniendo UN
+   SOLO escritor. Mezclar las dos puertas en una haría que cualquier lectura
+   pudiera, por un error, escribir.
 
 2. NADA DE SQL DEL LLAMADOR. Las consultas se arman aquí; lo que viene de
    afuera viaja como PARÁMETRO, nunca concatenado. Esto no es una pasarela de
@@ -218,3 +220,132 @@ def _documento(f: dict, tipo: str) -> dict[str, Any]:
 def facturas_de(empresa: str, texto: str, limite: int = 50) -> list[dict[str, Any]]:
     """Atajo historico: las FACTURAS cuya observacion menciona `texto`."""
     return documentos_de(empresa, texto, tipo="factura", limite=limite)
+
+
+def partir_documento(doc: Any) -> Optional[tuple[str, int]]:
+    """'ZHGO       370' -> ('ZHGO', 370) · 'ZCH5C 12' -> ('ZCH5C', 12).
+
+    Así escribe SAE un CVE_DOC (y el REFER de la CxC, que es el CVE_DOC de la
+    factura): la serie a la izquierda, rellena de espacios, y el folio a la
+    derecha. LA SERIE TERMINA DONDE EMPIEZA EL FOLIO, y el folio son los
+    dígitos FINALES después del ÚLTIMO espacio. Las series pueden llevar
+    dígitos (ZCH5C, MIN5C de la empresa 04), así que «letras y luego números»
+    no sirve para partir: con esa regla, los REP y las notas de crédito de esas
+    series se descartaron EN SILENCIO desde el 24-sep hasta el 26-sep-2026.
+
+    Sin espacio NO se adivina: en 'ZCH5C12' el corte podría ser ZCH5C·12 o
+    ZCH5·C12 —y en 'ZCH512', ZCH·512 o ZCH5·12—, y un folio equivocado cuelga
+    el pago de la factura de otro. SAE siempre separa, así que un documento
+    pegado no viene de SAE y se devuelve None. La única excepción es un
+    documento SIN serie, sólo dígitos ('0000000048' -> ('', 48)): ahí no hay
+    dónde equivocarse. Los ceros a la izquierda se van (regla del Facturador:
+    los folios van sin relleno).
+    """
+    texto = " ".join(str(doc or "").split())
+    if not texto:
+        return None
+    if texto.isdigit():
+        return "", int(texto)
+    serie, espacio, folio = texto.rpartition(" ")
+    if not espacio or not serie or not folio.isdigit():
+        return None
+    return serie.replace(" ", "").upper(), int(folio)
+
+
+# Leer INVE entero tarda: con ~2,000 artículos por empresa y la red del Mini,
+# el timeout de una consulta normal (25 s) no alcanza. Es el mismo margen que
+# le daba el bot a `sync_claves_sae.py`.
+_TIMEOUT_CATALOGO = 120
+
+
+def catalogo_inve(empresa: str) -> list[dict[str, Any]]:
+    """[{clave, descripcion, activa}] de INVE<empresa>: el catálogo de artículos
+    completo, para el espejo `claves_sae`.
+
+    Es el mismo SELECT que usaba el bot en `sync_claves_sae.py` (26-sep-2026).
+    Allá DESCR iba envuelta en REPLACE de saltos de línea y tabuladores porque
+    sqlcmd devuelve texto renglón por renglón; con pymssql la fila llega
+    entera y ese truco ya no hace falta para leer. Los separadores se siguen
+    cambiando por espacios, aquí en Python, para que lo guardado sea idéntico a
+    lo que depositaba el bot: si no, la primera pasada «actualizaría» todas las
+    descripciones con un salto de línea sin que nada haya cambiado.
+
+    `activa` es el STATUS de SAE: 'A' activa, cualquier otra cosa es baja. Una
+    lectura que falla LANZA (nunca devuelve una lista vacía por error): quien
+    reemplaza el catálogo con esto no puede confundir «SAE no contestó» con
+    «SAE no tiene artículos».
+    """
+    inve = tabla("INVE", empresa)
+    filas = consultar(
+        "SELECT LTRIM(RTRIM(CVE_ART)) AS clave, ISNULL(DESCR,'') AS descripcion, "
+        "ISNULL(STATUS,'A') AS status "
+        f"FROM {inve} WHERE CVE_ART IS NOT NULL AND LTRIM(RTRIM(CVE_ART)) <> ''",
+        timeout=_TIMEOUT_CATALOGO,
+    )
+    salida = []
+    for f in filas:
+        clave = str(f.get("clave") or "").strip()
+        if not clave:
+            continue
+        salida.append({
+            "clave": clave,
+            "descripcion": descripcion_inve(f.get("descripcion")),
+            "activa": status_activo(f.get("status")),
+        })
+    return salida
+
+
+def descripcion_inve(valor: Any) -> Optional[str]:
+    """DESCR de INVE como la guarda el espejo: sin orillas y con los saltos de
+    línea y tabuladores cambiados por espacios (lo que hacía el REPLACE del
+    bot). Una sola regla para la lectura del catálogo y para lo que confirma el
+    escritor, o las dos dirían distinto de la misma clave."""
+    return re.sub(r"[\r\n\t]", " ", str(valor or "").strip()) or None
+
+
+def status_activo(valor: Any) -> bool:
+    """STATUS de INVE: 'A' (o vacío) es activa; cualquier otra cosa es baja."""
+    return (str(valor or "A").strip().upper() or "A") == "A"
+
+
+def lineas_de(empresa: str) -> list[dict[str, Any]]:
+    """Las líneas de producto de SAE (CLIN<empresa>) que se pueden usar: las de
+    baja (STATUS 'B') no se ofrecen, porque asignar una sería dar de alta un
+    artículo en una línea que SAE ya retiró."""
+    filas = consultar(
+        "SELECT RTRIM(CVE_LIN) AS codigo, RTRIM(ISNULL(DESC_LIN,'')) AS nombre "
+        f"FROM {tabla('CLIN', empresa)} "
+        "WHERE ISNULL(STATUS,'A') <> 'B' ORDER BY CVE_LIN",
+    )
+    return [{"codigo": str(f.get("codigo") or "").strip(),
+             "nombre": str(f.get("nombre") or "").strip()}
+            for f in filas if str(f.get("codigo") or "").strip()]
+
+
+def _pct(v: Any) -> float:
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def esquemas_de(empresa: str) -> list[dict[str, Any]]:
+    """Los esquemas de impuestos de SAE (IMPU<empresa>) con su IVA y su IEPS en
+    PORCENTAJE (16.0 = 16 %), como los guarda SAE: IMPUESTO4 es el IVA e
+    IMPUESTO1 el IEPS. El número de esquema (CVE_ESQIMPU) es lo que viaja en un
+    alta o un cambio de producto."""
+    filas = consultar(
+        "SELECT CVE_ESQIMPU AS codigo, RTRIM(ISNULL(DESCRIPESQ,'')) AS descripcion, "
+        "ISNULL(IMPUESTO4,0) AS iva, ISNULL(IMPUESTO1,0) AS ieps "
+        f"FROM {tabla('IMPU', empresa)} ORDER BY CVE_ESQIMPU",
+    )
+    salida = []
+    for f in filas:
+        try:
+            codigo = int(f.get("codigo"))
+        except (TypeError, ValueError):
+            continue
+        salida.append({"codigo": codigo,
+                       "descripcion": str(f.get("descripcion") or "").strip(),
+                       "iva": _pct(f.get("iva")), "ieps": _pct(f.get("ieps"))})
+    return salida

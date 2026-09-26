@@ -196,19 +196,21 @@ def folios_con_abonos(empresa: str, desde: dt.date, series: list[str]) -> dict[s
     saldo cambió — sin esto, el estado de cuenta sigue cobrando lo ya pagado.
     """
     cuen = sae_lectura.tabla("CUEN_DET", empresa)
+    buscadas = set(series)
     out: dict[str, list[int]] = {}
     for r in sae_lectura.consultar(
         f"SELECT DISTINCT RTRIM(REFER) AS doc FROM {cuen} "
         "WHERE TIPO_MOV='A' AND FECHA_APLI >= %s",
         (desde.isoformat(),),
     ):
-        doc = str(r.get("doc") or "").strip()
-        for serie in series:
-            if doc.startswith(serie):
-                resto = doc[len(serie):].strip()
-                if resto.isdigit():
-                    out.setdefault(serie, []).append(int(resto))
-                break
+        # Se parte el documento y se compara la serie ENTERA (26-sep-2026).
+        # Antes se preguntaba «¿empieza con la serie?», que depende de que
+        # ninguna serie sea prefijo de otra: hoy no lo es, pero bastaba dar de
+        # alta una ZEHMO junto a ZEHMOHOS para que los pagos de una se
+        # perdieran detrás de la otra sin decir nada.
+        partido = sae_lectura.partir_documento(r.get("doc"))
+        if partido and partido[0] in buscadas:
+            out.setdefault(partido[0], []).append(partido[1])
     return out
 
 
@@ -451,6 +453,12 @@ _ultimo_cuadre: Optional[dt.date] = None
 # Los REP llegan de a poco, no cada medio minuto: correrlos en cada vuelta
 # sería pedirle a SAE cuatro consultas para nada. Se lleva su propio paso.
 _ultima_cobranza: float = 0.0
+# El catálogo de artículos cambia todavía menos y leerlo entero cuesta: su
+# propio paso también (ESPEJO_SAE_CLAVES_CADA_SEG, 4 h por omisión). None =
+# todavía no se lee en este proceso, y entonces toca: con 0.0 el primer turno
+# dependería de cuánto lleva prendida la máquina (el reloj monotónico cuenta
+# desde el arranque), y tras un reinicio el catálogo esperaría hasta 4 h.
+_ultimas_claves: Optional[float] = None
 
 def contexto_de_sistema(tenant_id) -> AuthContext:
     """Quien corre la pasada automática: nadie. No hay usuario al que atribuir.
@@ -469,6 +477,11 @@ def contexto_de_sistema(tenant_id) -> AuthContext:
 def pasada_programada() -> dict[str, Any]:
     """Una vuelta del reloj, para todas las empresas configuradas.
 
+    Cada vuelta trae las facturas nuevas; con su propio paso, además, el cuadre
+    (una vez al día), la cobranza (REP y notas, cada 5 min) y el catálogo de
+    artículos (INVE → `claves_sae`, cada 4 h y en su propia lista de empresas,
+    que incluye la 05). El botón «Sincronizar SAE» fuerza los tres.
+
     Sin `ESPEJO_SAE_TENANT_ID` no corre: no hay manera honesta de adivinar de
     quién es el espejo, y equivocarse sería escribir facturas en el tenant que
     no es.
@@ -478,20 +491,24 @@ def pasada_programada() -> dict[str, Any]:
 
     if not sae_lectura.disponible() or not settings.ESPEJO_SAE_TENANT_ID:
         return {"corrio": False, "motivo": "sin acceso a SAE o sin tenant configurado"}
-    empresas = [e.strip() for e in str(settings.ESPEJO_SAE_EMPRESAS or "").split(",") if e.strip()]
-    if not empresas:
+    empresas = _lista(settings.ESPEJO_SAE_EMPRESAS)
+    cada_claves = int(settings.ESPEJO_SAE_CLAVES_CADA_SEG or 0)
+    empresas_claves = _lista(settings.ESPEJO_SAE_CLAVES_EMPRESAS) if cada_claves > 0 else []
+    if not empresas and not empresas_claves:
         return {"corrio": False, "motivo": "sin empresas configuradas"}
 
     from ..api.v1.sae import _SERIES_POR_EMPRESA
-    global _ultimo_cuadre, _ultima_cobranza
+    global _ultimo_cuadre, _ultima_cobranza, _ultimas_claves
     import time as _time
 
     hoy = dt.date.today()
     toca_cuadre = _ultimo_cuadre != hoy
     ahora = _time.monotonic()
     toca_cobranza = (ahora - _ultima_cobranza) >= max(60, int(settings.ESPEJO_SAE_COBRANZA_CADA_SEG))
+    toca_claves = bool(empresas_claves) and (
+        _ultimas_claves is None or (ahora - _ultimas_claves) >= max(60, cada_claves))
     total = {"corrio": True, "nuevas": 0, "actualizadas": 0, "errores": [],
-             "cuadre": None, "cobranza": None}
+             "cuadre": None, "cobranza": None, "claves": None}
     # EL BOTÓN «SINCRONIZAR SAE» LO ATIENDE ESTE MISMO RELOJ (24-sep-2026).
     # Antes lo reclamaba el bot con un poller de 60 s; ahora que el espejo vive
     # aquí, dejarlo allá sería que el botón dependa de un programa que ya no
@@ -500,7 +517,9 @@ def pasada_programada() -> dict[str, Any]:
     solicitud = _reclamar_solicitud(settings.ESPEJO_SAE_TENANT_ID)
     if solicitud:
         total["solicitud"] = str(solicitud)
-        toca_cuadre = toca_cobranza = True   # el botón es el refresco completo
+        # el botón es el refresco completo: cuadre, cobranza y catálogo
+        toca_cuadre = toca_cobranza = True
+        toca_claves = bool(empresas_claves)
 
     for empresa in empresas:
         series = list(_SERIES_POR_EMPRESA.get(empresa, ()))
@@ -523,25 +542,71 @@ def pasada_programada() -> dict[str, Any]:
                     cb = cobranza_sae.sincronizar(db, ctx, empresa)
                     total["cobranza"] = total["cobranza"] or {}
                     total["cobranza"][empresa] = {"pagos": cb["pagos"]["enviados"],
-                                                  "notas": cb["notas_credito"]["enviados"]}
+                                                  "notas": cb["notas_credito"]["enviados"],
+                                                  "descartados": len(cb.get("descartados") or [])}
                     total["errores"].extend(cb.get("errores", []))
             total["nuevas"] += r.get("nuevas", 0)
             total["actualizadas"] += r.get("actualizadas", 0)
             total["errores"].extend(r.get("errores", []))
         except Exception as e:
             total["errores"].append(f"[{empresa}] {type(e).__name__}: {e}")
+    if toca_claves:
+        total["claves"] = sincronizar_claves(settings.ESPEJO_SAE_TENANT_ID,
+                                             empresas_claves, total["errores"])
     if toca_cuadre:
         # se marca aunque alguna empresa haya fallado: reintentarlo en la
         # siguiente pasada sería correrlo cada 30 s el resto del día
         _ultimo_cuadre = hoy
     if toca_cobranza:
         _ultima_cobranza = ahora
+    if toca_claves:
+        # igual que el cuadre: una empresa caída espera a la siguiente vuelta
+        # de 4 h (o al botón), no se reintenta cada 30 s
+        _ultimas_claves = ahora
     # El reporte sale SIEMPRE, con o sin botón: la fecha de «SAE actualizado»
     # que pinta la UI sale de aquí, también en las pasadas automáticas. Y una
     # solicitud reclamada y nunca reportada deja la pantalla «Sincronizando…»
     # hasta que el backend la expira a la hora.
     _reportar(settings.ESPEJO_SAE_TENANT_ID, solicitud, total)
     return total
+
+
+def _lista(valor: Any) -> list[str]:
+    """'02, 03,,04' -> ['02', '03', '04']."""
+    return [e.strip() for e in str(valor or "").split(",") if e.strip()]
+
+
+def sincronizar_claves(tenant_id, empresas: list[str], errores: list) -> dict[str, Any]:
+    """El catálogo de artículos de cada empresa: INVE de SAE → `claves_sae`.
+
+    Lo hacía el bot (`sync_claves_sae.py`, launchd a las 7:30 y 15:30) y lo
+    mandaba por HTTP; desde el 26-sep-2026 lo lee el Facturador. La lógica del
+    depósito es LA MISMA que la de la ruta (`claves_sae.reemplazar_catalogo`).
+
+    CADA EMPRESA ES SU PROPIA TRANSACCIÓN: si la 05 no contesta, la 02 ya quedó
+    al día. Y tres cosas que NO se hacen nunca desde aquí:
+
+      · Vaciar el catálogo por una lectura fallida: SAE caído lanza ANTES de
+        tocar la tabla, y un INVE vacío se rechaza como lectura mala.
+      · Forzar el candado de «encoge a menos de la mitad»: se reporta en los
+        errores de la pasada y lo decide una persona.
+      · Tragarse el error: va a `errores`, que es lo que pinta la fecha de
+        «SAE actualizado» en rojo.
+    """
+    from ..core.rbac import tenant_session
+    from . import claves_sae
+
+    out: dict[str, Any] = {}
+    for empresa in empresas:
+        try:
+            with tenant_session(tenant_id) as db:
+                r = claves_sae.sincronizar_catalogo(db, tenant_id, empresa)
+            out[empresa] = {"recibidas": r.recibidas, "creadas": r.creadas,
+                            "actualizadas": r.actualizadas, "eliminadas": r.eliminadas}
+        except Exception as e:  # una empresa no tumba a las demás
+            out[empresa] = {"error": f"{type(e).__name__}: {e}"[:300]}
+            errores.append(f"[claves {empresa}] {type(e).__name__}: {e}")
+    return out
 
 
 def _reclamar_solicitud(tenant_id) -> Optional[Any]:
@@ -567,7 +632,8 @@ def _reportar(tenant_id, solicitud, total: dict) -> None:
     from ..schemas.factura import EspejoSyncReporteIn
 
     try:
-        resumen = {k: total.get(k) for k in ("nuevas", "actualizadas", "cuadre", "cobranza")}
+        resumen = {k: total.get(k) for k in ("nuevas", "actualizadas", "cuadre", "cobranza",
+                                             "claves")}
         with tenant_session(tenant_id) as db:
             reportar_espejo_sync(
                 payload=EspejoSyncReporteIn(solicitud_id=solicitud,
@@ -612,6 +678,8 @@ async def reloj(intervalo: int) -> None:
             if r.get("cobranza") and any(v.get("pagos") or v.get("notas")
                                          for v in r["cobranza"].values()):
                 log.info("espejo SAE · cobranza: %s", r["cobranza"])
+            if r.get("claves"):
+                log.info("espejo SAE · catálogo de artículos: %s", r["claves"])
             for e in (r.get("errores") or [])[:3]:
                 log.warning("espejo SAE: %s", e)
         except Exception as e:

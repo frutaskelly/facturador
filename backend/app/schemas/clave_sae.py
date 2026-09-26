@@ -1,5 +1,6 @@
-"""Depósito del catálogo de claves de SAE (espejo de INVE##)."""
-from typing import List, Optional
+"""El catálogo de claves de SAE (espejo de INVE##): su depósito y su búsqueda."""
+import uuid
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -30,3 +31,27 @@ class ClavesSaeResult(BaseModel):
     actualizadas: int
     eliminadas: int
     total: int
+
+
+class ClaveSaeEnEmpresa(BaseModel):
+    """Cómo está una clave en UNA empresa de SAE, según el espejo."""
+    activa: bool
+    descripcion: Optional[str] = None
+
+
+class ClaveSaeBuscadaOut(BaseModel):
+    """Una clave de SAE con todas las empresas donde existe y el producto del
+    Facturador que la lleva (si alguno).
+
+    Es la respuesta de `GET /productos/claves-sae`, la búsqueda con la que el
+    bot decide si algo se da de ALTA (no existe en ninguna) o se CAMBIA (existe,
+    y entonces `empresas` son justo las que hay que mandar en el cambio).
+    """
+    clave: str
+    # La de la primera empresa donde está activa; si no hay ninguna activa, la
+    # primera que tenga descripción.
+    descripcion: Optional[str] = None
+    # Sólo las empresas donde la clave existe: {"02": {"activa": true, ...}}.
+    empresas: Dict[str, ClaveSaeEnEmpresa] = Field(default_factory=dict)
+    producto_id: Optional[uuid.UUID] = None
+    producto_nombre: Optional[str] = None
