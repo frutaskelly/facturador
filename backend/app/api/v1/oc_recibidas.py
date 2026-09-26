@@ -726,12 +726,20 @@ def _gemela_remisionada(db: Session, oc: OCRecibida) -> Optional[str]:
     bandeja dispara exactamente en esos tres casos. No descarta nada —eso lo
     decide una persona—, solo impide que el camino AUTOMÁTICO genere la segunda.
     Una remisión cancelada no cuenta: ahí la nueva sí hace falta.
+
+    MISMO FOLIO Y FECHA NO SIEMPRE ES LA MISMA ENTREGA (26-sep-2026). Las tres
+    CE-38CER que frenó al estrenarse venían de «PEDIDO KELLY SEMANA 39.xlsx»
+    (43/23/22 partidas) y las remisiones, de «PEDIDO CERESO S.38» (23/24/23):
+    eran la semana 39 con fechas de la 38 puestas por el bot. El motivo decía
+    «descártala» y se descartaron. Sigue frenando igual, pero compara el
+    contenido con `_firma_entrega`: idéntico, es el reenvío y se descarta;
+    distinto, es otro pedido mal fechado y el motivo lo dice.
     """
     folio = (oc.folio_externo or "").strip().upper()
     if not folio or oc.fecha_entrega is None or oc.cliente_id is None:
         return None
-    fila = (
-        db.query(OCRecibida.origen_externo, Remision.folio_interno)
+    filas = (
+        db.query(OCRecibida.origen_externo, OCRecibida.payload, Remision.folio_interno)
         .join(Remision, Remision.id == OCRecibida.remision_id)
         .filter(
             OCRecibida.tenant_id == oc.tenant_id,
@@ -743,13 +751,32 @@ def _gemela_remisionada(db: Session, oc: OCRecibida) -> Optional[str]:
             Remision.estado != "CANCELADA",
         )
         .order_by(Remision.created_at)
-        .first()
+        .all()
     )
-    if fila is None:
+    if not filas:
         return None
-    origen, remision = fila
-    return (f"esta entrega ya es la remisión {remision} (llegó antes como {origen}). "
-            "Si es la misma, descarta esta orden; si de verdad es otra, pásala a mano.")
+    lineas = (oc.payload or {}).get("lineas") or []
+    firma = _firma_entrega(lineas)
+    firmas = [_firma_entrega((p or {}).get("lineas")) for _, p, _ in filas]
+    # Si alguna de las gemelas trae exactamente lo mismo, ésa es la entrega.
+    # Sin contenido de un lado no hay con qué comparar: se trata como la misma,
+    # que es lo que decía el motivo antes de mirar el contenido.
+    igual = next((i for i, f in enumerate(firmas) if f == firma), None)
+    if igual is None and (not firma or not all(firmas)):
+        igual = 0
+    if igual is not None:
+        origen, _, remision = filas[igual]
+        return (f"esta entrega ya es la remisión {remision} (llegó antes como {origen}). "
+                "Si es la misma, descarta esta orden; si de verdad es otra, pásala a mano.")
+    origen, payload_gemela, remision = filas[0]
+    n, m = len(lineas), len((payload_gemela or {}).get("lineas") or [])
+    cuantas = (f"{n} vs {m} partidas" if n != m
+               else f"{n} partida{'s' if n != 1 else ''} cada una, "
+                    "con otros productos o cantidades")
+    return (f"mismo folio y fecha que la remisión {remision} (llegó como {origen}) "
+            f"pero con otro contenido ({cuantas}): probablemente es otro pedido con "
+            "la fecha mal puesta. No la descartes: pásala a mano y corrige la fecha "
+            "y el folio en la remisión.")
 
 
 def _intentar_remision_auto(db: Session, ctx: AuthContext, oc: OCRecibida) -> bool:
