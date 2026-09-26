@@ -52,9 +52,13 @@ class ListaPrecios(Base, TimestampMixin, SoftDeleteMixin):
     # La lista base del negocio (la usan los clientes sin lista propia). La
     # resolución de precios la prefiere sobre la convención codigo='UNICO'.
     es_default = Column(Boolean, nullable=False, server_default="false")
-    # Espejo de SAE: de qué lista de Aspel se alimenta esta lista — empresa
-    # ("02" Pachuca, "03" Tabasco) y CVE_PRECIO de PRECIO_X_PROD. Ambas en
-    # NULL = lista manual: el conector no la toca.
+    # VESTIGIO del espejo de precios SAE (empresa de Aspel + CVE_PRECIO de
+    # PRECIO_X_PROD). Desde el 26-sep-2026 las listas de SAE ya no se usan: el
+    # precio sale sólo del Facturador, no hay espejo en ninguna dirección y el
+    # API ya no lee ni escribe estas columnas (las 7 listas que las llenaban se
+    # desvincularon a propósito el 20-sep).
+    # Siguen aquí sólo porque borrarlas es una migración que necesita el OK
+    # del dueño; nada nuevo debe apoyarse en ellas.
     sae_empresa = Column(String(4))
     sae_lista = Column(SmallInteger)
 

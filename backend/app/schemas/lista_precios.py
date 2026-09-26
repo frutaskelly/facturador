@@ -19,22 +19,19 @@ class ListaPreciosBase(BaseModel):
     moneda: str = Field(default="MXN", max_length=3)
     notas: Optional[str] = None
     es_default: bool = False
-    # Espejo de SAE: empresa de Aspel ("02", "03") + número de lista
-    # (CVE_PRECIO). Ambos o ninguno — el conector solo escribe en listas que
-    # declaran su origen completo.
-    sae_empresa: Optional[str] = Field(default=None, max_length=4)
-    sae_lista: Optional[int] = Field(default=None, ge=1, le=10)
+    # Sin `sae_empresa`/`sae_lista` a propósito (26-sep-2026, decisión del
+    # dueño): las listas de precios de SAE ya no se usan y el precio sale SOLO
+    # del Facturador. Quitarlos del schema es lo que impide volver a ligar una
+    # lista a SAE: pydantic ignora los campos que no declara, así que un cliente
+    # viejo que todavía los mande (el front en caché manda `null`) guarda bien
+    # y no liga nada. Se ignoran en vez de rechazarse (extra="forbid") para no
+    # romperle el «Guardar» a quien no ha recargado la página. Las columnas
+    # siguen en la BD, en NULL, hasta que el dueño autorice la migración que
+    # las borre.
 
 
 class ListaPreciosCreate(ListaPreciosBase):
-    @model_validator(mode="after")
-    def _vinculo_sae_completo(self):
-        if (self.sae_empresa is None) != (self.sae_lista is None):
-            raise ValueError(
-                "El vínculo con SAE lleva empresa Y número de lista; "
-                "deja ambos vacíos para una lista manual."
-            )
-        return self
+    pass
 
 
 class ListaPreciosUpdate(BaseModel):
@@ -46,11 +43,13 @@ class ListaPreciosUpdate(BaseModel):
     moneda: Optional[str] = Field(default=None, max_length=3)
     notas: Optional[str] = None
     es_default: Optional[bool] = None
-    sae_empresa: Optional[str] = Field(default=None, max_length=4)
-    sae_lista: Optional[int] = Field(default=None, ge=1, le=10)
+    # Tampoco aquí van `sae_empresa`/`sae_lista` (26-sep-2026): ver arriba.
 
 
 class ListaPreciosOut(ORMModel, ListaPreciosBase):
+    # La salida tampoco los expone (26-sep-2026): el único que los leía era la
+    # columna «SAE» de /listas-precios, que se quitó, y enseñar un vínculo que
+    # nadie puede escribir ni usar sólo invita a volver a construir encima.
     id: uuid.UUID
     tenant_id: uuid.UUID
     created_at: datetime
@@ -105,40 +104,6 @@ class PrecioBulkResult(BaseModel):
     created: int
     updated: int
     skipped: int
-
-
-# ─── espejo de precios SAE (lo usa el conector, no la UI) ────────────────────
-class ListaVinculadaOut(BaseModel):
-    """Una lista que declara su origen en SAE — lo único que el conector
-    necesita para saber qué consultar en PRECIO_X_PROD."""
-    id: uuid.UUID
-    codigo: str
-    nombre: str
-    sae_empresa: str
-    sae_lista: int
-
-
-class EspejoPrecioItem(BaseModel):
-    clave: str = Field(min_length=1, max_length=60)  # CVE_ART tal cual (RTRIM)
-    precio: Decimal = Field(ge=0)
-    unidad: Optional[str] = Field(default=None, max_length=20)  # UNI_MED de INVE
-
-
-class EspejoPreciosIn(BaseModel):
-    lista_id: uuid.UUID
-    precios: List[EspejoPrecioItem] = Field(max_length=10000)
-
-
-class EspejoPreciosResult(BaseModel):
-    recibidos: int
-    creados: int
-    actualizados: int
-    sin_cambio: int
-    # Renglones que NO se escribieron y por qué — el conector los reporta para
-    # que la corrida deje rastro de lo que falta cruzar, no para fallar.
-    en_cero: int
-    sin_cruce: List[str]
-    sin_presentacion: List[str]
 
 
 # ─── Asignación de la lista (wizard de importación / administración) ─────────

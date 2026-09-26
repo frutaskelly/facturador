@@ -3,12 +3,12 @@
 /**
  * «Sincronizar SAE» — el botón de /facturas y /remisiones.
  *
- * El backend no ve SAE: el botón deja una SOLICITUD y el conector (que corre
- * en la Mac junto a SAE) la recoge en su siguiente vuelta, corre el espejo y
- * reporta. Por eso esto no es un spinner de 2 segundos: mientras la solicitud
- * viva, aquí se sondea cada 5 s y al terminar se recarga la lista de la
- * página. La fecha de «SAE actualizado» sale de la última corrida reportada —
- * incluidas las automáticas de cada 30 min, sin que nadie presione nada.
+ * El botón deja una SOLICITUD y el reloj del espejo del Facturador (desde el
+ * 24-sep-2026; antes era el conector del bot) la recoge en su siguiente vuelta,
+ * corre el espejo completo y reporta. Por eso esto no es un spinner de 2
+ * segundos: mientras la solicitud viva, aquí se sondea cada 5 s y al terminar se
+ * recarga la lista de la página. La fecha de «SAE actualizado» sale de la última
+ * corrida reportada — incluidas las automáticas, sin que nadie presione nada.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
@@ -23,19 +23,23 @@ type SyncRun = {
   estado: "PENDIENTE" | "EN_CURSO" | "OK" | "ERROR";
   origen: "MANUAL" | "AUTOMATICA";
   terminada_at?: string | null;
+  // Lo que reporta el reloj del espejo del Facturador (espejo_sae._reportar)
+  // desde el 24-sep-2026: facturas nuevas y actualizadas. Ya no hay precios que
+  // sincronizar (26-sep-2026: las listas de SAE no se usan; el precio es del
+  // Facturador). `enviadas` era la llave del conector del bot, que ya no reporta.
   resultado?: {
+    nuevas?: number;
+    actualizadas?: number;
     enviadas?: number;
-    canceladas?: number;
     errores?: string[];
-    // La corrida también refresca las listas de precios vinculadas a SAE.
-    precios?: { creados?: number; actualizados?: number; sin_cruce?: number } | null;
   } | null;
 };
 type SyncEstado = { ultima: SyncRun | null; pendiente: SyncRun | null };
 
 const POLL_MS = 5_000;
-// El conector recoge solicitudes cada minuto; si en 15 min nadie reportó,
-// algo anda mal (bot caído) y seguir sondeando solo gasta — se avisa y se para.
+// El reloj del espejo del Facturador recoge la solicitud en su siguiente vuelta
+// (cada 30 s); si en 15 min nadie reportó, algo anda mal (el reloj no corre o SAE
+// no contesta) y seguir sondeando solo gasta — se avisa y se para.
 const MAX_POLL_MS = 15 * 60_000;
 
 export function SincronizarSae({ onSynced }: { onSynced?: () => void }) {
@@ -67,11 +71,11 @@ export function SincronizarSae({ onSynced }: { onSynced?: () => void }) {
         // Terminó una solicitud que este componente estaba esperando.
         const r = est.ultima?.resultado;
         if (est.ultima?.estado === "OK") {
-          const p = r?.precios;
-          const precios = p && ((p.creados ?? 0) + (p.actualizados ?? 0)) > 0
-            ? ` · precios: ${p.creados ?? 0} nuevo(s), ${p.actualizados ?? 0} actualizado(s)`
-            : "";
-          toast.success(`SAE sincronizado — ${r?.enviadas ?? 0} factura(s) actualizadas${precios}`);
+          // Antes se leía `enviadas`, que el reloj del Facturador no manda: el
+          // aviso decía «0 factura(s)» aunque hubiera entrado todo (24 al 26-sep).
+          const nuevas = r?.nuevas ?? r?.enviadas ?? 0;
+          const actualizadas = r?.actualizadas ?? 0;
+          toast.success(`SAE sincronizado — ${nuevas} factura(s) nueva(s), ${actualizadas} actualizada(s)`);
         } else if (est.ultima?.estado === "ERROR") {
           toast.error(`La sincronización con SAE terminó con errores${r?.errores?.length ? `: ${r.errores[0]}` : ""}`);
         }
@@ -81,7 +85,7 @@ export function SincronizarSae({ onSynced }: { onSynced?: () => void }) {
     }
     if (Date.now() - desde.current > MAX_POLL_MS) {
       detener();
-      toast.error("SAE no ha respondido a la solicitud — revisa que el conector esté corriendo");
+      toast.error("SAE no ha respondido a la solicitud — el reloj del espejo del Facturador no la tomó o SAE no contesta");
       return;
     }
     timer.current = setTimeout(() => void sondear(false), POLL_MS);

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, FileText, ListPlus, Pencil, Plus, Tag, Trash2, Upload } from "lucide-react";
 
 import { NuevaPresentacionDialog } from "@/components/NuevaPresentacionDialog";
-import { SincronizarSae } from "@/components/SincronizarSae";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -69,7 +68,7 @@ export default function ListasPreciosPage() {
   );
 
   // ── editor de lista ──
-  const [listaForm, setListaForm] = useState<{ id?: string; codigo: string; nombre: string; status: string; es_default: boolean; copiarDe: string; saeEmpresa: string; saeLista: string } | null>(null);
+  const [listaForm, setListaForm] = useState<{ id?: string; codigo: string; nombre: string; status: string; es_default: boolean; copiarDe: string } | null>(null);
 
   async function saveLista() {
     if (!listaForm) return;
@@ -77,15 +76,10 @@ export default function ListasPreciosPage() {
       toast.error("Código y nombre son obligatorios");
       return;
     }
-    // El vínculo con SAE va completo o no va: empresa Y número de lista.
-    if (!listaForm.saeEmpresa.trim() !== !listaForm.saeLista.trim()) {
-      toast.error("El vínculo con SAE lleva empresa y número de lista; deja ambos vacíos para una lista manual");
-      return;
-    }
+    // Sin vínculo con SAE (26-sep-2026): las listas de SAE ya no se usan y el
+    // precio sale sólo del Facturador; el API ya no acepta sae_empresa/sae_lista.
     const body = { codigo: listaForm.codigo.trim(), nombre: listaForm.nombre.trim(),
-                   status: listaForm.status, es_default: listaForm.es_default,
-                   sae_empresa: listaForm.saeEmpresa.trim() || null,
-                   sae_lista: listaForm.saeLista.trim() ? Number(listaForm.saeLista) : null };
+                   status: listaForm.status, es_default: listaForm.es_default };
     try {
       if (listaForm.id) {
         await patch(`/api/v1/listas-precios/${listaForm.id}`, body);
@@ -321,12 +315,6 @@ export default function ListasPreciosPage() {
     { header: "Nombre", truncate: true, cell: (l) => <span title={l.nombre}>{l.nombre}</span> },
     { header: "Estado", cell: (l) => <Badge tone={l.status === "ACTIVO" ? "success" : "muted"}>{l.status}</Badge> },
     { header: "Base", cell: (l) => (l.es_default ? <Badge tone="accent">★ Base</Badge> : <span className="text-muted">—</span>) },
-    {
-      header: "SAE",
-      cell: (l) => (l.sae_empresa && l.sae_lista != null
-        ? <span title={`Se actualiza desde SAE: empresa ${l.sae_empresa}, lista ${l.sae_lista}`}><Badge tone="muted">{`${l.sae_empresa} · L${l.sae_lista}`}</Badge></span>
-        : <span className="text-muted">—</span>),
-    },
     { header: "Moneda", cell: (l) => <span className="text-muted">{l.moneda}</span> },
     {
       header: "",
@@ -338,7 +326,7 @@ export default function ListasPreciosPage() {
           </Button>
           {canWrite && (
             <button
-              onClick={(e) => { e.stopPropagation(); setListaForm({ id: l.id, codigo: l.codigo, nombre: l.nombre, status: l.status, es_default: !!l.es_default, copiarDe: "", saeEmpresa: l.sae_empresa ?? "", saeLista: l.sae_lista != null ? String(l.sae_lista) : "" }); }}
+              onClick={(e) => { e.stopPropagation(); setListaForm({ id: l.id, codigo: l.codigo, nombre: l.nombre, status: l.status, es_default: !!l.es_default, copiarDe: "" }); }}
               className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground" aria-label="Editar">
               <Pencil size={16} />
             </button>
@@ -379,11 +367,11 @@ export default function ListasPreciosPage() {
         subtitle="Niveles de venta (único, menudeo, mayoreo…) con precios por presentación y volumen."
         actions={
           <>
-            {/* La misma solicitud del espejo de /facturas: el conector, además
-                de las facturas, refresca los precios de las listas vinculadas. */}
-            <SincronizarSae onSynced={() => { listasRes.reload(); if (activeLista) void loadPrecios(activeLista.id); }} />
+            {/* Sin «Sincronizar SAE» aquí (26-sep-2026): las listas de precios de
+                SAE ya no se usan; los precios se capturan sólo en el Facturador.
+                El botón sigue en /facturas y /remisiones, donde espeja facturas. */}
             {canWrite && (
-              <Button onClick={() => setListaForm({ codigo: "", nombre: "", status: "ACTIVO", es_default: false, copiarDe: "", saeEmpresa: "", saeLista: "" })}>
+              <Button onClick={() => setListaForm({ codigo: "", nombre: "", status: "ACTIVO", es_default: false, copiarDe: "" })}>
                 <Plus size={16} /> Nueva lista de precios
               </Button>
             )}
@@ -438,23 +426,6 @@ export default function ListasPreciosPage() {
               <Switch
                 checked={listaForm.es_default}
                 onChange={(v) => setListaForm({ ...listaForm, es_default: v })}
-              />
-            </Field>
-            {/* El vínculo con SAE: de qué lista de Aspel se alimenta esta lista
-                cuando se presiona «Sincronizar SAE». Vacío = lista manual. */}
-            <Field label="Empresa SAE" hint="La empresa de Aspel: 02 Pachuca, 03 Tabasco. Vacío = lista manual.">
-              <Input
-                value={listaForm.saeEmpresa}
-                placeholder="02"
-                maxLength={4}
-                onChange={(e) => setListaForm({ ...listaForm, saeEmpresa: e.target.value.replace(/[^0-9]/g, "") })}
-              />
-            </Field>
-            <Field label="Lista SAE (número)" hint="El número de lista de precios en SAE (1–10).">
-              <Input
-                type="number" min="1" max="10"
-                value={listaForm.saeLista}
-                onChange={(e) => setListaForm({ ...listaForm, saeLista: e.target.value })}
               />
             </Field>
             {!listaForm.id && (

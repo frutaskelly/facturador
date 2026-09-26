@@ -792,6 +792,64 @@ def test_en_curso_reciente_sobrevive_al_corte_de_pendiente(client, env, auth_as,
     assert est["pendiente"] is not None and est["pendiente"]["id"] == sol["id"]
 
 
+def test_sincronizar_sae_ya_no_se_abre_con_el_menu_de_listas(client, env, auth_as):
+    """26-sep-2026: el botón «Sincronizar SAE» salió de /listas-precios (las
+    listas de SAE ya no se usan), así que `menu:listas_precios` dejó de abrir
+    el endpoint. Quien sólo captura precios no ve el botón en ninguna pantalla
+    y tampoco debe poder encolar la pasada completa del espejo por el API. Un
+    rol con `menu:remisiones` sigue pasando: ahí el botón sí vive."""
+    from app.models import EspejoSync, RolePermission
+
+    suffix = uuid.uuid4().hex[:8]
+    db = SessionLocal()
+    creados = []   # (rol, usuario, membership) para limpiar en orden
+    try:
+        quienes = {}
+        for nombre, perms in (("SOLO-LISTAS", ("menu:listas_precios",)),
+                              ("SOLO-REMISIONES", ("menu:remisiones",))):
+            rol = Role(tenant_id=env["tenant"], nombre=f"{nombre}-{suffix}",
+                       descripcion=nombre.lower())
+            db.add(rol); db.flush()
+            for pid in perms:
+                db.add(RolePermission(role_id=rol.id, permission_id=pid))
+            u = User(email=f"{nombre.lower()}-{suffix}@t.test",
+                     auth_user_id=f"sub-{nombre.lower()}-{suffix}", full_name=nombre)
+            db.add(u); db.flush()
+            m = Membership(tenant_id=env["tenant"], user_id=u.id, role_id=rol.id)
+            db.add(m); db.flush()
+            creados.append((rol.id, u.id, m.id))
+            quienes[nombre] = {"sub": u.auth_user_id, "email": u.email,
+                               "tenant_id": env["tenant"]}
+        db.commit()
+
+        listas = quienes["SOLO-LISTAS"]
+        auth_as(listas)
+        r = client.post("/api/v1/facturas/espejo/sync", headers=_hdr(listas))
+        assert r.status_code == 403, r.text
+        assert "menu:listas_precios" not in r.json()["detail"], \
+            "el 403 no debe seguir ofreciendo el menú de listas como salida"
+        assert client.get("/api/v1/facturas/espejo/sync",
+                          headers=_hdr(listas)).status_code == 403
+        with SessionLocal() as s:
+            assert s.query(EspejoSync).filter(
+                EspejoSync.tenant_id == env["tenant"]).count() == 0, \
+                "el 403 no debe dejar ninguna solicitud en cola"
+
+        remi = quienes["SOLO-REMISIONES"]
+        auth_as(remi)
+        ok = client.post("/api/v1/facturas/espejo/sync", headers=_hdr(remi))
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["estado"] == "PENDIENTE"
+    finally:
+        db.rollback()
+        for rol_id, uid, mid in creados:
+            db.query(Membership).filter(Membership.id == mid).delete()
+            db.query(User).filter(User.id == uid).delete()
+            db.query(RolePermission).filter(RolePermission.role_id == rol_id).delete()
+            db.query(Role).filter(Role.id == rol_id).delete()
+        db.commit(); db.close()
+
+
 def test_espejo_clientes_compartidos_solo_confirmados_en_espejo(client, env, auth_as, sin_sesion):
     """GET /espejo/clientes: la lista con la que el conector acota su pasada.
     Entra la equivalencia SAE CONFIRMADA de un cliente en espejo; quedan fuera

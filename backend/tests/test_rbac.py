@@ -318,14 +318,15 @@ def test_la_direccion_de_correo_no_se_destroza_al_normalizar():
 def test_la_conexion_deposita_precios_pero_no_administra_listas():
     """20-sep-2026: con las listas de precios viviendo en el Facturador, el chat
     necesita poder FIJAR un precio. Se le da un permiso acotado, no el de
-    administrar listas — que además abre re-vincularlas a SAE, o sea reencender
-    el espejo que se acaba de apagar."""
+    administrar listas. (Ese permiso también abría re-vincularlas a SAE; desde
+    el 26-sep-2026 el API ya no acepta el vínculo para nadie — ver
+    test_listas_precios_sin_sae.py.)"""
     from app.core.rbac import PERMISOS_CONEXION
 
     assert "precio:depositar" in PERMISOS_CONEXION
     assert "lista_precios:gestionar" not in PERMISOS_CONEXION, (
-        "con este permiso la clave del bot podría crear listas, asignarlas a "
-        "proyectos y reescribir sae_empresa/sae_lista"
+        "con este permiso la clave del bot podría crear, copiar, importar "
+        "listas y asignarlas a proyectos"
     )
 
 
