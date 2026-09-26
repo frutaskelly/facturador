@@ -876,6 +876,8 @@ export type OCRecibida = {
   canal: "WHATSAPP" | "EMAIL" | "MANUAL" | "API";
   origen_externo: string;
   folio_externo?: string | null;
+  /** La vigente (YYYY-MM-DD): la del documento o la que corrigió una persona. */
+  fecha_entrega?: string | null;
   remitente?: string | null;
   archivo_nombre?: string | null;
   archivo_url?: string | null;

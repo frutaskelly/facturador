@@ -4,8 +4,9 @@
 // remisión solas. Ya no viven en una franja aparte: son filas de la misma
 // tabla de remisiones, con estado REVISAR y el motivo a la vista.
 //
-// Aquí queda lo que esas filas necesitan —la lista, las acciones y los dos
-// modales (resolver y descartar)— para que la pantalla solo las intercale.
+// Aquí queda lo que esas filas necesitan —la lista, las acciones y los tres
+// modales (resolver, corregir fecha y folio, descartar)— para que la pantalla
+// solo las intercale.
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
@@ -42,6 +43,8 @@ export type OrdenesPorResolver = {
   procesarTodo: () => Promise<void>;
   /** Pasarla a remisiones; si le falta cliente o destino, abre el modal. */
   resolver: (oc: OCRecibida) => void;
+  /** Corregir la fecha de entrega y el folio que el bot leyó mal. */
+  corregir: (oc: OCRecibida) => void;
   descartar: (oc: OCRecibida) => void;
   recargar: () => void;
   /** Los diálogos. La pantalla los monta una vez, fuera de la tabla. */
@@ -82,6 +85,13 @@ export function useOrdenesPorResolver(
   const [sucursalSel, setSucursalSel] = useState("");
   const [aprender, setAprender] = useState(true);
   const [errorModal, setErrorModal] = useState<string | null>(null);
+
+  // Corregir la fecha y el folio. CE-38CER (26-sep-2026): el bot fechó en la
+  // semana 38 pedidos de la 39, y la única salida era descartarlas.
+  const [aCorregir, setACorregir] = useState<OCRecibida | null>(null);
+  const [folioEdit, setFolioEdit] = useState("");
+  const [fechaEdit, setFechaEdit] = useState("");
+  const [errorCorregir, setErrorCorregir] = useState<string | null>(null);
 
   // Descartar con motivo.
   const [aDescartar, setADescartar] = useState<OCRecibida | null>(null);
@@ -134,6 +144,55 @@ export function useOrdenesPorResolver(
     setMotivoDescarte("");
     setADescartar(oc);
   }, []);
+
+  const corregir = useCallback((oc: OCRecibida) => {
+    setFolioEdit(oc.folio_externo ?? "");
+    setFechaEdit(oc.fecha_entrega ?? "");
+    setErrorCorregir(null);
+    setACorregir(oc);
+  }, []);
+
+  // Solo viaja lo que cambió. Folio y fecha se corrigen, no se quitan: sin
+  // ellos el candado de gemelas ya no puede comparar.
+  const folioNuevo = folioEdit.trim();
+  const cambios: { folio_externo?: string; fecha_entrega?: string } = {};
+  if (aCorregir && folioNuevo && folioNuevo !== (aCorregir.folio_externo ?? "")) {
+    cambios.folio_externo = folioNuevo;
+  }
+  if (aCorregir && fechaEdit && fechaEdit !== (aCorregir.fecha_entrega ?? "")) {
+    cambios.fecha_entrega = fechaEdit;
+  }
+  const faltaDato = !!aCorregir && (
+    (!!aCorregir.folio_externo && !folioNuevo) || (!!aCorregir.fecha_entrega && !fechaEdit)
+  );
+  const hayCambios = Object.keys(cambios).length > 0;
+
+  async function guardarCorreccion(pasarDespues: boolean) {
+    if (!aCorregir || !hayCambios || faltaDato) return;
+    setOcupada(aCorregir.id);
+    setErrorCorregir(null);
+    let actualizada: OCRecibida;
+    try {
+      // `aprender` en false: una fecha no dice de quién es la orden.
+      actualizada = await apiFetch<OCRecibida>(`/api/v1/oc-recibidas/${aCorregir.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ ...cambios, aprender: false }),
+      });
+    } catch (e) {
+      setErrorCorregir(e instanceof ApiError ? e.message : "No se pudo corregir la orden.");
+      setOcupada(null);
+      return;
+    }
+    setOcupada(null);
+    setACorregir(null);
+    recargar();
+    // Pasarla es el mismo camino del botón de la fila: directo si ya tiene
+    // cliente y destino, y si no, el modal que los pide.
+    if (pasarDespues) resolver(actualizada);
+    else toast.success(actualizada.motivo
+      ? "Orden corregida. Sigue sin poder pasar sola: revisa el motivo."
+      : "Orden corregida.");
+  }
 
   async function resolverYPasar() {
     if (!aResolver) return;
@@ -274,6 +333,54 @@ export function useOrdenesPorResolver(
       </Modal>
 
       <Modal
+        open={aCorregir !== null}
+        onClose={() => setACorregir(null)}
+        title="Corregir fecha y folio"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setACorregir(null)}>Cancelar</Button>
+            <Button
+              variant="secondary"
+              onClick={() => void guardarCorreccion(false)}
+              disabled={!hayCambios || faltaDato || ocupada === aCorregir?.id}
+            >
+              Guardar
+            </Button>
+            <Button
+              onClick={() => void guardarCorreccion(true)}
+              disabled={!hayCambios || faltaDato || ocupada === aCorregir?.id}
+            >
+              Guardar y pasar a remisiones
+            </Button>
+          </>
+        }
+      >
+        {aCorregir ? (
+          <div className="space-y-3">
+            {aCorregir.motivo ? <p className="text-sm text-muted">{aCorregir.motivo}</p> : null}
+            {errorCorregir ? <Alert tone="danger">{errorCorregir}</Alert> : null}
+            <Field
+              label="Su pedido"
+              required={!!aCorregir.folio_externo}
+              hint="El folio lleva la semana y el día: si la fecha estaba mal, casi siempre el folio también."
+            >
+              <Input value={folioEdit} onChange={(e) => setFolioEdit(e.target.value)} />
+            </Field>
+            <Field
+              label="Fecha de entrega"
+              required={!!aCorregir.fecha_entrega}
+              hint="Es la que usará la remisión. Un reenvío del bot ya no la vuelve a cambiar."
+            >
+              <Input type="date" value={fechaEdit} onChange={(e) => setFechaEdit(e.target.value)} />
+            </Field>
+            {faltaDato ? (
+              <p className="text-xs text-danger">El folio y la fecha se corrigen, no se dejan vacíos.</p>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
         open={aDescartar !== null}
         onClose={() => setADescartar(null)}
         title="Descartar la orden"
@@ -301,5 +408,8 @@ export function useOrdenesPorResolver(
     </>
   );
 
-  return { ordenes, puedeResolver, ocupada, procesando, procesarTodo, resolver, descartar, recargar, modales };
+  return {
+    ordenes, puedeResolver, ocupada, procesando, procesarTodo, resolver, corregir, descartar,
+    recargar, modales,
+  };
 }
