@@ -2008,6 +2008,116 @@ def test_mismo_folio_y_fecha_con_otro_contenido_no_se_manda_a_descartar(
     assert vivas == 1
 
 
+def test_la_fecha_mal_leida_se_corrige_y_la_orden_sigue_su_camino(client, env, auth_as):
+    """El final del caso CE-38CER: frenada por «otro contenido», se le corrige
+    fecha y folio a la ORDEN, el motivo de gemela ya no aplica y se va, y el
+    lote la convierte con la fecha corregida."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    _externo(client, h, "UBICACION", "ehmo:JUAN GRAHAM", env["ehmo"], sucursal_id=env["suc"])
+    base = dict(folio_externo="CE-38CER-LUN", fecha_entrega="2026-09-21")
+    primera = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        perfil="ehmo", origen_externo="EHMO:ehmo:CE-38CER-LUN", **base)).json()
+    assert primera["remision_id"]
+
+    otra = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        perfil="ehmo-pachuca", origen_externo="EHMO:ehmo-pachuca:CE-38CER-LUN",
+        rfc=None, proyecto="HOSPITALES", forzar=True,
+        lineas=[{"descripcion": "JITOMATE SALADET", "cantidad": "30", "unidad": "KG"}],
+        **base)).json()
+    _externo(client, h, "PROYECTO", "ehmo:HOSPITALES", env["ehmo"])
+    client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=h)
+    frenada = client.get(f"/api/v1/oc-recibidas/{otra['id']}", headers=h).json()
+    assert "otro contenido" in frenada["motivo"]
+
+    r = client.patch(f"/api/v1/oc-recibidas/{otra['id']}", headers=h, json={
+        "fecha_entrega": "2026-09-28", "folio_externo": "CE-39CER-LUN"})
+    assert r.status_code == 200, r.text
+    corregida = r.json()
+    assert corregida["fecha_entrega"] == "2026-09-28"
+    assert corregida["folio_externo"] == "CE-39CER-LUN"
+    assert corregida["motivo"] is None
+    assert corregida["payload"]["fecha_entrega"] == "2026-09-21"   # lo que leyó el bot
+
+    r = client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=h).json()
+    assert r["creadas"] == 1
+    hecha = client.get(f"/api/v1/oc-recibidas/{otra['id']}", headers=h).json()
+    assert hecha["estado"] == "ASIGNADA" and hecha["remision_id"]
+    rem = client.get(f"/api/v1/remisiones/{hecha['remision_id']}", headers=h).json()
+    assert rem["fecha_entrega"] == "2026-09-28"
+    assert rem["su_pedido"] == "CE-39CER-LUN"
+
+
+def test_una_correccion_que_no_quita_el_choque_deja_la_orden_frenada(client, env, auth_as):
+    """Si tras la corrección sigue chocando —aquí se guarda el mismo folio—,
+    el motivo se recalcula en vez de borrarse y el lote no la convierte."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    _externo(client, h, "UBICACION", "ehmo:JUAN GRAHAM", env["ehmo"], sucursal_id=env["suc"])
+    base = dict(folio_externo="CE-38CER-LUN", fecha_entrega="2026-09-21")
+    primera = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        perfil="ehmo", origen_externo="EHMO:ehmo:CE-38CER-LUN", **base)).json()
+    otra = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        perfil="ehmo-pachuca", origen_externo="EHMO:ehmo-pachuca:CE-38CER-LUN",
+        rfc=None, proyecto="HOSPITALES", forzar=True, **base)).json()
+    _externo(client, h, "PROYECTO", "ehmo:HOSPITALES", env["ehmo"])
+    client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=h)
+
+    r = client.patch(f"/api/v1/oc-recibidas/{otra['id']}", headers=h,
+                     json={"folio_externo": "CE-38CER-LUN"}).json()
+    assert r["motivo"].startswith("No se pudo pasar a remisiones en automático")
+    assert primera["remision_folio"] in r["motivo"]
+    r = client.post("/api/v1/oc-recibidas/procesar-pendientes", headers=h).json()
+    assert r["creadas"] == 0
+
+
+def test_el_reenvio_del_bot_no_deshace_la_fecha_corregida(client, env, auth_as):
+    """La conciliación reenvía las pendientes cada 6 h con lo que leyó el bot.
+    Lo corregido a mano se queda; lo que nadie tocó sigue al documento."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    corregida = _oc(rfc=None, folio_externo="VH-39JUA-LUN", fecha_entrega="2026-09-21")
+    intacta = _oc(rfc=None, folio_externo="VH-39JUA-MAR", fecha_entrega="2026-09-22")
+    a = client.post("/api/v1/oc-recibidas", headers=h, json=corregida).json()
+    b = client.post("/api/v1/oc-recibidas", headers=h, json=intacta).json()
+    assert a["fecha_entrega"] == "2026-09-21" and a["estado"] == "PENDIENTE"
+
+    r = client.patch(f"/api/v1/oc-recibidas/{a['id']}", headers=h,
+                     json={"fecha_entrega": "2026-09-28", "folio_externo": "VH-40JUA-LUN"})
+    assert r.status_code == 200, r.text
+
+    otra_vez = client.post("/api/v1/oc-recibidas", headers=h, json=corregida).json()
+    assert otra_vez["id"] == a["id"]
+    assert otra_vez["fecha_entrega"] == "2026-09-28"
+    assert otra_vez["folio_externo"] == "VH-40JUA-LUN"
+
+    intacta["fecha_entrega"] = "2026-09-23"      # el bot releyó el documento
+    otra_vez = client.post("/api/v1/oc-recibidas", headers=h, json=intacta).json()
+    assert otra_vez["id"] == b["id"] and otra_vez["fecha_entrega"] == "2026-09-23"
+
+
+def test_corregir_la_fecha_no_aprende_ni_se_puede_quitar(client, env, auth_as):
+    """Una fecha no dice de quién es la orden: corregirla no confirma
+    equivalencias (con `aprender` en su default). Y sin fecha el candado de
+    gemelas no mira, así que no se puede dejar vacía."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="VH-39JUA-LUN", fecha_entrega="2026-09-21")).json()
+    assert oc["cliente_id"] == env["ehmo"] and oc["estado"] == "PENDIENTE"
+    antes = client.get("/api/v1/clientes/externos", headers=h).json()
+
+    r = client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                     json={"fecha_entrega": "2026-09-28"})
+    assert r.status_code == 200 and r.json()["fecha_entrega"] == "2026-09-28"
+    assert client.get("/api/v1/clientes/externos", headers=h).json() == antes
+
+    r = client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                     json={"fecha_entrega": None})
+    assert r.status_code == 422
+    sigue = client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()
+    assert sigue["fecha_entrega"] == "2026-09-28"
+
+
 def test_la_misma_entrega_se_vuelve_a_remisionar_si_la_anterior_se_cancelo(client, env, auth_as):
     """Una remisión cancelada no cuenta como la entrega hecha: ahí la nueva sí
     hace falta y el candado no estorba."""
