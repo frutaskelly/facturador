@@ -80,6 +80,41 @@ class Settings(BaseSettings):
     # facturas que espejar, pero el alta de productos escribe en ella y el
     # candado «esa clave ya existe en SAE» pregunta contra su catálogo.
     ESPEJO_SAE_CLAVES_EMPRESAS: str = "02,03,04,05"
+    # ─── Aspel SAE 9 (Firebird): un SEGUNDO SAE, sólo lectura ──────────────────
+    # Otro servidor (vmi2973834, por Tailscale), otro motor y empresas de más de
+    # un RFC (26-sep-2026). Se espeja lo mismo que del SAE 10 —facturas,
+    # cancelaciones, REP, notas de crédito y catálogo—, cada empresa en SU
+    # tenant y con su propio código (01 → 91) para que la 02 de un SAE no pise
+    # a la 02 del otro. Ver `services/sae_fuentes.py`. Sin host, usuario y
+    # contraseña no hay puerta y nada cambia. NUNCA se escribe en este SAE.
+    SAE_FB_HOST: str = ""
+    SAE_FB_PUERTO: int = 3050
+    SAE_FB_USER: str = ""
+    SAE_FB_PASSWORD: str = ""
+    # Cada empresa es su propio archivo; {nn} es el número de empresa de Aspel.
+    SAE_FB_RUTA: str = (r"C:\ASPEL\Empresas\Sistemas Aspel\SAE9.00"
+                        r"\Empresa{nn}\Datos\SAE90EMPRE{nn}.FDB")
+    # Las bases de Aspel SAE 9 declaran ISO8859_1 en todos sus campos de texto
+    # (esquema real de un SAE90EMPRE01.FDB). Leído como UTF-8 o sin charset, la
+    # Ñ truena o sale basura.
+    SAE_FB_CHARSET: str = "ISO8859_1"
+    # Firebird 2.5 sólo sabe la autenticación vieja (sin SRP).
+    SAE_FB_AUTH: str = "Legacy_Auth"
+    SAE_FB_TIMEOUT: int = 30
+    # Nada anterior a esta fecha se espeja («este año nada más», 26-sep-2026).
+    SAE_FB_DESDE: str = "2026-01-01"
+    # JSON: [{"numero": "01", "tenant": "<uuid>", "series": []}, …]. Sin series
+    # se descubren en FACTF desde SAE_FB_DESDE.
+    SAE_FB_EMPRESAS: str = ""
+    # Cada cuánto se consulta el SAE 9 (300 = cada 5 min). Va por Tailscale a
+    # otro país (~115 ms) y cada empresa es una conexión aparte: no cada 30 s
+    # como el SAE 10. El botón «Sincronizar SAE» lo fuerza igual.
+    # EN 0 ESTÁ APAGADO, y así nace: se enciende DESPUÉS de dar de alta los
+    # clientes (POST /sae/fuentes/{codigo}/clientes). Si el reloj corriera
+    # antes, las facturas de clientes sin equivalencia se saltarían y la marca
+    # de agua las dejaría atrás: sólo el cuadre diario del SAE 9 (200 por
+    # serie por día) o uno manual con `tope` alto las traería.
+    SAE_FB_CADA_SEG: int = 0
     # ─── Aspel SAE (escritura) ──────────────────────────────────────────────────
     # El Facturador como ÚNICO escritor de SAE (26-sep-2026): altas y cambios de
     # producto que antes aplicaba el bot. Usuario APARTE del de lectura, con

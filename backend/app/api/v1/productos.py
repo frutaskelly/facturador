@@ -1994,6 +1994,10 @@ def pedir_alta_sae(
 
     ya = (db.query(ClaveSae)
           .filter(ClaveSae.tenant_id == ctx.tenant_id,
+                  # Sólo el SAE 10, que es donde se escribe. El catálogo del
+                  # SAE 9 (91/92/94) vive en el mismo tenant desde el 26-sep-2026
+                  # y una clave que sólo existe allá no hace a esta alta repetida.
+                  ClaveSae.empresa.in_(_EMPRESAS_SAE),
                   func.upper(func.btrim(ClaveSae.clave)) == clave,
                   ClaveSae.activa.is_(True))
           .first())
@@ -2182,7 +2186,11 @@ def buscar_claves_sae(
 
     if not clave_de_busqueda(clave) and not (q or "").strip():
         raise HTTPException(status_code=422, detail="hace falta `clave` o `q`")
+    # Sin empresa, sólo las del SAE 10: con lo que contesta aquí el bot decide
+    # entre un alta y un cambio EN EL SAE 10, y una clave del SAE 9 (que nunca
+    # se escribe) lo mandaría a cambiar algo que en el 10 no existe.
     return buscar_claves(db, ctx.tenant_id, clave=clave, q=q, empresa=empresa,
+                         empresas=None if empresa else _EMPRESAS_SAE,
                          solo_activas=solo_activas, limit=limit)
 
 

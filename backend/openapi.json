@@ -41553,6 +41553,327 @@
     ]
    }
   },
+  "/api/v1/sae/fuentes": {
+   "get": {
+    "description": "Qué empresas de SAE alimentan a ESTE tenant, de qué servidor y con qué\ncódigo. Sin credenciales: sólo lo que hace falta para entender de dónde sale\ncada factura del espejo.",
+    "operationId": "fuentes_api_v1_sae_fuentes_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Fuentes",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
+  "/api/v1/sae/fuentes/{codigo}/clientes": {
+   "post": {
+    "description": "Da de alta (o liga por RFC) los clientes de una empresa del SAE 9 que\ntienen facturas desde su piso, con su equivalencia '91:CLAVE' y el espejo\nencendido. Sin esto el espejo del SAE 9 sale vacío: el depósito rechaza a\npropósito las facturas de un cliente que no conoce.\n\nPor omisión corre EN SECO. Nunca escribe en SAE.",
+    "operationId": "alta_clientes_sae_api_v1_sae_fuentes__codigo__clientes_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "codigo",
+      "required": true,
+      "schema": {
+       "title": "Codigo",
+       "type": "string"
+      }
+     },
+     {
+      "description": "En falso (por omisión) sólo devuelve el plan",
+      "in": "query",
+      "name": "aplicar",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "En falso (por omisión) sólo devuelve el plan",
+       "title": "Aplicar",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Alta Clientes Sae",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
+  "/api/v1/sae/fuentes/{codigo}/cuadre": {
+   "post": {
+    "description": "`/sae/espejo/cuadre` para una empresa del SAE 9. Repara de a `tope`: sus\nhuecos son facturas de clientes dados de alta después, no algo roto.",
+    "operationId": "cuadre_sae9_api_v1_sae_fuentes__codigo__cuadre_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "codigo",
+      "required": true,
+      "schema": {
+       "title": "Codigo",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Series"
+      }
+     },
+     {
+      "in": "query",
+      "name": "reparar",
+      "required": false,
+      "schema": {
+       "default": true,
+       "title": "Reparar",
+       "type": "boolean"
+      }
+     },
+     {
+      "description": "Cuántas faltantes se traen por llamada (las más viejas primero)",
+      "in": "query",
+      "name": "tope",
+      "required": false,
+      "schema": {
+       "default": 200,
+       "description": "Cuántas faltantes se traen por llamada (las más viejas primero)",
+       "maximum": 5000,
+       "minimum": 0,
+       "title": "Tope",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cuadre Sae9",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
+  "/api/v1/sae/fuentes/{codigo}/jalar": {
+   "post": {
+    "description": "`/sae/espejo/jalar` para una empresa del SAE 9: lo mismo, desde su\narchivo y con su piso de fecha.",
+    "operationId": "jalar_sae9_api_v1_sae_fuentes__codigo__jalar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "codigo",
+      "required": true,
+      "schema": {
+       "title": "Codigo",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Series separadas por coma; por omisión las suyas",
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Series separadas por coma; por omisión las suyas",
+       "title": "Series"
+      }
+     },
+     {
+      "in": "query",
+      "name": "dias",
+      "required": false,
+      "schema": {
+       "default": 3,
+       "maximum": 60,
+       "minimum": 0,
+       "title": "Dias",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Jalar Sae9",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
   "/api/v1/sae/partidas": {
    "get": {
     "description": "Las partidas de esas facturas: clave, cantidad, precio e importe.\n\nPor lote a propósito: con ochenta documentos, ir de a uno tarda minutos.",

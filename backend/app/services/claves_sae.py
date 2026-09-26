@@ -195,7 +195,8 @@ def clave_de_busqueda(valor: Optional[str]) -> str:
 
 def buscar_claves(db: Session, tenant_id, *, clave: Optional[str] = None,
                   q: Optional[str] = None, empresa: Optional[str] = None,
-                  solo_activas: bool = False, limit: int = 20) -> list[ClaveSaeBuscadaOut]:
+                  solo_activas: bool = False, limit: int = 20,
+                  empresas: Optional[tuple] = None) -> list[ClaveSaeBuscadaOut]:
     """Las claves del espejo que casan, agrupadas: una fila por clave con todas
     las empresas donde existe y el producto del Facturador que la lleva.
 
@@ -221,6 +222,8 @@ def buscar_claves(db: Session, tenant_id, *, clave: Optional[str] = None,
     base = db.query(ClaveSae).filter(ClaveSae.tenant_id == tenant_id)
     if empresa:
         base = base.filter(ClaveSae.empresa == empresa)
+    if empresas is not None:
+        base = base.filter(ClaveSae.empresa.in_(list(empresas)))
     if solo_activas:
         base = base.filter(ClaveSae.activa.is_(True))
 

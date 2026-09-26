@@ -365,3 +365,23 @@ def test_dos_productos_pueden_compartir_la_clave_sae(client, env, auth_as):
                      json={"clave_sae": "ajokg"})
     assert r.status_code == 200, r.text
     assert r.json()["clave_sae"] == "AJOKG"
+
+
+def test_una_clave_que_solo_existe_en_el_sae9_no_frena_el_alta_del_sae10(client, env, auth_as):
+    """El catálogo del SAE 9 (91/92/94) vive en el mismo tenant que el del 10
+    desde el 26-sep-2026. Al SAE 9 nunca se le escribe: una clave que sólo
+    existe allá no hace repetida un alta del SAE 10, y la búsqueda con la que
+    el bot decide entre alta y cambio no la ofrece (revisión del 26-sep)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    with SessionLocal() as s:
+        s.add(ClaveSae(tenant_id=env["tenant_id"], empresa="91", clave="AJOKG",
+                       descripcion="AJO DEL SAE 9", activa=True))
+        s.commit()
+    r = _pedir(client, h)
+    assert r.status_code in (200, 201), r.text
+    b = client.get("/api/v1/productos/claves-sae", params={"clave": "AJOKG"}, headers=h)
+    assert b.status_code == 200 and b.json() == []
+    # pidiéndola por su empresa sí aparece: el catálogo del SAE 9 no se esconde
+    b91 = client.get("/api/v1/productos/claves-sae",
+                     params={"clave": "AJOKG", "empresa": "91"}, headers=h)
+    assert b91.status_code == 200 and len(b91.json()) == 1
