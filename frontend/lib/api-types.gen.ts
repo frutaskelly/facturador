@@ -905,9 +905,10 @@ export interface paths {
          * Probar
          * @description Confirma que una clave sirve, sin escribir nada.
          *
-         *     Lo llama el bot al conectarse (para poder responder «listo» en el chat) y la
-         *     pantalla con el botón «Probar conexión». Pide un permiso que TODA conexión
-         *     tiene, así que sirve para ambas identidades.
+         *     Lo llama el bot al conectarse (para poder responder «listo» en el chat), Mini
+         *     Conta al guardar la clave, y la pantalla con el botón «Probar conexión».
+         *     Cualquier clave viva pasa —el alcance cambia por tipo y no todas tienen
+         *     `menu:remisiones`—; a una persona se le sigue pidiendo ese permiso.
          */
         get: operations["probar_api_v1_conexiones_probar_get"];
         put?: never;
@@ -2331,6 +2332,48 @@ export interface paths {
         put?: never;
         /** Cambiar Password */
         post: operations["cambiar_password_api_v1_memberships__membership_id__password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/sucursales": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sucursales
+         * @description Cada plaza del inquilino con las series de factura que le pertenecen.
+         */
+        get: operations["sucursales_api_v1_mini_conta_sucursales_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/ventas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ventas
+         * @description Las líneas de las facturas timbradas (ingreso, sin notas de crédito) de
+         *     las series de la plaza, con `desde`/`hasta` sobre la fecha de la factura
+         *     (hora de México), ambos inclusive.
+         */
+        get: operations["ventas_api_v1_mini_conta_ventas_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6001,7 +6044,7 @@ export interface components {
             clave: string;
             conexion: components["schemas"]["ConexionOut"];
             /** Instruccion Whatsapp */
-            instruccion_whatsapp: string;
+            instruccion_whatsapp?: string | null;
         };
         /**
          * ClaveSaeBuscadaOut
@@ -8873,6 +8916,54 @@ export interface components {
             codigo: string;
             /** Nombre */
             nombre: string;
+        };
+        /** LineaVentaOut */
+        LineaVentaOut: {
+            /** Cantidad */
+            cantidad: string;
+            /** Clave Unidad */
+            clave_unidad: string;
+            /** Descripcion */
+            descripcion: string;
+            /**
+             * Factura Id
+             * Format: uuid
+             */
+            factura_id: string;
+            /**
+             * Fecha Entrega
+             * Format: date
+             */
+            fecha_entrega: string;
+            /**
+             * Fecha Entrega Origen
+             * @enum {string}
+             */
+            fecha_entrega_origen: "remision" | "notas" | "factura";
+            /**
+             * Fecha Factura
+             * Format: date
+             */
+            fecha_factura: string;
+            /** Folio */
+            folio: number;
+            /** Importe */
+            importe: string;
+            /**
+             * Linea Id
+             * Format: uuid
+             */
+            linea_id: string;
+            /** Presentacion */
+            presentacion?: string | null;
+            /** Producto */
+            producto?: string | null;
+            /** Serie */
+            serie: string;
+            /** Sku */
+            sku?: string | null;
+            /** Uuid Cfdi */
+            uuid_cfdi?: string | null;
         };
         /** ListaAsignacionCreate */
         ListaAsignacionCreate: {
@@ -11810,6 +11901,13 @@ export interface components {
              */
             updated_at: string;
         };
+        /** SucursalSeriesOut */
+        SucursalSeriesOut: {
+            /** Nombre */
+            nombre: string;
+            /** Series */
+            series: string[];
+        };
         /** SucursalUpdate */
         SucursalUpdate: {
             /** Activo */
@@ -12179,6 +12277,25 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VentasOut */
+        VentasOut: {
+            /**
+             * Desde
+             * Format: date
+             */
+            desde: string;
+            /**
+             * Hasta
+             * Format: date
+             */
+            hasta: string;
+            /** Lineas */
+            lineas: components["schemas"]["LineaVentaOut"][];
+            /** Series */
+            series: string[];
+            /** Sucursal */
+            sucursal: string;
         };
         /**
          * VocabularioOut
@@ -17506,6 +17623,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MembershipOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sucursales_api_v1_mini_conta_sucursales_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SucursalSeriesOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ventas_api_v1_mini_conta_ventas_get: {
+        parameters: {
+            query: {
+                sucursal: string;
+                desde: string;
+                hasta: string;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VentasOut"];
                 };
             };
             /** @description Validation Error */

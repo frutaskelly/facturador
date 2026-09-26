@@ -1,6 +1,6 @@
 "use client";
 
-// Conexiones: enchufar Smart Supply sin repartir contraseñas.
+// Conexiones: enchufar Smart Supply (y Mini Conta) sin repartir contraseñas.
 //
 // La pantalla tiene dos vidas. Antes de conectar es un instructivo de un solo
 // botón. Después de conectar deja de ser configuración y pasa a responder una
@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
+  Calculator,
   Check,
   ChevronDown,
   ChevronRight,
@@ -49,16 +50,80 @@ import type {
 
 const WRITE = "membership:gestionar";
 
-const PUEDE = [
-  "Dejar órdenes de compra en la bandeja",
-  "Leer tu lista de clientes y productos para cruzarlas",
-  "Proponer a qué cliente pertenece cada orden",
-];
-const NO_PUEDE = [
-  "Timbrar ni cancelar una factura ante el SAT",
-  "Borrar clientes, productos ni remisiones",
-  "Ver tus sellos, tu contabilidad ni tus usuarios",
-];
+// Lo que cambia de un sistema a otro. El alcance real está en el backend
+// (core/rbac.py::PERMISOS_POR_TIPO); aquí solo se promete en español.
+type MetaConexion = {
+  descripcion: string;
+  sinConectar: string;
+  activa: string;          // la etiqueta verde cuando ya está en uso
+  esperando: string;
+  pasos: string[];
+  alConectar: string;      // el aviso cuando se pone en verde sola
+  desconectar: string;
+  regenerar: string;
+  puede: string[];
+  noPuede: string[];
+};
+
+const META: Record<string, MetaConexion> = {
+  SMART_SUPPLY: {
+    descripcion: "Órdenes de compra por WhatsApp",
+    sinConectar:
+      "Genera una clave y pégala en Smart Supply. A partir de ahí las órdenes que lleguen por WhatsApp aparecen solas en la bandeja.",
+    activa: "Recibiendo órdenes",
+    esperando: "Esperando a que la pegues en Smart Supply… esta pantalla se pone en verde sola.",
+    pasos: [
+      "Cópiala.",
+      "En el grupo interno de WhatsApp manda el mensaje de abajo.",
+      "El bot responde «listo», borra tu mensaje y esta pantalla se pone en verde sola.",
+    ],
+    alConectar: "Conectado — Smart Supply ya puede dejar órdenes.",
+    desconectar:
+      "La clave deja de servir en el momento. Las órdenes que ya están en la bandeja se quedan; las nuevas dejarán de llegar hasta que generes otra clave.",
+    regenerar:
+      "La clave actual deja de servir en el momento y hay que pegar la nueva en Smart Supply. Mientras no la pegues, las órdenes no van a llegar.",
+    puede: [
+      "Dejar órdenes de compra en la bandeja",
+      "Leer tu lista de clientes y productos para cruzarlas",
+      "Proponer a qué cliente pertenece cada orden",
+    ],
+    noPuede: [
+      "Timbrar ni cancelar una factura ante el SAT",
+      "Borrar clientes, productos ni remisiones",
+      "Ver tus sellos, tu contabilidad ni tus usuarios",
+    ],
+  },
+  MINI_CONTA: {
+    descripcion: "Contabilidad por sucursal: lee lo facturado",
+    sinConectar:
+      "Genera una clave y pégala en Mini Conta. Con ella lee las ventas facturadas de cada sucursal para cruzarlas contra sus compras.",
+    activa: "Leyendo ventas",
+    esperando: "Esperando a que Mini Conta la use por primera vez… esta pantalla se pone en verde sola.",
+    pasos: [
+      "Cópiala.",
+      "En Mini Conta, pégala donde pide la clave del Facturador y guarda.",
+      "En cuanto Mini Conta la use, esta pantalla se pone en verde sola.",
+    ],
+    alConectar: "Conectado — Mini Conta ya puede leer las ventas.",
+    desconectar:
+      "La clave deja de servir en el momento. Mini Conta deja de poder leer las ventas hasta que generes otra clave.",
+    regenerar:
+      "La clave actual deja de servir en el momento y hay que pegar la nueva en Mini Conta.",
+    puede: [
+      "Leer las líneas de las facturas timbradas de cada sucursal",
+      "Ver qué series pertenecen a cada sucursal",
+    ],
+    noPuede: [
+      "Crear, timbrar ni cancelar facturas",
+      "Dejar órdenes, tocar remisiones, clientes ni productos",
+      "Ver tus sellos, tus usuarios ni tus precios",
+    ],
+  },
+};
+
+function metaDe(tipo: string, nombre: string): MetaConexion {
+  return META[tipo] ?? { ...META.SMART_SUPPLY, descripcion: nombre, puede: [], noPuede: [] };
+}
 
 function haceCuanto(iso?: string | null): string {
   if (!iso) return "—";
@@ -94,7 +159,7 @@ export default function Page() {
   const [aRegenerar, setARegenerar] = useState<ConexionEstado | null>(null);
   const [refrescando, setRefrescando] = useState(false);
   // Para saber si la conexión acaba de ponerse en verde mientras mirabas.
-  const eraPendiente = useRef(false);
+  const eraPendiente = useRef<Set<string>>(new Set());
 
   const reload = useCallback(() => {
     setError(false);
@@ -103,13 +168,18 @@ export default function Page() {
         setEstados(cs);
         // El momento en que se pega la clave en WhatsApp: la pantalla se pone en
         // verde sola y se quita la clave de en medio, sin que nadie recargue.
-        if (eraPendiente.current && cs.some((c) => c.conexion?.estado === "ACTIVA")) {
-          setNueva(null);
-          toast.success("Conectado — Smart Supply ya puede dejar órdenes.");
+        for (const c of cs) {
+          if (eraPendiente.current.has(c.tipo) && c.conexion?.estado === "ACTIVA") {
+            setNueva((n) => (n?.conexion.tipo === c.tipo ? null : n));
+            toast.success(metaDe(c.tipo, c.nombre).alConectar);
+          }
         }
-        eraPendiente.current = cs.some((c) => c.conexion?.estado === "PENDIENTE");
+        eraPendiente.current = new Set(
+          cs.filter((c) => c.conexion?.estado === "PENDIENTE").map((c) => c.tipo)
+        );
 
-        if (cs.some((c) => c.conexion && c.conexion.estado !== "REVOCADA")) {
+        // Bandeja y grupos son de Smart Supply; Mini Conta solo lee.
+        if (cs.some((c) => c.tipo === "SMART_SUPPLY" && c.conexion && c.conexion.estado !== "REVOCADA")) {
           apiFetch<ActividadConexion[]>("/api/v1/conexiones/SMART_SUPPLY/actividad")
             .then(setActividad)
             .catch(() => setActividad([]));
@@ -270,7 +340,7 @@ export default function Page() {
     if (!c) return;
     try {
       await apiFetch(`/api/v1/conexiones/${c.id}/revocar`, { method: "POST" });
-      toast.success("Desconectado. Smart Supply dejó de poder escribir aquí.");
+      toast.success(`Desconectado. ${aDesconectar?.nombre ?? "El sistema"} dejó de poder entrar aquí.`);
       setADesconectar(null);
       setNueva(null);
       reload();
@@ -311,13 +381,15 @@ export default function Page() {
         const con = e.conexion;
         const conectado = !!con && con.estado !== "REVOCADA";
         const mostrandoClave = nueva !== null && nueva.conexion.tipo === e.tipo;
+        const meta = metaDe(e.tipo, e.nombre);
+        const esSmart = e.tipo === "SMART_SUPPLY";
 
         return (
           <Card key={e.tipo} className="mb-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-surface-2">
-                  <MessageCircle size={18} />
+                  {esSmart ? <MessageCircle size={18} /> : <Calculator size={18} />}
                 </div>
                 <div>
                   <h2 className="font-semibold">{e.nombre}</h2>
@@ -327,13 +399,13 @@ export default function Page() {
                           day: "numeric",
                           month: "long",
                         })} · clave …${con.clave_pista}`
-                      : "Órdenes de compra por WhatsApp"}
+                      : meta.descripcion}
                   </p>
                 </div>
               </div>
               {conectado && con ? (
                 con.estado === "ACTIVA" ? (
-                  <Badge tone="success">Recibiendo órdenes</Badge>
+                  <Badge tone="success">{meta.activa}</Badge>
                 ) : (
                   <Badge tone="warning">Falta pegar la clave</Badge>
                 )
@@ -362,15 +434,11 @@ export default function Page() {
 
                 <p className="mt-3 flex items-center gap-2 text-sm text-muted">
                   <RotateCw size={14} className="animate-spin" />
-                  Esperando a que la pegues en Smart Supply… esta pantalla se pone en verde sola.
+                  {meta.esperando}
                 </p>
 
                 <ol className="mt-4 space-y-2.5">
-                  {[
-                    "Cópiala.",
-                    "En el grupo interno de WhatsApp manda el mensaje de abajo.",
-                    "El bot responde «listo», borra tu mensaje y esta pantalla se pone en verde sola.",
-                  ].map((paso, i) => (
+                  {meta.pasos.map((paso, i) => (
                     <li key={i} className="flex items-start gap-3 text-sm">
                       <span className="mt-0.5 grid h-5 w-5 flex-shrink-0 place-items-center rounded-full border border-border bg-surface-2 text-[11px] font-semibold text-muted tabular-nums">
                         {i + 1}
@@ -380,12 +448,17 @@ export default function Page() {
                   ))}
                 </ol>
 
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface-2 px-4 py-3">
-                  <code className="break-all font-mono text-xs">{nueva.instruccion_whatsapp}</code>
-                  <Button variant="secondary" onClick={() => copiar(nueva.instruccion_whatsapp)}>
-                    <Copy size={15} /> Copiar mensaje
-                  </Button>
-                </div>
+                {nueva.instruccion_whatsapp ? (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface-2 px-4 py-3">
+                    <code className="break-all font-mono text-xs">{nueva.instruccion_whatsapp}</code>
+                    <Button
+                      variant="secondary"
+                      onClick={() => nueva.instruccion_whatsapp && copiar(nueva.instruccion_whatsapp)}
+                    >
+                      <Copy size={15} /> Copiar mensaje
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
@@ -394,10 +467,7 @@ export default function Page() {
               <div className="px-4 py-8 text-center">
                 <KeyRound size={44} className="mx-auto mb-4 text-muted opacity-50" />
                 <h3 className="font-semibold">Todavía no está conectado</h3>
-                <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
-                  Genera una clave y pégala en Smart Supply. A partir de ahí las órdenes que
-                  lleguen por WhatsApp aparecen solas en la bandeja.
-                </p>
+                <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">{meta.sinConectar}</p>
                 {canWrite ? (
                   <div className="mt-5">
                     <Button onClick={() => generar(e.tipo)} disabled={ocupado}>
@@ -428,6 +498,8 @@ export default function Page() {
                   </div>
                 ) : null}
 
+                {esSmart ? (
+                <>
                 <div className="mt-5 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
                   <div className="bg-surface px-4 py-3.5">
                     <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">
@@ -499,8 +571,21 @@ export default function Page() {
                     Conectado, pero todavía no ha llegado ninguna orden.
                   </p>
                 )}
+                </>
+                ) : (
+                  <div className="mt-5 overflow-hidden rounded-lg border border-border bg-surface px-4 py-3.5">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                      Última lectura
+                    </div>
+                    <div className="mt-0.5 text-2xl font-semibold tabular-nums">
+                      {haceCuanto(con?.ultimo_uso_at)}
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-4 flex flex-wrap gap-2">
+                  {esSmart ? (
+                  <>
                   <Link
                     href="/remisiones"
                     className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium hover:bg-surface-2"
@@ -510,6 +595,8 @@ export default function Page() {
                   <Button variant="secondary" onClick={probar} disabled={ocupado}>
                     <RefreshCw size={16} /> Probar conexión
                   </Button>
+                  </>
+                  ) : null}
                   {canWrite ? (
                     <>
                       <Button variant="secondary" onClick={() => setARegenerar(e)}>
@@ -531,7 +618,7 @@ export default function Page() {
                   <Check size={15} className="text-success" /> Sí puede
                 </h3>
                 <ul className="mt-2 space-y-1.5">
-                  {PUEDE.map((t) => (
+                  {meta.puede.map((t) => (
                     <li key={t} className="flex items-start gap-2 text-sm text-muted">
                       <Check size={14} className="mt-1 flex-shrink-0 text-success" />
                       {t}
@@ -544,7 +631,7 @@ export default function Page() {
                   <X size={15} className="text-danger" /> No puede
                 </h3>
                 <ul className="mt-2 space-y-1.5">
-                  {NO_PUEDE.map((t) => (
+                  {meta.noPuede.map((t) => (
                     <li key={t} className="flex items-start gap-2 text-sm text-muted">
                       <X size={14} className="mt-1 flex-shrink-0 text-danger" />
                       {t}
@@ -828,8 +915,8 @@ export default function Page() {
 
       <ConfirmDialog
         open={aDesconectar !== null}
-        title="Desconectar Smart Supply"
-        message="La clave deja de servir en el momento. Las órdenes que ya están en la bandeja se quedan; las nuevas dejarán de llegar hasta que generes otra clave."
+        title={`Desconectar ${aDesconectar?.nombre ?? ""}`}
+        message={aDesconectar ? metaDe(aDesconectar.tipo, aDesconectar.nombre).desconectar : ""}
         onClose={() => setADesconectar(null)}
         onConfirm={desconectar}
       />
@@ -837,7 +924,7 @@ export default function Page() {
       <ConfirmDialog
         open={aRegenerar !== null}
         title="Generar una clave nueva"
-        message="La clave actual deja de servir en el momento y hay que pegar la nueva en Smart Supply. Mientras no la pegues, las órdenes no van a llegar."
+        message={aRegenerar ? metaDe(aRegenerar.tipo, aRegenerar.nombre).regenerar : ""}
         onClose={() => setARegenerar(null)}
         onConfirm={() => aRegenerar && generar(aRegenerar.tipo)}
       />

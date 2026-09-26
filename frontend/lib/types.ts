@@ -968,7 +968,7 @@ export type ConexionEstado = {
 export type ClaveNueva = {
   clave: string;                // en claro; solo existe en memoria, una vez
   conexion: Conexion;
-  instruccion_whatsapp: string;
+  instruccion_whatsapp?: string | null;   // solo Smart Supply
 };
 
 export type ActividadConexion = {

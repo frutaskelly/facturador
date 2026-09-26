@@ -1,7 +1,7 @@
 """Conexiones — enchufar un sistema externo sin repartir contraseñas.
 
 La pantalla que sirve este router responde dos cosas y nada más: cómo conectar
-Smart Supply, y si está entrando lo que debe. Por eso el estado no devuelve
+Smart Supply (o Mini Conta), y si está entrando lo que debe. Por eso el estado no devuelve
 configuración sino ACTIVIDAD (última orden, cuántas hoy, cuántas sin resolver):
 una vez conectado, eso es lo único que alguien va a venir a mirar.
 
@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ...core.rbac import PERMISOS_CONEXION, AuthContext, get_tenant_db, require_permission
+from ...core.rbac import AuthContext, get_auth_context, get_tenant_db, require_permission
 from ...models import (
     Almacen,
     Cliente,
@@ -51,12 +51,17 @@ router = APIRouter(prefix="/conexiones", tags=["conexiones"])
 
 _GESTIONAR = "membership:gestionar"
 
-# Por ahora solo Smart Supply. El catálogo vive aquí para que la pantalla pueda
-# listar lo que se puede conectar sin conocer nada más.
+# El catálogo vive aquí para que la pantalla pueda listar lo que se puede
+# conectar sin conocer nada más. El ALCANCE de cada uno está en
+# core/rbac.py::PERMISOS_POR_TIPO.
 CATALOGO = {
     "SMART_SUPPLY": {
         "nombre": "Smart Supply",
         "descripcion": "Órdenes de compra por WhatsApp",
+    },
+    "MINI_CONTA": {
+        "nombre": "Mini Conta",
+        "descripcion": "Lee las ventas facturadas por sucursal",
     },
 }
 
@@ -88,6 +93,11 @@ def _estado(db: Session, tipo: str) -> ConexionEstadoOut:
         dias = (datetime.now(timezone.utc) - creada).days
         out.dias_desde_creacion = dias
         out.conviene_rotar = dias >= _DIAS_PARA_SUGERIR_ROTAR
+
+    if tipo != "SMART_SUPPLY":
+        # La actividad de la bandeja es de Smart Supply; Mini Conta solo lee,
+        # y lo que la pantalla muestra de ella es `conexion.ultimo_uso_at`.
+        return out
 
     desde = datetime.now(timezone.utc) - timedelta(hours=24)
     out.ordenes_hoy = (
@@ -153,7 +163,9 @@ def generar(
     return ClaveNuevaOut(
         clave=clave,
         conexion=ConexionOut.model_validate(con),
-        instruccion_whatsapp=f"smart supply: conectar facturador {clave}",
+        instruccion_whatsapp=(
+            f"smart supply: conectar facturador {clave}" if tipo == "SMART_SUPPLY" else None
+        ),
     )
 
 
@@ -204,14 +216,17 @@ def actividad(
 @router.get("/probar", response_model=PruebaOut)
 def probar(
     db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission("menu:remisiones")),
+    ctx: AuthContext = Depends(get_auth_context),
 ):
     """Confirma que una clave sirve, sin escribir nada.
 
-    Lo llama el bot al conectarse (para poder responder «listo» en el chat) y la
-    pantalla con el botón «Probar conexión». Pide un permiso que TODA conexión
-    tiene, así que sirve para ambas identidades.
+    Lo llama el bot al conectarse (para poder responder «listo» en el chat), Mini
+    Conta al guardar la clave, y la pantalla con el botón «Probar conexión».
+    Cualquier clave viva pasa —el alcance cambia por tipo y no todas tienen
+    `menu:remisiones`—; a una persona se le sigue pidiendo ese permiso.
     """
+    if ctx.conexion_id is None and not ctx.has("menu:remisiones"):
+        raise HTTPException(status_code=403, detail="Falta permiso: menu:remisiones")
     if ctx.cliente_scope:
         # Un usuario con candado por cliente (portal) no toca la conexión del bot.
         raise HTTPException(status_code=403, detail="Tu usuario no administra conexiones")
@@ -222,7 +237,7 @@ def probar(
             ok=True,
             mensaje="Clave válida. Las órdenes que mandes aparecerán en la bandeja.",
             tenant=t.legal_name if t else None,
-            permisos=sorted(PERMISOS_CONEXION),
+            permisos=sorted(ctx.permissions),
         )
     return PruebaOut(
         ok=True,
