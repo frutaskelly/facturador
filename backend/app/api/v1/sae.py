@@ -13,45 +13,20 @@ cola y su propio usuario (`services/sae_escritura.py`), nunca desde aquí.
 import threading
 import time
 from typing import Optional
-from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ...core.config import settings
-from ...core.rbac import AuthContext, get_auth_context, require_permission
+from ...core.rbac import AuthContext, require_duenio_de_sae, require_permission
 from ...core.rbac import get_tenant_db
 from ...schemas.sae import SaeCatalogosOut
 from ...services import espejo_sae, sae_lectura
 
 
-def _solo_el_duenio_de_sae(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
-    """El SAE que lee este router es UNO y es de un solo tenant.
-
-    La conexión (`SAE_SERVER`…) es global, del despliegue, no del tenant: sin
-    este candado, el OWNER de cualquier otro tenant —o quien se registre por
-    el signup público, que nace OWNER— leía en vivo las facturas y pedidos de
-    SAE ajenos, porque `require_permission` le deja pasar todo al OWNER
-    (hallazgo del 26-sep-2026). El permiso dice QUÉ puede hacer alguien en SU
-    tenant; de quién es SAE lo dice `ESPEJO_SAE_TENANT_ID`, el mismo tenant en
-    el que el reloj del espejo escribe.
-
-    Falla cerrado: sin `ESPEJO_SAE_TENANT_ID` (o con uno que no es UUID) nadie
-    pasa. Cuelga del router entero para que una ruta nueva no nazca abierta.
-    """
-    duenio = (settings.ESPEJO_SAE_TENANT_ID or "").strip()
-    try:
-        es_suyo = bool(duenio) and UUID(duenio) == UUID(str(ctx.tenant_id))
-    except ValueError:
-        es_suyo = False
-    if not es_suyo:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Esta empresa no tiene SAE conectado")
-    return ctx
-
-
+# El SAE que lee este router es UNO y es de un solo tenant: el candado cuelga
+# del router entero para que una ruta nueva no nazca abierta.
 router = APIRouter(prefix="/sae", tags=["sae"],
-                   dependencies=[Depends(_solo_el_duenio_de_sae)])
+                   dependencies=[Depends(require_duenio_de_sae)])
 
 _LEER = "factura:espejo"   # el mismo permiso con el que el bot ya lee el espejo
 
