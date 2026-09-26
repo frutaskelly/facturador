@@ -41268,14 +41268,14 @@
       }
      },
      {
-      "description": "Más faltantes que esto no se reparan solas (en el SAE 9 se reparan de a este tanto)",
+      "description": "Más faltantes que esto no se reparan solas",
       "in": "query",
       "name": "tope",
       "required": false,
       "schema": {
        "default": 25,
-       "description": "Más faltantes que esto no se reparan solas (en el SAE 9 se reparan de a este tanto)",
-       "maximum": 5000,
+       "description": "Más faltantes que esto no se reparan solas",
+       "maximum": 200,
        "minimum": 0,
        "title": "Tope",
        "type": "integer"
@@ -41675,6 +41675,200 @@
      }
     ],
     "summary": "Alta Clientes Sae",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
+  "/api/v1/sae/fuentes/{codigo}/cuadre": {
+   "post": {
+    "description": "`/sae/espejo/cuadre` para una empresa del SAE 9. Repara de a `tope`: sus\nhuecos son facturas de clientes dados de alta después, no algo roto.",
+    "operationId": "cuadre_sae9_api_v1_sae_fuentes__codigo__cuadre_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "codigo",
+      "required": true,
+      "schema": {
+       "title": "Codigo",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Series"
+      }
+     },
+     {
+      "in": "query",
+      "name": "reparar",
+      "required": false,
+      "schema": {
+       "default": true,
+       "title": "Reparar",
+       "type": "boolean"
+      }
+     },
+     {
+      "description": "Cuántas faltantes se traen por llamada (las más viejas primero)",
+      "in": "query",
+      "name": "tope",
+      "required": false,
+      "schema": {
+       "default": 200,
+       "description": "Cuántas faltantes se traen por llamada (las más viejas primero)",
+       "maximum": 5000,
+       "minimum": 0,
+       "title": "Tope",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cuadre Sae9",
+    "tags": [
+     "sae"
+    ]
+   }
+  },
+  "/api/v1/sae/fuentes/{codigo}/jalar": {
+   "post": {
+    "description": "`/sae/espejo/jalar` para una empresa del SAE 9: lo mismo, desde su\narchivo y con su piso de fecha.",
+    "operationId": "jalar_sae9_api_v1_sae_fuentes__codigo__jalar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "codigo",
+      "required": true,
+      "schema": {
+       "title": "Codigo",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Series separadas por coma; por omisión las suyas",
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Series separadas por coma; por omisión las suyas",
+       "title": "Series"
+      }
+     },
+     {
+      "in": "query",
+      "name": "dias",
+      "required": false,
+      "schema": {
+       "default": 3,
+       "maximum": 60,
+       "minimum": 0,
+       "title": "Dias",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Jalar Sae9",
     "tags": [
      "sae"
     ]

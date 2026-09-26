@@ -145,18 +145,6 @@ def partidas(
 _SERIES_POR_EMPRESA = sae_fuentes.SERIES_SAE10
 
 
-def _empresa_sae9(ctx: AuthContext, empresa: str):
-    """La empresa del SAE 9 con ese código, DEL TENANT DE QUIEN PREGUNTA, o
-    None si no es del SAE 9. Una empresa de otro tenant no existe para él."""
-    emp = sae_fuentes.empresa_de(ctx.tenant_id, empresa)
-    return emp if emp is not None and emp.servidor.es_firebird else None
-
-
-def _series_sae9(emp, series: Optional[str]) -> list[str]:
-    lista = [s.strip() for s in (series or "").split(",") if s.strip()]
-    return lista or list(emp.series) or espejo_sae.descubrir_series(emp.codigo, emp.desde)
-
-
 @router.post("/espejo/jalar")
 def jalar_espejo(
     empresa: str = Query(..., max_length=4),
@@ -174,9 +162,6 @@ def jalar_espejo(
     aunque corra seguido. Aparte se revisa una ventana corta por si algo se
     canceló, que es el cambio que la marca de agua no puede ver.
     """
-    emp9 = _empresa_sae9(ctx, empresa)
-    if emp9 is not None:
-        return _jalar_sae9(db, ctx, emp9, series, dias)
     if not sae_lectura.disponible():
         raise HTTPException(status_code=503, detail="el Facturador no tiene acceso a SAE")
     lista = [s.strip() for s in (series or "").split(",") if s.strip()]
@@ -192,37 +177,14 @@ def jalar_espejo(
         raise HTTPException(status_code=502, detail=f"la pasada del espejo falló: {type(e).__name__}: {e}")
 
 
-def _jalar_sae9(db: Session, ctx: AuthContext, emp, series: Optional[str], dias: int):
-    """`jalar` para una empresa del SAE 9: lo mismo, desde su archivo y con su piso."""
-    try:
-        with sae_lectura.en_empresa(emp):
-            if not sae_lectura.disponible():
-                raise HTTPException(status_code=503,
-                                    detail=f"el Facturador no tiene acceso al {emp.servidor.clave}")
-            lista = _series_sae9(emp, series)
-            if not lista:
-                raise HTTPException(status_code=422,
-                                    detail=f"la empresa {emp.codigo} no tiene facturas desde {emp.desde}")
-            return {"ok": True, "fuente": emp.etiqueta,
-                    **espejo_sae.sincronizar(db, ctx, emp.codigo, lista,
-                                             dias_cancelaciones=dias, desde=emp.desde)}
-    except HTTPException:
-        raise
-    except sae_lectura.SAENoDisponible as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"la pasada del espejo falló: {type(e).__name__}: {e}")
-
-
 @router.post("/espejo/cuadre")
 def cuadrar_espejo(
     empresa: str = Query(..., max_length=4),
     series: Optional[str] = Query(default=None),
     reparar: bool = Query(default=True,
                           description="Trae las que falten, hasta el tope"),
-    tope: int = Query(default=25, ge=0, le=5000,
-                      description="Más faltantes que esto no se reparan solas "
-                                  "(en el SAE 9 se reparan de a este tanto)"),
+    tope: int = Query(default=25, ge=0, le=200,
+                      description="Más faltantes que esto no se reparan solas"),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_LEER)),
 ):
@@ -234,22 +196,6 @@ def cuadrar_espejo(
     tope, porque si faltan trescientas eso no es un hueco, es que algo se
     rompió, y repararlo a escondidas taparía el problema.
     """
-    emp9 = _empresa_sae9(ctx, empresa)
-    if emp9 is not None:
-        try:
-            with sae_lectura.en_empresa(emp9):
-                if not sae_lectura.disponible():
-                    raise HTTPException(status_code=503, detail="el Facturador no tiene acceso al SAE 9")
-                return {"ok": True, "fuente": emp9.etiqueta,
-                        **espejo_sae.cuadre(db, ctx, emp9.codigo, _series_sae9(emp9, series),
-                                            reparar=reparar, tope=tope, desde=emp9.desde,
-                                            parcial=True)}
-        except HTTPException:
-            raise
-        except sae_lectura.SAENoDisponible as e:
-            raise HTTPException(status_code=503, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"el cuadre falló: {type(e).__name__}: {e}")
     if not sae_lectura.disponible():
         raise HTTPException(status_code=503, detail="el Facturador no tiene acceso a SAE")
     lista = [s.strip() for s in (series or "").split(",") if s.strip()] or \
@@ -263,55 +209,6 @@ def cuadrar_espejo(
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"el cuadre falló: {type(e).__name__}: {e}")
-
-
-# ── Las fuentes de SAE de este tenant (SAE 10 y SAE 9) ───────────────────────
-
-@router.get("/fuentes")
-def fuentes(ctx: AuthContext = Depends(require_permission(_LEER))):
-    """Qué empresas de SAE alimentan a ESTE tenant, de qué servidor y con qué
-    código. Sin credenciales: sólo lo que hace falta para entender de dónde sale
-    cada factura del espejo."""
-    return {"ok": True, "empresas": [{
-        "codigo": e.codigo, "numero": e.numero, "servidor": e.servidor.clave,
-        "motor": e.servidor.motor, "series": list(e.series), "desde": e.desde,
-        "facturas": e.facturas, "claves": e.claves,
-        "configurado": e.servidor.configurado(),
-    } for e in sae_fuentes.del_tenant(ctx.tenant_id)]}
-
-
-@router.post("/fuentes/{codigo}/clientes")
-def alta_clientes_sae(
-    codigo: str,
-    aplicar: bool = Query(default=False,
-                          description="En falso (por omisión) sólo devuelve el plan"),
-    db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission("cliente:gestionar")),
-):
-    """Da de alta (o liga por RFC) los clientes de una empresa del SAE 9 que
-    tienen facturas desde su piso, con su equivalencia '91:CLAVE' y el espejo
-    encendido. Sin esto el espejo del SAE 9 sale vacío: el depósito rechaza a
-    propósito las facturas de un cliente que no conoce.
-
-    Por omisión corre EN SECO. Nunca escribe en SAE.
-    """
-    emp = _empresa_sae9(ctx, codigo)
-    if emp is None:
-        raise HTTPException(status_code=404,
-                            detail=f"la empresa {codigo} no es del SAE 9 de este tenant")
-    try:
-        with sae_lectura.en_empresa(emp):
-            if not sae_lectura.disponible():
-                raise HTTPException(status_code=503, detail="el Facturador no tiene acceso al SAE 9")
-            filas = clientes_sae.leer_clientes(emp.codigo, emp.desde)
-    except HTTPException:
-        raise
-    except sae_lectura.SAENoDisponible as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"SAE no contestó: {type(e).__name__}: {e}")
-    return {"ok": True, "fuente": emp.etiqueta,
-            **clientes_sae.alta_clientes(db, ctx, emp.codigo, filas, aplicar=aplicar)}
 
 
 # ── Catálogos de SAE para dar de alta o cambiar un producto ──────────────────
@@ -380,3 +277,133 @@ def catalogos(
     with _catalogos_lock:
         _catalogos_cache[empresa] = (ahora, salida)
     return salida
+
+
+# ─── El SAE 9 y las fuentes de cada tenant (26-sep-2026) ─────────────────────
+#
+# Router APARTE. El de arriba lee EL SAE del despliegue (`SAE_SERVER`, el SAE
+# 10) y por eso sólo deja pasar al tenant dueño (`ESPEJO_SAE_TENANT_ID`). El SAE
+# 9 tiene empresas de MÁS DE UN tenant —Cristian (91, 92) y Gerardo (94)—, así
+# que su candado es otro: pasa un tenant que tiene empresas registradas en
+# `sae_fuentes`, y cada ruta resuelve la empresa DENTRO del tenant de quien
+# llama. Nada de aquí lee el SAE 10: una empresa que no es del SAE 9 de ese
+# tenant es un 404. Falla cerrado igual que el de arriba.
+
+
+def _tenant_con_sae(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    """Pasa quien tiene alguna empresa de SAE registrada a SU nombre."""
+    if not sae_fuentes.del_tenant(ctx.tenant_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Esta empresa no tiene SAE conectado")
+    return ctx
+
+
+router_fuentes = APIRouter(prefix="/sae/fuentes", tags=["sae"],
+                           dependencies=[Depends(_tenant_con_sae)])
+
+
+def _empresa_sae9(ctx: AuthContext, codigo: str):
+    """La empresa del SAE 9 con ese código, DEL TENANT DE QUIEN PREGUNTA. Una
+    de otro tenant, o una del SAE 10, no existe para estas rutas (404)."""
+    emp = sae_fuentes.empresa_de(ctx.tenant_id, codigo)
+    if emp is None or not emp.servidor.es_firebird:
+        raise HTTPException(status_code=404,
+                            detail=f"la empresa {codigo} no es del SAE 9 de este tenant")
+    return emp
+
+
+def _series_sae9(emp, series: Optional[str]) -> list[str]:
+    lista = [s.strip() for s in (series or "").split(",") if s.strip()]
+    return lista or list(emp.series) or espejo_sae.descubrir_series(emp.codigo, emp.desde)
+
+
+def _con_sae9(emp, trabajo):
+    """Corre `trabajo()` dentro de la empresa del SAE 9, con los errores de SAE
+    traducidos como en las rutas del SAE 10 (503 sin acceso, 502 si falló)."""
+    try:
+        with sae_lectura.en_empresa(emp):
+            if not sae_lectura.disponible():
+                raise HTTPException(status_code=503,
+                                    detail=f"el Facturador no tiene acceso al {emp.servidor.clave}")
+            return trabajo()
+    except HTTPException:
+        raise
+    except sae_lectura.SAENoDisponible as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{emp.etiqueta}: {type(e).__name__}: {e}")
+
+
+@router_fuentes.get("")
+def fuentes(ctx: AuthContext = Depends(require_permission(_LEER))):
+    """Qué empresas de SAE alimentan a ESTE tenant, de qué servidor y con qué
+    código. Sin credenciales: sólo lo que hace falta para entender de dónde sale
+    cada factura del espejo."""
+    return {"ok": True, "empresas": [{
+        "codigo": e.codigo, "numero": e.numero, "servidor": e.servidor.clave,
+        "motor": e.servidor.motor, "series": list(e.series), "desde": e.desde,
+        "facturas": e.facturas, "claves": e.claves,
+        "configurado": e.servidor.configurado(),
+    } for e in sae_fuentes.del_tenant(ctx.tenant_id)]}
+
+
+@router_fuentes.post("/{codigo}/clientes")
+def alta_clientes_sae(
+    codigo: str,
+    aplicar: bool = Query(default=False,
+                          description="En falso (por omisión) sólo devuelve el plan"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission("cliente:gestionar")),
+):
+    """Da de alta (o liga por RFC) los clientes de una empresa del SAE 9 que
+    tienen facturas desde su piso, con su equivalencia '91:CLAVE' y el espejo
+    encendido. Sin esto el espejo del SAE 9 sale vacío: el depósito rechaza a
+    propósito las facturas de un cliente que no conoce.
+
+    Por omisión corre EN SECO. Nunca escribe en SAE.
+    """
+    emp = _empresa_sae9(ctx, codigo)
+    filas = _con_sae9(emp, lambda: clientes_sae.leer_clientes(emp.codigo, emp.desde))
+    return {"ok": True, "fuente": emp.etiqueta,
+            **clientes_sae.alta_clientes(db, ctx, emp.codigo, filas, aplicar=aplicar)}
+
+
+@router_fuentes.post("/{codigo}/jalar")
+def jalar_sae9(
+    codigo: str,
+    series: Optional[str] = Query(default=None,
+                                  description="Series separadas por coma; por omisión las suyas"),
+    dias: int = Query(default=3, ge=0, le=60),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_LEER)),
+):
+    """`/sae/espejo/jalar` para una empresa del SAE 9: lo mismo, desde su
+    archivo y con su piso de fecha."""
+    emp = _empresa_sae9(ctx, codigo)
+
+    def _jalar():
+        lista = _series_sae9(emp, series)
+        if not lista:
+            raise HTTPException(status_code=422,
+                                detail=f"la empresa {emp.codigo} no tiene facturas desde {emp.desde}")
+        return espejo_sae.sincronizar(db, ctx, emp.codigo, lista,
+                                      dias_cancelaciones=dias, desde=emp.desde)
+    return {"ok": True, "fuente": emp.etiqueta, **_con_sae9(emp, _jalar)}
+
+
+@router_fuentes.post("/{codigo}/cuadre")
+def cuadre_sae9(
+    codigo: str,
+    series: Optional[str] = Query(default=None),
+    reparar: bool = Query(default=True),
+    tope: int = Query(default=200, ge=0, le=5000,
+                      description="Cuántas faltantes se traen por llamada (las más viejas primero)"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_LEER)),
+):
+    """`/sae/espejo/cuadre` para una empresa del SAE 9. Repara de a `tope`: sus
+    huecos son facturas de clientes dados de alta después, no algo roto."""
+    emp = _empresa_sae9(ctx, codigo)
+    return {"ok": True, "fuente": emp.etiqueta, **_con_sae9(emp, lambda: espejo_sae.cuadre(
+        db, ctx, emp.codigo, _series_sae9(emp, series), reparar=reparar, tope=tope,
+        desde=emp.desde, parcial=True))}

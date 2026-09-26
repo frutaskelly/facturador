@@ -105,9 +105,10 @@ solo, y se resuelve a mano:
 - Si el SAE 9 no contesta: sonda de 5 s, las demás empresas de ese servidor se saltan en
   esa vuelta y el error se queda en «SAE actualizado» hasta su siguiente vuelta.
 - Faltantes de golpe (p. ej. clientes dados de alta tarde):
-  `POST /api/v1/sae/espejo/cuadre?empresa=91&tope=2000`.
+  `POST /api/v1/sae/fuentes/91/cuadre?tope=2000`.
 - El botón «Sincronizar SAE» de cada tenant fuerza todo, SAE 10 y SAE 9.
-- Revisar: `GET /api/v1/sae/fuentes`, y `POST /api/v1/sae/espejo/cuadre?empresa=91`.
+- Revisar: `GET /api/v1/sae/fuentes` y `POST /api/v1/sae/fuentes/91/cuadre` (desde el tenant de
+  cada empresa: la 94, desde el de Gerardo).
 
 ### 6. La empresa 03
 
@@ -116,6 +117,11 @@ Averiguar su RFC en la base (`SELECT RFC FROM PARAM_DATOSEMP03`, o el emisor de 
 alguien nuevo (¿Brenda?), primero se da de alta ese tenant.
 
 ## Cómo está hecho
+
+- Rutas del SAE 9 en su propio router, `/api/v1/sae/fuentes/...` (`clientes`, `jalar`,
+  `cuadre`): pasa un tenant con empresas registradas, y la empresa se resuelve DENTRO de
+  su tenant (otra, o una del SAE 10, es 404). Las rutas de `/api/v1/sae/*` que leen el
+  SAE 10 del despliegue siguen con el candado de #267: sólo el tenant dueño.
 
 - `services/sae_fuentes.py`: el registro. El SAE 10 sale de las variables de siempre
   (`SAE_SERVER`, `ESPEJO_SAE_*`); el SAE 9 de `SAE_FB_*`.

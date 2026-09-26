@@ -162,6 +162,7 @@ app.include_router(conexiones.router, prefix="/api/v1")
 app.include_router(mini_conta.router, prefix="/api/v1")  # lectura de ventas (clave MINI_CONTA)
 app.include_router(facturas.router, prefix="/api/v1")
 app.include_router(sae.router, prefix="/api/v1")  # lectura en vivo de Aspel
+app.include_router(sae.router_fuentes, prefix="/api/v1")  # SAE 9 y fuentes por tenant
 app.include_router(sat.router, prefix="/api/v1")
 # IAM admin — roles, permission catalog, memberships
 app.include_router(roles.router, prefix="/api/v1")

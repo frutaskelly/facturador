@@ -4880,6 +4880,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sae/fuentes/{codigo}/cuadre": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cuadre Sae9
+         * @description `/sae/espejo/cuadre` para una empresa del SAE 9. Repara de a `tope`: sus
+         *     huecos son facturas de clientes dados de alta después, no algo roto.
+         */
+        post: operations["cuadre_sae9_api_v1_sae_fuentes__codigo__cuadre_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sae/fuentes/{codigo}/jalar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Jalar Sae9
+         * @description `/sae/espejo/jalar` para una empresa del SAE 9: lo mismo, desde su
+         *     archivo y con su piso de fecha.
+         */
+        post: operations["jalar_sae9_api_v1_sae_fuentes__codigo__jalar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sae/partidas": {
         parameters: {
             query?: never;
@@ -22009,7 +22051,7 @@ export interface operations {
                 series?: string | null;
                 /** @description Trae las que falten, hasta el tope */
                 reparar?: boolean;
-                /** @description Más faltantes que esto no se reparan solas (en el SAE 9 se reparan de a este tanto) */
+                /** @description Más faltantes que esto no se reparan solas */
                 tope?: number;
             };
             header?: {
@@ -22154,6 +22196,81 @@ export interface operations {
             query?: {
                 /** @description En falso (por omisión) sólo devuelve el plan */
                 aplicar?: boolean;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                codigo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cuadre_sae9_api_v1_sae_fuentes__codigo__cuadre_post: {
+        parameters: {
+            query?: {
+                series?: string | null;
+                reparar?: boolean;
+                /** @description Cuántas faltantes se traen por llamada (las más viejas primero) */
+                tope?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                codigo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    jalar_sae9_api_v1_sae_fuentes__codigo__jalar_post: {
+        parameters: {
+            query?: {
+                /** @description Series separadas por coma; por omisión las suyas */
+                series?: string | null;
+                dias?: number;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
