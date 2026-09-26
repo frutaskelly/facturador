@@ -38,8 +38,7 @@ class _SAE:
 def sae(monkeypatch, env):
     sae_api._catalogos_cache.clear()
     falso = _SAE()
-    # el tenant de la prueba es el dueño de SAE; los ajenos: test_sae_solo_su_tenant
-    monkeypatch.setattr(sae_api.settings, "ESPEJO_SAE_TENANT_ID", str(env["tenant_id"]))
+    # `env` hace al tenant de la prueba dueño de SAE; los ajenos: test_sae_solo_su_tenant
     monkeypatch.setattr(sae_lectura, "disponible", lambda: True)
     monkeypatch.setattr(sae_lectura, "consultar", falso)
     yield falso
