@@ -1324,6 +1324,7 @@ export default function RemisionesPage() {
       ["Llegó por", oc.canal],
       ["Remitente", oc.remitente],
       ["Su pedido", oc.folio_externo],
+      ["Entrega", oc.fecha_entrega ? fmtDate(oc.fecha_entrega) : null],
       ["Punto de entrega", oc.punto_entrega],
       ["Sucursal", oc.sucursal_nombre],
       ["Proyecto", oc.proyecto_nombre],
@@ -1347,6 +1348,15 @@ export default function RemisionesPage() {
           {oc.archivo_url ? (
             <Button variant="secondary" onClick={() => window.open(oc.archivo_url!, "_blank", "noopener")}>
               <FileSearch size={16} /> Ver la orden original
+            </Button>
+          ) : null}
+          {porResolver.puedeResolver ? (
+            <Button
+              variant="secondary"
+              disabled={porResolver.ocupada === oc.id}
+              onClick={() => porResolver.corregir(oc)}
+            >
+              <Pencil size={16} /> Corregir fecha y folio
             </Button>
           ) : null}
           {porResolver.puedeResolver ? (
@@ -2851,6 +2861,9 @@ export default function RemisionesPage() {
     { id: "oc-doc", label: "Ver la orden original", icon: <FileSearch size={15} />,
       onClick: (f) => { window.open(f.oc!.archivo_url!, "_blank", "noopener"); },
       hidden: (f) => !f.oc?.archivo_url },
+    { id: "oc-corregir", label: "Corregir fecha y folio", icon: <Pencil size={15} />,
+      onClick: (f) => { if (f.oc) filaRef.current.porResolver.corregir(f.oc); },
+      hidden: (f) => !f.oc || !filaRef.current.porResolver.puedeResolver },
     { id: "descartar", label: "Descartar", icon: <Trash2 size={15} />, tone: "danger",
       onClick: (f) => { if (f.oc) filaRef.current.porResolver.descartar(f.oc); },
       hidden: (f) => !f.oc || !filaRef.current.porResolver.puedeResolver },
