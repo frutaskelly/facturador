@@ -43,7 +43,8 @@ DDL = {
         FOLIO INTEGER, CVE_CLPV VARCHAR(10) {_V} NOT NULL, FECHA_DOC TIMESTAMP NOT NULL,
         CAN_TOT DOUBLE PRECISION, IMPORTE DOUBLE PRECISION, IMP_TOT1 DOUBLE PRECISION,
         IMP_TOT4 DOUBLE PRECISION, STATUS VARCHAR(1) {_V}, CVE_OBS INTEGER,
-        UUID VARCHAR(50) {_V}, FECHA_CANCELA TIMESTAMP""",
+        UUID VARCHAR(50) {_V}, FECHA_CANCELA TIMESTAMP,
+        METODODEPAGO VARCHAR(255) {_V}, FORMADEPAGOSAT VARCHAR(5) {_V}""",
     "CFDI01": f"""TIPO_DOC VARCHAR(1) {_V} NOT NULL, CVE_DOC VARCHAR(20) {_V} NOT NULL,
         UUID VARCHAR(36) {_V}, FECHA_CERT VARCHAR(30) {_V}, FECHA_CANCELA VARCHAR(30) {_V},
         XML_DOC BLOB SUB_TYPE 1 {_V}, MSJ_CANC VARCHAR(80) {_V}, UUID_REL VARCHAR(36) {_V},
@@ -70,7 +71,7 @@ DDL = {
         NOMBRE VARCHAR(254) {_V}, RFC VARCHAR(15) {_V}, CALLE VARCHAR(80) {_V},
         NUMEXT VARCHAR(15) {_V}, NUMINT VARCHAR(15) {_V}, COLONIA VARCHAR(50) {_V},
         CODIGO VARCHAR(5) {_V}, EMAILPRED VARCHAR(512) {_V}, REG_FISC VARCHAR(4) {_V},
-        USO_CFDI VARCHAR(5) {_V}""",
+        USO_CFDI VARCHAR(5) {_V}, DIASCRED INTEGER, LIMCRED DOUBLE PRECISION""",
 }
 
 
@@ -93,11 +94,16 @@ def _cli(clave: str) -> str:
     return clave.rjust(10)            # SAE rellena la clave del cliente a la izquierda
 
 
-def _sembrar(con):
+def _crear_tablas(con, nn: str):
     cur = con.cursor()
     for tabla, cols in DDL.items():
-        cur.execute(f"CREATE TABLE {tabla} ({cols})")
+        cur.execute(f"CREATE TABLE {tabla[:-2]}{nn} ({cols})")
     con.commit()
+    return cur
+
+
+def _sembrar(con):
+    cur = _crear_tablas(con, "01")
     ts = dt.datetime
     ins = lambda sql, *p: cur.execute(sql, p)  # noqa: E731
     # Clientes: 145 (iFood) y 9 (Newrest) facturan en 2026; 77 sólo en 2025.
@@ -105,9 +111,10 @@ def _sembrar(con):
         "REG_FISC, USO_CFDI) VALUES (?,?,?,?,?,?,?,?,?,?)",
         _cli("145"), "A", "IFOOD MÉXICO", RFC_IFOOD, "REFORMA", "222", "JUÁREZ", "06600",
         "601", "G03")
-    ins("INSERT INTO CLIE01 (CLAVE, STATUS, NOMBRE, RFC, CODIGO, REG_FISC, USO_CFDI) "
-        "VALUES (?,?,?,?,?,?,?)", _cli("9"), "A", "NEWREST CATERING MÉXICO", RFC_NEWREST,
-        "11000", "601", "G03")
+    ins("INSERT INTO CLIE01 (CLAVE, STATUS, NOMBRE, RFC, CODIGO, REG_FISC, USO_CFDI, DIASCRED, "
+        "LIMCRED, EMAILPRED) VALUES (?,?,?,?,?,?,?,?,?,?)", _cli("9"), "A",
+        "NEWREST CATERING MÉXICO", RFC_NEWREST, "11000", "601", "G03", 30, 50000.0,
+        "CxP@newrest.mx; facturas@newrest.mx")
     ins("INSERT INTO CLIE01 (CLAVE, STATUS, NOMBRE, RFC) VALUES (?,?,?,?)",
         _cli("77"), "A", "COMEDOR QUE YA NO COMPRA", RFC_VIEJO)
     # Catálogo con Ñ y acentos.
@@ -127,9 +134,11 @@ def _sembrar(con):
     for folio, cli, fecha, sub, tot, iva, st, uuid_f, cancela in facturas:
         cve = _doc("FOR K", folio)
         ins("INSERT INTO FACTF01 (CVE_DOC, SERIE, FOLIO, CVE_CLPV, FECHA_DOC, CAN_TOT, IMPORTE, "
-            "IMP_TOT1, IMP_TOT4, STATUS, CVE_OBS, UUID) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "IMP_TOT1, IMP_TOT4, STATUS, CVE_OBS, UUID, METODODEPAGO, FORMADEPAGOSAT) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             cve, "FOR K", folio, _cli(cli), fecha, sub, tot, 0.0, iva, st,
-            1 if folio == 10 else None, "sae-movil-no-es-el-uuid")
+            1 if folio == 10 else None, "sae-movil-no-es-el-uuid",
+            "PUE" if folio == 11 else "PPD", "03" if folio == 11 else "99")
         if uuid_f:
             ins("INSERT INTO CFDI01 (TIPO_DOC, CVE_DOC, UUID, FECHA_CERT, FECHA_CANCELA, MSJ_CANC) "
                 "VALUES (?,?,?,?,?,?)", "F", cve, uuid_f, fecha.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -175,6 +184,26 @@ def _sembrar(con):
     cur.close()
 
 
+def _sembrar_02(con):
+    """La empresa 02 del mismo SAE: iFood también compra aquí (su clave es la 33)."""
+    cur = _crear_tablas(con, "02")
+    ins = lambda sql, *p: cur.execute(sql, p)  # noqa: E731
+    ins("INSERT INTO CLIE02 (CLAVE, STATUS, NOMBRE, RFC) VALUES (?,?,?,?)",
+        _cli("33"), "A", "IFOOD MÉXICO", RFC_IFOOD)
+    ins("INSERT INTO INVE02 (CVE_ART, DESCR, STATUS) VALUES (?,?,?)", "PAPA", "PAPA", "A")
+    cve = _doc("KELLYQRO", 40)
+    ins("INSERT INTO FACTF02 (CVE_DOC, SERIE, FOLIO, CVE_CLPV, FECHA_DOC, CAN_TOT, IMPORTE, "
+        "IMP_TOT1, IMP_TOT4, STATUS, METODODEPAGO) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        cve, "KELLYQRO", 40, _cli("33"), dt.datetime(2026, 8, 27, 10), 100.0, 116.0, 0.0,
+        16.0, "E", "PPD")
+    ins("INSERT INTO CFDI02 (TIPO_DOC, CVE_DOC, UUID, FECHA_CERT) VALUES (?,?,?,?)",
+        "F", cve, "u-q40", "2026-08-27T10:05:00")
+    ins("INSERT INTO PAR_FACTF02 (CVE_DOC, NUM_PAR, CVE_ART, CANT, PREC, TOT_PARTIDA) "
+        "VALUES (?,?,?,?,?,?)", cve, 1, "PAPA", 1.0, 100.0, 100.0)
+    con.commit()
+    cur.close()
+
+
 @pytest.fixture(scope="module")
 def fb_empresa():
     import firebirdsql
@@ -186,6 +215,13 @@ def fb_empresa():
                                       auth_plugin_name="Legacy_Auth", wire_crypt=False)
     try:
         _sembrar(con)
+    finally:
+        con.close()
+    con = firebirdsql.create_database(host=HOST, port=PUERTO, database=ruta.replace("{nn}", "02"),
+                                      user="SYSDBA", password=PASSWORD, charset="ISO8859_1",
+                                      auth_plugin_name="Legacy_Auth", wire_crypt=False)
+    try:
+        _sembrar_02(con)
     finally:
         con.close()
     srv = ServidorSAE(clave="SAE9", motor="firebird", host=HOST, puerto=PUERTO,
@@ -321,6 +357,9 @@ def test_el_alta_de_clientes_liga_por_rfc_crea_los_que_faltan_y_no_toca_sin_apli
                                          Cliente.rfc == RFC_NEWREST).one()
         assert nuevo.espejo_sae and nuevo.regimen_fiscal == "601"
         assert nuevo.domicilio_fiscal.get("cp") == "11000"
+        # con su crédito: sin él toda su cartera saldría vencida
+        assert nuevo.dias_credito == 30 and float(nuevo.limite_credito) == 50000
+        assert nuevo.domicilio_fiscal.get("correos") == ["cxp@newrest.mx", "facturas@newrest.mx"]
         eq = db.query(ClienteExterno).filter(ClienteExterno.tenant_id == uuid.UUID(emp.tenant_id),
                                              ClienteExterno.clave == "91:9").one()
         assert eq.cliente_id == nuevo.id and eq.confianza == "CONFIRMADA"
@@ -330,9 +369,14 @@ def test_el_alta_de_clientes_liga_por_rfc_crea_los_que_faltan_y_no_toca_sin_apli
         r = espejo_sae.cuadre(db, _ctx(emp), "91", ["FOR K", "KELLYSLP"], desde=emp.desde)
     assert r["reparadas"] >= 1, r
     with SessionLocal() as db:
-        folios = {(f.serie, f.folio) for f in db.query(Factura).filter(
+        fs = {(f.serie, f.folio): f for f in db.query(Factura).filter(
             Factura.tenant_id == uuid.UUID(emp.tenant_id)).all()}
-    assert ("FORK", 11) in folios and ("KELLYSLP", 31) in folios
+    assert ("FORK", 11) in fs and ("KELLYSLP", 31) in fs
+    # PUE en SAE → PUE en el espejo, sin saldo; y la KELLYSLP 31, pagada, entra
+    # por el cuadre CON su saldo (0), no debiendo el total.
+    assert fs[("FORK", 11)].metodo_pago == "PUE" and float(fs[("FORK", 11)].saldo_insoluto) == 0
+    assert fs[("FORK", 11)].forma_pago == "03"
+    assert float(fs[("KELLYSLP", 31)].saldo_insoluto) == 0
 
 
 def test_el_catalogo_del_sae9_se_guarda_con_su_codigo(tenant9, monkeypatch):
@@ -347,3 +391,52 @@ def test_el_catalogo_del_sae9_se_guarda_con_su_codigo(tenant9, monkeypatch):
         claves = {c.clave: c for c in db.query(ClaveSae).filter(
             ClaveSae.tenant_id == uuid.UUID(emp.tenant_id)).all()}
     assert claves["ESPINACA"].empresa == "91" and claves["PAPA"].activa is False
+
+
+def test_el_cuadre_parcial_no_gasta_el_tope_en_clientes_sin_dueno(tenant9):
+    """Newrest (FOR K 11) no está ligado: se quita ANTES del tope, así el tope
+    de 1 trae una factura de iFood y no se atora en la que no puede entrar. Y
+    lo que entra por el cuadre trae su saldo de la CxC."""
+    from app.core.rbac import tenant_session
+
+    emp = tenant9
+    with sae_lectura.en_empresa(emp), tenant_session(emp.tenant_id) as db:
+        r = espejo_sae.cuadre(db, _ctx(emp), "91", ["FOR K"], desde=emp.desde,
+                              tope=1, parcial=True)
+    info = r["series"]["FORK"]
+    assert info["faltan"] == 4 and info["sin_equivalencia"] == 1
+    assert info["reparadas"] == 1 and info["pendientes"] == 2
+    with SessionLocal() as db:
+        f10 = db.query(Factura).filter(Factura.tenant_id == uuid.UUID(emp.tenant_id),
+                                       Factura.serie == "FORK", Factura.folio == 10).one()
+    assert float(f10.saldo_insoluto) == 600.01          # total menos pago y nota
+
+
+def test_quien_compra_en_la_91_y_en_la_92_se_liga_en_las_dos(tenant9):
+    """iFood ya está ligado a '91:145'. En la 02 es el cliente 33: con la 91 como
+    hermana se liga (no se queda en «revisar») y su factura de la 92 entra."""
+    from app.core.rbac import tenant_session
+
+    e91 = tenant9
+    e92 = EmpresaSAE(servidor=e91.servidor, numero="02", codigo="92",
+                     tenant_id=e91.tenant_id, desde=e91.desde)
+    with sae_lectura.en_empresa(e92):
+        filas = clientes_sae.leer_clientes("92", e92.desde)
+    assert [f["clave"] for f in filas] == ["33"]
+    with tenant_session(e92.tenant_id) as db:
+        sin_hermanas = clientes_sae.alta_clientes(db, _ctx(e92), "92", filas, hermanas=set())
+        con_hermanas = clientes_sae.alta_clientes(db, _ctx(e92), "92", filas, aplicar=True,
+                                                  hermanas={"91", "92"})
+    assert sin_hermanas["conteo"]["revisar"] == 1          # así se atoraba
+    assert con_hermanas["conteo"]["ligar"] == 1 and con_hermanas["aplicado"]
+    with sae_lectura.en_empresa(e92), tenant_session(e92.tenant_id) as db:
+        r = espejo_sae.sincronizar(db, _ctx(e92), "92", ["KELLYQRO"], desde=e92.desde)
+    assert r["nuevas"] == 1, r
+    with SessionLocal() as db:
+        f = db.query(Factura).filter(Factura.tenant_id == uuid.UUID(e92.tenant_id),
+                                     Factura.serie == "KELLYQRO", Factura.folio == 40).one()
+        assert f.espejo_empresa == "92"
+        eqs = {e.clave for e in db.query(ClienteExterno).filter(
+            ClienteExterno.tenant_id == uuid.UUID(e92.tenant_id),
+            ClienteExterno.cliente_id == f.cliente_id).all()}
+    assert eqs == {"91:145", "92:33"}

@@ -28,7 +28,8 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from typing import Any, Optional
+from decimal import Decimal
+from typing import Any, Iterable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -70,7 +71,11 @@ def leer_clientes(empresa: str, desde: Optional[dt.date]) -> list[dict[str, Any]
         f"{_c('CODIGO', 5)} AS cp, {_c('REG_FISC', 4)} AS regimen, "
         f"{_c('USO_CFDI', 5)} AS uso_cfdi, {_c('CALLE')} AS calle, "
         f"{_c('NUMEXT', 15)} AS numext, {_c('NUMINT', 15)} AS numint, "
-        f"{_c('COLONIA', 50)} AS colonia, C.STATUS AS status "
+        f"{_c('COLONIA', 50)} AS colonia, C.STATUS AS status, "
+        # Crédito y correo: sin ellos el cliente nace con 0 días y toda su
+        # cartera sale VENCIDA, y el envío de facturas no tiene a quién.
+        f"{_c('DIASCRED', 10)} AS dias_credito, {_c('LIMCRED', 30)} AS limite_credito, "
+        f"{_c('EMAILPRED', 512)} AS email "
         f"FROM {clie} C WHERE C.CLAVE IN ({sub})",
         tuple(params),
     )
@@ -89,8 +94,36 @@ def leer_clientes(empresa: str, desde: Optional[dt.date]) -> list[dict[str, Any]
             "calle": lx.texto(f.get("calle")), "numext": lx.texto(f.get("numext")),
             "numint": lx.texto(f.get("numint")), "colonia": lx.texto(f.get("colonia")),
             "status": lx.texto(f.get("status")),
+            "dias_credito": _entero(f.get("dias_credito"), 0, 730),
+            "limite_credito": _decimal(f.get("limite_credito")),
+            "correos": _correos(f.get("email")),
         })
     return sorted(salida, key=lambda x: x["nombre"])
+
+
+def _entero(v: Any, minimo: int, maximo: int) -> int:
+    try:
+        return max(minimo, min(maximo, int(float(v))))
+    except (TypeError, ValueError):
+        return minimo
+
+
+def _decimal(v: Any) -> Decimal:
+    try:
+        d = Decimal(str(v if v is not None else 0))
+    except Exception:
+        return Decimal(0)
+    return d if d > 0 else Decimal(0)
+
+
+def _correos(v: Any) -> list[str]:
+    """EMAILPRED de SAE: uno o varios, separados por ; , o espacios."""
+    vistos: list[str] = []
+    for c in re.split(r"[;,\s]+", str(v or "")):
+        c = c.strip().lower()
+        if c and "@" in c and "." in c.split("@")[-1] and c not in vistos:
+            vistos.append(c)
+    return vistos
 
 
 def _norm_nombre(s: str) -> str:
@@ -98,7 +131,8 @@ def _norm_nombre(s: str) -> str:
 
 
 def alta_clientes(db: Session, ctx: AuthContext, empresa: str, filas: list[dict[str, Any]],
-                  aplicar: bool = False) -> dict[str, Any]:
+                  aplicar: bool = False,
+                  hermanas: Optional[Iterable[str]] = None) -> dict[str, Any]:
     """El plan (y, con `aplicar`, su ejecución) para esos clientes de SAE.
 
     Acciones del plan:
@@ -111,10 +145,21 @@ def alta_clientes(db: Session, ctx: AuthContext, empresa: str, filas: list[dict[
                        decide una persona. Nunca se aplica solo.
       · ambiguo      — su RFC está en varios clientes.
       · rfc_invalido — el SAT no lo aceptaría.
+
+    `hermanas` son los códigos del SAE 9 de este mismo tenant (91, 92…). Un
+    cliente que ya vive en una hermana NO cuenta como «de otra empresa»: el
+    candado existe por el export de remisiones al SAE 10 (02-05), que no toca
+    al SAE 9. Sin esto, quien compra en la 01 y en la 02 se quedaba en
+    «revisar» y sus facturas de la 02 no entraban nunca. Por omisión se toman
+    del registro (`sae_fuentes`).
     """
     from ..models import ClienteExterno
 
     tenant = ctx.tenant_id
+    if hermanas is None:
+        from . import sae_fuentes
+        hermanas = {e.codigo for e in sae_fuentes.del_tenant(tenant) if e.servidor.es_firebird}
+    no_cuentan = set(hermanas) | {empresa}
     vivos = db.query(Cliente).filter(Cliente.tenant_id == tenant,
                                      Cliente.deleted_at.is_(None)).all()
     por_id = {c.id: c for c in vivos}
@@ -129,7 +174,7 @@ def alta_clientes(db: Session, ctx: AuthContext, empresa: str, filas: list[dict[
             ClienteExterno.tenant_id == tenant, ClienteExterno.sistema == "SAE",
             ClienteExterno.confianza == "CONFIRMADA"):
         m = re.match(r"^\s*(\d+)\s*[:. ]", clave or "")
-        if m and m.group(1) != empresa:
+        if m and m.group(1) not in no_cuentan:
             otras.setdefault(cid, set()).add(m.group(1))
 
     def _motivo_revisar(cli: Cliente) -> Optional[str]:
@@ -210,13 +255,16 @@ def alta_clientes(db: Session, ctx: AuthContext, empresa: str, filas: list[dict[
                     f["calle"], f["numext"], f"INT {f['numint']}" if f["numint"] else "") if p)
                 dom = {k: val for k, val in (("cp", f["cp"] if _CP.match(f["cp"] or "") else None),
                                              ("calle", calle or None),
-                                             ("colonia", f["colonia"] or None)) if val}
+                                             ("colonia", f["colonia"] or None),
+                                             ("correos", f.get("correos") or None)) if val}
                 cli = Cliente(
                     tenant_id=tenant, codigo=generate_cliente_codigo(db, tenant),
                     legal_name=(f["nombre"] or rfc)[:254], rfc=rfc,
                     regimen_fiscal=f["regimen"] if _REGIMEN.match(f["regimen"] or "") else None,
                     uso_cfdi_default=f["uso_cfdi"] if _USO.match(f["uso_cfdi"] or "") else None,
                     domicilio_fiscal=dom, espejo_sae=True,
+                    dias_credito=int(f.get("dias_credito") or 0),
+                    limite_credito=f.get("limite_credito") or Decimal(0),
                 )
                 db.add(cli)
                 db.flush()

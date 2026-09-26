@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 from typing import Any, Optional
 
 from sqlalchemy import func
@@ -101,6 +102,10 @@ def leer_encabezados(empresa: str, serie: str, desde_folio: Optional[int] = None
             "observaciones": str(r.get("observaciones") or "").strip() or None,
             "cancelacion_msj": str(r.get("cancelacion_msj") or "").strip() or None,
             "uuid_sustitucion": str(r.get("uuid_sustitucion") or "").strip() or None,
+            # Sólo el SAE 9 los trae (el SQL del 10 no los pide): en el 10 van
+            # en None y el depósito decide como siempre.
+            "metodo_pago": r.get("metodo_pago") or None,
+            "forma_pago": r.get("forma_pago") or None,
         })
     return salida
 
@@ -148,12 +153,15 @@ def _encabezados_firebird(factf: str, cfdi: str, obs: str, cond: list, params: l
     """
     msj = sae_lectura.col_o_nulo("C", cfdi, "MSJ_CANC", 255)
     rel = sae_lectura.col_o_nulo("C", cfdi, "UUID_REL", 60)
+    metodo = sae_lectura.col_o_nulo("F", factf, "METODODEPAGO", 255)
+    forma = sae_lectura.col_o_nulo("F", factf, "FORMADEPAGOSAT", 5)
     crudas = sae_lectura.consultar(
         f"SELECT FIRST {int(limite)} F.CVE_DOC AS cve_doc, F.SERIE AS serie, "
         "F.FOLIO AS folio, F.CVE_CLPV AS cliente_sae, F.FECHA_DOC AS fecha, "
         "F.CAN_TOT AS subtotal, F.IMPORTE AS total, F.IMP_TOT4 AS iva, F.IMP_TOT1 AS ieps, "
         "F.STATUS AS status, C.UUID AS uuid, C.FECHA_CANCELA AS fecha_cancela, "
-        f"O.STR_OBS AS observaciones, {msj} AS cancelacion_msj, {rel} AS uuid_sustitucion "
+        f"O.STR_OBS AS observaciones, {msj} AS cancelacion_msj, {rel} AS uuid_sustitucion, "
+        f"{metodo} AS metodo_pago, {forma} AS forma_pago "
         f"FROM {factf} F "
         f"LEFT JOIN {cfdi} C ON C.CVE_DOC = F.CVE_DOC AND C.TIPO_DOC = 'F' "
         f"LEFT JOIN {obs} O ON O.CVE_OBS = F.CVE_OBS "
@@ -172,7 +180,28 @@ def _encabezados_firebird(factf: str, cfdi: str, obs: str, cond: list, params: l
         "observaciones": lx.texto(r.get("observaciones"))[:250],
         "cancelacion_msj": lx.texto(r.get("cancelacion_msj")),
         "uuid_sustitucion": lx.texto(r.get("uuid_sustitucion")),
+        "metodo_pago": _metodo_pago(r.get("metodo_pago")),
+        "forma_pago": _forma_pago(r.get("forma_pago")),
     } for r in crudas]
+
+
+def _metodo_pago(v: Any) -> Optional[str]:
+    """PUE/PPD de la factura del SAE 9. Sin él, el depósito cae al del cliente
+    o a PPD, y una factura pagada al contado se quedaba debiendo el total.
+    Acepta la clave del SAT o el texto viejo de CFDI 3.2."""
+    t = " ".join(str(v or "").upper().split())
+    if t[:3] in ("PUE", "PPD"):
+        return t[:3]
+    if "PARCIALIDAD" in t or "DIFERIDO" in t:
+        return "PPD"
+    if "UNA SOLA EXHIBICI" in t:
+        return "PUE"
+    return None
+
+
+def _forma_pago(v: Any) -> Optional[str]:
+    t = str(v or "").strip()
+    return t if re.fullmatch(r"\d{2}", t) else None
 
 
 def leer_partidas(empresa: str, cve_docs: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -309,6 +338,7 @@ def como_payload(empresa: str, cab: dict, partidas: list[dict],
         subtotal=cab["subtotal"], total=cab["total"],
         iva=cab["iva"], ieps=cab["ieps"],
         uuid_sustitucion=cab["uuid_sustitucion"],
+        metodo_pago=cab.get("metodo_pago"), forma_pago=cab.get("forma_pago"),
         saldo_insoluto=saldo,
         lineas=[LineaFacturaEspejoIn(**p) for p in partidas],
     )
@@ -491,6 +521,29 @@ def folios_en_sae(empresa: str, serie: str, desde: Optional[dt.date] = None) -> 
     }
 
 
+def clientes_de_folios(empresa: str, serie: str,
+                       desde: Optional[dt.date] = None) -> dict[int, str]:
+    """{folio: cliente de SAE} de esa serie. Lo usa el cuadre parcial del SAE 9
+    para no gastar su tope en facturas de clientes que nadie ha ligado."""
+    factf = sae_lectura.tabla("FACTF", empresa)
+    if sae_lectura.motor() == "firebird":
+        sql = f"SELECT F.FOLIO AS folio, F.CVE_CLPV AS cliente FROM {factf} F WHERE F.SERIE = %s"
+    else:
+        sql = (f"SELECT F.FOLIO AS folio, LTRIM(RTRIM(F.CVE_CLPV)) AS cliente FROM {factf} F "
+               "WHERE RTRIM(F.SERIE) = %s")
+    params: list = [serie]
+    if desde:
+        sql += " AND F.FECHA_DOC >= %s"
+        params.append(desde.isoformat())
+    salida: dict[int, str] = {}
+    for r in sae_lectura.consultar(sql, tuple(params)):
+        try:
+            salida[int(r.get("folio"))] = str(r.get("cliente") or "").strip()
+        except (TypeError, ValueError):
+            continue
+    return salida
+
+
 def descubrir_series(empresa: str, desde: Optional[dt.date]) -> list[str]:
     """Las series con facturas desde esa fecha, tal como las escribe SAE.
 
@@ -552,13 +605,23 @@ def cuadre(db: Session, ctx: AuthContext, empresa: str, series: list[str],
         info = {"sae": len(en_sae), "espejo": len(en_espejo), "faltan": len(faltan),
                 "folios": faltan[:50], "reparadas": 0, "omitidas": 0}
         res["faltantes"] += len(faltan)
-        if faltan and reparar and parcial and len(faltan) > tope:
+        if faltan and reparar and parcial:
             # SAE 9: sus huecos son facturas de clientes que se dieron de alta
-            # después de la carga, no algo roto. Se traen de a `tope` por vuelta
-            # —las más viejas primero— y lo demás queda contado a la vista.
+            # después de la carga, no algo roto. ANTES del tope se quitan las
+            # de clientes que siguen sin equivalencia —si no, las mismas 200
+            # sin dueño ocuparían el tope todos los días y las demás no
+            # entrarían nunca—; luego se traen de a `tope`, las más viejas
+            # primero, y lo demás queda contado a la vista.
+            de_quien = clientes_de_folios(empresa, serie, desde)
+            from .cobranza_sae import clientes_con_equivalencia
+            ligados = clientes_con_equivalencia(db, ctx, empresa)
+            con_dueno = [f for f in faltan
+                         if (de_quien.get(f) or "").strip().upper() in ligados]
+            info["sin_equivalencia"] = len(faltan) - len(con_dueno)
             info["reparadas"], info["omitidas"] = _traer_folios(
-                db, ctx, empresa, serie, faltan[:tope], res["errores"])
-            info["pendientes"] = len(faltan) - tope
+                db, ctx, empresa, serie, con_dueno[:tope], res["errores"])
+            info["omitidas"] += info["sin_equivalencia"]
+            info["pendientes"] = max(0, len(con_dueno) - tope)
             res["reparadas"] += info["reparadas"]
             res["omitidas"] += info["omitidas"]
         elif faltan and reparar and len(faltan) <= tope:
@@ -595,8 +658,19 @@ def _traer_folios(db: Session, ctx: AuthContext, empresa: str, serie: str,
             if not cab:
                 continue
             partidas = leer_partidas(empresa, [cab["cve_doc"]])
+            # CON SU SALDO, como la pasada normal: sin él, una PPD ya pagada
+            # que entra por el cuadre quedaba debiendo el total, y ninguna
+            # pasada posterior la corrige (sus abonos son viejos). Sin CxC se
+            # deposita igual: peor es no traerla.
+            saldo = None
+            try:
+                pagado = leer_abonos(empresa, [cab["cve_doc"]]).get(cab["cve_doc"])
+                if pagado is not None:
+                    saldo = max(0.0, round(float(cab["total"]) - float(pagado), 2))
+            except Exception:
+                saldo = None
             factura_espejo(payload=como_payload(empresa, cab,
-                                                partidas.get(cab["cve_doc"], [])),
+                                                partidas.get(cab["cve_doc"], []), saldo),
                            db=db, ctx=ctx)
             hechas += 1
         except Exception as e:

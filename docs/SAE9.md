@@ -89,9 +89,20 @@ Repetir con 92 (tenant de Cristian) y 94 (tenant de Gerardo). Lo que el plan NO 
 solo, y se resuelve a mano:
 
 - `revisar`: el RFC ya es de un cliente del tenant que factura **nativo** (espejo apagado)
-  o que ya vive en **otra empresa de SAE**. Ligarlo le cambiaría cómo se trabaja con él.
+  o que ya vive en una empresa del **SAE 10** (02-05). Ligarlo le cambiaría cómo se trabaja
+  con él. Un cliente que compra en la 91 y en la 92 NO cae aquí: las empresas del mismo
+  SAE 9 son hermanas y se liga en las dos.
 - `ambiguo`: varios clientes con el mismo RFC.
 - `rfc_invalido`: el SAT no lo aceptaría.
+
+Los clientes que se crean traen de SAE sus días de crédito (`DIASCRED`), su límite
+(`LIMCRED`) y sus correos (`EMAILPRED`), para que su cartera no salga vencida.
+
+**Paso manual para cada `revisar` que se decida ligar:** en el Facturador, abrir el
+cliente → Equivalencias (`/clientes/{id}/equivalencias`) → agregar «Clave de SAE» con
+`9x:CLAVE` (la `equivalencia` que trae el plan, p. ej. `92:33`). Si su espejo estaba
+apagado, encenderlo sólo si ya no se le va a facturar nativo. Después, traer sus
+facturas con el cuadre: `POST /api/v1/sae/fuentes/92/cuadre`.
 
 ### 5. Encender el reloj y cuadrar
 
@@ -107,8 +118,10 @@ solo, y se resuelve a mano:
 - Faltantes de golpe (p. ej. clientes dados de alta tarde):
   `POST /api/v1/sae/fuentes/91/cuadre?tope=2000`.
 - El botón «Sincronizar SAE» de cada tenant fuerza todo, SAE 10 y SAE 9.
-- Revisar: `GET /api/v1/sae/fuentes` y `POST /api/v1/sae/fuentes/91/cuadre` (desde el tenant de
-  cada empresa: la 94, desde el de Gerardo).
+- Revisar sin tocar nada: `GET /api/v1/sae/fuentes` y
+  `POST /api/v1/sae/fuentes/91/cuadre?reparar=false` (desde el tenant de cada empresa: la
+  94, desde el de Gerardo). El cuadre que repara trae las faltantes CON su saldo de la
+  CxC y salta las de clientes sin equivalencia antes de su tope.
 
 ### 6. La empresa 03
 

@@ -339,8 +339,10 @@ def alta_clientes_sae(
     """
     emp = _empresa_sae9(ctx, codigo)
     filas = _con_sae9(emp, lambda: clientes_sae.leer_clientes(emp.codigo, emp.desde))
+    hermanas = {e.codigo for e in sae_fuentes.del_tenant(ctx.tenant_id) if e.servidor.es_firebird}
     return {"ok": True, "fuente": emp.etiqueta,
-            **clientes_sae.alta_clientes(db, ctx, emp.codigo, filas, aplicar=aplicar)}
+            **clientes_sae.alta_clientes(db, ctx, emp.codigo, filas, aplicar=aplicar,
+                                         hermanas=hermanas)}
 
 
 @router_fuentes.post("/{codigo}/jalar")
