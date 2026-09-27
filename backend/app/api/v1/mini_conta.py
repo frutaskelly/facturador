@@ -58,9 +58,9 @@ class SucursalSeriesOut(BaseModel):
 
 
 class ClienteAlcanceOut(BaseModel):
+    """Nombre y series, nada más: Mini Conta no necesita el RFC para escoger."""
     id: UUID
     nombre: str
-    rfc: Optional[str] = None
     series: list[str]
 
 
@@ -217,7 +217,8 @@ def alcance(
         sin_limite=con is not None and not con.alcance,
         sucursales=[SucursalSeriesOut(**s) for s in m["sucursales"]],
         series=m["series"],
-        clientes=[ClienteAlcanceOut(**c) for c in m["clientes"]],
+        clientes=[ClienteAlcanceOut(id=c["id"], nombre=c["nombre"], series=c["series"])
+                  for c in m["clientes"]],
         catalogo=m["catalogo"],
     )
 

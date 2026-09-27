@@ -427,6 +427,7 @@ def test_la_clave_solo_lee_sus_series(client, env, auth_as):
     assert a["series"] == ["ZPAC"]
     # cli2 tiene ZPAC solo en una plaza apagada: no cuenta.
     assert [c["nombre"] for c in a["clientes"]] == ["EHMO MC"]
+    assert "rfc" not in a["clientes"][0]
     assert a["catalogo"] is False and a["sin_limite"] is False
 
     d = client.get(url, headers=h, params=rango).json()

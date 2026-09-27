@@ -2305,6 +2305,7 @@
     "type": "object"
    },
    "ClienteAlcanceOut": {
+    "description": "Nombre y series, nada más: Mini Conta no necesita el RFC para escoger.",
     "properties": {
      "id": {
       "format": "uuid",
@@ -2314,17 +2315,6 @@
      "nombre": {
       "title": "Nombre",
       "type": "string"
-     },
-     "rfc": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Rfc"
      },
      "series": {
       "items": {

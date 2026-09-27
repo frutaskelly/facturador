@@ -6340,7 +6340,10 @@ export interface components {
             /** Total */
             total: number;
         };
-        /** ClienteAlcanceOut */
+        /**
+         * ClienteAlcanceOut
+         * @description Nombre y series, nada más: Mini Conta no necesita el RFC para escoger.
+         */
         ClienteAlcanceOut: {
             /**
              * Id
@@ -6349,8 +6352,6 @@ export interface components {
             id: string;
             /** Nombre */
             nombre: string;
-            /** Rfc */
-            rfc?: string | null;
             /** Series */
             series: string[];
         };
