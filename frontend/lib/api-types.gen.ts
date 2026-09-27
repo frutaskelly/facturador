@@ -3741,6 +3741,10 @@ export interface paths {
          * Match Productos
          * @description Cruza textos libres (tecleados/pegados) contra el catálogo: exacto → alias
          *     aprendido → difuso, y opcionalmente IA para los que no resuelvan.
+         *
+         *     Con `cliente_id` (y `sucursal_id`) el vocabulario de ese cliente va primero,
+         *     como `alias_cliente`: es como el bot pregunta qué producto es lo que pidió un
+         *     cliente sin escogerlo él.
          */
         post: operations["match_productos_api_v1_productos_match_post"];
         delete?: never;
@@ -9432,11 +9436,15 @@ export interface components {
         };
         /** MatchIn */
         MatchIn: {
+            /** Cliente Id */
+            cliente_id?: string | null;
             /**
              * Limit
              * @default 5
              */
             limit: number;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
             /** Textos */
             textos: string[];
             /**

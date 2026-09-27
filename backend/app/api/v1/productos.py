@@ -96,6 +96,7 @@ from ...services.catalogos_default import categoria_sin_categorizar
 from ...services.sugerir_esquema import match_categorias, sugerir_categorias, sugerir_esquemas
 from ...services.producto_match import (
     Candidato,
+    alias_de_cliente,
     alias_del_tenant,
     aprender_alias,
     buscar,
@@ -279,18 +280,26 @@ def match_productos(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     """Cruza textos libres (tecleados/pegados) contra el catálogo: exacto → alias
-    aprendido → difuso, y opcionalmente IA para los que no resuelvan."""
+    aprendido → difuso, y opcionalmente IA para los que no resuelvan.
+
+    Con `cliente_id` (y `sucursal_id`) el vocabulario de ese cliente va primero,
+    como `alias_cliente`: es como el bot pregunta qué producto es lo que pidió un
+    cliente sin escogerlo él."""
+    if payload.cliente_id is not None and not ctx.cliente_permitido(payload.cliente_id):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
     if payload.usar_ia:
         # La rama IA manda el catálogo completo como contexto (cuesta dinero).
         enforce(f"producto-ia:{ctx.tenant_id}", 120, 3600)
     catalogo = productos_activos(db, ctx.tenant_id)   # una sola carga para todos los textos
     aliases = alias_del_tenant(db, ctx.tenant_id)     # idem: sin esto era un SELECT por texto
+    aliases_cli = alias_de_cliente(db, ctx.tenant_id, payload.cliente_id, payload.sucursal_id)
     norms = normalizar_catalogo(catalogo)   # y sin esto, O(textos × productos)
     cats_por_id, esquemas_por_id = _mapas_catalogo(db)
     resultados: list[dict] = []
     sin_match: list[str] = []
     for texto in payload.textos:
-        cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit, prods=catalogo, aliases=aliases, norms=norms)
+        cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit, prods=catalogo,
+                       aliases=aliases, aliases_cliente=aliases_cli, norms=norms)
         resultados.append({
             "texto": texto,
             "candidatos": [_candidato_out(c, cats_por_id, esquemas_por_id) for c in cands],
