@@ -1098,11 +1098,13 @@ def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
     sugerencia guardada hace meses miente. `productos_activos` se carga una vez
     para las N partidas en vez de una vez por partida.
 
-    Orden del cruce por partida: 1) clave en el catálogo DEL cliente (100),
-    2) la misma clave usada por otro cliente si no es ambigua (95), 3) alias del
-    cliente > alias global > exacto > difuso (con la unidad como freno del
-    difuso). `auto` resume si la orden entera cruzó por vías deterministas y
-    puede volverse remisión con un clic.
+    Orden del cruce por partida: 1) el vocabulario del cliente (alias con su
+    alcance, 100) — el vocabulario lo decide el Facturador, no la clave que puso
+    el bot; 2) clave en el catálogo DEL cliente (100); 3) la misma clave usada
+    por otro cliente, solo si el cliente no la conoce y no es ambigua (95);
+    4) exacto > alias global > difuso (con la unidad como freno del difuso).
+    `auto` resume si la orden entera cruzó por vías deterministas y puede
+    volverse remisión con un clic.
     """
     payload = oc.payload or {}
     lineas_raw = payload.get("lineas") or []
@@ -1157,22 +1159,39 @@ def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
                    aliases_cliente=aliases_cli, norms=norms, unidad=unidad_norm)
             if texto else []
         )
-        # La CLAVE del cliente es lo más preciso que trae el documento. Primero
-        # exacta contra el catálogo del cliente; luego la de otro cliente (Balles
-        # y Jubran comparten claves) si no es ambigua; al final, como texto.
+        # La CLAVE es lo más preciso que trae el documento después del
+        # vocabulario del cliente. Primero exacta contra el catálogo del
+        # cliente; luego la de otro cliente (Balles y Jubran comparten claves)
+        # si no es ambigua; al final, como texto.
         clave = str(ln.get("clave") or "").strip()
         if clave:
             cod = _norm_codigo(clave)
-            exactos = []
+            exactos, de_otro = [], []
             pid = cods_cli.get(cod)
             if pid is not None and pid in by_id:
                 exactos.append(_cand_de(by_id[pid], 100, "codigo_cliente"))
-            elif cods_otros.get(cod) is not None and cods_otros[cod] in by_id:
-                exactos.append(_cand_de(by_id[cods_otros[cod]], 95, "codigo_otro_cliente"))
+            elif cod not in cods_cli and cods_otros.get(cod) is not None \
+                    and cods_otros[cod] in by_id:
+                # Solo si el cliente NO conoce la clave. Si la conoce en dos
+                # productos, preguntarle a otro cliente no desempata: escoge uno
+                # de los dos al azar. Así EHMO Tabasco, con CILANTROKG en el
+                # cilantro y en el cilantro criollo, recibía siempre el criollo
+                # porque así lo tienen MAFAN y los demás.
+                de_otro.append(_cand_de(by_id[cods_otros[cod]], 95, "codigo_otro_cliente"))
             por_clave = buscar(db, oc.tenant_id, clave, limit=3, prods=catalogo,
                                aliases=aliases, aliases_cliente=aliases_cli, norms=norms,
                                unidad=unidad_norm)   # mismo freno papa/papaya
-            vistos = {c.producto_id for c in exactos}
+            # El vocabulario del cliente va ANTES que cualquier clave: el
+            # vocabulario lo decide el Facturador, no el bot (regla del dueño,
+            # 27-sep-2026). En WhatsApp la clave ni siquiera es del cliente: es
+            # la que el bot le puso al texto. Si la clave del catálogo del propio
+            # cliente dice otra cosa, la partida no se decide sola (`_empatados`).
+            del_cliente = [c for c in cands if c.origen == "alias_cliente"]
+            vistos = {c.producto_id for c in del_cliente}
+            exactos = [c for c in exactos if c.producto_id not in vistos]
+            vistos |= {c.producto_id for c in exactos}
+            de_otro = [c for c in de_otro if c.producto_id not in vistos]
+            vistos |= {c.producto_id for c in de_otro}
             # La descripción manda cuando cruzó por vía determinista: un parecido
             # sobre la clave (prefijo 96, difuso) jamás desplaza a un exacto o a
             # un alias de 100 — "PAPA" como clave no puede tapar "PAPAYA MARADOL".
@@ -1181,7 +1200,7 @@ def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
             vistos |= {c.producto_id for c in fuertes}
             por_clave = [c for c in por_clave if c.producto_id not in vistos]
             vistos |= {c.producto_id for c in por_clave}
-            cands = exactos + fuertes + por_clave + [
+            cands = del_cliente + exactos + de_otro + fuertes + por_clave + [
                 c for c in cands if c.producto_id not in vistos
             ]
         top = cands[0] if cands else None
@@ -1256,10 +1275,31 @@ def _cand_de(p: Producto, score: int, origen: str):
     )
 
 
-# Orígenes que DECIDEN solos: la clave del cliente, un alias aprendido o la
-# coincidencia exacta. El difuso y la IA sugieren pero jamás deciden — regla
-# del catálogo multicliente (el falso positivo papa/papaya es la razón).
-_ORIGENES_DETERMINISTAS = {"codigo_cliente", "alias", "exacto"}
+# Orígenes que DECIDEN solos: la clave del cliente, un alias aprendido (el del
+# cliente o el global) o la coincidencia exacta. El difuso y la IA sugieren pero
+# jamás deciden — regla del catálogo multicliente (el falso positivo papa/papaya
+# es la razón).
+_ORIGENES_DETERMINISTAS = {"codigo_cliente", "alias_cliente", "alias", "exacto"}
+
+
+def _empatados(cands: list[dict]) -> set:
+    """Los productos DISTINTOS que cruzan al 100 por vía determinista.
+
+    Más de uno es un empate que decide un humano — salvo que arriba vaya el
+    vocabulario del cliente: esa regla existe justo para desempatar («el cliente
+    gana»), y contar contra ella el producto que se llama igual o el que tiene
+    la clave SAE la dejaba sin efecto. Solo la contradice la clave del catálogo
+    del propio cliente: si apunta a otro producto, empatan y lo ve un humano.
+    """
+    top = cands[0] if cands else None
+    if top is not None and top["origen"] == "alias_cliente":
+        return {top["producto_id"]} | {
+            c["producto_id"] for c in cands if c["origen"] == "codigo_cliente"
+        }
+    return {
+        c["producto_id"] for c in cands
+        if c["score"] >= 100 and c["origen"] in _ORIGENES_DETERMINISTAS
+    }
 
 
 def _lote_de(ln: dict) -> Optional[str]:
@@ -1356,10 +1396,7 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
         # ("CILANTRO" y "Cilantro" son dos filas) para que un humano vea el
         # duplicado. Esa ambigüedad no la puede resolver el orden del seq scan:
         # misma regla que la clave de otro cliente, que ya no decide si es ambigua.
-        empatados = {
-            c["producto_id"] for c in cands
-            if c["score"] >= 100 and c["origen"] in _ORIGENES_DETERMINISTAS
-        }
+        empatados = _empatados(cands)
         if len(empatados) > 1:
             falla(ln, "ambiguo",
                   f"La partida {ln['numero']} {etiqueta} cruza al 100 con "
@@ -1993,10 +2030,7 @@ def _sin_revisar_de(db: Session, oc: OCRecibida, lineas: list[dict]) -> tuple[li
         if top["origen"] not in _ORIGENES_DETERMINISTAS or top["score"] < 100:
             motivos.append(f"el cruce con «{prod.nombre}» es un parecido, no una clave ni un alias")
         else:
-            empatados = {
-                c["producto_id"] for c in cands
-                if c["score"] >= 100 and c["origen"] in _ORIGENES_DETERMINISTAS
-            }
+            empatados = _empatados(cands)
             if len(empatados) > 1:
                 motivos.append(f"cruza al 100 con {len(empatados)} productos distintos")
 

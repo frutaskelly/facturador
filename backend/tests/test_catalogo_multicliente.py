@@ -36,7 +36,7 @@ from app.models import (
     Tenant,
     User,
 )
-from app.services.producto_match import normalizar_unidad
+from app.services.producto_match import normalizar, normalizar_unidad
 
 _PURGE = (
     "oc_recibidas", "cliente_externos", "lineas_remision", "remisiones",
@@ -372,7 +372,7 @@ def test_el_cruce_de_la_bandeja_prefiere_el_vocabulario_del_cliente(client, env,
     top_ehmo = oc_ehmo["lineas"][0]["candidatos"][0]
     # Balles usa el global (serrano); EHMO su vocabulario privado (jalapeño).
     assert top_balles["producto_id"] == env["serrano"] and top_balles["origen"] == "alias"
-    assert top_ehmo["producto_id"] == env["jalapeno"] and top_ehmo["origen"] == "alias"
+    assert top_ehmo["producto_id"] == env["jalapeno"] and top_ehmo["origen"] == "alias_cliente"
 
 
 # ─── cruce por clave del cliente en la bandeja ───────────────────────────────
@@ -679,6 +679,115 @@ def test_la_clave_parecida_no_tapa_el_exacto_de_la_descripcion(client, env, auth
     ])
     top = oc["lineas"][0]["candidatos"][0]
     assert top["producto_id"] == env["jalapeno"] and top["origen"] == "exacto"
+
+
+def test_el_vocabulario_de_ehmo_tabasco_gana_a_la_clave_ajena_y_al_nombre(client, env, auth_as):
+    """El cilantro de Tabasco (27-sep-2026): el dueño escribió en /vocabulario
+    que para EHMO Tabasco «Cilantro» y «Cilantro poblano» son el cilantro de
+    siempre y «Cilantro criollo» es el criollo, y las órdenes seguían entrando
+    como CILANTRO CRIOLLO. Dos cosas lo tapaban:
+
+    - La clave. El bot manda CILANTROKG; EHMO la tiene en DOS productos (ambigua,
+      no decide) y el cruce se la preguntaba entonces a otro cliente, que la
+      tiene en el criollo — y esa pista de 95 iba delante de la regla del cliente.
+    - El nombre. «CILANTRO POBLANO» es también el nombre de un producto, y el
+      exacto iba delante del alias y empataba con él al 100.
+
+    El vocabulario lo decide el Facturador, no el bot: la regla del cliente va
+    antes que cualquier clave. Solo la clave del catálogo del propio cliente,
+    si apunta a otro producto, deja la partida para que la vea un humano.
+    """
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    tid, ehmo = uuid.UUID(env["tenant"]), uuid.UUID(env["ehmo"])
+    tab, balles = uuid.UUID(env["suc_tab"]), uuid.UUID(env["balles"])
+    db = SessionLocal()
+    try:
+        def prod(sku, nombre, clave_sae=None):
+            p = Producto(tenant_id=tid, sku=sku, nombre=nombre, clave_sae=clave_sae,
+                         clave_sat="50403700", unidad_sat="KGM",
+                         unidad_base="KILO", presentaciones={"KILO": 1})
+            db.add(p); db.flush()
+            return p
+        # El de Pachuca: se llama criollo pero lleva la clave del cilantro.
+        criollo = prod("00000310", "CILANTRO CRIOLLO", "CILANTROKG")
+        manojo = prod("00000311", "CILANTRO MANOJO DE 1 KG")
+        prod("00010378", "CILANTRO POBLANO")          # nadie lo usa; solo se llama igual
+        culantro = prod("00010182", "CILANCRIOLLOKG", "CILANCRIOLLOKG")
+        db.add_all([
+            ProductoCliente(tenant_id=tid, cliente_id=ehmo, producto_id=criollo.id,
+                            codigo_cliente="CILANTROKG", nombre_cliente="CILANTRO"),
+            ProductoCliente(tenant_id=tid, cliente_id=ehmo, sucursal_id=tab,
+                            producto_id=manojo.id, codigo_cliente="CILANTROKG"),
+            # Para otro cliente la misma clave es, sin duda, el criollo.
+            ProductoCliente(tenant_id=tid, cliente_id=balles, producto_id=criollo.id,
+                            codigo_cliente="CILANTROKG"),
+            # Y una clave que EHMO sí tiene, sin ambigüedad, en el criollo de Tabasco.
+            ProductoCliente(tenant_id=tid, cliente_id=ehmo, producto_id=culantro.id,
+                            codigo_cliente="EH-CRIOLLO"),
+        ])
+        db.commit()
+        manojo_id, culantro_id, criollo_id = str(manojo.id), str(culantro.id), str(criollo.id)
+    finally:
+        db.close()
+
+    client.post("/api/v1/clientes/externos", headers=h, json={
+        "sistema": "RFC", "clave": "GOA180712SF5", "cliente_id": env["ehmo"]})
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json={
+        "canal": "WHATSAPP", "origen_externo": f"WA:x:{uuid.uuid4().hex[:6]}",
+        "rfc": "GOA180712SF5", "folio_externo": "VH-39SAL-VIE",
+        "lineas": [
+            {"descripcion": "CILANTRO", "cantidad": "0.25", "unidad": "KILO",
+             "clave": "CILANTROKG", "precio": "51.7"},
+            {"descripcion": "CILANTRO POBLANO", "cantidad": "1", "unidad": "MAZO",
+             "clave": "CILANTROKG", "precio": "51.7"},
+            {"descripcion": "CILANTRO CRIOLLO", "cantidad": "2.3", "unidad": "KILO",
+             "clave": "CILANCRIOLLOKG", "precio": "206.8"},
+            # Una clave que EHMO no conoce sigue tomando la pista de otro cliente.
+            {"descripcion": "HIERBA SIN NOMBRE", "cantidad": "1", "unidad": "KILO",
+             "clave": "CILA-FRUT-145"},
+            # Su vocabulario contra SU propia clave: gana el vocabulario, pero no solo.
+            {"descripcion": "Cilantro", "cantidad": "1", "unidad": "KILO",
+             "clave": "EH-CRIOLLO"},
+        ],
+    }).json()
+    r = client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h, json={
+        "cliente_id": env["ehmo"], "sucursal_id": env["suc_tab"], "aprender": False})
+    assert r.status_code == 200, r.text
+    lineas = r.json()["lineas"]
+
+    # Sin regla del cliente: la clave ambigua de EHMO ya no se desempata con la
+    # de otro cliente — nada de colarse como criollo a 95.
+    origenes = {c["origen"] for c in lineas[0]["candidatos"]}
+    assert "codigo_otro_cliente" not in origenes
+    assert lineas[3]["candidatos"][0]["origen"] == "codigo_otro_cliente"
+    assert lineas[3]["candidatos"][0]["producto_id"] == env["cilantro"]
+
+    # El vocabulario de EHMO Tabasco, como lo dejó el dueño.
+    db = SessionLocal()
+    try:
+        for texto, pid in (("Cilantro", manojo_id), ("CILANTRO POBLANO", manojo_id),
+                           ("CILANTRO CRIOLLO", culantro_id)):
+            db.add(ProductoAlias(tenant_id=tid, producto_id=uuid.UUID(pid), alias=texto,
+                                 alias_normalizado=normalizar(texto),
+                                 cliente_id=ehmo, sucursal_id=tab))
+        db.commit()
+    finally:
+        db.close()
+
+    det = client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()
+    esperado = {1: manojo_id, 2: manojo_id, 3: culantro_id, 5: manojo_id}
+    for ln in det["lineas"]:
+        if ln["numero"] in esperado:
+            top = ln["candidatos"][0]
+            assert (top["producto_id"], top["origen"]) == (esperado[ln["numero"]], "alias_cliente"), \
+                ln["descripcion"]
+    assert all(ln["candidatos"][0]["producto_id"] != criollo_id for ln in det["lineas"][:3])
+    # La regla decide sola: ni «no cruza» ni «elige cuál va» en las tres primeras.
+    # La quinta la contradice la clave del propio cliente: esa sí la ve un humano.
+    assert det["auto"] is not None
+    tipos = {p["numero"]: p["tipo"] for p in det["auto"]["problemas"]}
+    assert not {n for n in (1, 2, 3) if tipos.get(n) in ("sin_cruce", "ambiguo")}, tipos
+    assert tipos.get(5) == "ambiguo", tipos
 
 
 def test_la_correccion_del_humano_pisa_el_alias_del_cliente(client, env, auth_as):

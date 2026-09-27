@@ -227,8 +227,8 @@ def buscar(
     `prods` permite pasar el catálogo ya cargado: /productos/match resuelve hasta
     200 textos por request y sin esto haría 200 SELECT del catálogo completo.
 
-    `aliases_cliente` (de `alias_de_cliente`) gana sobre el alias global: es el
-    vocabulario privado del cliente del documento. `unidad` (ya normalizada con
+    `aliases_cliente` (de `alias_de_cliente`) gana sobre el nombre exacto y el
+    alias global: es el vocabulario privado del cliente del documento. `unidad` (ya normalizada con
     `normalizar_unidad`) frena el paso difuso: un parecido que ni siquiera se
     vende en esa unidad no puede ser candidato fuerte — el clúster papa/papaya
     demostró que la distancia de edición sola engaña en nombres cortos.
@@ -247,10 +247,23 @@ def buscar(
     out: list[Candidato] = []
     seen: set[UUID] = set()
 
+    # 0) el vocabulario del CLIENTE va primero, antes que el nombre exacto: es
+    #    la regla que el dueño escribió para ese cliente, y «el cliente gana».
+    #    Detrás del exacto no servía de nada cuando el texto también es el nombre
+    #    de otro producto: EHMO Tabasco dice «CILANTRO POBLANO» por el cilantro
+    #    de siempre, y el producto que se llama así empataba al 100 con su regla.
+    #    Sale como `alias_cliente` para que el empate no lo cuente contra él.
+    alias_cli_pid = (aliases_cliente or {}).get(norm)
+    if alias_cli_pid is not None and alias_cli_pid in by_id:
+        out.append(_cand(by_id[alias_cli_pid], 100, "alias_cliente"))
+        seen.add(alias_cli_pid)
+
     # 1) exactos por nombre o sku — TODOS los que coinciden (no solo el primero).
     #    Clave para evitar duplicados: si ya existen "SANDIA", "Sandía", "Sandia"
     #    (todas normalizan igual), deben aparecer las tres para que el usuario las vea.
     for p in prods:
+        if p.id in seen:
+            continue
         idx = (norms or {}).get(p.id) or (
             normalizar(p.nombre), normalizar(p.sku), [], normalizar(p.clave_sae or ""))
         nombre_n, sku_n = idx[0], idx[1]
@@ -265,11 +278,12 @@ def buscar(
             out.append(_cand(p, 100, "exacto"))
             seen.add(p.id)
 
-    # 2) alias aprendido (si apunta a un producto que aún no está incluido).
-    #    El del CLIENTE gana sobre el global: es su vocabulario privado.
+    # 2) alias GLOBAL aprendido (si apunta a un producto que aún no está incluido).
+    #    Solo cuando el cliente no tiene regla propia para ese texto: la suya ya
+    #    salió en el paso 0 y el global no la contradice.
     #    `aliases` precargado evita un SELECT por texto en los cruces masivos.
-    alias_pid = (aliases_cliente or {}).get(norm)
-    if alias_pid is None:
+    alias_pid = None
+    if alias_cli_pid is None:
         if aliases is not None:
             alias_pid = aliases.get(norm)
         else:
