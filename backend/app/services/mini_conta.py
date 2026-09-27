@@ -8,9 +8,14 @@ con su propia clave, y el dueño del Facturador decide qué comparte cada una
   una plaza de otra.
 - `clientes`: None = todos los de esas series; una lista = solo esos.
 - `catalogo`: si puede leer los productos que se facturan en esas series.
+- `remisiones`: lo entregado (remisiones) en esas series, para los días que
+  todavía no se facturan.
+- `notas_credito`: las notas de crédito aplicadas a facturas de esas series.
+- `cobranza`: los pagos recibidos (REP) y los saldos por cobrar de esas facturas.
+- `precios`: el precio de lista que le toca a cada cliente de esas series.
 
 Una clave sin `alcance` es la de antes de 0092: lee todas las series y todos los
-clientes, sin catálogo, hasta que el dueño le ponga un límite. Una PERSONA con
+clientes, solo ventas, hasta que el dueño le ponga un límite. Una PERSONA con
 `venta:leer_lineas` (el dueño) lee todo.
 """
 from __future__ import annotations
@@ -39,15 +44,27 @@ def clave_nombre(nombre: str) -> str:
     return " ".join((nombre or "").split()).casefold()
 
 
+# Lo que una clave puede leer además de las ventas. Se guardan como banderas en
+# `conexiones.alcance`; una bandera que falta es False.
+DATOS = ("catalogo", "remisiones", "notas_credito", "cobranza", "precios")
+
+
 @dataclass(frozen=True)
 class Alcance:
     series: Optional[frozenset[str]]      # None = todas las de factura
     clientes: Optional[frozenset[UUID]]   # None = todos
-    catalogo: bool
+    catalogo: bool = False
+    remisiones: bool = False
+    notas_credito: bool = False
+    cobranza: bool = False
+    precios: bool = False
 
     @staticmethod
     def todo() -> "Alcance":
-        return Alcance(series=None, clientes=None, catalogo=True)
+        return Alcance(series=None, clientes=None, **{d: True for d in DATOS})
+
+    def datos(self) -> dict:
+        return {d: getattr(self, d) for d in DATOS}
 
 
 def alcance_de(db: Session, ctx: AuthContext) -> Alcance:
@@ -56,13 +73,57 @@ def alcance_de(db: Session, ctx: AuthContext) -> Alcance:
     con = db.get(Conexion, ctx.conexion_id)
     datos = con.alcance if con is not None else None
     if not datos:
-        return Alcance(series=None, clientes=None, catalogo=False)
+        return Alcance(series=None, clientes=None)
     clientes = datos.get("clientes")
     return Alcance(
         series=frozenset(datos.get("series") or []),
         clientes=None if clientes is None else frozenset(UUID(str(c)) for c in clientes),
-        catalogo=bool(datos.get("catalogo")),
+        **{d: bool(datos.get(d)) for d in DATOS},
     )
+
+
+def series_previstas(db: Session, tenant_id, pares) -> dict:
+    """{(cliente_id, sucursal_id): código de la serie de FACTURA} con la misma
+    cascada que `services.series.resolver_serie` (vínculo cliente×plaza →
+    cliente → predeterminada; solo series activas de factura), pero en cuatro
+    consultas para todos los pares en vez de cuatro por remisión."""
+    pares = set(pares)
+    if not pares:
+        return {}
+    activas = {
+        s.id: s.codigo for s in db.query(Serie)
+        .filter(Serie.tenant_id == tenant_id, Serie.tipo_documento == "FACTURA",
+                Serie.activa.is_(True))
+        .all()
+    }
+    default = (
+        db.query(Serie.codigo)
+        .filter(Serie.tenant_id == tenant_id, Serie.tipo_documento == "FACTURA",
+                Serie.activa.is_(True), Serie.es_default.is_(True))
+        .order_by(Serie.created_at)
+        .first()
+    )
+    clientes = {c for c, _ in pares if c}
+    vinculo = {
+        (cs.cliente_id, cs.sucursal_id): cs.serie_factura_id
+        for cs in db.query(ClienteSucursal)
+        .filter(ClienteSucursal.tenant_id == tenant_id, ClienteSucursal.cliente_id.in_(clientes))
+        .all()
+    } if clientes else {}
+    del_cliente = dict(
+        db.query(Cliente.id, Cliente.serie_factura_id)
+        .filter(Cliente.tenant_id == tenant_id, Cliente.id.in_(clientes))
+        .all()
+    ) if clientes else {}
+    out = {}
+    for cli, suc in pares:
+        codigo = activas.get(vinculo.get((cli, suc))) if suc else None
+        if codigo is None:
+            codigo = activas.get(del_cliente.get(cli))
+        if codigo is None:
+            codigo = default[0] if default else None
+        out[(cli, suc)] = codigo
+    return out
 
 
 def series_factura(db: Session, tenant_id) -> list[str]:
@@ -190,11 +251,11 @@ def mapa(db: Session, tenant_id, alcance: Alcance) -> dict:
         "sucursales": sucursales,
         "series": sorted(series),
         "clientes": clientes,
-        "catalogo": alcance.catalogo,
+        **alcance.datos(),
     }
 
 
-def validar_alcance(db: Session, tenant_id, series, clientes, catalogo: bool) -> dict:
+def validar_alcance(db: Session, tenant_id, series, clientes, **datos) -> dict:
     """Normaliza lo que el dueño marcó en la pantalla y lo deja listo para
     guardarse en `conexiones.alcance`. Una clave sin series no lee nada: se
     rechaza en vez de crear una conexión inútil."""
@@ -224,5 +285,5 @@ def validar_alcance(db: Session, tenant_id, series, clientes, catalogo: bool) ->
     return {
         "series": sorted(pedidas),
         "clientes": None if ids is None else [str(i) for i in ids],
-        "catalogo": bool(catalogo),
+        **{d: bool(datos.get(d)) for d in DATOS},
     }

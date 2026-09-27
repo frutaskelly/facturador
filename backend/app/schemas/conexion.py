@@ -16,6 +16,13 @@ class AlcanceMiniConta(BaseModel):
     series: list[str] = Field(default_factory=list)
     clientes: Optional[list[uuid.UUID]] = None     # None = todos los de esas series
     catalogo: bool = False
+    remisiones: bool = False
+    notas_credito: bool = False
+    cobranza: bool = False
+    precios: bool = False
+
+    def datos(self) -> dict:
+        return self.model_dump(exclude={"series", "clientes"})
 
 
 class ConexionOut(ORMModel):
