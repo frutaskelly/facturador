@@ -890,9 +890,9 @@ def precios(
     Sale de `resolver_precios_lote`, la MISMA cascada que cotiza y factura
     (override → asignación → lista base), una vez por cada cliente×plaza cuya
     serie de factura prevista es de las pedidas; con la serie de REMISIÓN que le
-    toca, porque las asignaciones por serie son por serie de remisión."""
+    toca, porque las asignaciones por serie son por serie de remisión. Para una
+    cuenta con muchos clientes, pídelo de a uno (`clientes=`)."""
     from ...services.precios import resolver_precios_lote
-    from ...services.series import resolver_serie
 
     a = alcance_de(db, ctx)
     _requiere(a.precios, "los precios")
@@ -914,42 +914,57 @@ def precios(
     if not pares:
         return MCPreciosOut(series=series_leer, fecha=hoy, precios=[])
 
+    # Qué se le facturó a cada cliente en su serie el último año: UNA consulta
+    # para todos los pares (el backend está lejos de la BD; una por par no cabe
+    # en el tiempo que Mini Conta espera).
     fecha_mx = sa.cast(sa.func.timezone(_ZONA, Factura.fecha), sa.Date)
-    salida: list[MCPrecioVentaOut] = []
+    vendidos: dict = {}
+    for cli, serie, pid in (
+        db.query(Factura.cliente_id, Factura.serie, LineaFactura.producto_id)
+        .join(LineaFactura, LineaFactura.factura_id == Factura.id)
+        .filter(
+            Factura.tenant_id == ctx.tenant_id,
+            Factura.estado == "TIMBRADA",
+            Factura.deleted_at.is_(None),
+            Factura.cliente_id.in_({c for c, _ in pares}),
+            Factura.serie.in_({prevista[k] for k in pares}),
+            LineaFactura.producto_id.isnot(None),
+            fecha_mx >= hoy - timedelta(days=365),
+        )
+        .distinct()
+        .all()
+    ):
+        vendidos.setdefault((cli, serie), set()).add(pid)
+    prods = {
+        p.id: p for p in db.query(Producto)
+        .filter(Producto.id.in_({pid for ps in vendidos.values() for pid in ps}),
+                Producto.deleted_at.is_(None))
+        .all()
+    } if vendidos else {}
+    serie_rem = series_previstas(db, ctx.tenant_id, pares, tipo="REMISION", como="id")
     nombres = dict(
         db.query(Cliente.id, Cliente.legal_name)
         .filter(Cliente.id.in_({c for c, _ in pares}))
         .all()
     )
+
+    salida: list[MCPrecioVentaOut] = []
     for (cli, suc), plaza in sorted(pares.items(), key=lambda x: (str(x[0][0]), x[1] or "")):
-        prods = (
-            db.query(Producto)
-            .join(LineaFactura, LineaFactura.producto_id == Producto.id)
-            .join(Factura, Factura.id == LineaFactura.factura_id)
-            .filter(
-                Factura.tenant_id == ctx.tenant_id,
-                Factura.estado == "TIMBRADA",
-                Factura.deleted_at.is_(None),
-                Factura.cliente_id == cli,
-                Factura.serie == prevista[(cli, suc)],
-                fecha_mx >= hoy - timedelta(days=365),
-                Producto.deleted_at.is_(None),
-            )
-            .distinct()
-            .all()
+        lista = sorted(
+            (prods[pid] for pid in vendidos.get((cli, prevista[(cli, suc)]), ()) if pid in prods),
+            key=lambda p: p.nombre,
         )
-        if not prods:
+        if not lista:
             continue
-        serie_rem = resolver_serie(db, ctx.tenant_id, "REMISION", sucursal_id=suc, cliente_id=cli)
         items = [
             {"producto_id": p.id, "presentacion": p.presentacion_default or p.unidad_base,
              "cantidad": Decimal(1)}
-            for p in prods
+            for p in lista
         ]
         resueltos = resolver_precios_lote(
             db, items=items, cliente_id=cli, sucursal_id=suc,
-            serie_id=serie_rem.id if serie_rem else None, fecha=hoy)
-        for p, it, r in zip(prods, items, resueltos):
+            serie_id=serie_rem.get((cli, suc)), fecha=hoy)
+        for p, it, r in zip(lista, items, resueltos):
             if not r or r.get("precio") is None:
                 continue
             salida.append(MCPrecioVentaOut(

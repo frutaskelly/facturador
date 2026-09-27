@@ -82,47 +82,49 @@ def alcance_de(db: Session, ctx: AuthContext) -> Alcance:
     )
 
 
-def series_previstas(db: Session, tenant_id, pares) -> dict:
-    """{(cliente_id, sucursal_id): código de la serie de FACTURA} con la misma
-    cascada que `services.series.resolver_serie` (vínculo cliente×plaza →
-    cliente → predeterminada; solo series activas de factura), pero en cuatro
-    consultas para todos los pares en vez de cuatro por remisión."""
+def series_previstas(db: Session, tenant_id, pares, tipo: str = "FACTURA",
+                     como: str = "codigo") -> dict:
+    """{(cliente_id, sucursal_id): serie de `tipo`} con la misma cascada que
+    `services.series.resolver_serie` (vínculo cliente×plaza → cliente →
+    predeterminada; solo series activas de ese tipo), pero en cuatro consultas
+    para todos los pares en vez de cuatro por par. `como` = "codigo" o "id"."""
     pares = set(pares)
     if not pares:
         return {}
+    campo = "serie_factura_id" if tipo == "FACTURA" else "serie_remision_id"
     activas = {
-        s.id: s.codigo for s in db.query(Serie)
-        .filter(Serie.tenant_id == tenant_id, Serie.tipo_documento == "FACTURA",
+        s.id: (s.codigo if como == "codigo" else s.id) for s in db.query(Serie)
+        .filter(Serie.tenant_id == tenant_id, Serie.tipo_documento == tipo,
                 Serie.activa.is_(True))
         .all()
     }
     default = (
-        db.query(Serie.codigo)
-        .filter(Serie.tenant_id == tenant_id, Serie.tipo_documento == "FACTURA",
+        db.query(Serie.id)
+        .filter(Serie.tenant_id == tenant_id, Serie.tipo_documento == tipo,
                 Serie.activa.is_(True), Serie.es_default.is_(True))
         .order_by(Serie.created_at)
         .first()
     )
     clientes = {c for c, _ in pares if c}
     vinculo = {
-        (cs.cliente_id, cs.sucursal_id): cs.serie_factura_id
+        (cs.cliente_id, cs.sucursal_id): getattr(cs, campo)
         for cs in db.query(ClienteSucursal)
         .filter(ClienteSucursal.tenant_id == tenant_id, ClienteSucursal.cliente_id.in_(clientes))
         .all()
     } if clientes else {}
     del_cliente = dict(
-        db.query(Cliente.id, Cliente.serie_factura_id)
+        db.query(Cliente.id, getattr(Cliente, campo))
         .filter(Cliente.tenant_id == tenant_id, Cliente.id.in_(clientes))
         .all()
     ) if clientes else {}
     out = {}
     for cli, suc in pares:
-        codigo = activas.get(vinculo.get((cli, suc))) if suc else None
-        if codigo is None:
-            codigo = activas.get(del_cliente.get(cli))
-        if codigo is None:
-            codigo = default[0] if default else None
-        out[(cli, suc)] = codigo
+        valor = activas.get(vinculo.get((cli, suc))) if suc else None
+        if valor is None:
+            valor = activas.get(del_cliente.get(cli))
+        if valor is None and default is not None:
+            valor = activas.get(default[0])
+        out[(cli, suc)] = valor
     return out
 
 
