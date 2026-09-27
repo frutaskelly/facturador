@@ -919,6 +919,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conexiones/{conexion_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Editar
+         * @description Cambia el nombre o lo que comparte una conexión de Mini Conta, sin tocar
+         *     su clave: Mini Conta ve el cambio la próxima vez que lea.
+         */
+        patch: operations["editar_api_v1_conexiones__conexion_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/conexiones/{conexion_id}/regenerar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerar
+         * @description Clave nueva para ESA conexión: la anterior deja de servir en el acto y la
+         *     nueva hereda su nombre y su alcance. Las demás cuentas no se enteran.
+         */
+        post: operations["regenerar_api_v1_conexiones__conexion_id__regenerar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conexiones/{conexion_id}/revocar": {
         parameters: {
             query?: never;
@@ -969,11 +1011,35 @@ export interface paths {
          * Generar
          * @description Genera la clave. Se devuelve en claro UNA vez y ya no se puede volver a leer.
          *
-         *     Si ya había una viva se revoca en el acto: «generar otra» y «la anterior deja
-         *     de servir» tienen que ser el mismo gesto, o quedarían dos claves buenas y
-         *     nadie sabría cuál está usando el bot.
+         *     Smart Supply: si ya había una viva se revoca en el acto —«generar otra» y «la
+         *     anterior deja de servir» tienen que ser el mismo gesto, o quedarían dos claves
+         *     buenas y nadie sabría cuál está usando el bot—.
+         *
+         *     Mini Conta: cada llamada es una cuenta NUEVA (nombre + alcance) y no toca a
+         *     las demás. Para cambiar la clave de una cuenta existente: `/{id}/regenerar`.
          */
         post: operations["generar_api_v1_conexiones__tipo__clave_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conexiones/{tipo}/opciones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Opciones
+         * @description Lo que se le puede compartir a una cuenta de Mini Conta: plazas con sus
+         *     series y los clientes de cada serie.
+         */
+        get: operations["opciones_api_v1_conexiones__tipo__opciones_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2338,6 +2404,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mini-conta/alcance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alcance
+         * @description Qué comparte esta clave: plazas con sus series, clientes y si hay
+         *     catálogo. Mini Conta lo pide al conectar y al cambiar qué trae.
+         */
+        get: operations["alcance_api_v1_mini_conta_alcance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/productos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Productos
+         * @description Los productos que se facturaron en esas series entre `desde` y `hasta`:
+         *     el catálogo que le sirve a ESTA cuenta, no los 1,500 de la empresa. Solo si
+         *     la conexión comparte el catálogo.
+         */
+        get: operations["productos_api_v1_mini_conta_productos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mini-conta/sucursales": {
         parameters: {
             query?: never;
@@ -2347,7 +2456,8 @@ export interface paths {
         };
         /**
          * Sucursales
-         * @description Cada plaza del inquilino con las series de factura que le pertenecen.
+         * @description Cada plaza con las series de factura que le pertenecen y que esta clave
+         *     comparte. Las plazas sin ninguna serie compartida no salen.
          */
         get: operations["sucursales_api_v1_mini_conta_sucursales_get"];
         put?: never;
@@ -2368,8 +2478,9 @@ export interface paths {
         /**
          * Ventas
          * @description Las líneas de las facturas timbradas (ingreso, sin notas de crédito) de
-         *     las series de la plaza, con `desde`/`hasta` sobre la fecha de la factura
-         *     (hora de México), ambos inclusive.
+         *     las series pedidas —o las de la plaza, o todas las que comparte la clave—,
+         *     con `desde`/`hasta` sobre la fecha de la factura (hora de México), ambos
+         *     inclusive. `clientes` recorta a esos clientes.
          */
         get: operations["ventas_api_v1_mini_conta_ventas_get"];
         put?: never;
@@ -5354,6 +5465,42 @@ export interface components {
             /** Remitente */
             remitente?: string | null;
         };
+        /**
+         * AlcanceMiniConta
+         * @description Qué comparte una clave de Mini Conta (ver services/mini_conta.py).
+         */
+        AlcanceMiniConta: {
+            /**
+             * Catalogo
+             * @default false
+             */
+            catalogo: boolean;
+            /** Clientes */
+            clientes?: string[] | null;
+            /** Series */
+            series?: string[];
+        };
+        /**
+         * AlcanceOut
+         * @description Lo que esta clave comparte, listo para que Mini Conta escoja qué traer.
+         */
+        AlcanceOut: {
+            /** Catalogo */
+            catalogo: boolean;
+            /** Clientes */
+            clientes: components["schemas"]["ClienteAlcanceOut"][];
+            conexion?: components["schemas"]["ConexionBreveOut"] | null;
+            empresa: components["schemas"]["app__api__v1__mini_conta__EmpresaOut"];
+            /** Series */
+            series: string[];
+            /**
+             * Sin Limite
+             * @default false
+             */
+            sin_limite: boolean;
+            /** Sucursales */
+            sucursales: components["schemas"]["SucursalSeriesOut"][];
+        };
         /** AliasIn */
         AliasIn: {
             /** Cliente Id */
@@ -6193,6 +6340,20 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** ClienteAlcanceOut */
+        ClienteAlcanceOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+            /** Rfc */
+            rfc?: string | null;
+            /** Series */
+            series: string[];
+        };
         /** ClienteCreate */
         ClienteCreate: {
             /** Almacen Id */
@@ -6455,6 +6616,20 @@ export interface components {
             /** Ventas Ytd */
             ventas_ytd: string;
         };
+        /** ClienteSeriesMC */
+        ClienteSeriesMC: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+            /** Rfc */
+            rfc?: string | null;
+            /** Series */
+            series: string[];
+        };
         /** ClienteSucursalOut */
         ClienteSucursalOut: {
             /**
@@ -6597,12 +6772,24 @@ export interface components {
             /** Sucursal Id */
             sucursal_id?: string | null;
         };
+        /** ConexionBreveOut */
+        ConexionBreveOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+        };
         /**
          * ConexionEstadoOut
          * @description Lo que la pantalla necesita para responder «¿está entrando lo que debe?».
          */
         ConexionEstadoOut: {
             conexion?: components["schemas"]["ConexionOut"] | null;
+            /** Conexiones */
+            conexiones?: components["schemas"]["ConexionOut"][];
             /**
              * Conviene Rotar
              * @default false
@@ -6631,6 +6818,7 @@ export interface components {
         ConexionOut: {
             /** Activada At */
             activada_at?: string | null;
+            alcance?: components["schemas"]["AlcanceMiniConta"] | null;
             /** Clave Pista */
             clave_pista: string;
             /**
@@ -6651,6 +6839,12 @@ export interface components {
             tipo: string;
             /** Ultimo Uso At */
             ultimo_uso_at?: string | null;
+        };
+        /** ConexionUpdate */
+        ConexionUpdate: {
+            alcance?: components["schemas"]["AlcanceMiniConta"] | null;
+            /** Nombre */
+            nombre?: string | null;
         };
         /**
          * ConfirmarRemisionIn
@@ -7256,36 +7450,6 @@ export interface components {
             multiemisor: boolean;
             /** Pasos */
             pasos?: components["schemas"]["OnboardingPaso"][];
-            /**
-             * Rfc
-             * @default
-             */
-            rfc: string;
-        };
-        /** EmpresaOut */
-        EmpresaOut: {
-            /** Domicilio Fiscal */
-            domicilio_fiscal?: Record<string, never>;
-            /**
-             * Domicilio Fiscal Cp
-             * @default
-             */
-            domicilio_fiscal_cp: string;
-            /**
-             * Has Logo
-             * @default false
-             */
-            has_logo: boolean;
-            /**
-             * Legal Name
-             * @default
-             */
-            legal_name: string;
-            /**
-             * Regimen Fiscal Sat
-             * @default
-             */
-            regimen_fiscal_sat: string;
             /**
              * Rfc
              * @default
@@ -8929,6 +9093,10 @@ export interface components {
             cantidad: string;
             /** Clave Unidad */
             clave_unidad: string;
+            /** Cliente */
+            cliente?: string | null;
+            /** Cliente Id */
+            cliente_id?: string | null;
             /** Descripcion */
             descripcion: string;
             /**
@@ -9450,6 +9618,15 @@ export interface components {
             /** Uuid */
             uuid?: string | null;
         };
+        /**
+         * NuevaConexionIn
+         * @description Mini Conta: una clave por cuenta, con nombre y alcance desde el inicio.
+         */
+        NuevaConexionIn: {
+            alcance: components["schemas"]["AlcanceMiniConta"];
+            /** Nombre */
+            nombre: string;
+        };
         /** OCRecibidaDetailOut */
         OCRecibidaDetailOut: {
             /**
@@ -9729,6 +9906,18 @@ export interface components {
             id: string;
             /** Titulo */
             titulo: string;
+        };
+        /**
+         * OpcionesMiniContaOut
+         * @description Todo lo que se puede compartir con una cuenta de Mini Conta.
+         */
+        OpcionesMiniContaOut: {
+            /** Clientes */
+            clientes: components["schemas"]["ClienteSeriesMC"][];
+            /** Series */
+            series: string[];
+            /** Sucursales */
+            sucursales: components["schemas"]["SucursalSeriesMC"][];
         };
         /** OrdenCompraCreate */
         OrdenCompraCreate: {
@@ -10815,6 +11004,43 @@ export interface components {
             unidad_sat?: string | null;
             /** Vida Util Dias */
             vida_util_dias?: number | null;
+        };
+        /** ProductoVendidoOut */
+        ProductoVendidoOut: {
+            /** Lineas */
+            lineas: number;
+            /** Nombre */
+            nombre: string;
+            /** Presentacion Default */
+            presentacion_default?: string | null;
+            /** Sku */
+            sku: string;
+            /**
+             * Ultima Venta
+             * Format: date
+             */
+            ultima_venta: string;
+            /** Unidad Base */
+            unidad_base?: string | null;
+            /** Unidad Sat */
+            unidad_sat: string;
+        };
+        /** ProductosOut */
+        ProductosOut: {
+            /**
+             * Desde
+             * Format: date
+             */
+            desde: string;
+            /**
+             * Hasta
+             * Format: date
+             */
+            hasta: string;
+            /** Productos */
+            productos: components["schemas"]["ProductoVendidoOut"][];
+            /** Series */
+            series: string[];
         };
         /** ProveedorCreate */
         ProveedorCreate: {
@@ -11913,6 +12139,13 @@ export interface components {
              */
             updated_at: string;
         };
+        /** SucursalSeriesMC */
+        SucursalSeriesMC: {
+            /** Nombre */
+            nombre: string;
+            /** Series */
+            series: string[];
+        };
         /** SucursalSeriesOut */
         SucursalSeriesOut: {
             /** Nombre */
@@ -12292,6 +12525,8 @@ export interface components {
         };
         /** VentasOut */
         VentasOut: {
+            /** Clientes */
+            clientes?: string[] | null;
             /**
              * Desde
              * Format: date
@@ -12307,7 +12542,7 @@ export interface components {
             /** Series */
             series: string[];
             /** Sucursal */
-            sucursal: string;
+            sucursal?: string | null;
         };
         /**
          * VocabularioOut
@@ -12372,6 +12607,16 @@ export interface components {
             /** Serie */
             serie?: string | null;
         };
+        /** EmpresaOut */
+        app__api__v1__mini_conta__EmpresaOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+        };
         /** ContactoIn */
         app__schemas__contacto__ContactoIn: {
             /** Correo */
@@ -12388,6 +12633,36 @@ export interface components {
             turnstile_token?: string | null;
             /** Website */
             website?: string | null;
+        };
+        /** EmpresaOut */
+        app__schemas__empresa__EmpresaOut: {
+            /** Domicilio Fiscal */
+            domicilio_fiscal?: Record<string, never>;
+            /**
+             * Domicilio Fiscal Cp
+             * @default
+             */
+            domicilio_fiscal_cp: string;
+            /**
+             * Has Logo
+             * @default false
+             */
+            has_logo: boolean;
+            /**
+             * Legal Name
+             * @default
+             */
+            legal_name: string;
+            /**
+             * Regimen Fiscal Sat
+             * @default
+             */
+            regimen_fiscal_sat: string;
+            /**
+             * Rfc
+             * @default
+             */
+            rfc: string;
         };
     };
     responses: never;
@@ -14552,6 +14827,76 @@ export interface operations {
             };
         };
     };
+    editar_api_v1_conexiones__conexion_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                conexion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConexionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConexionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerar_api_v1_conexiones__conexion_id__regenerar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                conexion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaveNuevaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     revocar_api_v1_conexiones__conexion_id__revocar_post: {
         parameters: {
             query?: never;
@@ -14629,7 +14974,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["NuevaConexionIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             201: {
@@ -14638,6 +14987,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClaveNuevaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    opciones_api_v1_conexiones__tipo__opciones_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tipo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpcionesMiniContaOut"];
                 };
             };
             /** @description Validation Error */
@@ -15068,7 +15450,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EmpresaOut"];
+                    "application/json": components["schemas"]["app__schemas__empresa__EmpresaOut"];
                 };
             };
             /** @description Validation Error */
@@ -15103,7 +15485,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EmpresaOut"];
+                    "application/json": components["schemas"]["app__schemas__empresa__EmpresaOut"];
                 };
             };
             /** @description Validation Error */
@@ -15402,7 +15784,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EmpresaOut"];
+                    "application/json": components["schemas"]["app__schemas__empresa__EmpresaOut"];
                 };
             };
             /** @description Validation Error */
@@ -15433,7 +15815,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EmpresaOut"];
+                    "application/json": components["schemas"]["app__schemas__empresa__EmpresaOut"];
                 };
             };
             /** @description Validation Error */
@@ -15501,7 +15883,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EmpresaOut"];
+                    "application/json": components["schemas"]["app__schemas__empresa__EmpresaOut"];
                 };
             };
             /** @description Validation Error */
@@ -17648,6 +18030,75 @@ export interface operations {
             };
         };
     };
+    alcance_api_v1_mini_conta_alcance_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlcanceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    productos_api_v1_mini_conta_productos_get: {
+        parameters: {
+            query: {
+                desde: string;
+                hasta: string;
+                /** @description Códigos separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductosOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     sucursales_api_v1_mini_conta_sucursales_get: {
         parameters: {
             query?: never;
@@ -17682,9 +18133,14 @@ export interface operations {
     ventas_api_v1_mini_conta_ventas_get: {
         parameters: {
             query: {
-                sucursal: string;
                 desde: string;
                 hasta: string;
+                /** @description Códigos separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+                /** @description Forma vieja: el nombre de la plaza */
+                sucursal?: string | null;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;

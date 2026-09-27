@@ -5,10 +5,14 @@ que aquí se FACTURÓ para sacar merma y ganancia por producto. Entra con una
 clave de conexión tipo MINI_CONTA, cuyo único permiso es `venta:leer_lineas`
 (ver core/rbac.py::PERMISOS_POR_TIPO): lee y nada más.
 
-La «sucursal» de Mini Conta es un NOMBRE («Chiapas», «Pachuca»), y aquí una
-plaza puede tener varias filas con el mismo nombre; así que se agrupa por
-nombre sin distinguir mayúsculas, y una plaza son todas las series de factura
-que sus vínculos cliente×plaza tienen asignadas.
+Cada cuenta de Mini Conta tiene SU clave, y cada clave su alcance (qué series,
+qué clientes, si ve el catálogo; ver services/mini_conta.py). Todo lo de aquí
+responde solo dentro de ese alcance: una cuenta nunca lee lo de otra.
+
+Mini Conta pide las ventas por `series` (lo que la cuenta escogió traer) y,
+opcionalmente, por `clientes`. La forma vieja —por «sucursal», un NOMBRE
+(«Chiapas») que se traduce a las series de sus vínculos cliente×plaza— sigue
+sirviendo para las cuentas que todavía no escogen series.
 
 Lo que más importa es la FECHA DE ENTREGA: la factura se hace días después de
 entregar, y el reporte de Mini Conta va por el día en que salió la mercancía.
@@ -29,17 +33,16 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import (
-    ClienteSucursal,
-    ClienteSucursalSerie,
-    Factura,
-    LineaFactura,
-    Producto,
-    Remision,
-    Serie,
-    Sucursal,
-)
+from ...models import Cliente, Conexion, Factura, LineaFactura, Producto, Remision, Tenant
 from ...services.fecha_entrega import fecha_entrega_de_notas
+from ...services.mini_conta import (
+    Alcance,
+    alcance_de,
+    clave_nombre,
+    mapa,
+    series_factura,
+    series_por_plaza,
+)
 
 router = APIRouter(prefix="/mini-conta", tags=["mini-conta"])
 
@@ -54,6 +57,34 @@ class SucursalSeriesOut(BaseModel):
     series: list[str]
 
 
+class ClienteAlcanceOut(BaseModel):
+    id: UUID
+    nombre: str
+    rfc: Optional[str] = None
+    series: list[str]
+
+
+class EmpresaOut(BaseModel):
+    id: UUID
+    nombre: str
+
+
+class ConexionBreveOut(BaseModel):
+    id: UUID
+    nombre: str
+
+
+class AlcanceOut(BaseModel):
+    """Lo que esta clave comparte, listo para que Mini Conta escoja qué traer."""
+    empresa: EmpresaOut
+    conexion: Optional[ConexionBreveOut] = None
+    sin_limite: bool = False      # clave de antes de 0092: todavía sin alcance
+    sucursales: list[SucursalSeriesOut]
+    series: list[str]
+    clientes: list[ClienteAlcanceOut]
+    catalogo: bool
+
+
 class LineaVentaOut(BaseModel):
     linea_id: UUID
     factura_id: UUID
@@ -63,6 +94,8 @@ class LineaVentaOut(BaseModel):
     fecha_factura: date
     fecha_entrega: date
     fecha_entrega_origen: Literal["remision", "notas", "factura"]
+    cliente_id: Optional[UUID] = None
+    cliente: Optional[str] = None
     sku: Optional[str] = None
     producto: Optional[str] = None
     descripcion: str
@@ -73,72 +106,92 @@ class LineaVentaOut(BaseModel):
 
 
 class VentasOut(BaseModel):
-    sucursal: str
+    sucursal: Optional[str] = None
     series: list[str]
+    clientes: Optional[list[UUID]] = None
     desde: date
     hasta: date
     lineas: list[LineaVentaOut]
 
 
-def _clave(nombre: str) -> str:
-    return " ".join((nombre or "").split()).casefold()
+class ProductoVendidoOut(BaseModel):
+    sku: str
+    nombre: str
+    unidad_sat: str
+    unidad_base: Optional[str] = None
+    presentacion_default: Optional[str] = None
+    lineas: int
+    ultima_venta: date
 
 
-def _series_por_sucursal(db: Session, tenant_id) -> dict[str, tuple[str, set[str]]]:
-    """{nombre normalizado: (nombre para mostrar, {códigos de serie})}.
-
-    Serie de factura DEFAULT del vínculo cliente×plaza + su abanico. Solo
-    plazas vivas y activas, y solo series de FACTURA (el abanico puede traer
-    series de remisión, que aquí no cuentan)."""
-    vivas = sa.and_(Sucursal.deleted_at.is_(None), Sucursal.activo.is_(True))
-    principal = (
-        db.query(Sucursal.nombre, Serie.codigo)
-        .join(ClienteSucursal, ClienteSucursal.sucursal_id == Sucursal.id)
-        .join(Serie, Serie.id == ClienteSucursal.serie_factura_id)
-        .filter(ClienteSucursal.tenant_id == tenant_id, vivas,
-                Serie.tipo_documento == "FACTURA")
-    )
-    abanico = (
-        db.query(Sucursal.nombre, Serie.codigo)
-        .join(ClienteSucursal, ClienteSucursal.sucursal_id == Sucursal.id)
-        .join(ClienteSucursalSerie, ClienteSucursalSerie.cliente_sucursal_id == ClienteSucursal.id)
-        .join(Serie, Serie.id == ClienteSucursalSerie.serie_id)
-        .filter(ClienteSucursal.tenant_id == tenant_id, vivas,
-                Serie.tipo_documento == "FACTURA")
-    )
-    out: dict[str, tuple[str, set[str]]] = {}
-    for nombre, codigo in sorted(list(principal) + list(abanico)):
-        k = _clave(nombre)
-        if not k:
-            continue
-        out.setdefault(k, (nombre.strip(), set()))[1].add(codigo)
-    return out
+class ProductosOut(BaseModel):
+    series: list[str]
+    desde: date
+    hasta: date
+    productos: list[ProductoVendidoOut]
 
 
-@router.get("/sucursales", response_model=list[SucursalSeriesOut])
-def sucursales(
-    db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_LEER)),
-):
-    """Cada plaza del inquilino con las series de factura que le pertenecen."""
-    mapa = _series_por_sucursal(db, ctx.tenant_id)
-    return [
-        SucursalSeriesOut(nombre=nombre, series=sorted(series))
-        for nombre, series in sorted(mapa.values(), key=lambda x: x[0].casefold())
-    ]
+def _lista(texto: Optional[str]) -> list[str]:
+    """`?series=A,B` → ["A", "B"]. Mini Conta arma la URL desde Postgres y ahí
+    una lista repetida es incómoda; una coma basta."""
+    return [x.strip() for x in (texto or "").split(",") if x.strip()]
 
 
-@router.get("/ventas", response_model=VentasOut)
-def ventas(
-    sucursal: str = Query(..., min_length=1),
-    desde: date = Query(...),
-    hasta: date = Query(...),
-    db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_LEER)),
-):
-    """Las líneas de las facturas timbradas (ingreso, sin notas de crédito) de
-    las series de la plaza, con `desde`/`hasta` sobre la fecha de la factura
-    (hora de México), ambos inclusive."""
+def _permitidas(db: Session, ctx: AuthContext, alcance: Alcance) -> set[str]:
+    universo = set(series_factura(db, ctx.tenant_id))
+    return universo if alcance.series is None else universo & set(alcance.series)
+
+
+def _resolver_series(
+    db: Session, ctx: AuthContext, alcance: Alcance,
+    series: Optional[str], sucursal: Optional[str],
+) -> tuple[list[str], Optional[str]]:
+    """Las series a leer, siempre dentro del alcance. Pedir una que la clave no
+    comparte es un 403 que lo dice, no un recorte silencioso: si el dueño le
+    quitó una serie a la cuenta, Mini Conta tiene que enterarse."""
+    permitidas = _permitidas(db, ctx, alcance)
+    pedidas = _lista(series)
+    if pedidas:
+        fuera = sorted(set(pedidas) - permitidas)
+        if fuera:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Esta conexión no comparte la serie {', '.join(fuera)}",
+            )
+        return sorted(set(pedidas)), None
+    if sucursal:
+        encontrada = series_por_plaza(db, ctx.tenant_id).get(clave_nombre(sucursal))
+        if encontrada is None:
+            raise HTTPException(status_code=404, detail=f"No hay sucursal «{sucursal}» con series")
+        nombre, propias = encontrada
+        visibles = sorted(propias & permitidas)
+        if not visibles:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Esta conexión no comparte las series de «{nombre}»",
+            )
+        return visibles, nombre
+    if not permitidas:
+        raise HTTPException(status_code=403, detail="Esta conexión no comparte ninguna serie")
+    return sorted(permitidas), None
+
+
+def _resolver_clientes(alcance: Alcance, clientes: Optional[str]) -> Optional[list[UUID]]:
+    pedidos = _lista(clientes)
+    if not pedidos:
+        return None if alcance.clientes is None else sorted(alcance.clientes, key=str)
+    try:
+        ids = {UUID(c) for c in pedidos}
+    except ValueError:
+        raise HTTPException(status_code=422, detail="«clientes» trae un id que no es válido")
+    if alcance.clientes is not None and not ids <= alcance.clientes:
+        raise HTTPException(
+            status_code=403, detail="Esta conexión no comparte alguno de esos clientes"
+        )
+    return sorted(ids, key=str)
+
+
+def _rango(desde: date, hasta: date) -> None:
     if hasta < desde:
         raise HTTPException(status_code=422, detail="«hasta» no puede ser antes de «desde»")
     if (hasta - desde).days > _MAX_DIAS:
@@ -146,11 +199,57 @@ def ventas(
             status_code=422, detail=f"El rango no puede pasar de {_MAX_DIAS} días"
         )
 
-    encontrada = _series_por_sucursal(db, ctx.tenant_id).get(_clave(sucursal))
-    if encontrada is None:
-        raise HTTPException(status_code=404, detail=f"No hay sucursal «{sucursal}» con series")
-    nombre, series_set = encontrada
-    series = sorted(series_set)
+
+@router.get("/alcance", response_model=AlcanceOut)
+def alcance(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_LEER)),
+):
+    """Qué comparte esta clave: plazas con sus series, clientes y si hay
+    catálogo. Mini Conta lo pide al conectar y al cambiar qué trae."""
+    a = alcance_de(db, ctx)
+    t = db.get(Tenant, ctx.tenant_id)
+    con = db.get(Conexion, ctx.conexion_id) if ctx.conexion_id else None
+    m = mapa(db, ctx.tenant_id, a)
+    return AlcanceOut(
+        empresa=EmpresaOut(id=ctx.tenant_id, nombre=(t.legal_name if t else "") or ""),
+        conexion=ConexionBreveOut(id=con.id, nombre=con.nombre) if con else None,
+        sin_limite=con is not None and not con.alcance,
+        sucursales=[SucursalSeriesOut(**s) for s in m["sucursales"]],
+        series=m["series"],
+        clientes=[ClienteAlcanceOut(**c) for c in m["clientes"]],
+        catalogo=m["catalogo"],
+    )
+
+
+@router.get("/sucursales", response_model=list[SucursalSeriesOut])
+def sucursales(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_LEER)),
+):
+    """Cada plaza con las series de factura que le pertenecen y que esta clave
+    comparte. Las plazas sin ninguna serie compartida no salen."""
+    return [SucursalSeriesOut(**s) for s in mapa(db, ctx.tenant_id, alcance_de(db, ctx))["sucursales"]]
+
+
+@router.get("/ventas", response_model=VentasOut)
+def ventas(
+    desde: date = Query(...),
+    hasta: date = Query(...),
+    series: Optional[str] = Query(None, description="Códigos separados por coma"),
+    clientes: Optional[str] = Query(None, description="Ids separados por coma"),
+    sucursal: Optional[str] = Query(None, description="Forma vieja: el nombre de la plaza"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_LEER)),
+):
+    """Las líneas de las facturas timbradas (ingreso, sin notas de crédito) de
+    las series pedidas —o las de la plaza, o todas las que comparte la clave—,
+    con `desde`/`hasta` sobre la fecha de la factura (hora de México), ambos
+    inclusive. `clientes` recorta a esos clientes."""
+    _rango(desde, hasta)
+    a = alcance_de(db, ctx)
+    series_leer, nombre = _resolver_series(db, ctx, a, series, sucursal)
+    clientes_leer = _resolver_clientes(a, clientes)
 
     fecha_mx = sa.cast(sa.func.timezone(_ZONA, Factura.fecha), sa.Date)
     filas = (
@@ -169,21 +268,28 @@ def ventas(
             Factura.folio,
             Factura.notas,
             fecha_mx.label("fecha_factura"),
+            Factura.cliente_id,
+            Cliente.legal_name.label("cliente"),
             Producto.sku,
             Producto.nombre.label("producto"),
         )
         .join(Factura, Factura.id == LineaFactura.factura_id)
+        .outerjoin(Cliente, Cliente.id == Factura.cliente_id)
         .outerjoin(Producto, Producto.id == LineaFactura.producto_id)
         .filter(
             Factura.tenant_id == ctx.tenant_id,
             Factura.estado == "TIMBRADA",
             Factura.deleted_at.is_(None),
             Factura.tipo_comprobante == "I",
-            Factura.serie.in_(series),
+            Factura.serie.in_(series_leer),
             fecha_mx >= desde,
             fecha_mx <= hasta,
         )
-        .order_by(fecha_mx, Factura.serie, Factura.folio, LineaFactura.numero_linea)
+    )
+    if clientes_leer is not None:
+        filas = filas.filter(Factura.cliente_id.in_(clientes_leer))
+    filas = (
+        filas.order_by(fecha_mx, Factura.serie, Factura.folio, LineaFactura.numero_linea)
         .all()
     )
 
@@ -225,6 +331,8 @@ def ventas(
             fecha_factura=f.fecha_factura,
             fecha_entrega=entrega,
             fecha_entrega_origen=origen,
+            cliente_id=f.cliente_id,
+            cliente=f.cliente,
             sku=f.sku,
             producto=f.producto,
             descripcion=f.descripcion,
@@ -234,4 +342,66 @@ def ventas(
             importe=str(importe),
         ))
 
-    return VentasOut(sucursal=nombre, series=series, desde=desde, hasta=hasta, lineas=lineas)
+    return VentasOut(sucursal=nombre, series=series_leer, clientes=clientes_leer,
+                     desde=desde, hasta=hasta, lineas=lineas)
+
+
+@router.get("/productos", response_model=ProductosOut)
+def productos(
+    desde: date = Query(...),
+    hasta: date = Query(...),
+    series: Optional[str] = Query(None, description="Códigos separados por coma"),
+    clientes: Optional[str] = Query(None, description="Ids separados por coma"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_LEER)),
+):
+    """Los productos que se facturaron en esas series entre `desde` y `hasta`:
+    el catálogo que le sirve a ESTA cuenta, no los 1,500 de la empresa. Solo si
+    la conexión comparte el catálogo."""
+    a = alcance_de(db, ctx)
+    if not a.catalogo:
+        raise HTTPException(status_code=403, detail="Esta conexión no comparte el catálogo")
+    _rango(desde, hasta)
+    series_leer, _ = _resolver_series(db, ctx, a, series, None)
+    clientes_leer = _resolver_clientes(a, clientes)
+
+    fecha_mx = sa.cast(sa.func.timezone(_ZONA, Factura.fecha), sa.Date)
+    q = (
+        db.query(
+            Producto.sku,
+            Producto.nombre,
+            Producto.unidad_sat,
+            Producto.unidad_base,
+            Producto.presentacion_default,
+            sa.func.count(LineaFactura.id).label("lineas"),
+            sa.func.max(fecha_mx).label("ultima_venta"),
+        )
+        .join(LineaFactura, LineaFactura.producto_id == Producto.id)
+        .join(Factura, Factura.id == LineaFactura.factura_id)
+        .filter(
+            Factura.tenant_id == ctx.tenant_id,
+            Factura.estado == "TIMBRADA",
+            Factura.deleted_at.is_(None),
+            Factura.tipo_comprobante == "I",
+            Factura.serie.in_(series_leer),
+            fecha_mx >= desde,
+            fecha_mx <= hasta,
+            Producto.deleted_at.is_(None),
+        )
+    )
+    if clientes_leer is not None:
+        q = q.filter(Factura.cliente_id.in_(clientes_leer))
+    filas = (
+        q.group_by(Producto.id, Producto.sku, Producto.nombre, Producto.unidad_sat,
+                   Producto.unidad_base, Producto.presentacion_default)
+        .order_by(Producto.nombre)
+        .all()
+    )
+    return ProductosOut(
+        series=series_leer, desde=desde, hasta=hasta,
+        productos=[ProductoVendidoOut(
+            sku=f.sku, nombre=f.nombre, unidad_sat=f.unidad_sat, unidad_base=f.unidad_base,
+            presentacion_default=f.presentacion_default, lineas=f.lineas,
+            ultima_venta=f.ultima_venta,
+        ) for f in filas],
+    )

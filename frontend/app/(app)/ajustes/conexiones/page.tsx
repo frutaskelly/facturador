@@ -1,6 +1,7 @@
 "use client";
 
 // Conexiones: enchufar Smart Supply (y Mini Conta) sin repartir contraseñas.
+// Mini Conta tiene una clave por cuenta y vive en MiniContaCuentas.tsx.
 //
 // La pantalla tiene dos vidas. Antes de conectar es un instructivo de un solo
 // botón. Después de conectar deja de ser configuración y pasa a responder una
@@ -11,7 +12,6 @@ import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
-  Calculator,
   Check,
   ChevronDown,
   ChevronRight,
@@ -36,6 +36,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
+import { MiniContaCuentas } from "./MiniContaCuentas";
 import { can, useAuth } from "@/lib/auth";
 import type {
   ActividadConexion,
@@ -93,32 +94,6 @@ const META: Record<string, MetaConexion> = {
       "Ver tus sellos, tu contabilidad ni tus usuarios",
     ],
   },
-  MINI_CONTA: {
-    descripcion: "Contabilidad por sucursal: lee lo facturado",
-    sinConectar:
-      "Genera una clave y pégala en Mini Conta. Con ella lee las ventas facturadas de cada sucursal para cruzarlas contra sus compras.",
-    activa: "Leyendo ventas",
-    esperando: "Esperando a que Mini Conta la use por primera vez… esta pantalla se pone en verde sola.",
-    pasos: [
-      "Cópiala.",
-      "En Mini Conta, pégala donde pide la clave del Facturador y guarda.",
-      "En cuanto Mini Conta la use, esta pantalla se pone en verde sola.",
-    ],
-    alConectar: "Conectado — Mini Conta ya puede leer las ventas.",
-    desconectar:
-      "La clave deja de servir en el momento. Mini Conta deja de poder leer las ventas hasta que generes otra clave.",
-    regenerar:
-      "La clave actual deja de servir en el momento y hay que pegar la nueva en Mini Conta.",
-    puede: [
-      "Leer las líneas de las facturas timbradas de cada sucursal",
-      "Ver qué series pertenecen a cada sucursal",
-    ],
-    noPuede: [
-      "Crear, timbrar ni cancelar facturas",
-      "Dejar órdenes, tocar remisiones, clientes ni productos",
-      "Ver tus sellos, tus usuarios ni tus precios",
-    ],
-  },
 };
 
 function metaDe(tipo: string, nombre: string): MetaConexion {
@@ -168,7 +143,9 @@ export default function Page() {
         setEstados(cs);
         // El momento en que se pega la clave en WhatsApp: la pantalla se pone en
         // verde sola y se quita la clave de en medio, sin que nadie recargue.
+        // (Mini Conta tiene una clave por cuenta y avisa por su cuenta.)
         for (const c of cs) {
+          if (c.tipo === "MINI_CONTA") continue;
           if (eraPendiente.current.has(c.tipo) && c.conexion?.estado === "ACTIVA") {
             setNueva((n) => (n?.conexion.tipo === c.tipo ? null : n));
             toast.success(metaDe(c.tipo, c.nombre).alConectar);
@@ -292,7 +269,10 @@ export default function Page() {
   // Se refresca sola. Rápido mientras espera la clave —que es justo cuando estás
   // viendo la pantalla— y despacio una vez conectada, donde lo único que cambia
   // son los contadores. En una pestaña de fondo no consulta nada.
-  const esperandoClave = estados?.some((e) => e.conexion?.estado === "PENDIENTE") ?? false;
+  const esperandoClave =
+    estados?.some(
+      (e) => e.conexion?.estado === "PENDIENTE" || e.conexiones?.some((c) => c.estado === "PENDIENTE")
+    ) ?? false;
   const hayConexion = estados?.some((e) => e.conexion && e.conexion.estado !== "REVOCADA") ?? false;
   useEffect(() => {
     if (!esperandoClave && !hayConexion) return;
@@ -378,6 +358,9 @@ export default function Page() {
       />
 
       {estados.map((e) => {
+        if (e.tipo === "MINI_CONTA") {
+          return <MiniContaCuentas key={e.tipo} estado={e} canWrite={canWrite} onCambio={reload} />;
+        }
         const con = e.conexion;
         const conectado = !!con && con.estado !== "REVOCADA";
         const mostrandoClave = nueva !== null && nueva.conexion.tipo === e.tipo;
@@ -389,7 +372,7 @@ export default function Page() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-surface-2">
-                  {esSmart ? <MessageCircle size={18} /> : <Calculator size={18} />}
+                  <MessageCircle size={18} />
                 </div>
                 <div>
                   <h2 className="font-semibold">{e.nombre}</h2>

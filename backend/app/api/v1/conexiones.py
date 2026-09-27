@@ -5,6 +5,11 @@ Smart Supply (o Mini Conta), y si está entrando lo que debe. Por eso el estado 
 configuración sino ACTIVIDAD (última orden, cuántas hoy, cuántas sin resolver):
 una vez conectado, eso es lo único que alguien va a venir a mirar.
 
+Smart Supply tiene UNA clave por empresa. Mini Conta tiene una por CUENTA (cada
+cuenta de Mini Conta es un cliente aparte), con nombre y alcance: qué series,
+qué clientes y si comparte el catálogo. Generar o revocar la de una cuenta no
+toca a las demás.
+
 Gestionar conexiones es cosa del dueño o de quien administre la empresa, así que
 se reusa `membership:gestionar` — el mismo permiso que abre Empresa y Correo.
 Leerlas pide `menu:ajustes.usuarios` no: basta con poder gestionar.
@@ -15,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -39,12 +44,16 @@ from ...schemas.conexion import (
     SucursalBreve,
     ConexionEstadoOut,
     ConexionOut,
+    ConexionUpdate,
     GrupoOut,
     GrupoUpdate,
+    NuevaConexionIn,
+    OpcionesMiniContaOut,
     PruebaOut,
     SincronizarGruposIn,
 )
 from ...services import cliente_match
+from ...services.mini_conta import Alcance, mapa, validar_alcance
 from ._helpers import get_or_404
 
 router = APIRouter(prefix="/conexiones", tags=["conexiones"])
@@ -70,22 +79,37 @@ CATALOGO = {
 _DIAS_PARA_SUGERIR_ROTAR = 365
 
 
-def _viva(db: Session, tipo: str) -> Optional[Conexion]:
+# Tipos con una clave por cuenta (varias vivas a la vez). El resto: una por empresa.
+_POR_CUENTA = {"MINI_CONTA"}
+
+
+def _vivas(db: Session, tipo: str) -> list[Conexion]:
     return (
         db.query(Conexion)
         .filter(Conexion.tipo == tipo, Conexion.estado != "REVOCADA")
-        .one_or_none()
+        .order_by(Conexion.created_at.desc())
+        .all()
     )
+
+
+def _viva(db: Session, tipo: str) -> Optional[Conexion]:
+    vivas = _vivas(db, tipo)
+    return vivas[0] if vivas else None
 
 
 def _estado(db: Session, tipo: str) -> ConexionEstadoOut:
     meta = CATALOGO[tipo]
-    con = _viva(db, tipo)
+    vivas = _vivas(db, tipo)
     out = ConexionEstadoOut(tipo=tipo, nombre=meta["nombre"])
-    if con is None:
+    if not vivas:
         return out
 
+    con = vivas[0]
     out.conexion = ConexionOut.model_validate(con)
+    out.conexiones = [
+        ConexionOut.model_validate(c)
+        for c in sorted(vivas, key=lambda c: (c.nombre or "").casefold())
+    ]
     creada = con.created_at
     if creada is not None:
         if creada.tzinfo is None:
@@ -125,37 +149,33 @@ def listar(
     return [_estado(db, tipo) for tipo in CATALOGO]
 
 
-@router.post("/{tipo}/clave", response_model=ClaveNuevaOut, status_code=status.HTTP_201_CREATED)
-def generar(
-    tipo: str,
-    db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_GESTIONAR)),
-):
-    """Genera la clave. Se devuelve en claro UNA vez y ya no se puede volver a leer.
+def _nombre_libre(db: Session, nombre: str, excepto=None) -> None:
+    q = db.query(Conexion).filter(
+        Conexion.tipo == "MINI_CONTA",
+        Conexion.estado != "REVOCADA",
+        func.lower(Conexion.nombre) == nombre.strip().lower(),
+    )
+    if excepto is not None:
+        q = q.filter(Conexion.id != excepto)
+    if q.first() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Ya hay una conexión «{nombre.strip()}»: genera su clave nueva desde ella",
+        )
 
-    Si ya había una viva se revoca en el acto: «generar otra» y «la anterior deja
-    de servir» tienen que ser el mismo gesto, o quedarían dos claves buenas y
-    nadie sabría cuál está usando el bot.
-    """
-    tipo = tipo.upper()
-    if tipo not in CATALOGO:
-        raise HTTPException(status_code=404, detail="Ese sistema no se puede conectar")
 
-    anterior = _viva(db, tipo)
-    if anterior is not None:
-        anterior.estado = "REVOCADA"
-        anterior.revocada_at = datetime.now(timezone.utc)
-        db.flush()
-
+def _clave_nueva(db: Session, ctx: AuthContext, tipo: str, nombre: str,
+                 alcance: Optional[dict]) -> ClaveNuevaOut:
     clave = generar_clave()
     con = Conexion(
         tenant_id=ctx.tenant_id,
         tipo=tipo,
-        nombre=CATALOGO[tipo]["nombre"],
+        nombre=nombre,
         clave_hash=hash_clave(clave),
         clave_pista=pista_de(clave),
         estado="PENDIENTE",
         created_by=ctx.user_id,
+        alcance=alcance,
     )
     db.add(con)
     db.flush()
@@ -169,6 +189,108 @@ def generar(
     )
 
 
+def _revocar(con: Conexion) -> None:
+    con.estado = "REVOCADA"
+    con.revocada_at = datetime.now(timezone.utc)
+
+
+@router.post("/{tipo}/clave", response_model=ClaveNuevaOut, status_code=status.HTTP_201_CREATED)
+def generar(
+    tipo: str,
+    payload: Optional[NuevaConexionIn] = Body(default=None),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_GESTIONAR)),
+):
+    """Genera la clave. Se devuelve en claro UNA vez y ya no se puede volver a leer.
+
+    Smart Supply: si ya había una viva se revoca en el acto —«generar otra» y «la
+    anterior deja de servir» tienen que ser el mismo gesto, o quedarían dos claves
+    buenas y nadie sabría cuál está usando el bot—.
+
+    Mini Conta: cada llamada es una cuenta NUEVA (nombre + alcance) y no toca a
+    las demás. Para cambiar la clave de una cuenta existente: `/{id}/regenerar`.
+    """
+    tipo = tipo.upper()
+    if tipo not in CATALOGO:
+        raise HTTPException(status_code=404, detail="Ese sistema no se puede conectar")
+
+    if tipo in _POR_CUENTA:
+        if payload is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Di de qué cuenta es la clave y qué comparte (nombre y alcance)",
+            )
+        nombre = payload.nombre.strip()
+        _nombre_libre(db, nombre)
+        a = payload.alcance
+        alcance = validar_alcance(db, ctx.tenant_id, a.series, a.clientes, a.catalogo)
+        return _clave_nueva(db, ctx, tipo, nombre, alcance)
+
+    anterior = _viva(db, tipo)
+    if anterior is not None:
+        _revocar(anterior)
+        db.flush()
+    return _clave_nueva(db, ctx, tipo, CATALOGO[tipo]["nombre"], None)
+
+
+@router.post("/{conexion_id}/regenerar", response_model=ClaveNuevaOut,
+             status_code=status.HTTP_201_CREATED)
+def regenerar(
+    conexion_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_GESTIONAR)),
+):
+    """Clave nueva para ESA conexión: la anterior deja de servir en el acto y la
+    nueva hereda su nombre y su alcance. Las demás cuentas no se enteran."""
+    con = get_or_404(db, Conexion, conexion_id, soft=False)
+    if con.estado == "REVOCADA":
+        raise HTTPException(status_code=409, detail="Esa conexión ya estaba desconectada")
+    _revocar(con)
+    db.flush()
+    return _clave_nueva(db, ctx, con.tipo, con.nombre, con.alcance)
+
+
+@router.patch("/{conexion_id}", response_model=ConexionOut)
+def editar(
+    conexion_id: UUID,
+    payload: ConexionUpdate,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_GESTIONAR)),
+):
+    """Cambia el nombre o lo que comparte una conexión de Mini Conta, sin tocar
+    su clave: Mini Conta ve el cambio la próxima vez que lea."""
+    con = get_or_404(db, Conexion, conexion_id, soft=False)
+    if con.tipo not in _POR_CUENTA:
+        raise HTTPException(status_code=422, detail="Esta conexión no tiene alcance que editar")
+    if con.estado == "REVOCADA":
+        raise HTTPException(status_code=409, detail="Esa conexión ya estaba desconectada")
+    if payload.nombre is not None:
+        _nombre_libre(db, payload.nombre, excepto=con.id)
+        con.nombre = payload.nombre.strip()
+    if payload.alcance is not None:
+        a = payload.alcance
+        con.alcance = validar_alcance(db, ctx.tenant_id, a.series, a.clientes, a.catalogo)
+    db.flush()
+    db.refresh(con)
+    return con
+
+
+@router.get("/{tipo}/opciones", response_model=OpcionesMiniContaOut)
+def opciones(
+    tipo: str,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_GESTIONAR)),
+):
+    """Lo que se le puede compartir a una cuenta de Mini Conta: plazas con sus
+    series y los clientes de cada serie."""
+    if tipo.upper() not in _POR_CUENTA:
+        raise HTTPException(status_code=404, detail="Esta conexión no tiene alcance que escoger")
+    m = mapa(db, ctx.tenant_id, Alcance.todo())
+    return OpcionesMiniContaOut(
+        sucursales=m["sucursales"], series=m["series"], clientes=m["clientes"],
+    )
+
+
 @router.post("/{conexion_id}/revocar", response_model=ConexionOut)
 def revocar(
     conexion_id: UUID,
@@ -178,8 +300,7 @@ def revocar(
     con = get_or_404(db, Conexion, conexion_id, soft=False)
     if con.estado == "REVOCADA":
         raise HTTPException(status_code=409, detail="Esa conexión ya estaba desconectada")
-    con.estado = "REVOCADA"
-    con.revocada_at = datetime.now(timezone.utc)
+    _revocar(con)
     db.flush()
     db.refresh(con)
     return con
