@@ -533,6 +533,33 @@ def _texto_producto(valor) -> str:
     return str(valor or "")
 
 
+def _catalogo_de_clientes(db: Session, cli_ids: set, prod_ids: set) -> dict:
+    """{(cliente, producto, sucursal|None): ProductoCliente} en UNA consulta.
+
+    Con clave por plaza (0067) puede haber fila genérica Y por sucursal para el
+    mismo (cliente, producto): por eso la llave lleva la sucursal, y quien la
+    lee resuelve con `_fila_del_cliente`.
+    """
+    if not (cli_ids and prod_ids):
+        return {}
+    return {
+        (pc.cliente_id, pc.producto_id, pc.sucursal_id): pc
+        for pc in db.query(ProductoCliente).filter(
+            ProductoCliente.cliente_id.in_(cli_ids),
+            ProductoCliente.producto_id.in_(prod_ids),
+        )
+    }
+
+
+def _fila_del_cliente(pcs: dict, cliente_id, producto_id, sucursal_id):
+    """La fila del catálogo del cliente que vale en ESA plaza — misma regla que
+    el export: la de la sucursal gana, cae la genérica, la de otra plaza no se
+    presta. None si el cliente no tiene el producto en su catálogo."""
+    return (
+        pcs.get((cliente_id, producto_id, sucursal_id)) if sucursal_id is not None else None
+    ) or pcs.get((cliente_id, producto_id, None))
+
+
 def _nombres_para_pdf(db: Session, rems: list[Remision]) -> dict:
     """{remision_id: {producto_id: (clave del cliente, nombre)}} para PDFs y correos.
 
@@ -548,30 +575,13 @@ def _nombres_para_pdf(db: Session, rems: list[Remision]) -> dict:
     interno = dict(
         db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all()
     ) if prod_ids else {}
-    cli_ids = {r.cliente_facturacion_id for r in rems if r.cliente_facturacion_id}
-    # Con clave por plaza (0067) puede haber fila genérica Y por sucursal para
-    # el mismo (cliente, producto): la llave lleva la sucursal y cada remisión
-    # resuelve con SU plaza — misma regla que el export (sucursal gana, cae la
-    # genérica, la de otra plaza no se presta).
-    pcs = {}
-    if cli_ids and prod_ids:
-        for pc in (
-            db.query(ProductoCliente)
-            .filter(
-                ProductoCliente.cliente_id.in_(cli_ids),
-                ProductoCliente.producto_id.in_(prod_ids),
-            )
-            .all()
-        ):
-            pcs[(pc.cliente_id, pc.producto_id, pc.sucursal_id)] = pc
+    pcs = _catalogo_de_clientes(
+        db, {r.cliente_facturacion_id for r in rems if r.cliente_facturacion_id}, prod_ids)
     out: dict = {}
     for r in rems:
         nombres: dict = {}
         for ln in r.lineas:
-            pc = (
-                pcs.get((r.cliente_facturacion_id, ln.producto_id, r.sucursal_id))
-                if r.sucursal_id is not None else None
-            ) or pcs.get((r.cliente_facturacion_id, ln.producto_id, None))
+            pc = _fila_del_cliente(pcs, r.cliente_facturacion_id, ln.producto_id, r.sucursal_id)
             base = (pc.nombre_cliente or "").strip() if pc else ""
             base = base or interno.get(ln.producto_id) or str(ln.producto_id)
             codigo = (pc.codigo_cliente or "").strip() if pc else ""
@@ -843,7 +853,10 @@ def reporte_armado(
             Remision.folio_interno,
             Remision.fecha_entrega,
             Remision.nota_entrega,
+            Remision.cliente_facturacion_id,
+            Remision.sucursal_id,
             Cliente.legal_name,
+            LineaRemision.producto_id,
             Producto.clave_sae,
             Producto.nombre,
             CategoriaProducto.nombre.label("categoria"),
@@ -876,8 +889,20 @@ def reporte_armado(
         .all()
     }
 
+    # La descripción que arma el equipo es la del CLIENTE (27-sep-2026): la hoja
+    # del Master traía el texto de la OC, y con el nombre interno quien surte ya
+    # no reconoce el renglón contra el pedido. Sale del catálogo del cliente
+    # —la misma capa que el PDF de la remisión y el CFDI— con el nombre interno
+    # de respaldo cuando el cliente no tiene el producto en su catálogo.
+    renglones = q.all()
+    pcs = _catalogo_de_clientes(
+        db,
+        {r.cliente_facturacion_id for r in renglones if r.cliente_facturacion_id},
+        {r.producto_id for r in renglones},
+    )
+
     rems: dict = {}
-    for r in q.all():
+    for r in renglones:
         rem = rems.setdefault(r.id, {
             "folio": normalizar_folio(r.su_pedido) or r.folio_interno,
             "cliente": r.legal_name or "",
@@ -889,9 +914,10 @@ def reporte_armado(
         })
         if r.id in pendientes:
             continue          # sus líneas salen del documento, abajo
+        pc = _fila_del_cliente(pcs, r.cliente_facturacion_id, r.producto_id, r.sucursal_id)
         rem["lineas"].append({
             "clave": r.clave_sae,
-            "descripcion": r.nombre,
+            "descripcion": ((pc.nombre_cliente or "").strip() if pc else "") or r.nombre,
             "unidad": r.presentacion,
             "nota": r.notas or "",
             "cantidad": str(r.cantidad_solicitada),

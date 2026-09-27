@@ -1038,6 +1038,53 @@ def test_reporte_armado_por_folios_ignora_fecha(client, env, auth_as):
     assert out["sin_fecha"] == []
 
 
+def test_reporte_armado_usa_la_descripcion_del_cliente(client, env, auth_as):
+    """La hoja de armado lleva la descripción del CLIENTE, no la del
+    Facturador (27-sep-2026): la del catálogo del cliente en su plaza gana,
+    cae la genérica, y solo sin nombre del cliente sale el interno."""
+    from app.models import ClienteSucursal, ProductoCliente, Sucursal
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    tid = env["admin_a"]["tenant_id"]
+    cli, prod, bulto = (uuid.UUID(env[k]) for k in ("cli_a", "prod_a", "prod_bulto_a"))
+    with SessionLocal() as s:
+        suc = Sucursal(tenant_id=tid, nombre="Plaza Armado")
+        s.add(suc); s.flush()
+        s.add(ClienteSucursal(tenant_id=tid, cliente_id=cli, sucursal_id=suc.id))
+        s.add_all([
+            ProductoCliente(tenant_id=tid, cliente_id=cli, producto_id=prod,
+                            nombre_cliente="JITOMATE ROMA"),
+            ProductoCliente(tenant_id=tid, cliente_id=cli, producto_id=prod,
+                            sucursal_id=suc.id, nombre_cliente="JITOMATE BOLA"),
+            # solo la clave, sin nombre: no pisa el interno con un vacío
+            ProductoCliente(tenant_id=tid, cliente_id=cli, producto_id=bulto,
+                            codigo_cliente="BLT-1"),
+        ])
+        s.commit()
+        suc_id = str(suc.id)
+
+    def rem(folio, sucursal=None):
+        body = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+                "su_pedido": folio, "fecha_entrega": "2031-04-13",
+                "lineas": [{"producto_id": env[p], "presentacion": "KILO",
+                            "cantidad_solicitada": "2", "precio_unitario": "5"}
+                           for p in ("prod_a", "prod_bulto_a")]}
+        if sucursal:
+            body["sucursal_id"] = sucursal
+        r = client.post("/api/v1/remisiones", headers=h, json=body)
+        assert r.status_code == 201, r.text
+
+    rem("24640")
+    rem("24641", suc_id)
+
+    r = client.get("/api/v1/remisiones/reporte-armado?fechas=2031-04-13", headers=h)
+    assert r.status_code == 200, r.text
+    desc = {x["folio"]: sorted(ln["descripcion"] for ln in x["lineas"])
+            for x in r.json()["remisiones"]}
+    assert desc == {"24640": ["JITOMATE ROMA", "Prod Bulto R"],
+                    "24641": ["JITOMATE BOLA", "Prod Bulto R"]}, desc
+
+
 def test_reporte_armado_usa_el_documento_nuevo_si_hay_incidencia(client, env, auth_as):
     """Misma regla que la lista de compras: con incidencia de cambio abierta,
     la hoja arma con las líneas del DOCUMENTO nuevo (marcadas) y las capturadas
