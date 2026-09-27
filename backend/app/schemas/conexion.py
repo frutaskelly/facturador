@@ -11,6 +11,13 @@ TipoConexion = Literal["SMART_SUPPLY", "MINI_CONTA"]
 EstadoConexion = Literal["PENDIENTE", "ACTIVA", "REVOCADA"]
 
 
+class AlcanceMiniConta(BaseModel):
+    """Qué comparte una clave de Mini Conta (ver services/mini_conta.py)."""
+    series: list[str] = Field(default_factory=list)
+    clientes: Optional[list[uuid.UUID]] = None     # None = todos los de esas series
+    catalogo: bool = False
+
+
 class ConexionOut(ORMModel):
     id: uuid.UUID
     tipo: str
@@ -20,6 +27,38 @@ class ConexionOut(ORMModel):
     created_at: datetime
     activada_at: Optional[datetime] = None
     ultimo_uso_at: Optional[datetime] = None
+    # Solo Mini Conta. None en una de Mini Conta = clave de antes, sin límite.
+    alcance: Optional[AlcanceMiniConta] = None
+
+
+class NuevaConexionIn(BaseModel):
+    """Mini Conta: una clave por cuenta, con nombre y alcance desde el inicio."""
+    nombre: str = Field(min_length=1, max_length=80)
+    alcance: AlcanceMiniConta
+
+
+class ConexionUpdate(BaseModel):
+    nombre: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    alcance: Optional[AlcanceMiniConta] = None
+
+
+class SucursalSeriesMC(BaseModel):
+    nombre: str
+    series: list[str]
+
+
+class ClienteSeriesMC(BaseModel):
+    id: uuid.UUID
+    nombre: str
+    rfc: Optional[str] = None
+    series: list[str]
+
+
+class OpcionesMiniContaOut(BaseModel):
+    """Todo lo que se puede compartir con una cuenta de Mini Conta."""
+    sucursales: list[SucursalSeriesMC]
+    series: list[str]
+    clientes: list[ClienteSeriesMC]
 
 
 class ConexionEstadoOut(BaseModel):
@@ -27,6 +66,9 @@ class ConexionEstadoOut(BaseModel):
     tipo: str
     nombre: str
     conexion: Optional[ConexionOut] = None
+    # Mini Conta tiene una por cuenta: todas las vivas. (`conexion` = la más
+    # reciente, para quien solo sabe leer una.)
+    conexiones: list[ConexionOut] = Field(default_factory=list)
     # Actividad real, no configuración.
     ordenes_hoy: int = 0
     ordenes_sin_resolver: int = 0

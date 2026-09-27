@@ -77,6 +77,97 @@
     "title": "ActividadConexionOut",
     "type": "object"
    },
+   "AlcanceMiniConta": {
+    "description": "Qué comparte una clave de Mini Conta (ver services/mini_conta.py).",
+    "properties": {
+     "catalogo": {
+      "default": false,
+      "title": "Catalogo",
+      "type": "boolean"
+     },
+     "clientes": {
+      "anyOf": [
+       {
+        "items": {
+         "format": "uuid",
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clientes"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     }
+    },
+    "title": "AlcanceMiniConta",
+    "type": "object"
+   },
+   "AlcanceOut": {
+    "description": "Lo que esta clave comparte, listo para que Mini Conta escoja qué traer.",
+    "properties": {
+     "catalogo": {
+      "title": "Catalogo",
+      "type": "boolean"
+     },
+     "clientes": {
+      "items": {
+       "$ref": "#/components/schemas/ClienteAlcanceOut"
+      },
+      "title": "Clientes",
+      "type": "array"
+     },
+     "conexion": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/ConexionBreveOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "empresa": {
+      "$ref": "#/components/schemas/app__api__v1__mini_conta__EmpresaOut"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     },
+     "sin_limite": {
+      "default": false,
+      "title": "Sin Limite",
+      "type": "boolean"
+     },
+     "sucursales": {
+      "items": {
+       "$ref": "#/components/schemas/SucursalSeriesOut"
+      },
+      "title": "Sucursales",
+      "type": "array"
+     }
+    },
+    "required": [
+     "empresa",
+     "sucursales",
+     "series",
+     "clientes",
+     "catalogo"
+    ],
+    "title": "AlcanceOut",
+    "type": "object"
+   },
    "AliasIn": {
     "properties": {
      "cliente_id": {
@@ -2213,6 +2304,34 @@
     "title": "ClavesSaeResult",
     "type": "object"
    },
+   "ClienteAlcanceOut": {
+    "description": "Nombre y series, nada más: Mini Conta no necesita el RFC para escoger.",
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     }
+    },
+    "required": [
+     "id",
+     "nombre",
+     "series"
+    ],
+    "title": "ClienteAlcanceOut",
+    "type": "object"
+   },
    "ClienteCreate": {
     "properties": {
      "almacen_id": {
@@ -3011,6 +3130,44 @@
     "title": "ClienteOut",
     "type": "object"
    },
+   "ClienteSeriesMC": {
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "rfc": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rfc"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     }
+    },
+    "required": [
+     "id",
+     "nombre",
+     "series"
+    ],
+    "title": "ClienteSeriesMC",
+    "type": "object"
+   },
    "ClienteSucursalOut": {
     "properties": {
      "cliente_id": {
@@ -3593,6 +3750,25 @@
     "title": "CoincidenciaOut",
     "type": "object"
    },
+   "ConexionBreveOut": {
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "nombre"
+    ],
+    "title": "ConexionBreveOut",
+    "type": "object"
+   },
    "ConexionEstadoOut": {
     "description": "Lo que la pantalla necesita para responder «¿está entrando lo que debe?».",
     "properties": {
@@ -3605,6 +3781,13 @@
         "type": "null"
        }
       ]
+     },
+     "conexiones": {
+      "items": {
+       "$ref": "#/components/schemas/ConexionOut"
+      },
+      "title": "Conexiones",
+      "type": "array"
      },
      "conviene_rotar": {
       "default": false,
@@ -3674,6 +3857,16 @@
       ],
       "title": "Activada At"
      },
+     "alcance": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AlcanceMiniConta"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
      "clave_pista": {
       "title": "Clave Pista",
       "type": "string"
@@ -3722,6 +3915,35 @@
      "created_at"
     ],
     "title": "ConexionOut",
+    "type": "object"
+   },
+   "ConexionUpdate": {
+    "properties": {
+     "alcance": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AlcanceMiniConta"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "nombre": {
+      "anyOf": [
+       {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre"
+     }
+    },
+    "title": "ConexionUpdate",
     "type": "object"
    },
    "ConfirmarRemisionIn": {
@@ -5133,41 +5355,6 @@
      "listo_para_facturar"
     ],
     "title": "EmpresaOnboardingOut",
-    "type": "object"
-   },
-   "EmpresaOut": {
-    "properties": {
-     "domicilio_fiscal": {
-      "title": "Domicilio Fiscal",
-      "type": "object"
-     },
-     "domicilio_fiscal_cp": {
-      "default": "",
-      "title": "Domicilio Fiscal Cp",
-      "type": "string"
-     },
-     "has_logo": {
-      "default": false,
-      "title": "Has Logo",
-      "type": "boolean"
-     },
-     "legal_name": {
-      "default": "",
-      "title": "Legal Name",
-      "type": "string"
-     },
-     "regimen_fiscal_sat": {
-      "default": "",
-      "title": "Regimen Fiscal Sat",
-      "type": "string"
-     },
-     "rfc": {
-      "default": "",
-      "title": "Rfc",
-      "type": "string"
-     }
-    },
-    "title": "EmpresaOut",
     "type": "object"
    },
    "EmpresaUpdate": {
@@ -9697,6 +9884,29 @@
       "title": "Clave Unidad",
       "type": "string"
      },
+     "cliente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
      "descripcion": {
       "title": "Descripcion",
       "type": "string"
@@ -11250,6 +11460,26 @@
     "title": "NotaCreditoEspejoIn",
     "type": "object"
    },
+   "NuevaConexionIn": {
+    "description": "Mini Conta: una clave por cuenta, con nombre y alcance desde el inicio.",
+    "properties": {
+     "alcance": {
+      "$ref": "#/components/schemas/AlcanceMiniConta"
+     },
+     "nombre": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Nombre",
+      "type": "string"
+     }
+    },
+    "required": [
+     "nombre",
+     "alcance"
+    ],
+    "title": "NuevaConexionIn",
+    "type": "object"
+   },
    "OCRecibidaDetailOut": {
     "properties": {
      "ambiguo": {
@@ -12322,6 +12552,39 @@
      "completo"
     ],
     "title": "OnboardingPaso",
+    "type": "object"
+   },
+   "OpcionesMiniContaOut": {
+    "description": "Todo lo que se puede compartir con una cuenta de Mini Conta.",
+    "properties": {
+     "clientes": {
+      "items": {
+       "$ref": "#/components/schemas/ClienteSeriesMC"
+      },
+      "title": "Clientes",
+      "type": "array"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     },
+     "sucursales": {
+      "items": {
+       "$ref": "#/components/schemas/SucursalSeriesMC"
+      },
+      "title": "Sucursales",
+      "type": "array"
+     }
+    },
+    "required": [
+     "sucursales",
+     "series",
+     "clientes"
+    ],
+    "title": "OpcionesMiniContaOut",
     "type": "object"
    },
    "OrdenCompraCreate": {
@@ -15424,6 +15687,98 @@
      }
     },
     "title": "ProductoUpdate",
+    "type": "object"
+   },
+   "ProductoVendidoOut": {
+    "properties": {
+     "lineas": {
+      "title": "Lineas",
+      "type": "integer"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "presentacion_default": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion Default"
+     },
+     "sku": {
+      "title": "Sku",
+      "type": "string"
+     },
+     "ultima_venta": {
+      "format": "date",
+      "title": "Ultima Venta",
+      "type": "string"
+     },
+     "unidad_base": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Base"
+     },
+     "unidad_sat": {
+      "title": "Unidad Sat",
+      "type": "string"
+     }
+    },
+    "required": [
+     "sku",
+     "nombre",
+     "unidad_sat",
+     "lineas",
+     "ultima_venta"
+    ],
+    "title": "ProductoVendidoOut",
+    "type": "object"
+   },
+   "ProductosOut": {
+    "properties": {
+     "desde": {
+      "format": "date",
+      "title": "Desde",
+      "type": "string"
+     },
+     "hasta": {
+      "format": "date",
+      "title": "Hasta",
+      "type": "string"
+     },
+     "productos": {
+      "items": {
+       "$ref": "#/components/schemas/ProductoVendidoOut"
+      },
+      "title": "Productos",
+      "type": "array"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     }
+    },
+    "required": [
+     "series",
+     "desde",
+     "hasta",
+     "productos"
+    ],
+    "title": "ProductosOut",
     "type": "object"
    },
    "ProveedorCreate": {
@@ -18923,6 +19278,27 @@
     "title": "SucursalOut",
     "type": "object"
    },
+   "SucursalSeriesMC": {
+    "properties": {
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     }
+    },
+    "required": [
+     "nombre",
+     "series"
+    ],
+    "title": "SucursalSeriesMC",
+    "type": "object"
+   },
    "SucursalSeriesOut": {
     "properties": {
      "nombre": {
@@ -20119,6 +20495,21 @@
    },
    "VentasOut": {
     "properties": {
+     "clientes": {
+      "anyOf": [
+       {
+        "items": {
+         "format": "uuid",
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clientes"
+     },
      "desde": {
       "format": "date",
       "title": "Desde",
@@ -20144,12 +20535,18 @@
       "type": "array"
      },
      "sucursal": {
-      "title": "Sucursal",
-      "type": "string"
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal"
      }
     },
     "required": [
-     "sucursal",
      "series",
      "desde",
      "hasta",
@@ -20314,6 +20711,25 @@
     "title": "ContactoIn",
     "type": "object"
    },
+   "app__api__v1__mini_conta__EmpresaOut": {
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "nombre"
+    ],
+    "title": "EmpresaOut",
+    "type": "object"
+   },
    "app__schemas__contacto__ContactoIn": {
     "properties": {
      "correo": {
@@ -20394,6 +20810,41 @@
      "mensaje"
     ],
     "title": "ContactoIn",
+    "type": "object"
+   },
+   "app__schemas__empresa__EmpresaOut": {
+    "properties": {
+     "domicilio_fiscal": {
+      "title": "Domicilio Fiscal",
+      "type": "object"
+     },
+     "domicilio_fiscal_cp": {
+      "default": "",
+      "title": "Domicilio Fiscal Cp",
+      "type": "string"
+     },
+     "has_logo": {
+      "default": false,
+      "title": "Has Logo",
+      "type": "boolean"
+     },
+     "legal_name": {
+      "default": "",
+      "title": "Legal Name",
+      "type": "string"
+     },
+     "regimen_fiscal_sat": {
+      "default": "",
+      "title": "Regimen Fiscal Sat",
+      "type": "string"
+     },
+     "rfc": {
+      "default": "",
+      "title": "Rfc",
+      "type": "string"
+     }
+    },
+    "title": "EmpresaOut",
     "type": "object"
    }
   },
@@ -25142,6 +25593,146 @@
     ]
    }
   },
+  "/api/v1/conexiones/{conexion_id}": {
+   "patch": {
+    "description": "Cambia el nombre o lo que comparte una conexión de Mini Conta, sin tocar\nsu clave: Mini Conta ve el cambio la próxima vez que lea.",
+    "operationId": "editar_api_v1_conexiones__conexion_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "conexion_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Conexion Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ConexionUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ConexionOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Editar",
+    "tags": [
+     "conexiones"
+    ]
+   }
+  },
+  "/api/v1/conexiones/{conexion_id}/regenerar": {
+   "post": {
+    "description": "Clave nueva para ESA conexión: la anterior deja de servir en el acto y la\nnueva hereda su nombre y su alcance. Las demás cuentas no se enteran.",
+    "operationId": "regenerar_api_v1_conexiones__conexion_id__regenerar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "conexion_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Conexion Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ClaveNuevaOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Regenerar",
+    "tags": [
+     "conexiones"
+    ]
+   }
+  },
   "/api/v1/conexiones/{conexion_id}/revocar": {
    "post": {
     "operationId": "revocar_api_v1_conexiones__conexion_id__revocar_post",
@@ -25276,7 +25867,7 @@
   },
   "/api/v1/conexiones/{tipo}/clave": {
    "post": {
-    "description": "Genera la clave. Se devuelve en claro UNA vez y ya no se puede volver a leer.\n\nSi ya había una viva se revoca en el acto: «generar otra» y «la anterior deja\nde servir» tienen que ser el mismo gesto, o quedarían dos claves buenas y\nnadie sabría cuál está usando el bot.",
+    "description": "Genera la clave. Se devuelve en claro UNA vez y ya no se puede volver a leer.\n\nSmart Supply: si ya había una viva se revoca en el acto —«generar otra» y «la\nanterior deja de servir» tienen que ser el mismo gesto, o quedarían dos claves\nbuenas y nadie sabría cuál está usando el bot—.\n\nMini Conta: cada llamada es una cuenta NUEVA (nombre + alcance) y no toca a\nlas demás. Para cambiar la clave de una cuenta existente: `/{id}/regenerar`.",
     "operationId": "generar_api_v1_conexiones__tipo__clave_post",
     "parameters": [
      {
@@ -25305,6 +25896,23 @@
       }
      }
     ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/NuevaConexionIn"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Payload"
+       }
+      }
+     }
+    },
     "responses": {
      "201": {
       "content": {
@@ -25333,6 +25941,70 @@
      }
     ],
     "summary": "Generar",
+    "tags": [
+     "conexiones"
+    ]
+   }
+  },
+  "/api/v1/conexiones/{tipo}/opciones": {
+   "get": {
+    "description": "Lo que se le puede compartir a una cuenta de Mini Conta: plazas con sus\nseries y los clientes de cada serie.",
+    "operationId": "opciones_api_v1_conexiones__tipo__opciones_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "tipo",
+      "required": true,
+      "schema": {
+       "title": "Tipo",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OpcionesMiniContaOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Opciones",
     "tags": [
      "conexiones"
     ]
@@ -26121,7 +26793,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/EmpresaOut"
+         "$ref": "#/components/schemas/app__schemas__empresa__EmpresaOut"
         }
        }
       },
@@ -26183,7 +26855,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/EmpresaOut"
+         "$ref": "#/components/schemas/app__schemas__empresa__EmpresaOut"
         }
        }
       },
@@ -26648,7 +27320,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/EmpresaOut"
+         "$ref": "#/components/schemas/app__schemas__empresa__EmpresaOut"
         }
        }
       },
@@ -26762,7 +27434,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/EmpresaOut"
+         "$ref": "#/components/schemas/app__schemas__empresa__EmpresaOut"
         }
        }
       },
@@ -26892,7 +27564,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/EmpresaOut"
+         "$ref": "#/components/schemas/app__schemas__empresa__EmpresaOut"
         }
        }
       },
@@ -31507,9 +32179,175 @@
     ]
    }
   },
+  "/api/v1/mini-conta/alcance": {
+   "get": {
+    "description": "Qué comparte esta clave: plazas con sus series, clientes y si hay\ncatálogo. Mini Conta lo pide al conectar y al cambiar qué trae.",
+    "operationId": "alcance_api_v1_mini_conta_alcance_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AlcanceOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Alcance",
+    "tags": [
+     "mini-conta"
+    ]
+   }
+  },
+  "/api/v1/mini-conta/productos": {
+   "get": {
+    "description": "Los productos que se facturaron en esas series entre `desde` y `hasta`:\nel catálogo que le sirve a ESTA cuenta, no los 1,500 de la empresa. Solo si\nla conexión comparte el catálogo.",
+    "operationId": "productos_api_v1_mini_conta_productos_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "desde",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Desde",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "hasta",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Hasta",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Códigos separados por coma",
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Códigos separados por coma",
+       "title": "Series"
+      }
+     },
+     {
+      "description": "Ids separados por coma",
+      "in": "query",
+      "name": "clientes",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Ids separados por coma",
+       "title": "Clientes"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProductosOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Productos",
+    "tags": [
+     "mini-conta"
+    ]
+   }
+  },
   "/api/v1/mini-conta/sucursales": {
    "get": {
-    "description": "Cada plaza del inquilino con las series de factura que le pertenecen.",
+    "description": "Cada plaza con las series de factura que le pertenecen y que esta clave\ncomparte. Las plazas sin ninguna serie compartida no salen.",
     "operationId": "sucursales_api_v1_mini_conta_sucursales_get",
     "parameters": [
      {
@@ -31568,19 +32406,9 @@
   },
   "/api/v1/mini-conta/ventas": {
    "get": {
-    "description": "Las líneas de las facturas timbradas (ingreso, sin notas de crédito) de\nlas series de la plaza, con `desde`/`hasta` sobre la fecha de la factura\n(hora de México), ambos inclusive.",
+    "description": "Las líneas de las facturas timbradas (ingreso, sin notas de crédito) de\nlas series pedidas —o las de la plaza, o todas las que comparte la clave—,\ncon `desde`/`hasta` sobre la fecha de la factura (hora de México), ambos\ninclusive. `clientes` recorta a esos clientes.",
     "operationId": "ventas_api_v1_mini_conta_ventas_get",
     "parameters": [
-     {
-      "in": "query",
-      "name": "sucursal",
-      "required": true,
-      "schema": {
-       "minLength": 1,
-       "title": "Sucursal",
-       "type": "string"
-      }
-     },
      {
       "in": "query",
       "name": "desde",
@@ -31599,6 +32427,60 @@
        "format": "date",
        "title": "Hasta",
        "type": "string"
+      }
+     },
+     {
+      "description": "Códigos separados por coma",
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Códigos separados por coma",
+       "title": "Series"
+      }
+     },
+     {
+      "description": "Ids separados por coma",
+      "in": "query",
+      "name": "clientes",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Ids separados por coma",
+       "title": "Clientes"
+      }
+     },
+     {
+      "description": "Forma vieja: el nombre de la plaza",
+      "in": "query",
+      "name": "sucursal",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Forma vieja: el nombre de la plaza",
+       "title": "Sucursal"
       }
      },
      {
