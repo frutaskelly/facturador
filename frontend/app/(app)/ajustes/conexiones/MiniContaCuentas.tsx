@@ -38,7 +38,36 @@ import type {
 const PUEDE = [
   "Leer las líneas de las facturas timbradas de las series que le compartes",
   "Ver qué clientes hay en esas series (o solo los que marques)",
-  "Leer los productos que se facturan en esas series, si le das el catálogo",
+  "Solo si se lo das: el catálogo, las remisiones, las notas de crédito, la cobranza y los precios de esas series",
+];
+
+// Lo que una cuenta puede leer además de las ventas, en el orden de la pantalla.
+const DATOS: { clave: keyof Omit<AlcanceMiniConta, "series" | "clientes">; titulo: string; texto: string }[] = [
+  {
+    clave: "catalogo",
+    titulo: "Catálogo",
+    texto: "Solo los productos que se facturan en esas series, para darlos de alta y ligarlos por SKU. Nunca el catálogo completo.",
+  },
+  {
+    clave: "remisiones",
+    titulo: "Remisiones",
+    texto: "Lo entregado en esas series, para que Compra vs venta cuente los días que todavía no se facturan.",
+  },
+  {
+    clave: "notas_credito",
+    titulo: "Notas de crédito",
+    texto: "Las aplicadas a facturas de esas series; se restan de la venta que corrigen.",
+  },
+  {
+    clave: "cobranza",
+    titulo: "Cobranza y saldos",
+    texto: "Los pagos recibidos de esas facturas y lo que falta por cobrar, con su antigüedad.",
+  },
+  {
+    clave: "precios",
+    titulo: "Precios de venta",
+    texto: "El precio de lista que hoy le toca a cada cliente, para ver el margen contra lo comprado.",
+  },
 ];
 const NO_PUEDE = [
   "Ver las series, los clientes o las ventas de otra cuenta",
@@ -288,8 +317,11 @@ export function MiniContaCuentas({
                         <dd>{resumenSeries(a.series, opciones)}</dd>
                         <dt className="text-muted">Clientes</dt>
                         <dd>{resumenClientes(a.clientes, opciones)}</dd>
-                        <dt className="text-muted">Catálogo</dt>
-                        <dd>{a.catalogo ? "Sí, lo que se factura en esas series" : "No"}</dd>
+                        <dt className="text-muted">Además</dt>
+                        <dd>
+                          {DATOS.filter((d) => a[d.clave]).map((d) => d.titulo).join(", ") ||
+                            "Solo ventas"}
+                        </dd>
                       </dl>
                     ) : (
                       <p className="mt-2 flex items-start gap-1.5 text-sm text-favorite">
@@ -397,7 +429,12 @@ function FormAlcance({
   const [series, setSeries] = useState<Set<string>>(new Set(inicial?.series ?? []));
   const [todos, setTodos] = useState(!inicial?.clientes);
   const [clientes, setClientes] = useState<Set<string>>(new Set(inicial?.clientes ?? []));
-  const [catalogo, setCatalogo] = useState(inicial?.catalogo ?? false);
+  const [datos, setDatos] = useState(() =>
+    Object.fromEntries(DATOS.map((d) => [d.clave, inicial?.[d.clave] ?? false])) as Record<
+      (typeof DATOS)[number]["clave"],
+      boolean
+    >
+  );
   const [guardando, setGuardando] = useState(false);
 
   const enPlaza = useMemo(() => new Set(opciones.sucursales.flatMap((s) => s.series)), [opciones]);
@@ -430,7 +467,7 @@ function FormAlcance({
     await onGuardar(nombre.trim(), {
       series: [...series].sort(),
       clientes: todos ? null : elegidos.map((c) => c.id),
-      catalogo,
+      ...datos,
     });
     setGuardando(false);
   }
@@ -563,15 +600,23 @@ function FormAlcance({
           ) : null}
         </section>
 
-        <section className="flex items-start justify-between gap-4 rounded-lg border border-border p-3">
-          <div>
-            <h3 className="text-sm font-medium">Compartir el catálogo</h3>
-            <p className="text-xs text-muted">
-              Solo los productos que se facturan en esas series, para que Mini Conta los dé de alta
-              y los ligue por SKU. Nunca el catálogo completo.
-            </p>
+        <section>
+          <h3 className="text-sm font-medium">Además de las ventas</h3>
+          <p className="mb-2 text-xs text-muted">Siempre de las mismas series y clientes de arriba.</p>
+          <div className="divide-y divide-border rounded-lg border border-border">
+            {DATOS.map((d) => (
+              <div key={d.clave} className="flex items-start justify-between gap-4 p-3">
+                <div>
+                  <p className="text-sm font-medium">{d.titulo}</p>
+                  <p className="text-xs text-muted">{d.texto}</p>
+                </div>
+                <Switch
+                  checked={datos[d.clave]}
+                  onChange={(v) => setDatos((prev) => ({ ...prev, [d.clave]: v }))}
+                />
+              </div>
+            ))}
           </div>
-          <Switch checked={catalogo} onChange={setCatalogo} />
         </section>
 
         {conexion && !conexion.alcance ? (
