@@ -1203,6 +1203,7 @@ def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
             cands = del_cliente + exactos + de_otro + fuertes + por_clave + [
                 c for c in cands if c.producto_id not in vistos
             ]
+        cands = _primero_el_que_vende(cands, unidad_norm)
         top = cands[0] if cands else None
         # La presentación con la que entraría la línea: la unidad del documento;
         # si no dice (o dice una que no reconocemos), la habitual de ese cliente
@@ -1300,6 +1301,48 @@ def _empatados(cands: list[dict]) -> set:
         c["producto_id"] for c in cands
         if c["score"] >= 100 and c["origen"] in _ORIGENES_DETERMINISTAS
     }
+
+
+def _vende_en(c, unidad: str) -> int:
+    """0 = la unidad es la base del producto, 1 = la vende como presentación,
+    2 = no la vende."""
+    u = unidad.strip().upper()
+    if (c.unidad_base or "").strip().upper() == u:
+        return 0
+    if u in {str(k).strip().upper() for k in (c.presentaciones or {})}:
+        return 1
+    return 2
+
+
+def _primero_el_que_vende(cands: list, unidad: Optional[str]) -> list:
+    """La unidad del documento desempata los cruces de 100 por nombre o alias.
+
+    El 26-sep-2026 el Hospital de la Mujer pidió 20 PIEZA de PLATANO TABASCO
+    (clave PLATANOTABPZ). Cruzaron al 100 tres productos: dos «PLATANO TABASCO»
+    por nombre exacto —uno de solo KILO— y «PLATANO TABASCO PIEZA» por alias y
+    por clave. Ganó el de solo KILO por estar primero, la pieza no cabía y la
+    partida entró como 20 KILO: así salió en la lista de compras y se compraron
+    kilos. El mismo día le pasó a la jícama y a la papaya de la misma orden.
+
+    Si el primero de esos candidatos no vende la unidad que pide el documento,
+    sube el primero que sí, y antes que nadie el que la tiene de base. Solo se
+    reacomodan entre ellos (mismo score, misma confianza) y en sus mismos
+    lugares. Lo que decide el cliente no se toca aunque el documento diga otra
+    unidad: ni su vocabulario (`alias_cliente`, «el cliente gana», regla del
+    dueño del 27-sep) ni la clave de su catálogo — esa partida sigue entrando
+    anotada «no la vende el producto» para que la vea un humano.
+    """
+    if not unidad:
+        return cands
+    lugares = [i for i, c in enumerate(cands)
+               if c.score >= 100 and c.origen in ("exacto", "alias")]
+    if not lugares or lugares[0] != 0 or _vende_en(cands[0], unidad) < 2:
+        return cands
+    orden = sorted((cands[i] for i in lugares), key=lambda c: _vende_en(c, unidad))
+    out = list(cands)
+    for i, c in zip(lugares, orden):
+        out[i] = c
+    return out
 
 
 def _lote_de(ln: dict) -> Optional[str]:
