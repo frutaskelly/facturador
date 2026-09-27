@@ -777,12 +777,12 @@ def _texto_como_venia(notas) -> str:
     return "" if texto.lower() == "sin descripción" else texto
 
 
-def _texto_del_documento(docs: list, claves: set, cantidad) -> str:
-    """El texto del renglón en el documento de la OC, casado por CLAVE (la de
-    SAE o el código del cliente) y desempatado por cantidad. `docs` va del más
-    nuevo al más viejo; el primero que tenga la clave contesta. Si dentro de un
-    documento quedan dos textos distintos para la misma clave y cantidad, no se
-    adivina: vacío, y la línea cae al catálogo."""
+def _renglon_del_documento(docs: list, claves: set, cantidad) -> Optional[dict]:
+    """El renglón del documento de la OC que corresponde a una línea, casado por
+    CLAVE (la de SAE o el código del cliente) y desempatado por cantidad. `docs`
+    va del más nuevo al más viejo; el primero que tenga la clave contesta. Si
+    dentro de un documento quedan dos textos distintos para la misma clave y
+    cantidad, no se adivina: None, y la línea cae al catálogo."""
     for lineas in docs:
         cands = [ln for ln in lineas if (ln.get("clave") or "").strip().upper() in claves]
         if not cands:
@@ -794,8 +794,25 @@ def _texto_del_documento(docs: list, claves: set, cantidad) -> str:
                     misma.append(ln)
             except Exception:
                 pass
-        textos = {" ".join((ln.get("descripcion") or "").split()) for ln in (misma or cands)} - {""}
-        return textos.pop() if len(textos) == 1 else ""
+        cands = misma or cands
+        textos = {" ".join((ln.get("descripcion") or "").split()) for ln in cands} - {""}
+        return cands[0] if len(textos) == 1 else None
+    return None
+
+
+def _lote_de_nota(*textos) -> str:
+    """«EXTRA», «REPOSICION» o vacío. La marca vive en la nota de la línea de
+    dos formas: al principio («EXTRA · Como venía…», la ingesta) o como un tramo
+    suelto al final («Como venía: «AJONJOLI» … · EXTRA», medido en VH-39NIN-LUN).
+    Las mismas dos familias que el bot: EXTRAS es EXTRA y REPOSICIONES es
+    REPOSICION."""
+    for texto in textos:
+        for tramo in re.split(r"\s*·\s*", str(texto or "")):
+            n = unicodedata.normalize("NFKD", tramo).encode("ascii", "ignore").decode().strip().upper()
+            if n.startswith("EXTRA"):
+                return "EXTRA"
+            if n.startswith("REPOSICION"):
+                return "REPOSICION"
     return ""
 
 
@@ -888,6 +905,7 @@ def reporte_armado(
             Remision.sucursal_id,
             Cliente.legal_name,
             LineaRemision.producto_id,
+            LineaRemision.numero_linea,
             Producto.clave_sae,
             Producto.nombre,
             CategoriaProducto.nombre.label("categoria"),
@@ -900,6 +918,9 @@ def reporte_armado(
         .join(Cliente, Cliente.id == Remision.cliente_facturacion_id)
         .outerjoin(CategoriaProducto, CategoriaProducto.id == Producto.categoria_id)
         .filter(*base, *filtro, LineaRemision.cantidad_solicitada > 0)
+        # en el orden del documento: la hoja por hospital numera los lotes así
+        .order_by(Remision.fecha_entrega, Remision.su_pedido, Remision.id,
+                  LineaRemision.numero_linea)
     )
 
     # LA VERSIÓN QUE MANDA ES LA DEL DOCUMENTO — misma regla que la lista de
@@ -920,10 +941,12 @@ def reporte_armado(
         .all()
     }
 
-    # LA DESCRIPCIÓN ES LA DEL PEDIDO DEL CLIENTE (27-sep-2026): el hospital
-    # escribe ahí lo que importa para surtir —«COL BLANCA (PIEZAS MEDIANAS)»,
+    # EL TEXTO DEL PEDIDO, APARTE (27-sep-2026): la hoja de armado por hospital
+    # imprime lo que el hospital escribió —«COL BLANCA (PIEZAS MEDIANAS)»,
     # «PIÑA MIEL (SIN CORONA)», «PLATANO MACHO MADURO SIN PENCA»— y el nombre
-    # interno («COL», «PINA») lo borra. Por renglón, en este orden:
+    # interno («COL», «PINA») lo borra. Va en `descripcion_pedido` y NO pisa
+    # `descripcion`: el pronóstico, quién pide y el calendario siguen con el
+    # nombre interno, como estaban. Por renglón, en este orden:
     #   1. la marca «Como venía: «…»» de la nota de la línea (la deja la ingesta);
     #   2. el renglón del documento de su OC, casado por clave;
     #   3. el nombre del cliente en su catálogo (su plaza gana, cae la genérica);
@@ -969,17 +992,21 @@ def reporte_armado(
         if r.id in pendientes:
             continue          # sus líneas salen del documento, abajo
         pc = _fila_del_cliente(pcs, r.cliente_facturacion_id, r.producto_id, r.sucursal_id)
-        descripcion = _texto_como_venia(r.notas)
-        if not descripcion and r.id in docs_de:
+        texto, del_doc = _texto_como_venia(r.notas), None
+        if not texto and r.id in docs_de:
             claves = {(r.clave_sae or "").strip().upper(),
                       ((pc.codigo_cliente or "") if pc else "").strip().upper()} - {""}
-            descripcion = _texto_del_documento(docs_de[r.id], claves, r.cantidad_solicitada)
-        descripcion = (descripcion
-                       or ((pc.nombre_cliente or "").strip() if pc else "")
-                       or r.nombre)
+            del_doc = _renglon_del_documento(docs_de[r.id], claves, r.cantidad_solicitada)
+            texto = " ".join(((del_doc or {}).get("descripcion") or "").split())
         rem["lineas"].append({
             "clave": r.clave_sae,
-            "descripcion": descripcion,
+            "descripcion": r.nombre,
+            "descripcion_pedido": (texto
+                                   or ((pc.nombre_cliente or "").strip() if pc else "")
+                                   or r.nombre),
+            "linea": r.numero_linea,
+            "lote": (_lote_de_nota(r.notas)
+                     or (_lote_de_nota(del_doc.get("notas"), del_doc.get("lote")) if del_doc else "")),
             "unidad": r.presentacion,
             "nota": r.notas or "",
             "cantidad": str(r.cantidad_solicitada),
@@ -1007,13 +1034,17 @@ def reporte_armado(
             rem = rems.get(rid)
             if rem is None:
                 continue
-            for ln in (pn or {}).get("lineas") or []:
-                if not isinstance(ln, dict):
-                    continue
+            docs = [ln for ln in (pn or {}).get("lineas") or [] if isinstance(ln, dict)]
+            for i, ln in enumerate(docs, start=1):
                 clave = (ln.get("clave") or "").strip() or None
+                descripcion = (ln.get("descripcion") or "").strip() or "PARTIDA"
                 rem["lineas"].append({
                     "clave": clave,
-                    "descripcion": (ln.get("descripcion") or "").strip() or "PARTIDA",
+                    "descripcion": descripcion,
+                    # aquí el documento ES el pedido: el mismo texto
+                    "descripcion_pedido": " ".join(descripcion.split()),
+                    "linea": i,
+                    "lote": _lote_de_nota(ln.get("notas") or ln.get("nota"), ln.get("lote")),
                     # unidad del DOCUMENTO, texto del cliente: el bot la canoniza
                     "unidad": (ln.get("unidad") or "").strip() or "?",
                     "nota": (ln.get("notas") or ln.get("nota") or "").strip(),
