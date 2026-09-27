@@ -768,6 +768,37 @@ def reporte_compras(
             "con_cambio_abierto": len(pendientes)}
 
 
+def _texto_como_venia(notas) -> str:
+    """El texto del renglón tal como lo escribió el cliente, de la marca
+    «Como venía: «…»» que la ingesta deja en la nota de la línea. Vacío si no
+    la trae (o si la marca es el relleno «sin descripción»)."""
+    m = _RX_COMO_VENIA.search(notas or "")
+    texto = " ".join(m.group(1).split()) if m else ""
+    return "" if texto.lower() == "sin descripción" else texto
+
+
+def _texto_del_documento(docs: list, claves: set, cantidad) -> str:
+    """El texto del renglón en el documento de la OC, casado por CLAVE (la de
+    SAE o el código del cliente) y desempatado por cantidad. `docs` va del más
+    nuevo al más viejo; el primero que tenga la clave contesta. Si dentro de un
+    documento quedan dos textos distintos para la misma clave y cantidad, no se
+    adivina: vacío, y la línea cae al catálogo."""
+    for lineas in docs:
+        cands = [ln for ln in lineas if (ln.get("clave") or "").strip().upper() in claves]
+        if not cands:
+            continue
+        misma = []
+        for ln in cands:
+            try:
+                if Decimal(str(ln.get("cantidad")).replace(",", "")) == cantidad:
+                    misma.append(ln)
+            except Exception:
+                pass
+        textos = {" ".join((ln.get("descripcion") or "").split()) for ln in (misma or cands)} - {""}
+        return textos.pop() if len(textos) == 1 else ""
+    return ""
+
+
 @router.get("/reporte-armado")
 def reporte_armado(
     fechas: Optional[str] = Query(default=None, description="Fechas de ENTREGA (bodega), ISO, separadas por coma"),
@@ -889,17 +920,40 @@ def reporte_armado(
         .all()
     }
 
-    # La descripción que arma el equipo es la del CLIENTE (27-sep-2026): la hoja
-    # del Master traía el texto de la OC, y con el nombre interno quien surte ya
-    # no reconoce el renglón contra el pedido. Sale del catálogo del cliente
-    # —la misma capa que el PDF de la remisión y el CFDI— con el nombre interno
-    # de respaldo cuando el cliente no tiene el producto en su catálogo.
+    # LA DESCRIPCIÓN ES LA DEL PEDIDO DEL CLIENTE (27-sep-2026): el hospital
+    # escribe ahí lo que importa para surtir —«COL BLANCA (PIEZAS MEDIANAS)»,
+    # «PIÑA MIEL (SIN CORONA)», «PLATANO MACHO MADURO SIN PENCA»— y el nombre
+    # interno («COL», «PINA») lo borra. Por renglón, en este orden:
+    #   1. la marca «Como venía: «…»» de la nota de la línea (la deja la ingesta);
+    #   2. el renglón del documento de su OC, casado por clave;
+    #   3. el nombre del cliente en su catálogo (su plaza gana, cae la genérica);
+    #   4. el nombre interno.
+    # El catálogo va tercero y no primero: guarda UN nombre por producto y se
+    # pierde la anotación de ESTE pedido (medido en VH-39NIN-LUN: da «COL» donde
+    # el pedido dice «COL BLANCA (PIEZAS MEDIANAS)»).
     renglones = q.all()
     pcs = _catalogo_de_clientes(
         db,
         {r.cliente_facturacion_id for r in renglones if r.cliente_facturacion_id},
         {r.producto_id for r in renglones},
     )
+    # El documento de la OC solo se lee para las remisiones que tienen alguna
+    # línea sin la marca: la de hoy la trae, las del 14 al 24-sep de
+    # Villahermosa no (entraron por la bandeja a mano).
+    sin_marca = {r.id for r in renglones
+                 if r.id not in pendientes and not _texto_como_venia(r.notas)}
+    docs_de: dict = {}
+    if sin_marca:
+        for rid, pay, pay_nuevo in (
+            db.query(OCRecibida.remision_id, OCRecibida.payload, OCRecibida.payload_nuevo)
+            .filter(OCRecibida.remision_id.in_(sin_marca))
+            .order_by(OCRecibida.recibida_at.desc())
+        ):
+            # un cambio ya resuelto deja la versión nueva en payload_nuevo: esa primero
+            for doc in (pay_nuevo, pay):
+                lineas = [ln for ln in (doc or {}).get("lineas") or [] if isinstance(ln, dict)]
+                if lineas:
+                    docs_de.setdefault(rid, []).append(lineas)
 
     rems: dict = {}
     for r in renglones:
@@ -915,9 +969,17 @@ def reporte_armado(
         if r.id in pendientes:
             continue          # sus líneas salen del documento, abajo
         pc = _fila_del_cliente(pcs, r.cliente_facturacion_id, r.producto_id, r.sucursal_id)
+        descripcion = _texto_como_venia(r.notas)
+        if not descripcion and r.id in docs_de:
+            claves = {(r.clave_sae or "").strip().upper(),
+                      ((pc.codigo_cliente or "") if pc else "").strip().upper()} - {""}
+            descripcion = _texto_del_documento(docs_de[r.id], claves, r.cantidad_solicitada)
+        descripcion = (descripcion
+                       or ((pc.nombre_cliente or "").strip() if pc else "")
+                       or r.nombre)
         rem["lineas"].append({
             "clave": r.clave_sae,
-            "descripcion": ((pc.nombre_cliente or "").strip() if pc else "") or r.nombre,
+            "descripcion": descripcion,
             "unidad": r.presentacion,
             "nota": r.notas or "",
             "cantidad": str(r.cantidad_solicitada),
