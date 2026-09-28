@@ -31,6 +31,11 @@ from ..models import Cliente, Factura, Remision
 from .series import resolver_serie
 
 _RE_OC_OBS = re.compile(r"\bOC[\s:]+([A-Z0-9][A-Z0-9\-\/\.]*)")
+# El punto (y el guion o la diagonal) valen DENTRO del folio, pero al final son
+# puntuación de la frase: «OC VH-36EMI-JUE. SEM 36 HOSPITAL …» traía
+# «VH-36EMI-JUE.» y no casaba con el su_pedido (ZEHMOVH-1346, 28-sep-2026).
+# Coma y punto y coma ni entran: no están en la clase de caracteres.
+_PUNTUACION_FINAL = ".-/"
 # El folio interno de una entrega EHMO/MAFAN: dos letras del proyecto, la
 # semana, el punto y el día — HO-33PAC-LUN, SN-33NER-JUE, VH-35SAL-VIE.
 # La «-B» final es la semana repetida del corte (25-sep-2026): VH-38ROV-LUN-B es
@@ -89,7 +94,7 @@ def extraer_oc(observaciones: Optional[str]) -> Optional[str]:
     texto = (observaciones or "").upper()
     m = _RE_OC_OBS.search(texto)
     if m:
-        return norm_oc(m.group(1))
+        return norm_oc(m.group(1).rstrip(_PUNTUACION_FINAL))
     m = _RE_FOLIO_INTERNO.search(texto)
     return norm_oc(m.group(1)) if m else None
 
