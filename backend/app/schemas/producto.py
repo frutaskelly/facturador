@@ -112,6 +112,12 @@ class MatchIn(BaseModel):
     textos: list[Annotated[str, Field(max_length=500)]] = Field(min_length=1, max_length=200)
     usar_ia: bool = False         # complementa con IA los textos sin buen candidato
     limit: int = Field(default=5, ge=1, le=20)
+    # De quién es el texto (27-sep-2026): con cliente, su vocabulario manda sobre
+    # el nombre exacto y el alias global — el mismo cruce que la bandeja de OC.
+    # El bot ya no escoge producto: le pregunta al Facturador, y sin esto la
+    # regla «Cilantro → manojo» de EHMO Tabasco no existía para él.
+    cliente_id: Optional[uuid.UUID] = None
+    sucursal_id: Optional[uuid.UUID] = None
 
 
 class CandidatoOut(BaseModel):
@@ -119,7 +125,7 @@ class CandidatoOut(BaseModel):
     sku: str
     nombre: str
     score: int
-    origen: str                   # exacto | alias | difuso | ia
+    origen: str                   # exacto | alias_cliente | alias | difuso | ia
     presentaciones: dict = {}
     presentacion_default: Optional[str] = None
     unidad_base: Optional[str] = None

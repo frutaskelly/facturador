@@ -11678,12 +11678,36 @@
    },
    "MatchIn": {
     "properties": {
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
      "limit": {
       "default": 5,
       "maximum": 20.0,
       "minimum": 1.0,
       "title": "Limit",
       "type": "integer"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
      },
      "textos": {
       "items": {
@@ -38453,7 +38477,7 @@
   },
   "/api/v1/productos/match": {
    "post": {
-    "description": "Cruza textos libres (tecleados/pegados) contra el catálogo: exacto → alias\naprendido → difuso, y opcionalmente IA para los que no resuelvan.",
+    "description": "Cruza textos libres (tecleados/pegados) contra el catálogo: exacto → alias\naprendido → difuso, y opcionalmente IA para los que no resuelvan.\n\nCon `cliente_id` (y `sucursal_id`) el vocabulario de ese cliente va primero,\ncomo `alias_cliente`: es como el bot pregunta qué producto es lo que pidió un\ncliente sin escogerlo él.",
     "operationId": "match_productos_api_v1_productos_match_post",
     "parameters": [
      {
