@@ -1020,15 +1020,21 @@ def espejo_resumen(
 
 
 def _puede_pedir_sync(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
-    """El botón vive en /facturas, /remisiones y /listas-precios: basta
-    cualquiera de esos menús (require_permission exige TODOS, y hay roles con
-    uno solo)."""
-    menus = {"menu:facturas", "menu:remisiones", "menu:listas_precios"}
+    """El botón vive en /facturas y /remisiones: basta cualquiera de esos dos
+    menús (require_permission exige TODOS, y hay roles con uno solo).
+
+    26-sep-2026: sale `menu:listas_precios`. Estaba aquí sólo porque el botón
+    también vivía en /listas-precios, para traer los precios de SAE; el dueño
+    decidió que las listas de SAE ya no se usan y el botón salió de esa
+    pantalla. Dejarlo le abría a quien sólo captura precios una puerta que
+    ninguna pantalla le ofrece: encolar la pasada completa del espejo
+    (facturas, cuadre, cobranza y catálogo de artículos)."""
+    menus = {"menu:facturas", "menu:remisiones"}
     if ctx.is_owner or menus & set(ctx.permissions):
         return ctx
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Falta permiso: menu:facturas, menu:remisiones o menu:listas_precios",
+        detail="Falta permiso: menu:facturas o menu:remisiones",
     )
 
 

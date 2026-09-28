@@ -81,10 +81,8 @@ export type ListaPrecios = {
   notas?: string | null;
   /** La lista base del negocio: la que se cobra cuando ninguna asignación aplica. */
   es_default: boolean;
-  /** Espejo de SAE: empresa de Aspel ("02", "03") + número de lista (CVE_PRECIO).
-      Ambos o ninguno; con vínculo, «Sincronizar SAE» refresca sus precios. */
-  sae_empresa?: string | null;
-  sae_lista?: number | null;
+  // Sin sae_empresa/sae_lista (26-sep-2026): las listas de SAE ya no se usan,
+  // no hay espejo de precios y el API ya no los acepta ni los devuelve.
   created_at: string;
   updated_at: string;
 };
