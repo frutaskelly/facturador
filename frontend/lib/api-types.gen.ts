@@ -2509,7 +2509,8 @@ export interface paths {
          *     Sale de `resolver_precios_lote`, la MISMA cascada que cotiza y factura
          *     (override → asignación → lista base), una vez por cada cliente×plaza cuya
          *     serie de factura prevista es de las pedidas; con la serie de REMISIÓN que le
-         *     toca, porque las asignaciones por serie son por serie de remisión.
+         *     toca, porque las asignaciones por serie son por serie de remisión. Para una
+         *     cuenta con muchos clientes, pídelo de a uno (`clientes=`).
          */
         get: operations["precios_api_v1_mini_conta_precios_get"];
         put?: never;
