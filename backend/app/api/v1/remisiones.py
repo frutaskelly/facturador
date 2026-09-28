@@ -533,6 +533,33 @@ def _texto_producto(valor) -> str:
     return str(valor or "")
 
 
+def _catalogo_de_clientes(db: Session, cli_ids: set, prod_ids: set) -> dict:
+    """{(cliente, producto, sucursal|None): ProductoCliente} en UNA consulta.
+
+    Con clave por plaza (0067) puede haber fila genérica Y por sucursal para el
+    mismo (cliente, producto): por eso la llave lleva la sucursal, y quien la
+    lee resuelve con `_fila_del_cliente`.
+    """
+    if not (cli_ids and prod_ids):
+        return {}
+    return {
+        (pc.cliente_id, pc.producto_id, pc.sucursal_id): pc
+        for pc in db.query(ProductoCliente).filter(
+            ProductoCliente.cliente_id.in_(cli_ids),
+            ProductoCliente.producto_id.in_(prod_ids),
+        )
+    }
+
+
+def _fila_del_cliente(pcs: dict, cliente_id, producto_id, sucursal_id):
+    """La fila del catálogo del cliente que vale en ESA plaza — misma regla que
+    el export: la de la sucursal gana, cae la genérica, la de otra plaza no se
+    presta. None si el cliente no tiene el producto en su catálogo."""
+    return (
+        pcs.get((cliente_id, producto_id, sucursal_id)) if sucursal_id is not None else None
+    ) or pcs.get((cliente_id, producto_id, None))
+
+
 def _nombres_para_pdf(db: Session, rems: list[Remision]) -> dict:
     """{remision_id: {producto_id: (clave del cliente, nombre)}} para PDFs y correos.
 
@@ -548,30 +575,13 @@ def _nombres_para_pdf(db: Session, rems: list[Remision]) -> dict:
     interno = dict(
         db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all()
     ) if prod_ids else {}
-    cli_ids = {r.cliente_facturacion_id for r in rems if r.cliente_facturacion_id}
-    # Con clave por plaza (0067) puede haber fila genérica Y por sucursal para
-    # el mismo (cliente, producto): la llave lleva la sucursal y cada remisión
-    # resuelve con SU plaza — misma regla que el export (sucursal gana, cae la
-    # genérica, la de otra plaza no se presta).
-    pcs = {}
-    if cli_ids and prod_ids:
-        for pc in (
-            db.query(ProductoCliente)
-            .filter(
-                ProductoCliente.cliente_id.in_(cli_ids),
-                ProductoCliente.producto_id.in_(prod_ids),
-            )
-            .all()
-        ):
-            pcs[(pc.cliente_id, pc.producto_id, pc.sucursal_id)] = pc
+    pcs = _catalogo_de_clientes(
+        db, {r.cliente_facturacion_id for r in rems if r.cliente_facturacion_id}, prod_ids)
     out: dict = {}
     for r in rems:
         nombres: dict = {}
         for ln in r.lineas:
-            pc = (
-                pcs.get((r.cliente_facturacion_id, ln.producto_id, r.sucursal_id))
-                if r.sucursal_id is not None else None
-            ) or pcs.get((r.cliente_facturacion_id, ln.producto_id, None))
+            pc = _fila_del_cliente(pcs, r.cliente_facturacion_id, ln.producto_id, r.sucursal_id)
             base = (pc.nombre_cliente or "").strip() if pc else ""
             base = base or interno.get(ln.producto_id) or str(ln.producto_id)
             codigo = (pc.codigo_cliente or "").strip() if pc else ""
@@ -758,6 +768,54 @@ def reporte_compras(
             "con_cambio_abierto": len(pendientes)}
 
 
+def _texto_como_venia(notas) -> str:
+    """El texto del renglón tal como lo escribió el cliente, de la marca
+    «Como venía: «…»» que la ingesta deja en la nota de la línea. Vacío si no
+    la trae (o si la marca es el relleno «sin descripción»)."""
+    m = _RX_COMO_VENIA.search(notas or "")
+    texto = " ".join(m.group(1).split()) if m else ""
+    return "" if texto.lower() == "sin descripción" else texto
+
+
+def _renglon_del_documento(docs: list, claves: set, cantidad) -> Optional[dict]:
+    """El renglón del documento de la OC que corresponde a una línea, casado por
+    CLAVE (la de SAE o el código del cliente) y desempatado por cantidad. `docs`
+    va del más nuevo al más viejo; el primero que tenga la clave contesta. Si
+    dentro de un documento quedan dos textos distintos para la misma clave y
+    cantidad, no se adivina: None, y la línea cae al catálogo."""
+    for lineas in docs:
+        cands = [ln for ln in lineas if (ln.get("clave") or "").strip().upper() in claves]
+        if not cands:
+            continue
+        misma = []
+        for ln in cands:
+            try:
+                if Decimal(str(ln.get("cantidad")).replace(",", "")) == cantidad:
+                    misma.append(ln)
+            except Exception:
+                pass
+        cands = misma or cands
+        textos = {" ".join((ln.get("descripcion") or "").split()) for ln in cands} - {""}
+        return cands[0] if len(textos) == 1 else None
+    return None
+
+
+def _lote_de_nota(*textos) -> str:
+    """«EXTRA», «REPOSICION» o vacío. La marca vive en la nota de la línea de
+    dos formas: al principio («EXTRA · Como venía…», la ingesta) o como un tramo
+    suelto al final («Como venía: «AJONJOLI» … · EXTRA», medido en VH-39NIN-LUN).
+    Las mismas dos familias que el bot: EXTRAS es EXTRA y REPOSICIONES es
+    REPOSICION."""
+    for texto in textos:
+        for tramo in re.split(r"\s*·\s*", str(texto or "")):
+            n = unicodedata.normalize("NFKD", tramo).encode("ascii", "ignore").decode().strip().upper()
+            if n.startswith("EXTRA"):
+                return "EXTRA"
+            if n.startswith("REPOSICION"):
+                return "REPOSICION"
+    return ""
+
+
 @router.get("/reporte-armado")
 def reporte_armado(
     fechas: Optional[str] = Query(default=None, description="Fechas de ENTREGA (bodega), ISO, separadas por coma"),
@@ -843,7 +901,11 @@ def reporte_armado(
             Remision.folio_interno,
             Remision.fecha_entrega,
             Remision.nota_entrega,
+            Remision.cliente_facturacion_id,
+            Remision.sucursal_id,
             Cliente.legal_name,
+            LineaRemision.producto_id,
+            LineaRemision.numero_linea,
             Producto.clave_sae,
             Producto.nombre,
             CategoriaProducto.nombre.label("categoria"),
@@ -856,6 +918,9 @@ def reporte_armado(
         .join(Cliente, Cliente.id == Remision.cliente_facturacion_id)
         .outerjoin(CategoriaProducto, CategoriaProducto.id == Producto.categoria_id)
         .filter(*base, *filtro, LineaRemision.cantidad_solicitada > 0)
+        # en el orden del documento: la hoja por hospital numera los lotes así
+        .order_by(Remision.fecha_entrega, Remision.su_pedido, Remision.id,
+                  LineaRemision.numero_linea)
     )
 
     # LA VERSIÓN QUE MANDA ES LA DEL DOCUMENTO — misma regla que la lista de
@@ -876,8 +941,45 @@ def reporte_armado(
         .all()
     }
 
+    # EL TEXTO DEL PEDIDO, APARTE (27-sep-2026): la hoja de armado por hospital
+    # imprime lo que el hospital escribió —«COL BLANCA (PIEZAS MEDIANAS)»,
+    # «PIÑA MIEL (SIN CORONA)», «PLATANO MACHO MADURO SIN PENCA»— y el nombre
+    # interno («COL», «PINA») lo borra. Va en `descripcion_pedido` y NO pisa
+    # `descripcion`: el pronóstico, quién pide y el calendario siguen con el
+    # nombre interno, como estaban. Por renglón, en este orden:
+    #   1. la marca «Como venía: «…»» de la nota de la línea (la deja la ingesta);
+    #   2. el renglón del documento de su OC, casado por clave;
+    #   3. el nombre del cliente en su catálogo (su plaza gana, cae la genérica);
+    #   4. el nombre interno.
+    # El catálogo va tercero y no primero: guarda UN nombre por producto y se
+    # pierde la anotación de ESTE pedido (medido en VH-39NIN-LUN: da «COL» donde
+    # el pedido dice «COL BLANCA (PIEZAS MEDIANAS)»).
+    renglones = q.all()
+    pcs = _catalogo_de_clientes(
+        db,
+        {r.cliente_facturacion_id for r in renglones if r.cliente_facturacion_id},
+        {r.producto_id for r in renglones},
+    )
+    # El documento de la OC solo se lee para las remisiones que tienen alguna
+    # línea sin la marca: la de hoy la trae, las del 14 al 24-sep de
+    # Villahermosa no (entraron por la bandeja a mano).
+    sin_marca = {r.id for r in renglones
+                 if r.id not in pendientes and not _texto_como_venia(r.notas)}
+    docs_de: dict = {}
+    if sin_marca:
+        for rid, pay, pay_nuevo in (
+            db.query(OCRecibida.remision_id, OCRecibida.payload, OCRecibida.payload_nuevo)
+            .filter(OCRecibida.remision_id.in_(sin_marca))
+            .order_by(OCRecibida.recibida_at.desc())
+        ):
+            # un cambio ya resuelto deja la versión nueva en payload_nuevo: esa primero
+            for doc in (pay_nuevo, pay):
+                lineas = [ln for ln in (doc or {}).get("lineas") or [] if isinstance(ln, dict)]
+                if lineas:
+                    docs_de.setdefault(rid, []).append(lineas)
+
     rems: dict = {}
-    for r in q.all():
+    for r in renglones:
         rem = rems.setdefault(r.id, {
             "folio": normalizar_folio(r.su_pedido) or r.folio_interno,
             "cliente": r.legal_name or "",
@@ -889,9 +991,22 @@ def reporte_armado(
         })
         if r.id in pendientes:
             continue          # sus líneas salen del documento, abajo
+        pc = _fila_del_cliente(pcs, r.cliente_facturacion_id, r.producto_id, r.sucursal_id)
+        texto, del_doc = _texto_como_venia(r.notas), None
+        if not texto and r.id in docs_de:
+            claves = {(r.clave_sae or "").strip().upper(),
+                      ((pc.codigo_cliente or "") if pc else "").strip().upper()} - {""}
+            del_doc = _renglon_del_documento(docs_de[r.id], claves, r.cantidad_solicitada)
+            texto = " ".join(((del_doc or {}).get("descripcion") or "").split())
         rem["lineas"].append({
             "clave": r.clave_sae,
             "descripcion": r.nombre,
+            "descripcion_pedido": (texto
+                                   or ((pc.nombre_cliente or "").strip() if pc else "")
+                                   or r.nombre),
+            "linea": r.numero_linea,
+            "lote": (_lote_de_nota(r.notas)
+                     or (_lote_de_nota(del_doc.get("notas"), del_doc.get("lote")) if del_doc else "")),
             "unidad": r.presentacion,
             "nota": r.notas or "",
             "cantidad": str(r.cantidad_solicitada),
@@ -919,13 +1034,17 @@ def reporte_armado(
             rem = rems.get(rid)
             if rem is None:
                 continue
-            for ln in (pn or {}).get("lineas") or []:
-                if not isinstance(ln, dict):
-                    continue
+            docs = [ln for ln in (pn or {}).get("lineas") or [] if isinstance(ln, dict)]
+            for i, ln in enumerate(docs, start=1):
                 clave = (ln.get("clave") or "").strip() or None
+                descripcion = (ln.get("descripcion") or "").strip() or "PARTIDA"
                 rem["lineas"].append({
                     "clave": clave,
-                    "descripcion": (ln.get("descripcion") or "").strip() or "PARTIDA",
+                    "descripcion": descripcion,
+                    # aquí el documento ES el pedido: el mismo texto
+                    "descripcion_pedido": " ".join(descripcion.split()),
+                    "linea": i,
+                    "lote": _lote_de_nota(ln.get("notas") or ln.get("nota"), ln.get("lote")),
                     # unidad del DOCUMENTO, texto del cliente: el bot la canoniza
                     "unidad": (ln.get("unidad") or "").strip() or "?",
                     "nota": (ln.get("notas") or ln.get("nota") or "").strip(),
