@@ -1038,6 +1038,109 @@ def test_reporte_armado_por_folios_ignora_fecha(client, env, auth_as):
     assert out["sin_fecha"] == []
 
 
+def test_reporte_armado_trae_el_texto_del_pedido(client, env, auth_as):
+    """La hoja de armado por hospital imprime el texto del PEDIDO del cliente,
+    con sus anotaciones (27-sep-2026, VH-39NIN-LUN: «COL BLANCA (PIEZAS
+    MEDIANAS)», no «COL»). Viaja en `descripcion_pedido`; `descripcion` sigue
+    siendo el nombre interno para todo lo demás. Por renglón: la marca «Como
+    venía» de la nota → el renglón de su OC casado por clave (desempate por
+    cantidad; la versión nueva de un cambio resuelto primero; si sigue ambiguo
+    no adivina) → el catálogo del cliente (su plaza gana) → el nombre interno.
+    Cada línea trae su número y su lote (EXTRA al principio o al final de la
+    nota, REPOSICIÓN, o la marca del renglón de la OC)."""
+    from app.models import ClienteSucursal, Producto, ProductoCliente, Sucursal
+    from app.models.oc_recibida import OCRecibida
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    tid = env["admin_a"]["tenant_id"]
+    cli, prod, bulto = (uuid.UUID(env[k]) for k in ("cli_a", "prod_a", "prod_bulto_a"))
+    with SessionLocal() as s:
+        s.query(Producto).filter(Producto.id == prod).update({"clave_sae": "JITKG"})
+        suc = Sucursal(tenant_id=tid, nombre="Plaza Armado")
+        s.add(suc); s.flush()
+        s.add(ClienteSucursal(tenant_id=tid, cliente_id=cli, sucursal_id=suc.id))
+        s.add_all([
+            ProductoCliente(tenant_id=tid, cliente_id=cli, producto_id=prod,
+                            nombre_cliente="JITOMATE ROMA"),
+            ProductoCliente(tenant_id=tid, cliente_id=cli, producto_id=prod,
+                            sucursal_id=suc.id, nombre_cliente="JITOMATE BOLA"),
+            # solo la clave, sin nombre: no pisa el interno con un vacío
+            ProductoCliente(tenant_id=tid, cliente_id=cli, producto_id=bulto,
+                            codigo_cliente="BLT-1"),
+        ])
+        s.commit()
+        suc_id = str(suc.id)
+
+    def rem(folio, lineas, sucursal=None, doc=None, doc_nuevo=None):
+        body = {"cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+                "su_pedido": folio, "fecha_entrega": "2031-04-13",
+                "lineas": [{"producto_id": env[p], "presentacion": "KILO",
+                            "cantidad_solicitada": "2", "precio_unitario": "5",
+                            "notas": notas}
+                           for p, notas in lineas]}
+        if sucursal:
+            body["sucursal_id"] = sucursal
+        r = client.post("/api/v1/remisiones", headers=h, json=body)
+        assert r.status_code == 201, r.text
+        if doc is not None:
+            ahora = datetime.now(timezone.utc)
+            with SessionLocal() as s:
+                s.add(OCRecibida(
+                    tenant_id=tid, canal="WHATSAPP", origen_externo=f"EHMO:prueba:{folio}",
+                    folio_externo=folio, estado="ASIGNADA",
+                    remision_id=uuid.UUID(r.json()["id"]),
+                    payload={"lineas": doc},
+                    payload_nuevo={"lineas": doc_nuevo} if doc_nuevo else None,
+                    cambio_detectado_at=ahora if doc_nuevo else None,
+                    cambio_resuelto_at=ahora if doc_nuevo else None,
+                ))
+                s.commit()
+
+    def ln(clave, texto, cantidad="2", notas=None):
+        return {"clave": clave, "descripcion": texto, "cantidad": cantidad, "unidad": "KILO",
+                "notas": notas}
+
+    # 1. la marca de la nota manda (y se le quitan los espacios dobles)
+    rem("24640", [("prod_a", "Como venía: «JITOMATE  SALADET (MADURO)» (clave JITKG)"
+                             " · Revisar: cruza al 100 con 2 productos distintos"),
+                  ("prod_bulto_a", None)])
+    # 2. sin marca: el renglón de su OC, por código del cliente...
+    rem("24641", [("prod_a", None), ("prod_bulto_a", None)], sucursal=suc_id,
+        doc=[ln("BLT-1", "BULTO DE PAPA (SIN TIERRA)", notas="EXTRA")])
+    # ...o por clave SAE, desempatado por cantidad
+    rem("24642", [("prod_a", None)],
+        doc=[ln("jitkg", "JITOMATE P/ SALSA"), ln("JITKG", "JITOMATE EXTRA", "9")])
+    # sin OC: el catálogo del cliente
+    rem("24643", [("prod_a", None)])
+    # misma clave y cantidad con dos textos: no adivina, cae al catálogo
+    rem("24644", [("prod_a", None)],
+        doc=[ln("JITKG", "JITOMATE UNO"), ln("JITKG", "JITOMATE DOS")])
+    # cambio ya resuelto: manda la versión nueva del documento
+    rem("24645", [("prod_a", None)],
+        doc=[ln("JITKG", "JITOMATE VIEJO")], doc_nuevo=[ln("JITKG", "JITOMATE NUEVO")])
+
+    # los dos acomodos de la marca de lote en la nota
+    rem("24646", [("prod_a", "Como venía: «AJONJOLI» (clave JITKG) · EXTRA"),
+                  ("prod_bulto_a", "REPOSICIÓN — se surte, no se cobra · Como venía: «PAPA»")])
+
+    r = client.get("/api/v1/remisiones/reporte-armado?fechas=2031-04-13", headers=h)
+    assert r.status_code == 200, r.text
+    rems = r.json()["remisiones"]
+    # todo lo demás sigue con el nombre interno
+    assert {l["descripcion"] for x in rems for l in x["lineas"]} == {"Prod R", "Prod Bulto R"}
+    desc = {x["folio"]: [(l["linea"], l["descripcion_pedido"], l["lote"]) for l in x["lineas"]]
+            for x in rems}
+    assert desc == {
+        "24640": [(1, "JITOMATE SALADET (MADURO)", ""), (2, "Prod Bulto R", "")],
+        "24641": [(1, "JITOMATE BOLA", ""), (2, "BULTO DE PAPA (SIN TIERRA)", "EXTRA")],
+        "24642": [(1, "JITOMATE P/ SALSA", "")],
+        "24643": [(1, "JITOMATE ROMA", "")],
+        "24644": [(1, "JITOMATE ROMA", "")],
+        "24645": [(1, "JITOMATE NUEVO", "")],
+        "24646": [(1, "AJONJOLI", "EXTRA"), (2, "PAPA", "REPOSICION")],
+    }, desc
+
+
 def test_reporte_armado_usa_el_documento_nuevo_si_hay_incidencia(client, env, auth_as):
     """Misma regla que la lista de compras: con incidencia de cambio abierta,
     la hoja arma con las líneas del DOCUMENTO nuevo (marcadas) y las capturadas
@@ -1075,6 +1178,9 @@ def test_reporte_armado_usa_el_documento_nuevo_si_hay_incidencia(client, env, au
         {("AJO", "25"), ("SAL DE GRANO", "2")}
     assert [l["nota"] for l in fila["lineas"] if l["descripcion"] == "SAL DE GRANO"] == \
         ["grano grueso"]
+    # la hoja por hospital: el texto del documento, su orden y su lote
+    assert [(l["linea"], l["descripcion_pedido"], l["lote"]) for l in fila["lineas"]] == \
+        [(1, "AJO", ""), (2, "SAL DE GRANO", "")]
 
 
 def test_reporte_armado_origen_acota_el_carril(client, env, auth_as):
