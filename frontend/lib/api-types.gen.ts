@@ -2425,6 +2425,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mini-conta/cartera": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cartera
+         * @description Lo que falta por cobrar HOY: facturas timbradas PPD de las series pedidas
+         *     con saldo, con el mismo filtro que el estado de cuenta (fuera las que ya van
+         *     en cancelación). Vence a los días de crédito del cliente.
+         */
+        get: operations["cartera_api_v1_mini_conta_cartera_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/cobranza": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cobranza
+         * @description Lo cobrado: cada pago (REP timbrado) aplicado a una factura de las series
+         *     pedidas, con fecha de pago en el rango (hora de México).
+         */
+        get: operations["cobranza_api_v1_mini_conta_cobranza_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/notas-credito": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Notas Credito
+         * @description Las notas de crédito vigentes con fecha en el rango, aplicadas a facturas
+         *     de las series pedidas.
+         *
+         *     Una nota aquí es solo DINERO (el SAE no trae sus productos): cada aplicación
+         *     se reparte entre las líneas de la factura en proporción a su importe, con
+         *     cantidad 0 e importe negativo, y con la fecha de entrega de esa factura —
+         *     la nota corrige esa venta, no una del día en que se emitió.
+         */
+        get: operations["notas_credito_api_v1_mini_conta_notas_credito_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/precios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Precios
+         * @description El precio de lista que HOY le toca a cada cliente de esas series, para los
+         *     productos que se le facturaron en el último año.
+         *
+         *     Sale de `resolver_precios_lote`, la MISMA cascada que cotiza y factura
+         *     (override → asignación → lista base), una vez por cada cliente×plaza cuya
+         *     serie de factura prevista es de las pedidas; con la serie de REMISIÓN que le
+         *     toca, porque las asignaciones por serie son por serie de remisión. Para una
+         *     cuenta con muchos clientes, pídelo de a uno (`clientes=`).
+         */
+        get: operations["precios_api_v1_mini_conta_precios_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mini-conta/productos": {
         parameters: {
             query?: never;
@@ -2439,6 +2535,32 @@ export interface paths {
          *     la conexión comparte el catálogo.
          */
         get: operations["productos_api_v1_mini_conta_productos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/remisiones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Remisiones
+         * @description Lo ENTREGADO: las líneas de las remisiones no canceladas con `fecha_entrega`
+         *     en el rango cuya serie de factura prevista es de las pedidas.
+         *
+         *     Van todas, facturadas o no (`facturada` lo dice): la factura se hace días
+         *     después y muchas remisiones que el SAE ya facturó no quedan ligadas aquí, así
+         *     que «sin factura» no es confiable. Quien las lea las usa EN LUGAR de las
+         *     facturas para los días que todavía no se facturan, nunca además de ellas.
+         */
+        get: operations["remisiones_api_v1_mini_conta_remisiones_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5481,6 +5603,26 @@ export interface components {
             catalogo: boolean;
             /** Clientes */
             clientes?: string[] | null;
+            /**
+             * Cobranza
+             * @default false
+             */
+            cobranza: boolean;
+            /**
+             * Notas Credito
+             * @default false
+             */
+            notas_credito: boolean;
+            /**
+             * Precios
+             * @default false
+             */
+            precios: boolean;
+            /**
+             * Remisiones
+             * @default false
+             */
+            remisiones: boolean;
             /** Series */
             series?: string[];
         };
@@ -5493,8 +5635,28 @@ export interface components {
             catalogo: boolean;
             /** Clientes */
             clientes: components["schemas"]["ClienteAlcanceOut"][];
+            /**
+             * Cobranza
+             * @default false
+             */
+            cobranza: boolean;
             conexion?: components["schemas"]["ConexionBreveOut"] | null;
-            empresa: components["schemas"]["app__api__v1__mini_conta__EmpresaOut"];
+            empresa: components["schemas"]["MCEmpresaOut"];
+            /**
+             * Notas Credito
+             * @default false
+             */
+            notas_credito: boolean;
+            /**
+             * Precios
+             * @default false
+             */
+            precios: boolean;
+            /**
+             * Remisiones
+             * @default false
+             */
+            remisiones: boolean;
             /** Series */
             series: string[];
             /**
@@ -7455,6 +7617,36 @@ export interface components {
             multiemisor: boolean;
             /** Pasos */
             pasos?: components["schemas"]["OnboardingPaso"][];
+            /**
+             * Rfc
+             * @default
+             */
+            rfc: string;
+        };
+        /** EmpresaOut */
+        EmpresaOut: {
+            /** Domicilio Fiscal */
+            domicilio_fiscal?: Record<string, never>;
+            /**
+             * Domicilio Fiscal Cp
+             * @default
+             */
+            domicilio_fiscal_cp: string;
+            /**
+             * Has Logo
+             * @default false
+             */
+            has_logo: boolean;
+            /**
+             * Legal Name
+             * @default
+             */
+            legal_name: string;
+            /**
+             * Regimen Fiscal Sat
+             * @default
+             */
+            regimen_fiscal_sat: string;
             /**
              * Rfc
              * @default
@@ -9433,6 +9625,302 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** MCCarteraOut */
+        MCCarteraOut: {
+            /**
+             * Corte
+             * Format: date
+             */
+            corte: string;
+            /** Facturas */
+            facturas: components["schemas"]["MCSaldoOut"][];
+            /** Series */
+            series: string[];
+        };
+        /** MCCobranzaOut */
+        MCCobranzaOut: {
+            /** Cobros */
+            cobros: components["schemas"]["MCCobroOut"][];
+            /**
+             * Desde
+             * Format: date
+             */
+            desde: string;
+            /**
+             * Hasta
+             * Format: date
+             */
+            hasta: string;
+            /** Series */
+            series: string[];
+        };
+        /** MCCobroOut */
+        MCCobroOut: {
+            /** Cliente */
+            cliente?: string | null;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /**
+             * Factura Id
+             * Format: uuid
+             */
+            factura_id: string;
+            /**
+             * Fecha Pago
+             * Format: date
+             */
+            fecha_pago: string;
+            /** Folio */
+            folio: number;
+            /** Forma Pago */
+            forma_pago?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Importe */
+            importe: string;
+            /** Recibo */
+            recibo: string;
+            /**
+             * Recibo Id
+             * Format: uuid
+             */
+            recibo_id: string;
+            /** Saldo Insoluto */
+            saldo_insoluto?: string | null;
+            /** Serie */
+            serie: string;
+        };
+        /** MCEmpresaOut */
+        MCEmpresaOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+        };
+        /** MCLineaNotaOut */
+        MCLineaNotaOut: {
+            /** Cantidad */
+            cantidad: string;
+            /** Clave Unidad */
+            clave_unidad: string;
+            /** Cliente */
+            cliente?: string | null;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Descripcion */
+            descripcion: string;
+            /**
+             * Factura Id
+             * Format: uuid
+             */
+            factura_id: string;
+            /**
+             * Fecha Entrega
+             * Format: date
+             */
+            fecha_entrega: string;
+            /**
+             * Fecha Entrega Origen
+             * @enum {string}
+             */
+            fecha_entrega_origen: "remision" | "notas" | "factura";
+            /**
+             * Fecha Nota
+             * Format: date
+             */
+            fecha_nota: string;
+            /** Folio */
+            folio: number;
+            /** Importe */
+            importe: string;
+            /**
+             * Linea Id
+             * Format: uuid
+             */
+            linea_id: string;
+            /** Nota */
+            nota: string;
+            /**
+             * Nota Id
+             * Format: uuid
+             */
+            nota_id: string;
+            /** Presentacion */
+            presentacion?: string | null;
+            /** Producto */
+            producto?: string | null;
+            /** Serie */
+            serie: string;
+            /** Sku */
+            sku?: string | null;
+            /** Uuid Cfdi */
+            uuid_cfdi?: string | null;
+        };
+        /** MCLineaRemisionOut */
+        MCLineaRemisionOut: {
+            /** Cantidad */
+            cantidad: string;
+            /** Clave Unidad */
+            clave_unidad?: string | null;
+            /** Cliente */
+            cliente?: string | null;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Descripcion */
+            descripcion: string;
+            /** Estado */
+            estado: string;
+            /** Facturada */
+            facturada: boolean;
+            /**
+             * Fecha Entrega
+             * Format: date
+             */
+            fecha_entrega: string;
+            /** Folio */
+            folio: string;
+            /** Importe */
+            importe: string;
+            /**
+             * Linea Id
+             * Format: uuid
+             */
+            linea_id: string;
+            /** Plaza */
+            plaza?: string | null;
+            /** Presentacion */
+            presentacion?: string | null;
+            /** Producto */
+            producto?: string | null;
+            /**
+             * Remision Id
+             * Format: uuid
+             */
+            remision_id: string;
+            /** Serie */
+            serie: string;
+            /** Sku */
+            sku?: string | null;
+        };
+        /** MCNotasOut */
+        MCNotasOut: {
+            /**
+             * Desde
+             * Format: date
+             */
+            desde: string;
+            /**
+             * Hasta
+             * Format: date
+             */
+            hasta: string;
+            /** Lineas */
+            lineas: components["schemas"]["MCLineaNotaOut"][];
+            /** Series */
+            series: string[];
+            /**
+             * Sin Factura
+             * @default 0
+             */
+            sin_factura: number;
+        };
+        /** MCPrecioVentaOut */
+        MCPrecioVentaOut: {
+            /** Cliente */
+            cliente?: string | null;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Origen */
+            origen: string;
+            /** Plaza */
+            plaza?: string | null;
+            /** Precio */
+            precio: string;
+            /** Presentacion */
+            presentacion: string;
+            /** Producto */
+            producto: string;
+            /** Sku */
+            sku: string;
+        };
+        /** MCPreciosOut */
+        MCPreciosOut: {
+            /**
+             * Fecha
+             * Format: date
+             */
+            fecha: string;
+            /** Precios */
+            precios: components["schemas"]["MCPrecioVentaOut"][];
+            /** Series */
+            series: string[];
+        };
+        /** MCRemisionesOut */
+        MCRemisionesOut: {
+            /**
+             * Desde
+             * Format: date
+             */
+            desde: string;
+            /**
+             * Hasta
+             * Format: date
+             */
+            hasta: string;
+            /** Lineas */
+            lineas: components["schemas"]["MCLineaRemisionOut"][];
+            /** Series */
+            series: string[];
+        };
+        /** MCSaldoOut */
+        MCSaldoOut: {
+            /** Cliente */
+            cliente?: string | null;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Dias Vencida */
+            dias_vencida: number;
+            /**
+             * Factura Id
+             * Format: uuid
+             */
+            factura_id: string;
+            /**
+             * Fecha
+             * Format: date
+             */
+            fecha: string;
+            /** Folio */
+            folio: number;
+            /** Saldo */
+            saldo: string;
+            /** Serie */
+            serie: string;
+            /** Total */
+            total: string;
+            /** Uuid Cfdi */
+            uuid_cfdi?: string | null;
+            /**
+             * Vencimiento
+             * Format: date
+             */
+            vencimiento: string;
         };
         /** MatchIn */
         MatchIn: {
@@ -12616,16 +13104,6 @@ export interface components {
             /** Serie */
             serie?: string | null;
         };
-        /** EmpresaOut */
-        app__api__v1__mini_conta__EmpresaOut: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Nombre */
-            nombre: string;
-        };
         /** ContactoIn */
         app__schemas__contacto__ContactoIn: {
             /** Correo */
@@ -12642,36 +13120,6 @@ export interface components {
             turnstile_token?: string | null;
             /** Website */
             website?: string | null;
-        };
-        /** EmpresaOut */
-        app__schemas__empresa__EmpresaOut: {
-            /** Domicilio Fiscal */
-            domicilio_fiscal?: Record<string, never>;
-            /**
-             * Domicilio Fiscal Cp
-             * @default
-             */
-            domicilio_fiscal_cp: string;
-            /**
-             * Has Logo
-             * @default false
-             */
-            has_logo: boolean;
-            /**
-             * Legal Name
-             * @default
-             */
-            legal_name: string;
-            /**
-             * Regimen Fiscal Sat
-             * @default
-             */
-            regimen_fiscal_sat: string;
-            /**
-             * Rfc
-             * @default
-             */
-            rfc: string;
         };
     };
     responses: never;
@@ -15459,7 +15907,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__empresa__EmpresaOut"];
+                    "application/json": components["schemas"]["EmpresaOut"];
                 };
             };
             /** @description Validation Error */
@@ -15494,7 +15942,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__empresa__EmpresaOut"];
+                    "application/json": components["schemas"]["EmpresaOut"];
                 };
             };
             /** @description Validation Error */
@@ -15793,7 +16241,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__empresa__EmpresaOut"];
+                    "application/json": components["schemas"]["EmpresaOut"];
                 };
             };
             /** @description Validation Error */
@@ -15824,7 +16272,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__empresa__EmpresaOut"];
+                    "application/json": components["schemas"]["EmpresaOut"];
                 };
             };
             /** @description Validation Error */
@@ -15892,7 +16340,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__empresa__EmpresaOut"];
+                    "application/json": components["schemas"]["EmpresaOut"];
                 };
             };
             /** @description Validation Error */
@@ -18070,6 +18518,154 @@ export interface operations {
             };
         };
     };
+    cartera_api_v1_mini_conta_cartera_get: {
+        parameters: {
+            query?: {
+                /** @description Códigos de FACTURA separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCCarteraOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cobranza_api_v1_mini_conta_cobranza_get: {
+        parameters: {
+            query: {
+                desde: string;
+                hasta: string;
+                /** @description Códigos de FACTURA separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCCobranzaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notas_credito_api_v1_mini_conta_notas_credito_get: {
+        parameters: {
+            query: {
+                desde: string;
+                hasta: string;
+                /** @description Códigos de FACTURA separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCNotasOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    precios_api_v1_mini_conta_precios_get: {
+        parameters: {
+            query?: {
+                /** @description Códigos de FACTURA separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCPreciosOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     productos_api_v1_mini_conta_productos_get: {
         parameters: {
             query: {
@@ -18095,6 +18691,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductosOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remisiones_api_v1_mini_conta_remisiones_get: {
+        parameters: {
+            query: {
+                desde: string;
+                hasta: string;
+                /** @description Códigos de FACTURA separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCRemisionesOut"];
                 };
             };
             /** @description Validation Error */

@@ -16,11 +16,15 @@ from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
 from app.models import (
-    Cliente, ClienteSucursal, ClienteSucursalSerie, Factura, LineaFactura, Membership,
-    Producto, Remision, Role, Serie, Sucursal, Tenant, User,
+    Cliente, ClienteSucursal, ClienteSucursalSerie, Factura, LineaFactura, LineaRemision,
+    Membership, NotaCredito, NotaCreditoFactura, Producto, ReciboPago, ReciboPagoFactura,
+    Remision, Role, Serie, Sucursal, Tenant, User,
 )
+from app.models.sucursal import PrecioOverride
 
 _PURGE = (
+    "lineas_remision", "nota_credito_facturas", "notas_credito", "recibo_pago_facturas",
+    "recibos_pago", "precio_overrides",
     "lineas_factura", "remisiones", "facturas", "cliente_sucursal_series",
     "cliente_sucursales", "sucursales", "series", "conexiones", "oc_recibidas",
     "productos", "clientes",
@@ -62,7 +66,8 @@ def env(db_engine):
             s = Serie(tenant_id=t.id, codigo=codigo, tipo_documento=tipo)
             db.add(s); db.flush(); return s
 
-        cli = Cliente(tenant_id=ta.id, codigo="MC", legal_name="EHMO MC", rfc="GOA180712SF5")
+        cli = Cliente(tenant_id=ta.id, codigo="MC", legal_name="EHMO MC", rfc="GOA180712SF5",
+                      dias_credito=15)
         cli2 = Cliente(tenant_id=ta.id, codigo="MC2", legal_name="DIF MC", rfc="DIF180712SF5")
         prod = Producto(tenant_id=ta.id, sku="00000283", nombre="AGUACATE",
                         clave_sat="01010101", unidad_sat="KGM")
@@ -96,10 +101,12 @@ def env(db_engine):
         ])
 
         def _factura(serie, folio, fecha, *, notas=None, estado="TIMBRADA", tipo="I",
-                     borrada=False, cliente=cli):
+                     borrada=False, cliente=cli, ppd_saldo=None):
             f = Factura(tenant_id=ta.id, serie=serie, folio=folio, cliente_id=cliente.id,
                         estado=estado, tipo_comprobante=tipo, uuid=str(uuid.uuid4()),
-                        fecha=fecha, notas=notas,
+                        fecha=fecha, notas=notas, total=Decimal("11693"),
+                        metodo_pago="PPD" if ppd_saldo is not None else "PUE",
+                        saldo_insoluto=ppd_saldo or Decimal(0),
                         deleted_at=_utc(2026, 9, 20) if borrada else None)
             db.add(f); db.flush()
             db.add(LineaFactura(
@@ -118,7 +125,8 @@ def env(db_engine):
             return f
 
         # 1. con remisión que dice la entrega (y notas que dirían otra cosa)
-        f_rem = _factura("ZSUR", 1, _utc(2026, 9, 10), notas="ENTREGA 07/09/2026")
+        f_rem = _factura("ZSUR", 1, _utc(2026, 9, 10), notas="ENTREGA 07/09/2026",
+                         ppd_saldo=Decimal("5000"))
         db.add(Remision(tenant_id=ta.id, folio_interno=f"R{suffix}", cliente_facturacion_id=cli.id,
                         fecha_entrega=date(2026, 9, 4), factura_id=f_rem.id))
         # 2. sin remisión: la fecha sale de las notas
@@ -135,6 +143,32 @@ def env(db_engine):
         _factura("ZPAC", 8, _utc(2026, 9, 11))                 # otra plaza
         _factura("ZSUR", 9, _utc(2026, 10, 2))                 # fuera del rango
         _factura("ZOLD", 10, _utc(2026, 9, 11))                # serie de la plaza borrada
+
+        # Fase 2: una remisión entregada sin factura en Chiapas (serie prevista ZSUR por
+        # el vínculo cli×Chiapas) y una cancelada, que no cuenta.
+        for folio, estado in ((f"RB{suffix}", "BORRADOR"), (f"RC{suffix}", "CANCELADA")):
+            r = Remision(tenant_id=ta.id, folio_interno=folio, cliente_facturacion_id=cli.id,
+                         sucursal_id=chis1.id, fecha_entrega=date(2026, 9, 25), estado=estado,
+                         subtotal=Decimal("900"), total=Decimal("900"))
+            db.add(r); db.flush()
+            db.add(LineaRemision(tenant_id=ta.id, remision_id=r.id, numero_linea=1,
+                                 producto_id=prod.id, cantidad_solicitada=Decimal("10"),
+                                 precio_unitario=Decimal("90"), importe=Decimal("900")))
+        # Una nota de crédito de $116 aplicada a la factura 1.
+        nc = NotaCredito(tenant_id=ta.id, cliente_id=cli.id, serie="NC", folio=7,
+                         fecha=_utc(2026, 9, 18), total=Decimal("116"), estado="VIGENTE")
+        db.add(nc); db.flush()
+        db.add(NotaCreditoFactura(tenant_id=ta.id, nota_id=nc.id, factura_id=f_rem.id,
+                                  importe=Decimal("116")))
+        # Fase 3: un pago de $500 a la factura 1, y el precio del aguacate para cli en Chiapas.
+        rp = ReciboPago(tenant_id=ta.id, cliente_id=cli.id, serie="CP", folio=3,
+                        fecha_pago=_utc(2026, 9, 20), monto=Decimal("500"), estado="TIMBRADO")
+        db.add(rp); db.flush()
+        db.add(ReciboPagoFactura(tenant_id=ta.id, recibo_id=rp.id, factura_id=f_rem.id,
+                                 importe_pagado=Decimal("500"), saldo_insoluto=Decimal("5000")))
+        db.add(PrecioOverride(tenant_id=ta.id, cliente_id=cli.id, sucursal_id=chis1.id,
+                              producto_id=prod.id, presentacion="KILO",
+                              precio_unitario=Decimal("95")))
         db.commit()
         yield {"dueno_a": dueno_a, "dueno_b": dueno_b, "rem_factura": str(f_rem.id),
                "cli": str(cli.id), "cli2": str(cli2.id), "ta": ta.id}
@@ -178,12 +212,12 @@ _TODAS = ["ZSUR", "ZDIF", "ZCH5C", "ZPAC", "ZOLD"]
 
 
 def _clave(client, u, tipo, *, nombre="Kelly Chiapas", series=None, clientes=None,
-           catalogo=False):
+           catalogo=False, **datos):
     body = None
     if tipo == "MINI_CONTA":
         body = {"nombre": nombre, "alcance": {
             "series": _TODAS if series is None else series,
-            "clientes": clientes, "catalogo": catalogo}}
+            "clientes": clientes, "catalogo": catalogo, **datos}}
     r = client.post(f"/api/v1/conexiones/{tipo}/clave", headers=_hdr(u), json=body)
     assert r.status_code == 201, r.text
     return r.json()
@@ -372,8 +406,9 @@ def test_cada_cuenta_tiene_su_clave_y_no_revoca_a_las_demas(client, env, auth_as
     mc = next(c for c in listado if c["tipo"] == "MINI_CONTA")
     assert [c["nombre"] for c in mc["conexiones"]] == ["Kelly Chiapas", "Kelly Hidalgo"]
     assert {c["estado"] for c in mc["conexiones"]} == {"PENDIENTE"}
-    assert mc["conexiones"][1]["alcance"] == {"series": ["ZPAC"], "clientes": None,
-                                               "catalogo": False}
+    assert mc["conexiones"][1]["alcance"] == {
+        "series": ["ZPAC"], "clientes": None, "catalogo": False, "remisiones": False,
+        "notas_credito": False, "cobranza": False, "precios": False}
 
     # Nombre repetido (sin importar mayúsculas): 409, no una segunda clave.
     r = client.post("/api/v1/conexiones/MINI_CONTA/clave", headers=_hdr(env["dueno_a"]),
@@ -479,7 +514,9 @@ def test_editar_el_alcance_sin_cambiar_la_clave(client, env, auth_as):
                            "alcance": {"series": ["ZPAC"], "catalogo": True}})
     assert r.status_code == 200, r.text
     assert r.json()["nombre"] == "Kelly Chiapas 2"
-    assert r.json()["alcance"] == {"series": ["ZPAC"], "clientes": None, "catalogo": True}
+    assert r.json()["alcance"] == {
+        "series": ["ZPAC"], "clientes": None, "catalogo": True, "remisiones": False,
+        "notas_credito": False, "cobranza": False, "precios": False}
     _sin_sesion()
     a = client.get("/api/v1/mini-conta/alcance", headers=_bearer(nueva["clave"])).json()
     assert a["series"] == ["ZPAC"] and a["catalogo"] is True
@@ -555,3 +592,92 @@ def test_productos_que_se_facturan_en_sus_series(client, env, auth_as):
         "presentacion_default": "KILO", "lineas": 1, "ultima_venta": "2026-09-10"}]
     assert client.get(url, headers=_bearer(con), params={**rango, "series": "ZPAC"}
                       ).status_code == 403
+
+
+
+# ─── fases 2 y 3 ─────────────────────────────────────────────────────────────
+
+_SEPT = {"desde": "2026-09-01", "hasta": "2026-09-30"}
+
+
+def test_cada_dato_nuevo_pide_su_bandera(client, env, auth_as):
+    auth_as(env["dueno_a"])
+    solo_ventas = _clave(client, env["dueno_a"], "MINI_CONTA", nombre="Solo ventas")["clave"]
+    todo = _clave(client, env["dueno_a"], "MINI_CONTA", nombre="Todo", remisiones=True,
+                  notas_credito=True, cobranza=True, precios=True)["clave"]
+    _sin_sesion()
+    a = client.get("/api/v1/mini-conta/alcance", headers=_bearer(todo)).json()
+    assert {k: a[k] for k in ("remisiones", "notas_credito", "cobranza", "precios")} == {
+        "remisiones": True, "notas_credito": True, "cobranza": True, "precios": True}
+    for ruta, params in (("remisiones", _SEPT), ("notas-credito", _SEPT), ("cobranza", _SEPT),
+                         ("cartera", {}), ("precios", {})):
+        url = f"/api/v1/mini-conta/{ruta}"
+        assert client.get(url, headers=_bearer(solo_ventas), params=params).status_code == 403, ruta
+        assert client.get(url, headers=_bearer(todo), params=params).status_code == 200, ruta
+
+
+def test_remisiones_entregadas_con_su_serie_prevista(client, env, auth_as):
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"], "MINI_CONTA", remisiones=True)["clave"]
+    solo_pac = _clave(client, env["dueno_a"], "MINI_CONTA", nombre="Pachuca", series=["ZPAC"],
+                      remisiones=True)["clave"]
+    _sin_sesion()
+    d = client.get("/api/v1/mini-conta/remisiones", headers=_bearer(clave), params=_SEPT).json()
+    assert len(d["lineas"]) == 1                       # la cancelada no cuenta
+    ln = d["lineas"][0]
+    assert (ln["serie"], ln["plaza"], ln["cliente"]) == ("ZSUR", "Chiapas", "EHMO MC")
+    assert (ln["fecha_entrega"], ln["estado"], ln["facturada"]) == ("2026-09-25", "BORRADOR", False)
+    assert (ln["sku"], ln["cantidad"], ln["importe"]) == ("00000283", "10.0000", "900.00")
+    # La serie prevista (ZSUR) no es de esa clave: no la ve.
+    assert client.get("/api/v1/mini-conta/remisiones", headers=_bearer(solo_pac),
+                      params=_SEPT).json()["lineas"] == []
+
+
+def test_notas_de_credito_se_reparten_entre_las_lineas(client, env, auth_as):
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"], "MINI_CONTA", notas_credito=True)["clave"]
+    _sin_sesion()
+    url = "/api/v1/mini-conta/notas-credito"
+    d = client.get(url, headers=_bearer(clave), params=_SEPT).json()
+    assert [(l["descripcion"], l["importe"]) for l in d["lineas"]] == [
+        ("AGUACATE HASS", "-115.01"), ("FLETE", "-0.99")]   # 116 × 11593/11693 y el resto
+    uno = d["lineas"][0]
+    assert (uno["nota"], uno["serie"], uno["folio"], uno["cantidad"]) == ("NC 7", "ZSUR", 1, "0")
+    # La nota corrige la venta de esa factura: su fecha de entrega es la de la factura.
+    assert (uno["fecha_entrega"], uno["fecha_entrega_origen"]) == ("2026-09-04", "remision")
+    assert uno["fecha_nota"] == "2026-09-18"
+    # El id es estable: volver a leer no cambia las líneas.
+    otra = client.get(url, headers=_bearer(clave), params=_SEPT).json()
+    assert [l["linea_id"] for l in otra["lineas"]] == [l["linea_id"] for l in d["lineas"]]
+    fuera = client.get(url, headers=_bearer(clave),
+                       params={"desde": "2026-09-19", "hasta": "2026-09-30"}).json()
+    assert fuera["lineas"] == []
+
+
+def test_cobranza_y_saldos(client, env, auth_as):
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"], "MINI_CONTA", cobranza=True)["clave"]
+    otra = _clave(client, env["dueno_a"], "MINI_CONTA", nombre="Solo DIF", clientes=[env["cli2"]],
+                  cobranza=True)["clave"]
+    _sin_sesion()
+    c = client.get("/api/v1/mini-conta/cobranza", headers=_bearer(clave), params=_SEPT).json()
+    assert [(x["recibo"], x["fecha_pago"], x["serie"], x["folio"], x["importe"])
+            for x in c["cobros"]] == [("CP 3", "2026-09-20", "ZSUR", 1, "500.00")]
+
+    s = client.get("/api/v1/mini-conta/cartera", headers=_bearer(clave)).json()
+    assert [(x["serie"], x["folio"], x["saldo"], x["vencimiento"]) for x in s["facturas"]] == [
+        ("ZSUR", 1, "5000.00", "2026-09-25")]            # 10-sep + 15 días de crédito
+    # Otro cliente: ni sus pagos ni sus saldos.
+    assert client.get("/api/v1/mini-conta/cobranza", headers=_bearer(otra),
+                      params=_SEPT).json()["cobros"] == []
+    assert client.get("/api/v1/mini-conta/cartera", headers=_bearer(otra)).json()["facturas"] == []
+
+
+def test_precios_con_la_cascada_del_facturador(client, env, auth_as):
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"], "MINI_CONTA", series=["ZSUR"], precios=True)["clave"]
+    _sin_sesion()
+    d = client.get("/api/v1/mini-conta/precios", headers=_bearer(clave)).json()
+    assert [(p["sku"], p["cliente"], p["plaza"], p["presentacion"], p["precio"], p["origen"])
+            for p in d["precios"]] == [
+        ("00000283", "EHMO MC", "Chiapas", "KILO", "95.0000", "override_sucursal")]

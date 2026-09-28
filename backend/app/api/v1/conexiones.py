@@ -223,7 +223,7 @@ def generar(
         nombre = payload.nombre.strip()
         _nombre_libre(db, nombre)
         a = payload.alcance
-        alcance = validar_alcance(db, ctx.tenant_id, a.series, a.clientes, a.catalogo)
+        alcance = validar_alcance(db, ctx.tenant_id, a.series, a.clientes, **a.datos())
         return _clave_nueva(db, ctx, tipo, nombre, alcance)
 
     anterior = _viva(db, tipo)
@@ -269,7 +269,7 @@ def editar(
         con.nombre = payload.nombre.strip()
     if payload.alcance is not None:
         a = payload.alcance
-        con.alcance = validar_alcance(db, ctx.tenant_id, a.series, a.clientes, a.catalogo)
+        con.alcance = validar_alcance(db, ctx.tenant_id, a.series, a.clientes, **a.datos())
     db.flush()
     db.refresh(con)
     return con
