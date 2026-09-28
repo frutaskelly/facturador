@@ -33282,7 +33282,7 @@
   },
   "/api/v1/mini-conta/precios": {
    "get": {
-    "description": "El precio de lista que HOY le toca a cada cliente de esas series, para los\nproductos que se le facturaron en el último año.\n\nSale de `resolver_precios_lote`, la MISMA cascada que cotiza y factura\n(override → asignación → lista base), una vez por cada cliente×plaza cuya\nserie de factura prevista es de las pedidas; con la serie de REMISIÓN que le\ntoca, porque las asignaciones por serie son por serie de remisión.",
+    "description": "El precio de lista que HOY le toca a cada cliente de esas series, para los\nproductos que se le facturaron en el último año.\n\nSale de `resolver_precios_lote`, la MISMA cascada que cotiza y factura\n(override → asignación → lista base), una vez por cada cliente×plaza cuya\nserie de factura prevista es de las pedidas; con la serie de REMISIÓN que le\ntoca, porque las asignaciones por serie son por serie de remisión. Para una\ncuenta con muchos clientes, pídelo de a uno (`clientes=`).",
     "operationId": "precios_api_v1_mini_conta_precios_get",
     "parameters": [
      {
