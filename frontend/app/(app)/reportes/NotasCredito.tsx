@@ -3,12 +3,14 @@
 // Notas de crédito (CFDI de egreso) del periodo: las timbra SAE y las aplica en
 // su CxC; el espejo las trae con las facturas a las que se aplicaron. Cuelgan de
 // los mismos filtros que ventas —rango y cliente— por su fecha de emisión. No
-// mueven nada aquí: la cartera ya llega con ellas descontadas desde SAE.
-import { useMemo } from "react";
+// mueven nada aquí: la cartera ya llega con ellas descontadas desde SAE. La
+// tabla es DataTableSmart: el embudo de «Facturas relacionadas» lista cada
+// factura por separado, y el conteo y el total siguen a lo que se ve.
+import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Spinner } from "@/components/ui/Spinner";
 import { folioRelacionado } from "@/lib/cobranza";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
@@ -26,7 +28,9 @@ type Notas = {
   total: string; notas: number; total_cancelado: string; canceladas: number;
 };
 
-const relacionadas = (n: Nota) => n.facturas.map(folioRelacionado).join(", ");
+// Sin repetir: el espejo puede traer dos renglones de la misma factura.
+const foliosRelacionados = (n: Nota) => [...new Set(n.facturas.map(folioRelacionado))];
+const relacionadas = (n: Nota) => foliosRelacionados(n).join(", ");
 
 export function NotasCredito({
   filtros, rango, clienteNombre,
@@ -38,6 +42,8 @@ export function NotasCredito({
 }) {
   const res = useResource<Notas>(`/api/v1/reportes/notas-credito?${filtros}`);
   const d = res.data;
+  // Lo que queda tras el buscador y los embudos; null = aún sin filtrar.
+  const [visibles, setVisibles] = useState<Nota[] | null>(null);
 
   const cols: Column<Nota>[] = useMemo(() => [
     { header: "Fecha", className: "whitespace-nowrap", sortable: true,
@@ -54,6 +60,7 @@ export function NotasCredito({
         ? <span className="font-mono text-xs text-muted" title={n.uuid}>{n.uuid.slice(0, 8)}…</span>
         : <span className="text-muted">—</span> },
     { header: "Facturas relacionadas", truncate: true, exportValue: relacionadas,
+      filterValues: foliosRelacionados,
       cell: (n) => <span title={relacionadas(n)}>{relacionadas(n) || "—"}</span> },
     { header: "Importe", className: "whitespace-nowrap text-right tabular-nums", sortable: true,
       sortValue: (n) => Number(n.total), exportValue: (n) => n.total,
@@ -68,6 +75,16 @@ export function NotasCredito({
         ? <Badge tone="success">Vigente</Badge>
         : <Badge tone="danger">Cancelada</Badge> },
   ], []);
+
+  // El conteo y el total siguen a lo VISIBLE (buscador y embudos), y como el
+  // del servidor, solo cuentan las vigentes: lo cancelado va aparte.
+  const suma = useMemo(() => {
+    const base = visibles ?? d?.items ?? [];
+    const vig = base.filter((n) => n.estado === "VIGENTE");
+    const can = base.filter((n) => n.estado === "CANCELADA");
+    const monto = (xs: Nota[]) => xs.reduce((t, n) => t + Number(n.total), 0);
+    return { vigentes: vig.length, total: monto(vig), canceladas: can.length, totalCancelado: monto(can) };
+  }, [visibles, d]);
 
   if (res.error) {
     return (
@@ -88,28 +105,30 @@ export function NotasCredito({
         <>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="text-muted">
-              {fmtNumber(d.notas, 0)} {d.notas === 1 ? "nota vigente" : "notas vigentes"}
+              {fmtNumber(suma.vigentes, 0)} {suma.vigentes === 1 ? "nota vigente" : "notas vigentes"}
+              {suma.vigentes !== d.notas && ` de ${fmtNumber(d.notas, 0)}`}
             </span>
             <span>
-              Total: <span className="font-semibold tabular-nums">{fmtMoney(d.total)}</span>
+              Total: <span className="font-semibold tabular-nums">{fmtMoney(suma.total)}</span>
             </span>
           </div>
           <div className={res.loading ? "opacity-50 transition-opacity" : "transition-opacity"}>
-            <DataTable
+            <DataTableSmart
               rows={d.items}
               rowKey={(n) => n.id}
               columns={cols}
               empty="Sin notas de crédito en el rango."
-              exportable
+              storageKey="reportes-notas-credito"
+              searchPlaceholder="Folio, cliente o factura (p. ej. FEHMOHOS12)…"
               exportFilename="notas-de-credito"
-              paginated
               defaultPageSize={50}
+              onFilteredRowsChange={setVisibles}
             />
           </div>
-          {d.canceladas > 0 && (
+          {suma.canceladas > 0 && (
             <p className="mt-3 text-xs text-muted">
-              Fuera del total: {fmtMoney(d.total_cancelado)} en {fmtNumber(d.canceladas, 0)}{" "}
-              {d.canceladas === 1 ? "nota cancelada" : "notas canceladas"}.
+              Fuera del total: {fmtMoney(suma.totalCancelado)} en {fmtNumber(suma.canceladas, 0)}{" "}
+              {suma.canceladas === 1 ? "nota cancelada" : "notas canceladas"}.
             </p>
           )}
         </>
