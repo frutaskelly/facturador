@@ -100,6 +100,26 @@
       ],
       "title": "Clientes"
      },
+     "cobranza": {
+      "default": false,
+      "title": "Cobranza",
+      "type": "boolean"
+     },
+     "notas_credito": {
+      "default": false,
+      "title": "Notas Credito",
+      "type": "boolean"
+     },
+     "precios": {
+      "default": false,
+      "title": "Precios",
+      "type": "boolean"
+     },
+     "remisiones": {
+      "default": false,
+      "title": "Remisiones",
+      "type": "boolean"
+     },
      "series": {
       "items": {
        "type": "string"
@@ -125,6 +145,11 @@
       "title": "Clientes",
       "type": "array"
      },
+     "cobranza": {
+      "default": false,
+      "title": "Cobranza",
+      "type": "boolean"
+     },
      "conexion": {
       "anyOf": [
        {
@@ -136,7 +161,22 @@
       ]
      },
      "empresa": {
-      "$ref": "#/components/schemas/app__api__v1__mini_conta__EmpresaOut"
+      "$ref": "#/components/schemas/MCEmpresaOut"
+     },
+     "notas_credito": {
+      "default": false,
+      "title": "Notas Credito",
+      "type": "boolean"
+     },
+     "precios": {
+      "default": false,
+      "title": "Precios",
+      "type": "boolean"
+     },
+     "remisiones": {
+      "default": false,
+      "title": "Remisiones",
+      "type": "boolean"
      },
      "series": {
       "items": {
@@ -5355,6 +5395,41 @@
      "listo_para_facturar"
     ],
     "title": "EmpresaOnboardingOut",
+    "type": "object"
+   },
+   "EmpresaOut": {
+    "properties": {
+     "domicilio_fiscal": {
+      "title": "Domicilio Fiscal",
+      "type": "object"
+     },
+     "domicilio_fiscal_cp": {
+      "default": "",
+      "title": "Domicilio Fiscal Cp",
+      "type": "string"
+     },
+     "has_logo": {
+      "default": false,
+      "title": "Has Logo",
+      "type": "boolean"
+     },
+     "legal_name": {
+      "default": "",
+      "title": "Legal Name",
+      "type": "string"
+     },
+     "regimen_fiscal_sat": {
+      "default": "",
+      "title": "Regimen Fiscal Sat",
+      "type": "string"
+     },
+     "rfc": {
+      "default": "",
+      "title": "Rfc",
+      "type": "string"
+     }
+    },
+    "title": "EmpresaOut",
     "type": "object"
    },
    "EmpresaUpdate": {
@@ -10887,6 +10962,718 @@
      "updated_at"
     ],
     "title": "LoteOut",
+    "type": "object"
+   },
+   "MCCarteraOut": {
+    "properties": {
+     "corte": {
+      "format": "date",
+      "title": "Corte",
+      "type": "string"
+     },
+     "facturas": {
+      "items": {
+       "$ref": "#/components/schemas/MCSaldoOut"
+      },
+      "title": "Facturas",
+      "type": "array"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     }
+    },
+    "required": [
+     "series",
+     "corte",
+     "facturas"
+    ],
+    "title": "MCCarteraOut",
+    "type": "object"
+   },
+   "MCCobranzaOut": {
+    "properties": {
+     "cobros": {
+      "items": {
+       "$ref": "#/components/schemas/MCCobroOut"
+      },
+      "title": "Cobros",
+      "type": "array"
+     },
+     "desde": {
+      "format": "date",
+      "title": "Desde",
+      "type": "string"
+     },
+     "hasta": {
+      "format": "date",
+      "title": "Hasta",
+      "type": "string"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     }
+    },
+    "required": [
+     "series",
+     "desde",
+     "hasta",
+     "cobros"
+    ],
+    "title": "MCCobranzaOut",
+    "type": "object"
+   },
+   "MCCobroOut": {
+    "properties": {
+     "cliente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "factura_id": {
+      "format": "uuid",
+      "title": "Factura Id",
+      "type": "string"
+     },
+     "fecha_pago": {
+      "format": "date",
+      "title": "Fecha Pago",
+      "type": "string"
+     },
+     "folio": {
+      "title": "Folio",
+      "type": "integer"
+     },
+     "forma_pago": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Forma Pago"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "importe": {
+      "title": "Importe",
+      "type": "string"
+     },
+     "recibo": {
+      "title": "Recibo",
+      "type": "string"
+     },
+     "recibo_id": {
+      "format": "uuid",
+      "title": "Recibo Id",
+      "type": "string"
+     },
+     "saldo_insoluto": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Saldo Insoluto"
+     },
+     "serie": {
+      "title": "Serie",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "recibo_id",
+     "recibo",
+     "fecha_pago",
+     "factura_id",
+     "serie",
+     "folio",
+     "importe"
+    ],
+    "title": "MCCobroOut",
+    "type": "object"
+   },
+   "MCEmpresaOut": {
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "nombre"
+    ],
+    "title": "MCEmpresaOut",
+    "type": "object"
+   },
+   "MCLineaNotaOut": {
+    "properties": {
+     "cantidad": {
+      "title": "Cantidad",
+      "type": "string"
+     },
+     "clave_unidad": {
+      "title": "Clave Unidad",
+      "type": "string"
+     },
+     "cliente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "descripcion": {
+      "title": "Descripcion",
+      "type": "string"
+     },
+     "factura_id": {
+      "format": "uuid",
+      "title": "Factura Id",
+      "type": "string"
+     },
+     "fecha_entrega": {
+      "format": "date",
+      "title": "Fecha Entrega",
+      "type": "string"
+     },
+     "fecha_entrega_origen": {
+      "enum": [
+       "remision",
+       "notas",
+       "factura"
+      ],
+      "title": "Fecha Entrega Origen",
+      "type": "string"
+     },
+     "fecha_nota": {
+      "format": "date",
+      "title": "Fecha Nota",
+      "type": "string"
+     },
+     "folio": {
+      "title": "Folio",
+      "type": "integer"
+     },
+     "importe": {
+      "title": "Importe",
+      "type": "string"
+     },
+     "linea_id": {
+      "format": "uuid",
+      "title": "Linea Id",
+      "type": "string"
+     },
+     "nota": {
+      "title": "Nota",
+      "type": "string"
+     },
+     "nota_id": {
+      "format": "uuid",
+      "title": "Nota Id",
+      "type": "string"
+     },
+     "presentacion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     },
+     "producto": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto"
+     },
+     "serie": {
+      "title": "Serie",
+      "type": "string"
+     },
+     "sku": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sku"
+     },
+     "uuid_cfdi": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uuid Cfdi"
+     }
+    },
+    "required": [
+     "linea_id",
+     "nota_id",
+     "nota",
+     "fecha_nota",
+     "factura_id",
+     "serie",
+     "folio",
+     "fecha_entrega",
+     "fecha_entrega_origen",
+     "descripcion",
+     "clave_unidad",
+     "cantidad",
+     "importe"
+    ],
+    "title": "MCLineaNotaOut",
+    "type": "object"
+   },
+   "MCLineaRemisionOut": {
+    "properties": {
+     "cantidad": {
+      "title": "Cantidad",
+      "type": "string"
+     },
+     "clave_unidad": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Unidad"
+     },
+     "cliente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente"
+     },
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "descripcion": {
+      "title": "Descripcion",
+      "type": "string"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "facturada": {
+      "title": "Facturada",
+      "type": "boolean"
+     },
+     "fecha_entrega": {
+      "format": "date",
+      "title": "Fecha Entrega",
+      "type": "string"
+     },
+     "folio": {
+      "title": "Folio",
+      "type": "string"
+     },
+     "importe": {
+      "title": "Importe",
+      "type": "string"
+     },
+     "linea_id": {
+      "format": "uuid",
+      "title": "Linea Id",
+      "type": "string"
+     },
+     "plaza": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Plaza"
+     },
+     "presentacion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     },
+     "producto": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto"
+     },
+     "remision_id": {
+      "format": "uuid",
+      "title": "Remision Id",
+      "type": "string"
+     },
+     "serie": {
+      "title": "Serie",
+      "type": "string"
+     },
+     "sku": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sku"
+     }
+    },
+    "required": [
+     "linea_id",
+     "remision_id",
+     "folio",
+     "estado",
+     "facturada",
+     "fecha_entrega",
+     "serie",
+     "cliente_id",
+     "descripcion",
+     "cantidad",
+     "importe"
+    ],
+    "title": "MCLineaRemisionOut",
+    "type": "object"
+   },
+   "MCNotasOut": {
+    "properties": {
+     "desde": {
+      "format": "date",
+      "title": "Desde",
+      "type": "string"
+     },
+     "hasta": {
+      "format": "date",
+      "title": "Hasta",
+      "type": "string"
+     },
+     "lineas": {
+      "items": {
+       "$ref": "#/components/schemas/MCLineaNotaOut"
+      },
+      "title": "Lineas",
+      "type": "array"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     },
+     "sin_factura": {
+      "default": 0,
+      "title": "Sin Factura",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "series",
+     "desde",
+     "hasta",
+     "lineas"
+    ],
+    "title": "MCNotasOut",
+    "type": "object"
+   },
+   "MCPrecioVentaOut": {
+    "properties": {
+     "cliente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente"
+     },
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "plaza": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Plaza"
+     },
+     "precio": {
+      "title": "Precio",
+      "type": "string"
+     },
+     "presentacion": {
+      "title": "Presentacion",
+      "type": "string"
+     },
+     "producto": {
+      "title": "Producto",
+      "type": "string"
+     },
+     "sku": {
+      "title": "Sku",
+      "type": "string"
+     }
+    },
+    "required": [
+     "sku",
+     "producto",
+     "presentacion",
+     "cliente_id",
+     "precio",
+     "origen"
+    ],
+    "title": "MCPrecioVentaOut",
+    "type": "object"
+   },
+   "MCPreciosOut": {
+    "properties": {
+     "fecha": {
+      "format": "date",
+      "title": "Fecha",
+      "type": "string"
+     },
+     "precios": {
+      "items": {
+       "$ref": "#/components/schemas/MCPrecioVentaOut"
+      },
+      "title": "Precios",
+      "type": "array"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     }
+    },
+    "required": [
+     "series",
+     "fecha",
+     "precios"
+    ],
+    "title": "MCPreciosOut",
+    "type": "object"
+   },
+   "MCRemisionesOut": {
+    "properties": {
+     "desde": {
+      "format": "date",
+      "title": "Desde",
+      "type": "string"
+     },
+     "hasta": {
+      "format": "date",
+      "title": "Hasta",
+      "type": "string"
+     },
+     "lineas": {
+      "items": {
+       "$ref": "#/components/schemas/MCLineaRemisionOut"
+      },
+      "title": "Lineas",
+      "type": "array"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     }
+    },
+    "required": [
+     "series",
+     "desde",
+     "hasta",
+     "lineas"
+    ],
+    "title": "MCRemisionesOut",
+    "type": "object"
+   },
+   "MCSaldoOut": {
+    "properties": {
+     "cliente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente"
+     },
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "dias_vencida": {
+      "title": "Dias Vencida",
+      "type": "integer"
+     },
+     "factura_id": {
+      "format": "uuid",
+      "title": "Factura Id",
+      "type": "string"
+     },
+     "fecha": {
+      "format": "date",
+      "title": "Fecha",
+      "type": "string"
+     },
+     "folio": {
+      "title": "Folio",
+      "type": "integer"
+     },
+     "saldo": {
+      "title": "Saldo",
+      "type": "string"
+     },
+     "serie": {
+      "title": "Serie",
+      "type": "string"
+     },
+     "total": {
+      "title": "Total",
+      "type": "string"
+     },
+     "uuid_cfdi": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uuid Cfdi"
+     },
+     "vencimiento": {
+      "format": "date",
+      "title": "Vencimiento",
+      "type": "string"
+     }
+    },
+    "required": [
+     "factura_id",
+     "serie",
+     "folio",
+     "fecha",
+     "vencimiento",
+     "dias_vencida",
+     "cliente_id",
+     "total",
+     "saldo"
+    ],
+    "title": "MCSaldoOut",
     "type": "object"
    },
    "MatchIn": {
@@ -20711,25 +21498,6 @@
     "title": "ContactoIn",
     "type": "object"
    },
-   "app__api__v1__mini_conta__EmpresaOut": {
-    "properties": {
-     "id": {
-      "format": "uuid",
-      "title": "Id",
-      "type": "string"
-     },
-     "nombre": {
-      "title": "Nombre",
-      "type": "string"
-     }
-    },
-    "required": [
-     "id",
-     "nombre"
-    ],
-    "title": "EmpresaOut",
-    "type": "object"
-   },
    "app__schemas__contacto__ContactoIn": {
     "properties": {
      "correo": {
@@ -20810,41 +21578,6 @@
      "mensaje"
     ],
     "title": "ContactoIn",
-    "type": "object"
-   },
-   "app__schemas__empresa__EmpresaOut": {
-    "properties": {
-     "domicilio_fiscal": {
-      "title": "Domicilio Fiscal",
-      "type": "object"
-     },
-     "domicilio_fiscal_cp": {
-      "default": "",
-      "title": "Domicilio Fiscal Cp",
-      "type": "string"
-     },
-     "has_logo": {
-      "default": false,
-      "title": "Has Logo",
-      "type": "boolean"
-     },
-     "legal_name": {
-      "default": "",
-      "title": "Legal Name",
-      "type": "string"
-     },
-     "regimen_fiscal_sat": {
-      "default": "",
-      "title": "Regimen Fiscal Sat",
-      "type": "string"
-     },
-     "rfc": {
-      "default": "",
-      "title": "Rfc",
-      "type": "string"
-     }
-    },
-    "title": "EmpresaOut",
     "type": "object"
    }
   },
@@ -26793,7 +27526,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/app__schemas__empresa__EmpresaOut"
+         "$ref": "#/components/schemas/EmpresaOut"
         }
        }
       },
@@ -26855,7 +27588,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/app__schemas__empresa__EmpresaOut"
+         "$ref": "#/components/schemas/EmpresaOut"
         }
        }
       },
@@ -27320,7 +28053,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/app__schemas__empresa__EmpresaOut"
+         "$ref": "#/components/schemas/EmpresaOut"
         }
        }
       },
@@ -27434,7 +28167,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/app__schemas__empresa__EmpresaOut"
+         "$ref": "#/components/schemas/EmpresaOut"
         }
        }
       },
@@ -27564,7 +28297,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/app__schemas__empresa__EmpresaOut"
+         "$ref": "#/components/schemas/EmpresaOut"
         }
        }
       },
@@ -32234,6 +32967,410 @@
     ]
    }
   },
+  "/api/v1/mini-conta/cartera": {
+   "get": {
+    "description": "Lo que falta por cobrar HOY: facturas timbradas PPD de las series pedidas\ncon saldo, con el mismo filtro que el estado de cuenta (fuera las que ya van\nen cancelación). Vence a los días de crédito del cliente.",
+    "operationId": "cartera_api_v1_mini_conta_cartera_get",
+    "parameters": [
+     {
+      "description": "Códigos de FACTURA separados por coma",
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Códigos de FACTURA separados por coma",
+       "title": "Series"
+      }
+     },
+     {
+      "description": "Ids separados por coma",
+      "in": "query",
+      "name": "clientes",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Ids separados por coma",
+       "title": "Clientes"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/MCCarteraOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cartera",
+    "tags": [
+     "mini-conta"
+    ]
+   }
+  },
+  "/api/v1/mini-conta/cobranza": {
+   "get": {
+    "description": "Lo cobrado: cada pago (REP timbrado) aplicado a una factura de las series\npedidas, con fecha de pago en el rango (hora de México).",
+    "operationId": "cobranza_api_v1_mini_conta_cobranza_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "desde",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Desde",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "hasta",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Hasta",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Códigos de FACTURA separados por coma",
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Códigos de FACTURA separados por coma",
+       "title": "Series"
+      }
+     },
+     {
+      "description": "Ids separados por coma",
+      "in": "query",
+      "name": "clientes",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Ids separados por coma",
+       "title": "Clientes"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/MCCobranzaOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cobranza",
+    "tags": [
+     "mini-conta"
+    ]
+   }
+  },
+  "/api/v1/mini-conta/notas-credito": {
+   "get": {
+    "description": "Las notas de crédito vigentes con fecha en el rango, aplicadas a facturas\nde las series pedidas.\n\nUna nota aquí es solo DINERO (el SAE no trae sus productos): cada aplicación\nse reparte entre las líneas de la factura en proporción a su importe, con\ncantidad 0 e importe negativo, y con la fecha de entrega de esa factura —\nla nota corrige esa venta, no una del día en que se emitió.",
+    "operationId": "notas_credito_api_v1_mini_conta_notas_credito_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "desde",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Desde",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "hasta",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Hasta",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Códigos de FACTURA separados por coma",
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Códigos de FACTURA separados por coma",
+       "title": "Series"
+      }
+     },
+     {
+      "description": "Ids separados por coma",
+      "in": "query",
+      "name": "clientes",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Ids separados por coma",
+       "title": "Clientes"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/MCNotasOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Notas Credito",
+    "tags": [
+     "mini-conta"
+    ]
+   }
+  },
+  "/api/v1/mini-conta/precios": {
+   "get": {
+    "description": "El precio de lista que HOY le toca a cada cliente de esas series, para los\nproductos que se le facturaron en el último año.\n\nSale de `resolver_precios_lote`, la MISMA cascada que cotiza y factura\n(override → asignación → lista base), una vez por cada cliente×plaza cuya\nserie de factura prevista es de las pedidas; con la serie de REMISIÓN que le\ntoca, porque las asignaciones por serie son por serie de remisión. Para una\ncuenta con muchos clientes, pídelo de a uno (`clientes=`).",
+    "operationId": "precios_api_v1_mini_conta_precios_get",
+    "parameters": [
+     {
+      "description": "Códigos de FACTURA separados por coma",
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Códigos de FACTURA separados por coma",
+       "title": "Series"
+      }
+     },
+     {
+      "description": "Ids separados por coma",
+      "in": "query",
+      "name": "clientes",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Ids separados por coma",
+       "title": "Clientes"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/MCPreciosOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Precios",
+    "tags": [
+     "mini-conta"
+    ]
+   }
+  },
   "/api/v1/mini-conta/productos": {
    "get": {
     "description": "Los productos que se facturaron en esas series entre `desde` y `hasta`:\nel catálogo que le sirve a ESTA cuenta, no los 1,500 de la empresa. Solo si\nla conexión comparte el catálogo.",
@@ -32340,6 +33477,117 @@
      }
     ],
     "summary": "Productos",
+    "tags": [
+     "mini-conta"
+    ]
+   }
+  },
+  "/api/v1/mini-conta/remisiones": {
+   "get": {
+    "description": "Lo ENTREGADO: las líneas de las remisiones no canceladas con `fecha_entrega`\nen el rango cuya serie de factura prevista es de las pedidas.\n\nVan todas, facturadas o no (`facturada` lo dice): la factura se hace días\ndespués y muchas remisiones que el SAE ya facturó no quedan ligadas aquí, así\nque «sin factura» no es confiable. Quien las lea las usa EN LUGAR de las\nfacturas para los días que todavía no se facturan, nunca además de ellas.",
+    "operationId": "remisiones_api_v1_mini_conta_remisiones_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "desde",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Desde",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "hasta",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Hasta",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Códigos de FACTURA separados por coma",
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Códigos de FACTURA separados por coma",
+       "title": "Series"
+      }
+     },
+     {
+      "description": "Ids separados por coma",
+      "in": "query",
+      "name": "clientes",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Ids separados por coma",
+       "title": "Clientes"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/MCRemisionesOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Remisiones",
     "tags": [
      "mini-conta"
     ]

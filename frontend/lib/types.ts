@@ -950,6 +950,10 @@ export type AlcanceMiniConta = {
   series: string[];
   clientes?: string[] | null;   // null = todos los de esas series
   catalogo: boolean;
+  remisiones: boolean;          // lo entregado, para los días que aún no se facturan
+  notas_credito: boolean;
+  cobranza: boolean;            // pagos recibidos y saldos por cobrar
+  precios: boolean;             // precio de lista por cliente
 };
 
 export type Conexion = {
