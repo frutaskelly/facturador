@@ -94,19 +94,22 @@ def saldos_por_factura(empresa: str, refers: list[str]) -> dict[str, list[dict]]
         if not lote:
             continue
         marcadores = ", ".join(["%s"] * len(lote))
-        cargos = {
-            str(r.get("refer") or "").strip(): _num(r.get("cargo"))
-            for r in sae_lectura.consultar(
-                f"SELECT LTRIM(RTRIM(REFER)) AS refer, SUM(IMPORTE) AS cargo FROM {cuen_m} "
-                f"WHERE NUM_CPTO=1 AND LTRIM(RTRIM(REFER)) IN ({marcadores}) "
-                "GROUP BY LTRIM(RTRIM(REFER))", tuple(lote))
-        }
-        movs = sae_lectura.consultar(
-            "SELECT LTRIM(RTRIM(REFER)) AS refer, "
-            "LTRIM(RTRIM(ISNULL(CVE_DOC_COMPPAGO,''))) AS rep, IMPORTE AS importe, ID_MOV AS id_mov "
-            f"FROM {cuen_det} WHERE TIPO_MOV='A' AND SIGNO=-1 "
-            f"AND LTRIM(RTRIM(REFER)) IN ({marcadores}) "
-            "ORDER BY LTRIM(RTRIM(REFER)), FECHA_APLI, ID_MOV", tuple(lote))
+        if sae_lectura.motor() == "firebird":
+            cargos, movs = _saldos_firebird(cuen_m, cuen_det, lote, marcadores)
+        else:
+            cargos = {
+                str(r.get("refer") or "").strip(): _num(r.get("cargo"))
+                for r in sae_lectura.consultar(
+                    f"SELECT LTRIM(RTRIM(REFER)) AS refer, SUM(IMPORTE) AS cargo FROM {cuen_m} "
+                    f"WHERE NUM_CPTO=1 AND LTRIM(RTRIM(REFER)) IN ({marcadores}) "
+                    "GROUP BY LTRIM(RTRIM(REFER))", tuple(lote))
+            }
+            movs = sae_lectura.consultar(
+                "SELECT LTRIM(RTRIM(REFER)) AS refer, "
+                "LTRIM(RTRIM(ISNULL(CVE_DOC_COMPPAGO,''))) AS rep, IMPORTE AS importe, ID_MOV AS id_mov "
+                f"FROM {cuen_det} WHERE TIPO_MOV='A' AND SIGNO=-1 "
+                f"AND LTRIM(RTRIM(REFER)) IN ({marcadores}) "
+                "ORDER BY LTRIM(RTRIM(REFER)), FECHA_APLI, ID_MOV", tuple(lote))
         corrido: dict[str, float] = {}
         parcialidad: dict[str, int] = {}
         for r in movs:
@@ -125,21 +128,51 @@ def saldos_por_factura(empresa: str, refers: list[str]) -> dict[str, list[dict]]
     return out
 
 
+def _saldos_firebird(cuen_m: str, cuen_det: str, lote: list,
+                     marcadores: str) -> tuple[dict[str, float], list[dict]]:
+    """Cargos y abonos desde el SAE 9. TRIM de los dos lados, como el SQL del
+    10: el REFER de SAE puede traer relleno a la izquierda."""
+    cargos: dict[str, float] = {}
+    for r in sae_lectura.consultar(
+        f"SELECT TRIM(M.REFER) AS refer, SUM(M.IMPORTE) AS cargo FROM {cuen_m} M "
+        f"WHERE M.NUM_CPTO = 1 AND TRIM(M.REFER) IN ({marcadores}) "
+        "GROUP BY TRIM(M.REFER)", tuple(lote)):
+        cargos[sae_lectura.texto(r.get("refer"))] = _num(r.get("cargo"))
+    movs = [{"refer": sae_lectura.texto(r.get("refer")), "rep": sae_lectura.texto(r.get("rep")),
+             "importe": r.get("importe"), "id_mov": r.get("id_mov")}
+            for r in sae_lectura.consultar(
+                "SELECT TRIM(D.REFER) AS refer, D.CVE_DOC_COMPPAGO AS rep, "
+                "D.IMPORTE AS importe, D.ID_MOV AS id_mov "
+                f"FROM {cuen_det} D WHERE D.TIPO_MOV = 'A' AND D.SIGNO = -1 "
+                f"AND TRIM(D.REFER) IN ({marcadores}) "
+                "ORDER BY 1, D.FECHA_APLI, D.ID_MOV", tuple(lote))]
+    return cargos, movs
+
+
 def leer_reps(empresa: str, desde: dt.date) -> list[dict[str, Any]]:
     """REP emitidos o cancelados desde esa fecha, con sus renglones."""
     factg, cfdi = sae_lectura.tabla("FACTG", empresa), sae_lectura.tabla("CFDI", empresa)
-    cab = sae_lectura.consultar(
-        "SELECT LTRIM(RTRIM(G.CVE_DOC)) AS cve_doc, RTRIM(ISNULL(G.SERIE,'')) AS serie, "
-        "G.FOLIO AS folio, LTRIM(RTRIM(G.CVE_CLPV)) AS cliente_sae, "
-        "CONVERT(varchar(19), G.FECHA_DOC, 120) AS fecha, RTRIM(ISNULL(G.STATUS,'')) AS status, "
-        "LTRIM(RTRIM(ISNULL(C.UUID,''))) AS uuid, "
-        "LTRIM(RTRIM(ISNULL(C.FECHA_CANCELA,''))) AS fecha_cancela, "
-        "RTRIM(ISNULL(G.FORMADEPAGOSAT,'')) AS forma_sat "
-        f"FROM {factg} G LEFT JOIN {cfdi} C "
-        "ON LTRIM(RTRIM(C.CVE_DOC))=LTRIM(RTRIM(G.CVE_DOC)) AND C.TIPO_DOC='G' "
-        "WHERE G.FECHA_DOC >= %s OR C.FECHA_CANCELA >= %s",
-        (desde.isoformat(), desde.isoformat()),
-    )
+    if sae_lectura.motor() == "firebird":
+        # En el SAE 9 las fechas del CFDI son TEXTO ISO (VARCHAR 30): comparar
+        # contra 'AAAA-MM-DD' funciona igual que en el 10. Lo demás, crudo.
+        lx = sae_lectura
+        cab = [{
+            "cve_doc": lx.texto(r.get("cve_doc")), "serie": lx.texto(r.get("serie")),
+            "folio": r.get("folio"), "cliente_sae": lx.texto(r.get("cliente_sae")),
+            "fecha": lx.fecha_hora(r.get("fecha")), "status": lx.texto(r.get("status")),
+            "uuid": lx.texto(r.get("uuid")), "fecha_cancela": lx.fecha_hora(r.get("fecha_cancela")),
+            "forma_sat": lx.texto(r.get("forma_sat")),
+        } for r in lx.consultar(
+            "SELECT G.CVE_DOC AS cve_doc, G.SERIE AS serie, G.FOLIO AS folio, "
+            "G.CVE_CLPV AS cliente_sae, G.FECHA_DOC AS fecha, G.STATUS AS status, "
+            "C.UUID AS uuid, C.FECHA_CANCELA AS fecha_cancela, "
+            f"{lx.col_o_nulo('G', factg, 'FORMADEPAGOSAT', 5)} AS forma_sat "
+            f"FROM {factg} G LEFT JOIN {cfdi} C "
+            "ON TRIM(C.CVE_DOC) = TRIM(G.CVE_DOC) AND C.TIPO_DOC = 'G' "
+            "WHERE G.FECHA_DOC >= %s OR C.FECHA_CANCELA >= %s",
+            (desde.isoformat(), desde.isoformat()))]
+    else:
+        cab = _reps_sqlserver(factg, cfdi, desde)
     reps = []
     for r in cab:
         cve = str(r.get("cve_doc") or "").strip()
@@ -160,6 +193,21 @@ def leer_reps(empresa: str, desde: dt.date) -> list[dict[str, Any]]:
     return reps
 
 
+def _reps_sqlserver(factg: str, cfdi: str, desde: dt.date) -> list[dict[str, Any]]:
+    return sae_lectura.consultar(
+        "SELECT LTRIM(RTRIM(G.CVE_DOC)) AS cve_doc, RTRIM(ISNULL(G.SERIE,'')) AS serie, "
+        "G.FOLIO AS folio, LTRIM(RTRIM(G.CVE_CLPV)) AS cliente_sae, "
+        "CONVERT(varchar(19), G.FECHA_DOC, 120) AS fecha, RTRIM(ISNULL(G.STATUS,'')) AS status, "
+        "LTRIM(RTRIM(ISNULL(C.UUID,''))) AS uuid, "
+        "LTRIM(RTRIM(ISNULL(C.FECHA_CANCELA,''))) AS fecha_cancela, "
+        "RTRIM(ISNULL(G.FORMADEPAGOSAT,'')) AS forma_sat "
+        f"FROM {factg} G LEFT JOIN {cfdi} C "
+        "ON LTRIM(RTRIM(C.CVE_DOC))=LTRIM(RTRIM(G.CVE_DOC)) AND C.TIPO_DOC='G' "
+        "WHERE G.FECHA_DOC >= %s OR C.FECHA_CANCELA >= %s",
+        (desde.isoformat(), desde.isoformat()),
+    )
+
+
 def _colgar_renglones(empresa: str, reps: list[dict], columna: str) -> None:
     cuen_det = sae_lectura.tabla("CUEN_DET", empresa)
     docs = [p["cve_doc"] for p in reps]
@@ -169,13 +217,25 @@ def _colgar_renglones(empresa: str, reps: list[dict], columna: str) -> None:
         if not lote:
             continue
         marcadores = ", ".join(["%s"] * len(lote))
-        for r in sae_lectura.consultar(
-            f"SELECT LTRIM(RTRIM({columna})) AS doc, LTRIM(RTRIM(REFER)) AS refer, "
-            "IMPORTE AS importe, CONVERT(varchar(19), FECHA_APLI, 120) AS fecha, "
-            "NUM_CPTO AS concepto "
-            f"FROM {cuen_det} WHERE LTRIM(RTRIM({columna})) IN ({marcadores})",
-            tuple(lote),
-        ):
+        if sae_lectura.motor() == "firebird":
+            lx = sae_lectura
+            filas = [{"doc": lx.texto(r.get("doc")), "refer": lx.texto(r.get("refer")),
+                      "importe": r.get("importe"), "fecha": lx.fecha_hora(r.get("fecha")),
+                      "concepto": r.get("concepto")}
+                     for r in lx.consultar(
+                         f"SELECT TRIM(D.{columna}) AS doc, TRIM(D.REFER) AS refer, "
+                         "D.IMPORTE AS importe, D.FECHA_APLI AS fecha, D.NUM_CPTO AS concepto "
+                         f"FROM {cuen_det} D WHERE TRIM(D.{columna}) IN ({marcadores})",
+                         tuple(lote))]
+        else:
+            filas = sae_lectura.consultar(
+                f"SELECT LTRIM(RTRIM({columna})) AS doc, LTRIM(RTRIM(REFER)) AS refer, "
+                "IMPORTE AS importe, CONVERT(varchar(19), FECHA_APLI, 120) AS fecha, "
+                "NUM_CPTO AS concepto "
+                f"FROM {cuen_det} WHERE LTRIM(RTRIM({columna})) IN ({marcadores})",
+                tuple(lote),
+            )
+        for r in filas:
             por_rep.setdefault(str(r.get("doc") or "").strip(), []).append({
                 "refer": str(r.get("refer") or "").strip(), "importe": _num(r.get("importe")),
                 "fecha": str(r.get("fecha") or "").strip(),
@@ -187,17 +247,32 @@ def _colgar_renglones(empresa: str, reps: list[dict], columna: str) -> None:
 def leer_notas(empresa: str, desde: dt.date) -> list[dict[str, Any]]:
     """Notas de crédito (CFDI de egreso) timbradas o canceladas desde esa fecha."""
     cfdi, cuen_det = sae_lectura.tabla("CFDI", empresa), sae_lectura.tabla("CUEN_DET", empresa)
-    cab = sae_lectura.consultar(
-        "SELECT LTRIM(RTRIM(C.CVE_DOC)) AS cve_doc, LTRIM(RTRIM(ISNULL(C.UUID,''))) AS uuid, "
-        "LEFT(C.FECHA_CERT, 19) AS fecha, "
-        "LTRIM(RTRIM(ISNULL(C.FECHA_CANCELA,''))) AS fecha_cancela "
-        f"FROM {cfdi} C WHERE C.TIPO_DOC='E' AND (C.FECHA_CERT >= %s OR C.FECHA_CANCELA >= %s)",
-        (desde.isoformat(), desde.isoformat()),
-    )
+    fb = sae_lectura.motor() == "firebird"
+    if fb:
+        lx = sae_lectura
+        cab = [{"cve_doc": lx.texto(r.get("cve_doc")), "uuid": lx.texto(r.get("uuid")),
+                "fecha": lx.fecha_hora(r.get("fecha")),
+                "fecha_cancela": lx.fecha_hora(r.get("fecha_cancela")),
+                "serie_folio": _serie_folio_xml(r.get("xml"))}
+               for r in lx.consultar(
+                   "SELECT C.CVE_DOC AS cve_doc, C.UUID AS uuid, C.FECHA_CERT AS fecha, "
+                   "C.FECHA_CANCELA AS fecha_cancela, C.XML_DOC AS xml "
+                   f"FROM {cfdi} C WHERE C.TIPO_DOC = 'E' "
+                   "AND (C.FECHA_CERT >= %s OR C.FECHA_CANCELA >= %s)",
+                   (desde.isoformat(), desde.isoformat()))]
+    else:
+        cab = sae_lectura.consultar(
+            "SELECT LTRIM(RTRIM(C.CVE_DOC)) AS cve_doc, LTRIM(RTRIM(ISNULL(C.UUID,''))) AS uuid, "
+            "LEFT(C.FECHA_CERT, 19) AS fecha, "
+            "LTRIM(RTRIM(ISNULL(C.FECHA_CANCELA,''))) AS fecha_cancela "
+            f"FROM {cfdi} C WHERE C.TIPO_DOC='E' AND (C.FECHA_CERT >= %s OR C.FECHA_CANCELA >= %s)",
+            (desde.isoformat(), desde.isoformat()),
+        )
     notas = [{"cve_doc": str(r.get("cve_doc") or "").strip(),
               "uuid": str(r.get("uuid") or "").strip() or None,
               "fecha": str(r.get("fecha") or "").strip(),
               "fecha_cancela": str(r.get("fecha_cancela") or "").strip() or None,
+              "serie_folio": r.get("serie_folio"),
               "renglones": [], "cliente_sae": None}
              for r in cab if str(r.get("cve_doc") or "").strip()]
     docs = [n["cve_doc"] for n in notas]
@@ -208,6 +283,10 @@ def leer_notas(empresa: str, desde: dt.date) -> list[dict[str, Any]]:
             continue
         marcadores = ", ".join(["%s"] * len(lote))
         for r in sae_lectura.consultar(
+            "SELECT TRIM(D.DOCTO) AS doc, TRIM(D.CVE_CLIE) AS cliente, "
+            "TRIM(D.REFER) AS refer, D.IMPORTE AS importe "
+            f"FROM {cuen_det} D WHERE D.NUM_CPTO = 1002 AND TRIM(D.DOCTO) IN ({marcadores})"
+            if fb else
             "SELECT LTRIM(RTRIM(DOCTO)) AS doc, LTRIM(RTRIM(CVE_CLIE)) AS cliente, "
             "LTRIM(RTRIM(REFER)) AS refer, IMPORTE AS importe "
             f"FROM {cuen_det} WHERE NUM_CPTO=1002 AND LTRIM(RTRIM(DOCTO)) IN ({marcadores})",
@@ -224,8 +303,24 @@ def leer_notas(empresa: str, desde: dt.date) -> list[dict[str, Any]]:
     return notas
 
 
-def _renglon(refer: str, importe: float, saldo: Optional[dict] = None) -> Optional[dict]:
-    sf = _partir(refer)
+_XML_COMPROBANTE = re.compile(r"<(?:cfdi:)?Comprobante\b[^>]*>", re.IGNORECASE)
+
+
+def _serie_folio_xml(xml: Any) -> Optional[tuple[str, int]]:
+    """('NC', 12) del <cfdi:Comprobante Serie="NC" Folio="12">, o None."""
+    m = _XML_COMPROBANTE.search(str(xml or ""))
+    if not m:
+        return None
+    serie = re.search(r'\sSerie="([^"]*)"', m.group(0))
+    folio = re.search(r'\sFolio="0*(\d+)"', m.group(0))
+    if not folio:
+        return None
+    return "".join((serie.group(1) if serie else "").split()).upper(), int(folio.group(1))
+
+
+def _renglon(refer: str, importe: float, saldo: Optional[dict] = None,
+             series=None) -> Optional[dict]:
+    sf = sae_lectura.partir_con_series(refer, series) if series else _partir(refer)
     if sf is None or not sf[1]:
         return None
     d = {"serie": sf[0], "folio": sf[1], "importe": _dinero(importe)}
@@ -237,18 +332,37 @@ def _renglon(refer: str, importe: float, saldo: Optional[dict] = None) -> Option
     return d
 
 
-def sincronizar(db: Session, ctx: AuthContext, empresa: str, dias: int = 3) -> dict[str, Any]:
+def sincronizar(db: Session, ctx: AuthContext, empresa: str, dias: int = 3,
+                desde_minimo: Optional[dt.date] = None,
+                series: Optional[list] = None, completa: bool = False) -> dict[str, Any]:
     """Una empresa: primero los REP, luego las notas de crédito.
 
     Reusa las MISMAS rutas de depósito que usaba el bot, por lo mismo de
     siempre: la lógica de cruce y los candados viven ahí, y duplicarlos sería
     garantizar que se separen.
+
+    `desde_minimo` es el piso del SAE 9 (1-ene-2026): la ventana nunca empieza
+    antes. Con `completa` arranca EN el piso —todo el año—: el reloj la pide
+    una vez al día por empresa (y con el botón), así entran los pagos de un
+    cliente que se dio de alta después, sin releer el año cada cinco minutos.
+    `series` (las del SAE 9) deja partir un documento con el folio pegado
+    contra las series conocidas; ver `sae_lectura.partir_con_series`.
     """
     from ..api.v1.espejo_cobranza import (NotaCreditoEspejoIn, ReciboPagoEspejoIn,
                                           nota_credito_espejo, recibo_pago_espejo)
 
     desde = dt.date.today() - dt.timedelta(days=max(0, int(dias)))
     permitidos = clientes_con_equivalencia(db, ctx, empresa)
+    if desde_minimo is not None:
+        if completa or desde < desde_minimo:
+            desde = desde_minimo
+        if not permitidos:
+            # SAE 9 sin un solo cliente ligado: no hay a quién reflejarle nada,
+            # así que ni se le pregunta a SAE (el año entero, por Tailscale).
+            return {"ok": True, "empresa": empresa,
+                    "pagos": {"enviados": 0, "omitidos": 0},
+                    "notas_credito": {"enviados": 0, "omitidos": 0},
+                    "errores": [], "descartados": [], "sin_equivalencias": True}
     placeholders = _PLACEHOLDERS.get(empresa, set())
 
     def _entra(cli: Optional[str]) -> bool:
@@ -279,7 +393,7 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, dias: int = 3) -> d
         renglones = []
         for g in p["renglones"]:
             saldo = next((s for s in saldos.get(g["refer"], []) if s["rep"] == p["cve_doc"]), None)
-            d = _renglon(g["refer"], g["importe"], saldo)
+            d = _renglon(g["refer"], g["importe"], saldo, series)
             if d:
                 renglones.append(d)
             else:
@@ -303,8 +417,16 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, dias: int = 3) -> d
         except Exception as e:
             errores.append(f"REP {p['cve_doc']}: {type(e).__name__}: {e}")
 
+    # Las series de nota que dieron los XML de esta misma pasada, más las
+    # conocidas: si a una nota le falta su XML, su CVE_DOC pegado
+    # ('NC0000000003') todavía se parte sin adivinar.
+    series_nc = sorted({n["serie_folio"][0] for n in notas
+                        if n.get("serie_folio") and n["serie_folio"][0]} | set(series or []))
     for n in notas:
-        sf = _partir(n["cve_doc"])
+        # El SAE 9 trae la serie y el folio del XML timbrado de la nota: es el
+        # dato que el SAT tiene, sin depender de cómo SAE escriba su CVE_DOC.
+        sf = n.get("serie_folio") or (sae_lectura.partir_con_series(n["cve_doc"], series_nc)
+                                      if series_nc else _partir(n["cve_doc"]))
         # Una nota CANCELADA ya no tiene renglones en la CxC, y sin ellos no hay
         # cliente al cual colgarla: se cuenta y se deja. Inventarle dueño sería
         # peor que no reflejarla.
@@ -317,7 +439,7 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, dias: int = 3) -> d
             continue
         renglones = []
         for g in n["renglones"]:
-            d = _renglon(g["refer"], g["importe"])
+            d = _renglon(g["refer"], g["importe"], series=series)
             if d:
                 renglones.append(d)
             else:

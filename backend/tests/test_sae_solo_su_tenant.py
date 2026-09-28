@@ -146,6 +146,8 @@ def test_tampoco_pidiendo_el_tenant_ajeno_por_encabezado(client, dos, auth_as, s
 def test_el_dueno_de_sae_si_lee(client, dos, auth_as, sae):
     auth_as(dos["suyo"])
     for metodo, ruta in _rutas_sae():
+        if ruta.startswith("/api/v1/sae/fuentes/{codigo}"):
+            continue          # las del SAE 9 piden SU empresa: ver las pruebas de abajo
         r = _pedir(client, metodo, ruta, _hdr(dos["suyo"]))
         assert r.status_code == 200, (metodo, ruta, r.status_code, r.text)
     assert any("OC-123" in str(q) or "FACTF" in str(q) for q in sae)
@@ -251,3 +253,62 @@ def test_la_clave_de_conexion_ajena_no_pide_altas(client, dos, auth_as, sae):
                     headers={"Authorization": f"Bearer {clave}"})
     assert r.status_code == 403, r.text
     assert _contar_en(dos["ajeno"]["tenant_id"]) == (0, 0)
+
+
+# ── El SAE 9: empresas de MÁS DE UN tenant (26-sep-2026) ─────────────────────
+
+_RUTAS_SAE10 = [("GET", "/api/v1/sae/salud"), ("GET", "/api/v1/sae/facturas"),
+                ("GET", "/api/v1/sae/partidas"), ("GET", "/api/v1/sae/catalogos"),
+                ("POST", "/api/v1/sae/espejo/jalar"), ("POST", "/api/v1/sae/espejo/cuadre")]
+
+
+@pytest.fixture
+def con_sae9(monkeypatch, dos, sae):
+    """El tenant «ajeno» es dueño de la empresa 04 del SAE 9 (código 94), como
+    Gerardo; el «suyo» sigue siendo el dueño del SAE 10, como Cristian."""
+    import json
+    from app.core.config import settings as s   # no `sae_api.settings`: el candado se muda (#269)
+    monkeypatch.setattr(s, "SAE_FB_HOST", "100.95.166.85")
+    monkeypatch.setattr(s, "SAE_FB_USER", "SYSDBA")
+    monkeypatch.setattr(s, "SAE_FB_PASSWORD", "x")
+    monkeypatch.setattr(s, "SAE_FB_EMPRESAS", json.dumps(
+        [{"numero": "04", "tenant": str(dos["ajeno"]["tenant_id"])}]))
+    return sae
+
+
+def test_un_tenant_de_puro_sae9_no_lee_el_sae10_por_ninguna_puerta(client, dos, auth_as, con_sae9):
+    """Tener una empresa del SAE 9 NO abre las rutas que leen el SAE 10 del
+    despliegue: con empresa=02 leería (o, con jalar, escribiría en su tenant)
+    las facturas de otro."""
+    auth_as(dos["ajeno"])
+    for metodo, ruta in _RUTAS_SAE10:
+        assert _pedir(client, metodo, ruta, _hdr(dos["ajeno"])).status_code == 403, ruta
+    # ni por las rutas del SAE 9 pidiendo una empresa que no es suya
+    for cod in ("02", "03"):
+        for accion in ("clientes", "jalar", "cuadre"):
+            r = client.post(f"/api/v1/sae/fuentes/{cod}/{accion}", params=_PARAMS,
+                            headers=_hdr(dos["ajeno"]))
+            assert r.status_code == 404, (cod, accion, r.status_code, r.text)
+    assert con_sae9 == []                 # ni una pregunta llegó a SAE
+
+
+def test_un_tenant_de_puro_sae9_si_usa_su_empresa(client, dos, auth_as, con_sae9):
+    auth_as(dos["ajeno"])
+    r = client.get("/api/v1/sae/fuentes", headers=_hdr(dos["ajeno"]))
+    assert r.status_code == 200, r.text
+    assert [e["codigo"] for e in r.json()["empresas"]] == ["94"]
+    r = client.post("/api/v1/sae/fuentes/94/jalar", params={"series": "SLPB"},
+                    headers=_hdr(dos["ajeno"]))
+    assert r.status_code == 200, r.text
+    assert "sincronizar" in con_sae9
+
+
+def test_el_dueno_del_sae10_no_toca_la_empresa_sae9_de_otro(client, dos, auth_as, con_sae9):
+    auth_as(dos["suyo"])
+    r = client.get("/api/v1/sae/fuentes", headers=_hdr(dos["suyo"]))
+    assert r.status_code == 200 and "94" not in [e["codigo"] for e in r.json()["empresas"]]
+    for accion in ("clientes", "jalar", "cuadre"):
+        r = client.post(f"/api/v1/sae/fuentes/94/{accion}", params={"series": "SLPB"},
+                        headers=_hdr(dos["suyo"]))
+        assert r.status_code == 404, (accion, r.status_code, r.text)
+    assert con_sae9 == []
