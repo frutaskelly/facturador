@@ -237,6 +237,123 @@ def test_una_factura_sin_equivalencia_se_omite_sin_gritar(monkeypatch):
     assert errores == []          # no es un error: es una omisión explicada
 
 
+def test_los_abonos_de_una_serie_no_se_llevan_los_de_otra(monkeypatch):
+    """La serie se pide como prefijo, así que ZEHMO también trae ZEHMOHOS.
+    Cada REFER se parte y sólo cuenta el de la serie pedida; las series con
+    dígito (ZCH5C) se parten bien."""
+    from app.services import espejo_sae
+    pedidos = []
+
+    def _fake(sql, params=(), timeout=None):
+        pedidos.append(params)
+        return [{"doc": "ZEHMO        7", "abonado": "100.0000"},
+                {"doc": "ZEHMOHOS   542", "abonado": "999.0000"},
+                {"doc": "ZCH5C       12", "abonado": "50.5000"}]
+
+    monkeypatch.setattr(sae_lectura, "consultar", _fake)
+    monkeypatch.setattr(sae_lectura, "disponible", lambda: True)
+    assert espejo_sae.abonos_de_serie("02", "ZEHMO") == {7: 100.0}
+    assert pedidos[-1] == ("ZEHMO%",)
+    assert espejo_sae.abonos_de_serie("04", "ZCH5C") == {12: 50.5}
+
+
+class _FacturasQ:
+    def __init__(self, filas): self._f = filas
+    def filter(self, *a, **k): return self
+    def all(self): return self._f
+
+
+class _FacturasDB:
+    def __init__(self, filas): self._f = filas
+    def query(self, *a, **k): return _FacturasQ(self._f)
+
+
+def _factura(folio, total, saldo, metodo="PPD"):
+    return type("F", (), {"folio": folio, "total": total, "saldo_insoluto": saldo,
+                          "metodo_pago": metodo})()
+
+
+def test_el_cuadre_de_saldos_ve_la_factura_que_perdio_su_abono(monkeypatch):
+    """Caso real del 28-sep-2026: el pago de EHMO que se aplicó a MAFAN el
+    19-sep y SAE corrigió el 22-sep. La CxC ya no tiene esos abonos y ninguna
+    pasada vuelve por la factura, porque sólo se revisa la que RECIBE un abono.
+    ZMAFAN 186 se quedó «pagada parcial» con $50,059.84 que ya no existían."""
+    from app.services import espejo_sae
+    db = _FacturasDB([
+        _factura(186, 135297.20, 85237.36),     # parcial con un abono que SAE borró
+        _factura(156, 135297.20, 0),            # «pagada» sin abono en la CxC
+        _factura(114, 59265.71, 0),             # pagada de verdad (REP 10)
+        _factura(151, 11339.70, 1781.83),       # parcial de verdad
+        _factura(200, 5000.00, 5000.00),        # debe todo y no tiene abonos: bien
+        _factura(300, 800.00, 0, metodo="PUE"),  # contado sin CxC: su 0 es correcto
+    ])
+    monkeypatch.setattr(espejo_sae, "abonos_de_serie",
+                        lambda e, s: {114: 59265.71, 151: 9557.87})
+    traidas = {}
+
+    def _traer(db, ctx, e, s, folios, errores, saldos=None):
+        traidas.update({f: saldos[f] for f in folios})
+        return len(folios), 0
+
+    monkeypatch.setattr(espejo_sae, "_traer_folios", _traer)
+    r = espejo_sae.cuadre_saldos(db, None, "02", ["ZMAFAN"])
+    assert traidas == {156: 135297.20, 186: 135297.20}, traidas
+    assert r["distintos"] == 2 and r["corregidos"] == 2 and r["errores"] == []
+    assert r["series"]["ZMAFAN"]["folios"] == [156, 186]
+
+
+def test_el_cuadre_de_saldos_no_corrige_de_mas(monkeypatch):
+    """Si difieren más que el tope, lo probable es que la CxC no contestó
+    completa: poner a deber cientos de facturas pagadas sería peor que el
+    hueco. Se reporta y no se toca nada. Y una CxC que no contesta es un error
+    de esa serie, no «todas deben el total»."""
+    from app.services import espejo_sae
+    db = _FacturasDB([_factura(n, 100.0, 0) for n in range(1, 6)])
+    monkeypatch.setattr(espejo_sae, "abonos_de_serie", lambda e, s: {})
+    traidas = []
+    monkeypatch.setattr(espejo_sae, "_traer_folios",
+                        lambda *a, **k: (traidas.extend(a[4]) or len(a[4]), 0))
+    r = espejo_sae.cuadre_saldos(db, None, "02", ["ZMAFAN"], tope=3)
+    assert traidas == [] and r["corregidos"] == 0 and r["distintos"] == 5
+    assert any("no las corrijo a escondidas" in e for e in r["errores"]), r["errores"]
+
+    def _caida(e, s):
+        raise sae_lectura.SAENoDisponible("sin red")
+
+    monkeypatch.setattr(espejo_sae, "abonos_de_serie", _caida)
+    r2 = espejo_sae.cuadre_saldos(db, None, "02", ["ZMAFAN"])
+    assert r2["distintos"] == 0 and traidas == []
+    assert any("sin red" in e for e in r2["errores"])
+
+
+def test_la_reparacion_deposita_el_saldo_medido_aunque_la_cxc_este_vacia(monkeypatch):
+    """Sin `saldos`, «la CxC no tiene abonos» es «no hay dato» y no pisa lo
+    guardado. Para la factura que perdió sus abonos eso es justo lo que hay
+    que pisar, así que el saldo medido por el cuadre manda."""
+    from app.services import espejo_sae
+    from app.api.v1 import facturas as facturas_api
+
+    monkeypatch.setattr(espejo_sae, "leer_encabezados", lambda *a, **k: [{
+        "cve_doc": "ZMAFAN       186", "serie": "ZMAFAN", "folio": 186, "cliente_sae": "4",
+        "fecha": "2026-09-14 00:00:00", "estado": "TIMBRADA", "uuid": "u-186",
+        "cancelacion_msj": None, "observaciones": None, "subtotal": "135297.20",
+        "total": "135297.20", "iva": "0", "ieps": "0", "uuid_sustitucion": None}])
+    monkeypatch.setattr(espejo_sae, "leer_partidas", lambda *a, **k: {})
+    monkeypatch.setattr(espejo_sae, "leer_abonos", lambda *a, **k: {})
+    depositos = []
+    monkeypatch.setattr(facturas_api, "factura_espejo",
+                        lambda payload, db, ctx: depositos.append(payload))
+    errores = []
+    hechas, _ = espejo_sae._traer_folios(None, None, "02", "ZMAFAN", [186], errores,
+                                         saldos={186: 135297.20})
+    assert hechas == 1 and errores == []
+    assert float(depositos[0].saldo_insoluto) == 135297.20
+
+    depositos.clear()
+    espejo_sae._traer_folios(None, None, "02", "ZMAFAN", [186], errores)
+    assert depositos[0].saldo_insoluto is None     # sin medir, no se pisa
+
+
 def test_la_pasada_reporta_aunque_nadie_haya_presionado_el_boton(monkeypatch):
     """La fecha de «SAE actualizado» que pinta la UI sale del reporte, también
     en las pasadas automáticas. Y una solicitud reclamada y nunca reportada

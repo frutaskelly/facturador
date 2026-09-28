@@ -637,8 +637,104 @@ def cuadre(db: Session, ctx: AuthContext, empresa: str, series: list[str],
     return res
 
 
+def abonos_de_serie(empresa: str, serie: str) -> dict[int, float]:
+    """{folio: total abonado} de TODA la serie en la CxC, en una consulta.
+
+    `leer_abonos` pregunta por documentos que ya se conocen y sólo contesta por
+    los que tienen abonos. El cuadre de saldos necesita lo contrario: todo lo
+    que la CxC tiene de la serie, para ver también la factura que DEJÓ de
+    tener abonos (la que no sale aquí es la que ya no tiene ninguno).
+
+    Se pide con la serie como prefijo y luego se parte cada REFER: así una
+    serie que es prefijo de otra (ZEHMO frente a ZEHMOHOS) no se queda con
+    los abonos de la otra.
+    """
+    cuen = sae_lectura.tabla("CUEN_DET", empresa)
+    if sae_lectura.motor() == "firebird":
+        sql = ("SELECT D.REFER AS doc, SUM(D.IMPORTE) AS abonado "
+               f"FROM {cuen} D WHERE D.TIPO_MOV = 'A' AND D.SIGNO = -1 "
+               "AND D.REFER LIKE %s GROUP BY D.REFER")
+    else:
+        sql = ("SELECT RTRIM(REFER) AS doc, "
+               "CAST(CAST(SUM(IMPORTE) AS decimal(18,4)) AS varchar(30)) AS abonado "
+               f"FROM {cuen} WHERE TIPO_MOV='A' AND SIGNO=-1 "
+               "AND REFER LIKE %s GROUP BY RTRIM(REFER)")
+    serie_f = serie_facturador(serie)
+    abonos: dict[int, float] = {}
+    for r in sae_lectura.consultar(sql, (f"{serie}%",)):
+        partido = sae_lectura.partir_con_series(r.get("doc"), {serie_f})
+        if not partido or partido[0] != serie_f:
+            continue
+        try:
+            abonos[partido[1]] = abonos.get(partido[1], 0.0) + float(
+                sae_lectura.dinero(r.get("abonado"), 4))
+        except (TypeError, ValueError):
+            continue
+    return abonos
+
+
+def cuadre_saldos(db: Session, ctx: AuthContext, empresa: str, series: list[str],
+                  reparar: bool = True, tope: int = 50) -> dict[str, Any]:
+    """Saldo contra saldo: ¿lo que el espejo da por cobrado es lo que la CxC abonó?
+
+    EL SALDO SÓLO SE REVISABA CUANDO LLEGABA UN ABONO. La pasada trae de
+    vuelta las facturas con abonos recientes, así que a la que PIERDE un abono
+    no la ve nadie: al cancelar un REP, o al borrar un pago mal aplicado, SAE
+    quita sus renglones de la CxC, y en el Facturador la factura se queda
+    pagada para siempre. Caso real (28-sep-2026): el 19-sep se aplicó a MAFAN
+    un pago de $3,237,885.30 que era de EHMO. El 22-sep SAE lo corrigió (REP 9
+    a EHMO; REP 10 a MAFAN por $1,755,879.24), pero en el Facturador 27
+    facturas de MAFAN (ZMAFAN 152 a 186, $1,480,224.23) siguieron pagadas.
+    ZMAFAN 186 quedó «pagada parcial» con un abono que ya no existía, y nadie
+    encontraba su comprobante porque no lo hay.
+
+    Es una consulta agregada por serie y corre con el cuadre de folios: una vez
+    al día y con el botón. Repara hasta `tope`: si difieren cientos, lo más
+    probable es que la CxC no contestó completa, y poner a deber cientos de
+    facturas pagadas sería peor que el hueco.
+    """
+    res: dict[str, Any] = {"empresa": empresa, "distintos": 0, "corregidos": 0,
+                           "series": {}, "errores": []}
+    for serie in series:
+        serie_f = serie_facturador(serie)
+        try:
+            abonado = abonos_de_serie(empresa, serie)
+        except Exception as e:
+            res["errores"].append(f"saldos {serie}: {type(e).__name__}: {e}")
+            continue
+        esperados: dict[int, float] = {}
+        for f in db.query(Factura.folio, Factura.total, Factura.saldo_insoluto,
+                          Factura.metodo_pago).filter(
+                Factura.origen == "ESPEJO_SAE", Factura.espejo_empresa == empresa,
+                Factura.serie == serie_f, Factura.estado == "TIMBRADA",
+                Factura.deleted_at.is_(None)).all():
+            pagado = abonado.get(f.folio)
+            # Una PUE sin nada en la CxC se cobró al contado: su 0 es correcto.
+            # Una PPD sin abonos debe el total, que es justo el caso que se perdía.
+            if pagado is None and f.metodo_pago != "PPD":
+                continue
+            esperado = max(0.0, round(float(f.total or 0) - (pagado or 0.0), 2))
+            guardado = float(f.saldo_insoluto) if f.saldo_insoluto is not None else None
+            if _saldo_cambio(guardado, esperado):
+                esperados[f.folio] = esperado
+        folios = sorted(esperados)
+        info = {"distintos": len(folios), "folios": folios[:50], "corregidos": 0}
+        res["distintos"] += len(folios)
+        if folios and reparar and len(folios) <= tope:
+            info["corregidos"], _ = _traer_folios(db, ctx, empresa, serie, folios,
+                                                  res["errores"], saldos=esperados)
+            res["corregidos"] += info["corregidos"]
+        elif folios and reparar:
+            res["errores"].append(
+                f"saldos {serie}: {len(folios)} facturas con saldo distinto al de la CxC, "
+                f"más del tope de {tope} — no las corrijo a escondidas")
+        res["series"][serie_f] = info
+    return res
+
+
 def _traer_folios(db: Session, ctx: AuthContext, empresa: str, serie: str,
-                  folios: list[int], errores: list) -> tuple[int, int]:
+                  folios: list[int], errores: list,
+                  saldos: Optional[dict[int, float]] = None) -> tuple[int, int]:
     """Deposita esos folios, uno por uno. Devuelve (traídas, omitidas).
 
     OMITIDA NO ES ERROR. Una factura de un cliente sin equivalencia en el
@@ -647,6 +743,11 @@ def _traer_folios(db: Session, ctx: AuthContext, empresa: str, serie: str,
     todos los días entrena al equipo a ignorar el reporte; contarla aparte deja
     el hueco visible sin gritar. Caso real: ZMAFAN 131, de un cliente cuyo
     contrato terminó y cuya factura además está en proceso de cancelación.
+
+    `saldos` trae el saldo ya medido por `cuadre_saldos`. Hace falta porque
+    aquí «la CxC no tiene abonos» se lee como «no hay dato» y no pisa lo
+    guardado, y para una factura que perdió sus abonos eso es justo lo que
+    hay que pisar.
     """
     from ..api.v1.facturas import factura_espejo
 
@@ -662,13 +763,14 @@ def _traer_folios(db: Session, ctx: AuthContext, empresa: str, serie: str,
             # que entra por el cuadre quedaba debiendo el total, y ninguna
             # pasada posterior la corrige (sus abonos son viejos). Sin CxC se
             # deposita igual: peor es no traerla.
-            saldo = None
-            try:
-                pagado = leer_abonos(empresa, [cab["cve_doc"]]).get(cab["cve_doc"])
-                if pagado is not None:
-                    saldo = max(0.0, round(float(cab["total"]) - float(pagado), 2))
-            except Exception:
-                saldo = None
+            saldo = (saldos or {}).get(folio)
+            if saldo is None:
+                try:
+                    pagado = leer_abonos(empresa, [cab["cve_doc"]]).get(cab["cve_doc"])
+                    if pagado is not None:
+                        saldo = max(0.0, round(float(cab["total"]) - float(pagado), 2))
+                except Exception:
+                    saldo = None
             factura_espejo(payload=como_payload(empresa, cab,
                                                 partidas.get(cab["cve_doc"], []), saldo),
                            db=db, ctx=ctx)
@@ -917,6 +1019,16 @@ def _pasada_del_tenant(tenant, emps: list, banderas: dict, con_boton: bool,
                         parcial["cuadre"][emp.codigo] = {
                             k: c[k] for k in ("faltantes", "reparadas", "omitidas")}
                         parcial["errores"].extend(c.get("errores", []))
+                        # SALDO CONTRA SALDO, con el mismo paso. Un abono que
+                        # SAE borra no lo trae ninguna pasada (ver cuadre_saldos).
+                        # Sólo el SAE 10: la CxC del 9 no se ha medido contra el
+                        # espejo, y un tope rebasado a diario sería ruido rojo.
+                        if not fb:
+                            cs = cuadre_saldos(db, ctx, emp.codigo, series)
+                            parcial["cuadre"][emp.codigo].update(
+                                saldos_distintos=cs["distintos"],
+                                saldos_corregidos=cs["corregidos"])
+                            parcial["errores"].extend(cs.get("errores", []))
                     if banderas["cobranza"] and not fb:
                         cb = cobranza_sae.sincronizar(db, ctx, emp.codigo)
                         _anotar_cobranza(parcial, emp.codigo, cb)
