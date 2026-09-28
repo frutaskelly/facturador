@@ -942,6 +942,17 @@ export type OCRecibidaDetalle = OCRecibida & {
 // ─── Conexiones ──────────────────────────────────────────────────────────────
 // Una clave con la que un sistema externo (Smart Supply) deja órdenes en la
 // bandeja, sin que nadie tenga que repartir la contraseña de una persona.
+// Mini Conta tiene una por CUENTA, cada una con lo que comparte (`alcance`).
+
+export type AlcanceMiniConta = {
+  series: string[];
+  clientes?: string[] | null;   // null = todos los de esas series
+  catalogo: boolean;
+  remisiones: boolean;          // lo entregado, para los días que aún no se facturan
+  notas_credito: boolean;
+  cobranza: boolean;            // pagos recibidos y saldos por cobrar
+  precios: boolean;             // precio de lista por cliente
+};
 
 export type Conexion = {
   id: string;
@@ -952,12 +963,20 @@ export type Conexion = {
   created_at: string;
   activada_at?: string | null;
   ultimo_uso_at?: string | null;
+  alcance?: AlcanceMiniConta | null;   // Mini Conta; null = clave de antes, sin límite
+};
+
+export type OpcionesMiniConta = {
+  sucursales: { nombre: string; series: string[] }[];
+  series: string[];
+  clientes: { id: string; nombre: string; rfc?: string | null; series: string[] }[];
 };
 
 export type ConexionEstado = {
   tipo: string;
   nombre: string;
   conexion?: Conexion | null;
+  conexiones: Conexion[];       // Mini Conta: todas las vivas, una por cuenta
   ordenes_hoy: number;
   ordenes_sin_resolver: number;
   ultima_orden_at?: string | null;

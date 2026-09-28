@@ -115,6 +115,33 @@ def test_alias_aprendido_se_reutiliza(client, env, auth_as):
     assert cands[0]["origen"] == "alias" and cands[0]["producto_id"] == env["chi"]
 
 
+def test_match_con_cliente_usa_su_vocabulario(client, env, auth_as):
+    """El bot ya no escoge producto (27-sep-2026): le pregunta al Facturador. Con
+    el cliente y la plaza, su vocabulario manda aunque el texto sea el nombre
+    exacto de otro producto; sin ellos, el cruce de siempre."""
+    auth_as(env["user"]); h = _h(env["user"])
+    a = client.post("/api/v1/productos/alias", headers=h, json={
+        "texto": "zanahoria", "producto_id": env["chi"],
+        "cliente_id": env["cli"], "sucursal_id": env["suc"]})
+    assert a.status_code == 201, a.text
+
+    r = client.post("/api/v1/productos/match", headers=h, json={
+        "textos": ["Zanahoria"], "cliente_id": env["cli"], "sucursal_id": env["suc"]})
+    assert r.status_code == 200, r.text
+    top = r.json()[0]["candidatos"][0]
+    assert (top["producto_id"], top["origen"]) == (env["chi"], "alias_cliente")
+
+    r = client.post("/api/v1/productos/match", headers=h, json={"textos": ["Zanahoria"]})
+    top = r.json()[0]["candidatos"][0]
+    assert (top["producto_id"], top["origen"]) == (env["zan"], "exacto")
+
+    r = client.post("/api/v1/productos/match", headers=h, json={
+        "textos": ["Zanahoria"], "cliente_id": str(uuid.uuid4())})
+    assert r.status_code in (200, 404)
+    if r.status_code == 200:   # cliente ajeno: sin vocabulario propio, el cruce de siempre
+        assert r.json()[0]["candidatos"][0]["origen"] == "exacto"
+
+
 # ─── resolución de series + folio sin guion ──────────────────────────────────
 def _rem(client, h, env, **over):
     body = {"cliente_facturacion_id": env["cli"], "almacen_id": env["alm"],

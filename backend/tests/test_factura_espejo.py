@@ -657,6 +657,57 @@ def test_espejo_liga_por_folio_interno_sin_prefijo_oc(client, env, auth_as, sin_
     assert det["estado"] == "FACTURADA"
 
 
+def test_extraer_oc_sin_puntuacion_final():
+    """La puntuación que cierra la frase no es parte del folio (ZEHMOVH-1346,
+    28-sep-2026: «OC VH-36EMI-JUE. SEM 36 …» no casaba con VH-36EMI-JUE). El
+    punto, guion o diagonal INTERNOS sí se quedan."""
+    from app.services.espejo_cruce import extraer_oc
+
+    obs = "OC VH-36EMI-JUE. SEM 36 HOSPITAL EMILIANO ZAPATA 03 SEPTIEMBRE 2026"
+    assert extraer_oc(obs) == "VH-36EMI-JUE"
+    assert extraer_oc("OC VH-36EMI-JUE, SEM 36") == "VH-36EMI-JUE"
+    assert extraer_oc("OC VH-36EMI-JUE; SEM 36") == "VH-36EMI-JUE"
+    assert extraer_oc("OC: VH-38ROV-LUN-B.") == "VH-38ROV-LUN-B"
+    assert extraer_oc("OC 0000024736. ENTREGA CEDIS") == "24736"   # y sin ceros
+    assert extraer_oc("OC 24736-. ENTREGA") == "24736"
+    assert extraer_oc("OC 4500.123 ENTREGA") == "4500.123"          # punto interno
+    assert extraer_oc("OC 24736/2 ENTREGA") == "24736/2"
+
+
+def test_espejo_liga_oc_con_punto_final_en_ambos_sentidos(client, env, auth_as, sin_sesion):
+    """El caso ZEHMOVH-1346: la observación de SAE cierra el folio con punto.
+    Debe ligar al depositar la factura (factura → remisión) y también en el
+    reintento cuando la remisión llega después (remisión → factura)."""
+    obs = "OC VH-36EMI-JUE. SEM 36 HOSPITAL EMILIANO ZAPATA 03 SEPTIEMBRE 2026"
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "su_pedido": "VH-36EMI-JUE",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    f = client.post("/api/v1/facturas/espejo", headers=hk,
+                    json=_espejo(folio=1346, observaciones=obs)).json()
+    auth_as(env["dueno"])
+    det = client.get(f"/api/v1/remisiones/{rem['id']}", headers=h).json()
+    assert det["factura_sae"] == "ZHGO 1346"
+    assert det["factura_id"] == f["id"]
+    assert det["estado"] == "FACTURADA"
+
+    # Al revés: la factura ya pasó huérfana y la remisión nace después.
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    f2 = client.post("/api/v1/facturas/espejo", headers=hk, json=_espejo(
+        folio=1347, observaciones=obs.replace("JUE.", "VIE."))).json()
+    auth_as(env["dueno"])
+    rem2 = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "su_pedido": "VH-36EMI-VIE",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 836}]}).json()
+    assert rem2["estado"] == "FACTURADA"
+    assert rem2["factura_sae"] == "ZHGO 1347"
+    assert rem2["factura_id"] == f2["id"]
+
+
 def test_buscar_factura_por_folio_interno_y_por_folio_fiscal(client, env, auth_as, sin_sesion):
     """«No encuentro esta factura»: el equipo la busca por el folio de la
     entrega, no por el fiscal. El listado busca en los dos, y en el UUID."""

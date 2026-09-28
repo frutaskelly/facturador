@@ -96,6 +96,7 @@ from ...services.catalogos_default import categoria_sin_categorizar
 from ...services.sugerir_esquema import match_categorias, sugerir_categorias, sugerir_esquemas
 from ...services.producto_match import (
     Candidato,
+    alias_de_cliente,
     alias_del_tenant,
     aprender_alias,
     buscar,
@@ -279,18 +280,26 @@ def match_productos(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     """Cruza textos libres (tecleados/pegados) contra el catálogo: exacto → alias
-    aprendido → difuso, y opcionalmente IA para los que no resuelvan."""
+    aprendido → difuso, y opcionalmente IA para los que no resuelvan.
+
+    Con `cliente_id` (y `sucursal_id`) el vocabulario de ese cliente va primero,
+    como `alias_cliente`: es como el bot pregunta qué producto es lo que pidió un
+    cliente sin escogerlo él."""
+    if payload.cliente_id is not None and not ctx.cliente_permitido(payload.cliente_id):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
     if payload.usar_ia:
         # La rama IA manda el catálogo completo como contexto (cuesta dinero).
         enforce(f"producto-ia:{ctx.tenant_id}", 120, 3600)
     catalogo = productos_activos(db, ctx.tenant_id)   # una sola carga para todos los textos
     aliases = alias_del_tenant(db, ctx.tenant_id)     # idem: sin esto era un SELECT por texto
+    aliases_cli = alias_de_cliente(db, ctx.tenant_id, payload.cliente_id, payload.sucursal_id)
     norms = normalizar_catalogo(catalogo)   # y sin esto, O(textos × productos)
     cats_por_id, esquemas_por_id = _mapas_catalogo(db)
     resultados: list[dict] = []
     sin_match: list[str] = []
     for texto in payload.textos:
-        cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit, prods=catalogo, aliases=aliases, norms=norms)
+        cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit, prods=catalogo,
+                       aliases=aliases, aliases_cliente=aliases_cli, norms=norms)
         resultados.append({
             "texto": texto,
             "candidatos": [_candidato_out(c, cats_por_id, esquemas_por_id) for c in cands],
@@ -1994,6 +2003,10 @@ def pedir_alta_sae(
 
     ya = (db.query(ClaveSae)
           .filter(ClaveSae.tenant_id == ctx.tenant_id,
+                  # Sólo el SAE 10, que es donde se escribe. El catálogo del
+                  # SAE 9 (91/92/94) vive en el mismo tenant desde el 26-sep-2026
+                  # y una clave que sólo existe allá no hace a esta alta repetida.
+                  ClaveSae.empresa.in_(_EMPRESAS_SAE),
                   func.upper(func.btrim(ClaveSae.clave)) == clave,
                   ClaveSae.activa.is_(True))
           .first())
@@ -2182,7 +2195,11 @@ def buscar_claves_sae(
 
     if not clave_de_busqueda(clave) and not (q or "").strip():
         raise HTTPException(status_code=422, detail="hace falta `clave` o `q`")
+    # Sin empresa, sólo las del SAE 10: con lo que contesta aquí el bot decide
+    # entre un alta y un cambio EN EL SAE 10, y una clave del SAE 9 (que nunca
+    # se escribe) lo mandaría a cambiar algo que en el 10 no existe.
     return buscar_claves(db, ctx.tenant_id, clave=clave, q=q, empresa=empresa,
+                         empresas=None if empresa else _EMPRESAS_SAE,
                          solo_activas=solo_activas, limit=limit)
 
 

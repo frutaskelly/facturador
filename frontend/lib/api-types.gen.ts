@@ -919,6 +919,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conexiones/{conexion_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Editar
+         * @description Cambia el nombre o lo que comparte una conexión de Mini Conta, sin tocar
+         *     su clave: Mini Conta ve el cambio la próxima vez que lea.
+         */
+        patch: operations["editar_api_v1_conexiones__conexion_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/conexiones/{conexion_id}/regenerar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerar
+         * @description Clave nueva para ESA conexión: la anterior deja de servir en el acto y la
+         *     nueva hereda su nombre y su alcance. Las demás cuentas no se enteran.
+         */
+        post: operations["regenerar_api_v1_conexiones__conexion_id__regenerar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conexiones/{conexion_id}/revocar": {
         parameters: {
             query?: never;
@@ -969,11 +1011,35 @@ export interface paths {
          * Generar
          * @description Genera la clave. Se devuelve en claro UNA vez y ya no se puede volver a leer.
          *
-         *     Si ya había una viva se revoca en el acto: «generar otra» y «la anterior deja
-         *     de servir» tienen que ser el mismo gesto, o quedarían dos claves buenas y
-         *     nadie sabría cuál está usando el bot.
+         *     Smart Supply: si ya había una viva se revoca en el acto —«generar otra» y «la
+         *     anterior deja de servir» tienen que ser el mismo gesto, o quedarían dos claves
+         *     buenas y nadie sabría cuál está usando el bot—.
+         *
+         *     Mini Conta: cada llamada es una cuenta NUEVA (nombre + alcance) y no toca a
+         *     las demás. Para cambiar la clave de una cuenta existente: `/{id}/regenerar`.
          */
         post: operations["generar_api_v1_conexiones__tipo__clave_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conexiones/{tipo}/opciones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Opciones
+         * @description Lo que se le puede compartir a una cuenta de Mini Conta: plazas con sus
+         *     series y los clientes de cada serie.
+         */
+        get: operations["opciones_api_v1_conexiones__tipo__opciones_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2287,6 +2353,171 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mini-conta/alcance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alcance
+         * @description Qué comparte esta clave: plazas con sus series, clientes y si hay
+         *     catálogo. Mini Conta lo pide al conectar y al cambiar qué trae.
+         */
+        get: operations["alcance_api_v1_mini_conta_alcance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/cartera": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cartera
+         * @description Lo que falta por cobrar HOY: facturas timbradas PPD de las series pedidas
+         *     con saldo, con el mismo filtro que el estado de cuenta (fuera las que ya van
+         *     en cancelación). Vence a los días de crédito del cliente.
+         */
+        get: operations["cartera_api_v1_mini_conta_cartera_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/cobranza": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cobranza
+         * @description Lo cobrado: cada pago (REP timbrado) aplicado a una factura de las series
+         *     pedidas, con fecha de pago en el rango (hora de México).
+         */
+        get: operations["cobranza_api_v1_mini_conta_cobranza_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/notas-credito": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Notas Credito
+         * @description Las notas de crédito vigentes con fecha en el rango, aplicadas a facturas
+         *     de las series pedidas.
+         *
+         *     Una nota aquí es solo DINERO (el SAE no trae sus productos): cada aplicación
+         *     se reparte entre las líneas de la factura en proporción a su importe, con
+         *     cantidad 0 e importe negativo, y con la fecha de entrega de esa factura —
+         *     la nota corrige esa venta, no una del día en que se emitió.
+         */
+        get: operations["notas_credito_api_v1_mini_conta_notas_credito_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/precios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Precios
+         * @description El precio de lista que HOY le toca a cada cliente de esas series, para los
+         *     productos que se le facturaron en el último año.
+         *
+         *     Sale de `resolver_precios_lote`, la MISMA cascada que cotiza y factura
+         *     (override → asignación → lista base), una vez por cada cliente×plaza cuya
+         *     serie de factura prevista es de las pedidas; con la serie de REMISIÓN que le
+         *     toca, porque las asignaciones por serie son por serie de remisión. Para una
+         *     cuenta con muchos clientes, pídelo de a uno (`clientes=`).
+         */
+        get: operations["precios_api_v1_mini_conta_precios_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/productos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Productos
+         * @description Los productos que se facturaron en esas series entre `desde` y `hasta`:
+         *     el catálogo que le sirve a ESTA cuenta, no los 1,500 de la empresa. Solo si
+         *     la conexión comparte el catálogo.
+         */
+        get: operations["productos_api_v1_mini_conta_productos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mini-conta/remisiones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Remisiones
+         * @description Lo ENTREGADO: las líneas de las remisiones no canceladas con `fecha_entrega`
+         *     en el rango cuya serie de factura prevista es de las pedidas.
+         *
+         *     Van todas, facturadas o no (`facturada` lo dice): la factura se hace días
+         *     después y muchas remisiones que el SAE ya facturó no quedan ligadas aquí, así
+         *     que «sin factura» no es confiable. Quien las lea las usa EN LUGAR de las
+         *     facturas para los días que todavía no se facturan, nunca además de ellas.
+         */
+        get: operations["remisiones_api_v1_mini_conta_remisiones_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mini-conta/sucursales": {
         parameters: {
             query?: never;
@@ -2296,7 +2527,8 @@ export interface paths {
         };
         /**
          * Sucursales
-         * @description Cada plaza del inquilino con las series de factura que le pertenecen.
+         * @description Cada plaza con las series de factura que le pertenecen y que esta clave
+         *     comparte. Las plazas sin ninguna serie compartida no salen.
          */
         get: operations["sucursales_api_v1_mini_conta_sucursales_get"];
         put?: never;
@@ -2317,8 +2549,9 @@ export interface paths {
         /**
          * Ventas
          * @description Las líneas de las facturas timbradas (ingreso, sin notas de crédito) de
-         *     las series de la plaza, con `desde`/`hasta` sobre la fecha de la factura
-         *     (hora de México), ambos inclusive.
+         *     las series pedidas —o las de la plaza, o todas las que comparte la clave—,
+         *     con `desde`/`hasta` sobre la fecha de la factura (hora de México), ambos
+         *     inclusive. `clientes` recorta a esos clientes.
          */
         get: operations["ventas_api_v1_mini_conta_ventas_get"];
         put?: never;
@@ -3579,6 +3812,10 @@ export interface paths {
          * Match Productos
          * @description Cruza textos libres (tecleados/pegados) contra el catálogo: exacto → alias
          *     aprendido → difuso, y opcionalmente IA para los que no resuelvan.
+         *
+         *     Con `cliente_id` (y `sucursal_id`) el vocabulario de ese cliente va primero,
+         *     como `alias_cliente`: es como el bot pregunta qué producto es lo que pidió un
+         *     cliente sin escogerlo él.
          */
         post: operations["match_productos_api_v1_productos_match_post"];
         delete?: never;
@@ -4782,6 +5019,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sae/fuentes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fuentes
+         * @description Qué empresas de SAE alimentan a ESTE tenant, de qué servidor y con qué
+         *     código. Sin credenciales: sólo lo que hace falta para entender de dónde sale
+         *     cada factura del espejo.
+         */
+        get: operations["fuentes_api_v1_sae_fuentes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sae/fuentes/{codigo}/clientes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Alta Clientes Sae
+         * @description Da de alta (o liga por RFC) los clientes de una empresa del SAE 9 que
+         *     tienen facturas desde su piso, con su equivalencia '91:CLAVE' y el espejo
+         *     encendido. Sin esto el espejo del SAE 9 sale vacío: el depósito rechaza a
+         *     propósito las facturas de un cliente que no conoce.
+         *
+         *     Por omisión corre EN SECO. Nunca escribe en SAE.
+         */
+        post: operations["alta_clientes_sae_api_v1_sae_fuentes__codigo__clientes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sae/fuentes/{codigo}/cuadre": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cuadre Sae9
+         * @description `/sae/espejo/cuadre` para una empresa del SAE 9. Repara de a `tope`: sus
+         *     huecos son facturas de clientes dados de alta después, no algo roto.
+         */
+        post: operations["cuadre_sae9_api_v1_sae_fuentes__codigo__cuadre_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sae/fuentes/{codigo}/jalar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Jalar Sae9
+         * @description `/sae/espejo/jalar` para una empresa del SAE 9: lo mismo, desde su
+         *     archivo y con su piso de fecha.
+         */
+        post: operations["jalar_sae9_api_v1_sae_fuentes__codigo__jalar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sae/partidas": {
         parameters: {
             query?: never;
@@ -5302,6 +5628,82 @@ export interface components {
             recibida_at: string;
             /** Remitente */
             remitente?: string | null;
+        };
+        /**
+         * AlcanceMiniConta
+         * @description Qué comparte una clave de Mini Conta (ver services/mini_conta.py).
+         */
+        AlcanceMiniConta: {
+            /**
+             * Catalogo
+             * @default false
+             */
+            catalogo: boolean;
+            /** Clientes */
+            clientes?: string[] | null;
+            /**
+             * Cobranza
+             * @default false
+             */
+            cobranza: boolean;
+            /**
+             * Notas Credito
+             * @default false
+             */
+            notas_credito: boolean;
+            /**
+             * Precios
+             * @default false
+             */
+            precios: boolean;
+            /**
+             * Remisiones
+             * @default false
+             */
+            remisiones: boolean;
+            /** Series */
+            series?: string[];
+        };
+        /**
+         * AlcanceOut
+         * @description Lo que esta clave comparte, listo para que Mini Conta escoja qué traer.
+         */
+        AlcanceOut: {
+            /** Catalogo */
+            catalogo: boolean;
+            /** Clientes */
+            clientes: components["schemas"]["ClienteAlcanceOut"][];
+            /**
+             * Cobranza
+             * @default false
+             */
+            cobranza: boolean;
+            conexion?: components["schemas"]["ConexionBreveOut"] | null;
+            empresa: components["schemas"]["MCEmpresaOut"];
+            /**
+             * Notas Credito
+             * @default false
+             */
+            notas_credito: boolean;
+            /**
+             * Precios
+             * @default false
+             */
+            precios: boolean;
+            /**
+             * Remisiones
+             * @default false
+             */
+            remisiones: boolean;
+            /** Series */
+            series: string[];
+            /**
+             * Sin Limite
+             * @default false
+             */
+            sin_limite: boolean;
+            /** Sucursales */
+            sucursales: components["schemas"]["SucursalSeriesOut"][];
         };
         /** AliasIn */
         AliasIn: {
@@ -6142,6 +6544,21 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * ClienteAlcanceOut
+         * @description Nombre y series, nada más: Mini Conta no necesita el RFC para escoger.
+         */
+        ClienteAlcanceOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+            /** Series */
+            series: string[];
+        };
         /** ClienteCreate */
         ClienteCreate: {
             /** Almacen Id */
@@ -6404,6 +6821,20 @@ export interface components {
             /** Ventas Ytd */
             ventas_ytd: string;
         };
+        /** ClienteSeriesMC */
+        ClienteSeriesMC: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+            /** Rfc */
+            rfc?: string | null;
+            /** Series */
+            series: string[];
+        };
         /** ClienteSucursalOut */
         ClienteSucursalOut: {
             /**
@@ -6546,12 +6977,24 @@ export interface components {
             /** Sucursal Id */
             sucursal_id?: string | null;
         };
+        /** ConexionBreveOut */
+        ConexionBreveOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+        };
         /**
          * ConexionEstadoOut
          * @description Lo que la pantalla necesita para responder «¿está entrando lo que debe?».
          */
         ConexionEstadoOut: {
             conexion?: components["schemas"]["ConexionOut"] | null;
+            /** Conexiones */
+            conexiones?: components["schemas"]["ConexionOut"][];
             /**
              * Conviene Rotar
              * @default false
@@ -6580,6 +7023,7 @@ export interface components {
         ConexionOut: {
             /** Activada At */
             activada_at?: string | null;
+            alcance?: components["schemas"]["AlcanceMiniConta"] | null;
             /** Clave Pista */
             clave_pista: string;
             /**
@@ -6600,6 +7044,12 @@ export interface components {
             tipo: string;
             /** Ultimo Uso At */
             ultimo_uso_at?: string | null;
+        };
+        /** ConexionUpdate */
+        ConexionUpdate: {
+            alcance?: components["schemas"]["AlcanceMiniConta"] | null;
+            /** Nombre */
+            nombre?: string | null;
         };
         /**
          * ConfirmarRemisionIn
@@ -8842,6 +9292,10 @@ export interface components {
             cantidad: string;
             /** Clave Unidad */
             clave_unidad: string;
+            /** Cliente */
+            cliente?: string | null;
+            /** Cliente Id */
+            cliente_id?: string | null;
             /** Descripcion */
             descripcion: string;
             /**
@@ -9142,13 +9596,313 @@ export interface components {
              */
             updated_at: string;
         };
+        /** MCCarteraOut */
+        MCCarteraOut: {
+            /**
+             * Corte
+             * Format: date
+             */
+            corte: string;
+            /** Facturas */
+            facturas: components["schemas"]["MCSaldoOut"][];
+            /** Series */
+            series: string[];
+        };
+        /** MCCobranzaOut */
+        MCCobranzaOut: {
+            /** Cobros */
+            cobros: components["schemas"]["MCCobroOut"][];
+            /**
+             * Desde
+             * Format: date
+             */
+            desde: string;
+            /**
+             * Hasta
+             * Format: date
+             */
+            hasta: string;
+            /** Series */
+            series: string[];
+        };
+        /** MCCobroOut */
+        MCCobroOut: {
+            /** Cliente */
+            cliente?: string | null;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /**
+             * Factura Id
+             * Format: uuid
+             */
+            factura_id: string;
+            /**
+             * Fecha Pago
+             * Format: date
+             */
+            fecha_pago: string;
+            /** Folio */
+            folio: number;
+            /** Forma Pago */
+            forma_pago?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Importe */
+            importe: string;
+            /** Recibo */
+            recibo: string;
+            /**
+             * Recibo Id
+             * Format: uuid
+             */
+            recibo_id: string;
+            /** Saldo Insoluto */
+            saldo_insoluto?: string | null;
+            /** Serie */
+            serie: string;
+        };
+        /** MCEmpresaOut */
+        MCEmpresaOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+        };
+        /** MCLineaNotaOut */
+        MCLineaNotaOut: {
+            /** Cantidad */
+            cantidad: string;
+            /** Clave Unidad */
+            clave_unidad: string;
+            /** Cliente */
+            cliente?: string | null;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Descripcion */
+            descripcion: string;
+            /**
+             * Factura Id
+             * Format: uuid
+             */
+            factura_id: string;
+            /**
+             * Fecha Entrega
+             * Format: date
+             */
+            fecha_entrega: string;
+            /**
+             * Fecha Entrega Origen
+             * @enum {string}
+             */
+            fecha_entrega_origen: "remision" | "notas" | "factura";
+            /**
+             * Fecha Nota
+             * Format: date
+             */
+            fecha_nota: string;
+            /** Folio */
+            folio: number;
+            /** Importe */
+            importe: string;
+            /**
+             * Linea Id
+             * Format: uuid
+             */
+            linea_id: string;
+            /** Nota */
+            nota: string;
+            /**
+             * Nota Id
+             * Format: uuid
+             */
+            nota_id: string;
+            /** Presentacion */
+            presentacion?: string | null;
+            /** Producto */
+            producto?: string | null;
+            /** Serie */
+            serie: string;
+            /** Sku */
+            sku?: string | null;
+            /** Uuid Cfdi */
+            uuid_cfdi?: string | null;
+        };
+        /** MCLineaRemisionOut */
+        MCLineaRemisionOut: {
+            /** Cantidad */
+            cantidad: string;
+            /** Clave Unidad */
+            clave_unidad?: string | null;
+            /** Cliente */
+            cliente?: string | null;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Descripcion */
+            descripcion: string;
+            /** Estado */
+            estado: string;
+            /** Facturada */
+            facturada: boolean;
+            /**
+             * Fecha Entrega
+             * Format: date
+             */
+            fecha_entrega: string;
+            /** Folio */
+            folio: string;
+            /** Importe */
+            importe: string;
+            /**
+             * Linea Id
+             * Format: uuid
+             */
+            linea_id: string;
+            /** Plaza */
+            plaza?: string | null;
+            /** Presentacion */
+            presentacion?: string | null;
+            /** Producto */
+            producto?: string | null;
+            /**
+             * Remision Id
+             * Format: uuid
+             */
+            remision_id: string;
+            /** Serie */
+            serie: string;
+            /** Sku */
+            sku?: string | null;
+        };
+        /** MCNotasOut */
+        MCNotasOut: {
+            /**
+             * Desde
+             * Format: date
+             */
+            desde: string;
+            /**
+             * Hasta
+             * Format: date
+             */
+            hasta: string;
+            /** Lineas */
+            lineas: components["schemas"]["MCLineaNotaOut"][];
+            /** Series */
+            series: string[];
+            /**
+             * Sin Factura
+             * @default 0
+             */
+            sin_factura: number;
+        };
+        /** MCPrecioVentaOut */
+        MCPrecioVentaOut: {
+            /** Cliente */
+            cliente?: string | null;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Origen */
+            origen: string;
+            /** Plaza */
+            plaza?: string | null;
+            /** Precio */
+            precio: string;
+            /** Presentacion */
+            presentacion: string;
+            /** Producto */
+            producto: string;
+            /** Sku */
+            sku: string;
+        };
+        /** MCPreciosOut */
+        MCPreciosOut: {
+            /**
+             * Fecha
+             * Format: date
+             */
+            fecha: string;
+            /** Precios */
+            precios: components["schemas"]["MCPrecioVentaOut"][];
+            /** Series */
+            series: string[];
+        };
+        /** MCRemisionesOut */
+        MCRemisionesOut: {
+            /**
+             * Desde
+             * Format: date
+             */
+            desde: string;
+            /**
+             * Hasta
+             * Format: date
+             */
+            hasta: string;
+            /** Lineas */
+            lineas: components["schemas"]["MCLineaRemisionOut"][];
+            /** Series */
+            series: string[];
+        };
+        /** MCSaldoOut */
+        MCSaldoOut: {
+            /** Cliente */
+            cliente?: string | null;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Dias Vencida */
+            dias_vencida: number;
+            /**
+             * Factura Id
+             * Format: uuid
+             */
+            factura_id: string;
+            /**
+             * Fecha
+             * Format: date
+             */
+            fecha: string;
+            /** Folio */
+            folio: number;
+            /** Saldo */
+            saldo: string;
+            /** Serie */
+            serie: string;
+            /** Total */
+            total: string;
+            /** Uuid Cfdi */
+            uuid_cfdi?: string | null;
+            /**
+             * Vencimiento
+             * Format: date
+             */
+            vencimiento: string;
+        };
         /** MatchIn */
         MatchIn: {
+            /** Cliente Id */
+            cliente_id?: string | null;
             /**
              * Limit
              * @default 5
              */
             limit: number;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
             /** Textos */
             textos: string[];
             /**
@@ -9330,6 +10084,15 @@ export interface components {
             total?: number | string | null;
             /** Uuid */
             uuid?: string | null;
+        };
+        /**
+         * NuevaConexionIn
+         * @description Mini Conta: una clave por cuenta, con nombre y alcance desde el inicio.
+         */
+        NuevaConexionIn: {
+            alcance: components["schemas"]["AlcanceMiniConta"];
+            /** Nombre */
+            nombre: string;
         };
         /** OCRecibidaDetailOut */
         OCRecibidaDetailOut: {
@@ -9610,6 +10373,18 @@ export interface components {
             id: string;
             /** Titulo */
             titulo: string;
+        };
+        /**
+         * OpcionesMiniContaOut
+         * @description Todo lo que se puede compartir con una cuenta de Mini Conta.
+         */
+        OpcionesMiniContaOut: {
+            /** Clientes */
+            clientes: components["schemas"]["ClienteSeriesMC"][];
+            /** Series */
+            series: string[];
+            /** Sucursales */
+            sucursales: components["schemas"]["SucursalSeriesMC"][];
         };
         /** OrdenCompraCreate */
         OrdenCompraCreate: {
@@ -10696,6 +11471,43 @@ export interface components {
             unidad_sat?: string | null;
             /** Vida Util Dias */
             vida_util_dias?: number | null;
+        };
+        /** ProductoVendidoOut */
+        ProductoVendidoOut: {
+            /** Lineas */
+            lineas: number;
+            /** Nombre */
+            nombre: string;
+            /** Presentacion Default */
+            presentacion_default?: string | null;
+            /** Sku */
+            sku: string;
+            /**
+             * Ultima Venta
+             * Format: date
+             */
+            ultima_venta: string;
+            /** Unidad Base */
+            unidad_base?: string | null;
+            /** Unidad Sat */
+            unidad_sat: string;
+        };
+        /** ProductosOut */
+        ProductosOut: {
+            /**
+             * Desde
+             * Format: date
+             */
+            desde: string;
+            /**
+             * Hasta
+             * Format: date
+             */
+            hasta: string;
+            /** Productos */
+            productos: components["schemas"]["ProductoVendidoOut"][];
+            /** Series */
+            series: string[];
         };
         /** ProveedorCreate */
         ProveedorCreate: {
@@ -11794,6 +12606,13 @@ export interface components {
              */
             updated_at: string;
         };
+        /** SucursalSeriesMC */
+        SucursalSeriesMC: {
+            /** Nombre */
+            nombre: string;
+            /** Series */
+            series: string[];
+        };
         /** SucursalSeriesOut */
         SucursalSeriesOut: {
             /** Nombre */
@@ -12173,6 +12992,8 @@ export interface components {
         };
         /** VentasOut */
         VentasOut: {
+            /** Clientes */
+            clientes?: string[] | null;
             /**
              * Desde
              * Format: date
@@ -12188,7 +13009,7 @@ export interface components {
             /** Series */
             series: string[];
             /** Sucursal */
-            sucursal: string;
+            sucursal?: string | null;
         };
         /**
          * VocabularioOut
@@ -14433,6 +15254,76 @@ export interface operations {
             };
         };
     };
+    editar_api_v1_conexiones__conexion_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                conexion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConexionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConexionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerar_api_v1_conexiones__conexion_id__regenerar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                conexion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaveNuevaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     revocar_api_v1_conexiones__conexion_id__revocar_post: {
         parameters: {
             query?: never;
@@ -14510,7 +15401,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["NuevaConexionIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             201: {
@@ -14519,6 +15414,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClaveNuevaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    opciones_api_v1_conexiones__tipo__opciones_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                tipo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpcionesMiniContaOut"];
                 };
             };
             /** @description Validation Error */
@@ -17463,6 +18391,261 @@ export interface operations {
             };
         };
     };
+    alcance_api_v1_mini_conta_alcance_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlcanceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cartera_api_v1_mini_conta_cartera_get: {
+        parameters: {
+            query?: {
+                /** @description Códigos de FACTURA separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCCarteraOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cobranza_api_v1_mini_conta_cobranza_get: {
+        parameters: {
+            query: {
+                desde: string;
+                hasta: string;
+                /** @description Códigos de FACTURA separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCCobranzaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notas_credito_api_v1_mini_conta_notas_credito_get: {
+        parameters: {
+            query: {
+                desde: string;
+                hasta: string;
+                /** @description Códigos de FACTURA separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCNotasOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    precios_api_v1_mini_conta_precios_get: {
+        parameters: {
+            query?: {
+                /** @description Códigos de FACTURA separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCPreciosOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    productos_api_v1_mini_conta_productos_get: {
+        parameters: {
+            query: {
+                desde: string;
+                hasta: string;
+                /** @description Códigos separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductosOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remisiones_api_v1_mini_conta_remisiones_get: {
+        parameters: {
+            query: {
+                desde: string;
+                hasta: string;
+                /** @description Códigos de FACTURA separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCRemisionesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     sucursales_api_v1_mini_conta_sucursales_get: {
         parameters: {
             query?: never;
@@ -17497,9 +18680,14 @@ export interface operations {
     ventas_api_v1_mini_conta_ventas_get: {
         parameters: {
             query: {
-                sucursal: string;
                 desde: string;
                 hasta: string;
+                /** @description Códigos separados por coma */
+                series?: string | null;
+                /** @description Ids separados por coma */
+                clientes?: string | null;
+                /** @description Forma vieja: el nombre de la plaza */
+                sucursal?: string | null;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
@@ -21862,6 +23050,148 @@ export interface operations {
                 "X-Tenant-Id"?: string | null;
             };
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fuentes_api_v1_sae_fuentes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    alta_clientes_sae_api_v1_sae_fuentes__codigo__clientes_post: {
+        parameters: {
+            query?: {
+                /** @description En falso (por omisión) sólo devuelve el plan */
+                aplicar?: boolean;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                codigo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cuadre_sae9_api_v1_sae_fuentes__codigo__cuadre_post: {
+        parameters: {
+            query?: {
+                series?: string | null;
+                reparar?: boolean;
+                /** @description Cuántas faltantes se traen por llamada (las más viejas primero) */
+                tope?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                codigo: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    jalar_sae9_api_v1_sae_fuentes__codigo__jalar_post: {
+        parameters: {
+            query?: {
+                /** @description Series separadas por coma; por omisión las suyas */
+                series?: string | null;
+                dias?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                codigo: string;
+            };
             cookie?: never;
         };
         requestBody?: never;

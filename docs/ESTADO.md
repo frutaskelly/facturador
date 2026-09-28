@@ -1,4 +1,4 @@
-# Estado del proyecto — 23/09/2026 (cierre: `43558ed` — el bot dejó de hablar con SAE)
+# Estado del proyecto — 26/09/2026 (`main` y prod en `035efb6`)
 
 Lo reescribe `/endworking` al cerrar el día. Punto de entrada para retomar: basta abrir esta
 carpeta y leer este archivo.
@@ -9,10 +9,66 @@ precio, impuestos por clave, espejo de facturas con detalle, cola de altas a SAE
 apagó su conexión a Aspel. El detalle de qué quedó encendido y con qué banderas vive en el
 repo del bot (`SmartSupply/bot/docs/ESTADO.md`); aquí queda lo que toca a este producto.
 
-> **Este archivo tiene un hueco declarado.** La cabecera y los pendientes están al día
-> (23-sep). Las secciones históricas de más abajo terminan el **01-sep**: entre el 02 y el 19
+> **Este archivo tiene un hueco declarado.** La cabecera, Git, Deploy y lo del 26-sep están al
+> día (26-sep); los pendientes del 23-sep no se revisaron de nuevo. Las secciones históricas de más abajo terminan el **01-sep**: entre el 02 y el 19
 > entraron 91 PRs y 16 migraciones de otras sesiones que nadie resumió aquí. Para ese tramo
 > manda `git log 9021dfa..main --oneline`, no este archivo.
+
+## 26-sep: la orden con folio y fecha de otra remisión — distinguirla, corregirla, no descartarla
+
+**El incidente.** CE-38CER-LUN/MAR/MIE (MAFAN, CEREZOS, grupo `ehmo-pachuca`) chocaron por
+folio y fecha con RFMAFAN32-34, y el candado nuevo `_gemela_remisionada` (#261) las frenó con
+«si es la misma, descarta esta orden». No eran la misma: venían de «PEDIDO KELLY SEMANA
+39.xlsx» (43/23/22 partidas) contra «PEDIDO CERESO S.38» (23/24/23). Eran la semana 39 con
+fechas de la 38 puestas por el bot. Se descartaron por error y se rehicieron a mano (hoy
+RZMAFAN35-37).
+
+Desplegado:
+
+- **#263** (`48a415d`) — el candado compara el contenido con `_firma_entrega`. Idéntico →
+  «descarta esta orden»; distinto → «otro contenido (N vs M partidas)… fecha mal puesta. No la
+  descartes…». En los dos casos sigue frenando el camino automático.
+- **#265** (`7742e38`) — `PATCH /oc-recibidas/{id}` acepta `fecha_entrega` (se corrige, no se
+  quita: `null` → 422) y la salida de la orden la expone. Para que la corrección sirva:
+  - la remisión toma la fecha de la **columna** antes que la del payload (antes salía siempre
+    con la que leyó el bot);
+  - un reenvío del bot **no pisa** folio ni fecha corregidos: si la columna ya no coincide con
+    el payload anterior, la tocó una persona. La conciliación del bot busca por folio y reenvía
+    cada 6 h, y sin esto deshacía la corrección. Medido antes de ponerlo: en las 806 órdenes de
+    prod, columna y payload coincidían, así que no congeló ninguna;
+  - si el motivo era el de gemela, se recalcula al cambiar fecha o folio: si ya no choca se
+    borra y el lote la vuelve a intentar.
+
+  Además, `aprender` sólo actúa si el PATCH toca cliente, sucursal, proyecto o punto de entrega.
+  Antes un PATCH de sólo motivo, folio o fecha confirmaba equivalencias que nadie revisó.
+- **#268** (`56e8d50`) — «Corregir fecha y folio» en la franja de /remisiones (menú de la fila
+  y panel de la orden; *Guardar* / *Guardar y pasar a remisiones*). El panel enseña la fecha de
+  entrega. En el mismo PR: **`fmtDate` pintaba un día antes** toda fecha `YYYY-MM-DD` en México
+  (`new Date("2026-09-28")` es medianoche UTC = 27-sep en UTC-6). Ahora la lee como día local;
+  las fechas con hora no cambian. Si alguien nota que «cambiaron» las fechas en pantalla, es
+  esto.
+
+**El CI de `main` estuvo en rojo entre #261 y #263.** #261 cambió el docstring de una ruta y no
+regeneró `openapi.json`, y el paso «OpenAPI al día» lo atrapó. El docstring de una ruta **es**
+contrato: después de tocarlo, `python -m scripts.export_openapi` y `npm run gen:api`.
+
+**`require_duenio_de_sae` (#267/#269) falla cerrado:** sin `ESPEJO_SAE_TENANT_ID` no pasa nadie,
+tampoco el dueño. En prod apunta a `cristian-gerardo-zarate-orozco`, que es el tenant de todas
+las conexiones del bot y de toda la cola de SAE (verificado el 26-sep, antes de dar por bueno
+el deploy de #269).
+
+También entró desde el último ESTADO (otras sesiones):
+
+| PR | commit | qué |
+|---|---|---|
+| #258 | `0840ae0` | Un documento no es gemelo de sí mismo; `sin_remision` dice si trae pedido base (25-sep) |
+| #194 | `e17fb0d` | La remisión es la factura, y las dos hablan como el bot |
+| #259 | `b12e618` | El perfil `ehmo-pachuca` hereda las equivalencias de `ehmo` |
+| #261 | `5b7b84e` | Procesar órdenes también destraba las que llegaron sin cliente |
+| #260 | `5f7e8e1` | El Facturador lee y escribe SAE por su cuenta (migración `0089`) |
+| #262 | `e3c5530` | Mini Conta lee las ventas facturadas por sucursal (migración `0090`) |
+| #267 | `fc28701` | SAE en vivo sólo para el tenant dueño; cierra el respaldo sin RLS (migración `0091`) |
+| #269 | `035efb6` | La cola de escrituras a SAE sólo acepta al tenant dueño de SAE |
 
 ## 25-sep: cobranza — filtros de antigüedad, detalle de REP y cobranza automática
 
@@ -67,12 +123,12 @@ repararon con una pasada nueva; quedan bien las 46 con IEPS de la muestra compar
 
 | | |
 |---|---|
-| Rama base | `main` en `43558ed`, igual que `origin/main` |
+| Rama base | `main` en `035efb6` + el commit de este ESTADO, igual que `origin/main` |
 | Remoto | `frutaskelly/facturador` |
 | Working tree | limpio en el padre |
-| Worktrees | `gerencia-frutaskelly-access` — **de otra sesión viva, no se tocó** |
-| PRs abiertos | ninguno de esta sesión |
-| Migración head | `0083_lineas_factura_clave_sae` |
+| Worktrees | varias, de otras sesiones — **no se tocaron** |
+| PRs abiertos | #186, #264, #266 y #270, de otras sesiones |
+| Migración head | `0091_cierra_respaldo_codigo_sae` |
 
 **Este checkout lo comparten varias sesiones a la vez.** El 22-sep un `git add -A backend`
 se llevó 335 líneas a medias de otra sesión y salieron a `main` en un PR ajeno (se revirtió
@@ -81,9 +137,10 @@ uno por uno, nunca `-A` ni una carpeta entera.
 
 ## Deploy
 
-**En vivo en https://facturador.mx con `43558ed`.** `./deploy.sh` recreó el backend el 23-sep
-a las 09:17 UTC; los cinco contenedores quedaron sanos y el archivo que tocó el último merge
-(`backend/app/core/auth.py`) tiene dentro del contenedor el mismo hash que en `main`.
+**En vivo en https://facturador.mx con `035efb6`** (26-sep). El último `./deploy.sh` lo corrió la
+sesión de #269 a las 12:39 UTC. Alembic está en `0091_cierra_respaldo_codigo_sae (head)`, los
+cinco contenedores están sanos, y `require_duenio_de_sae` está dentro del contenedor. El commit
+de este ESTADO es sólo documentación: no hace falta redesplegar por él.
 
 Los contenedores se construyen desde este checkout; ninguna worktree respalda el deploy
 (comprobable con `docker inspect facturador_backend --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'`).
@@ -487,9 +544,9 @@ es el `headRefOid` del PR contra el tip local, comparar el **contenido** de los 
 #42; se confirmó por contenido (los cinco marcadores que introducía están en `main`) antes de
 podarla.
 
-## Pendientes abiertos (23-sep)
+## Pendientes abiertos (23 y 26-sep)
 
-Éstos son los vivos. Los de más abajo son de cierres anteriores y **nadie los ha revisado
+Éstos son los vivos (los del 23-sep no se revisaron el 26; del 7 en adelante son del 26). Los de más abajo son de cierres anteriores y **nadie los ha revisado
 desde entonces**: trátalos como historia, no como lista de trabajo.
 
 1. **416 desacuerdos de catálogo con SAE**, en `SmartSupply/bot/listas/catalogo_desacuerdos.csv`:
@@ -511,6 +568,17 @@ desde entonces**: trátalos como historia, no como lista de trabajo.
 6. **La contraseña de la BD de producción se imprimió** en un mensaje de error de `psycopg2`
    durante la sesión del 17-sep. El script ya no la expone, pero quedó en el transcript;
    rotarla es decisión del dueño.
+7. **«Corregir fecha y folio» (#268) no se ha visto en el navegador.** No hay usuario de prueba y
+   prod tenía 0 órdenes pendientes. La primera orden que se atore en la franja es la prueba.
+8. **Corregir sólo la fecha de una orden EHMO le cuesta un 409 al bot.** Si el bot reprocesa
+   ese mismo pedido, `_candado_folio_repetido` ve el mismo folio con otra fecha y contesta 409;
+   el bot lo vuelve pregunta al equipo. La corrección se conserva, y corregir también el folio
+   (que lleva la semana) lo evita.
+9. **El catálogo de SAE se lee dos veces.** El Facturador lo lee cada 4 h
+   (`ESPEJO_SAE_CLAVES_CADA_SEG`, #260) y el launchd del bot sigue sincronizando claves a las 7:30
+   y 15:30. Decidir cuál se queda.
+10. **Cobranza automática** (25-sep): sigue apagada hasta que el dueño capture los contactos y
+    apruebe los primeros envíos a mano.
 
 ## Pendientes del cierre del 19-sep (sin revisar desde entonces)
 
