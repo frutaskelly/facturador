@@ -129,12 +129,21 @@ def productos_activos(db: Session, tenant_id: UUID) -> list[Producto]:
     corren como superusuario (BYPASSRLS). Sin el filtro, el catálogo trae
     productos de otro tenant y el cruce por SKU se lleva el ajeno — con la
     clave correcta pero sin ningún precio de ESTE tenant.
+
+    El ORDEN es parte del resultado: dos productos con el mismo nombre cruzan
+    los dos al 100 y el primero de la lista es el que entra a la remisión. Sin
+    ORDER BY, Postgres los devuelve en el orden físico de la tabla, que cambia
+    con cada UPDATE — el 26-sep-2026 un gemelo de solo KILO dado de alta el
+    22-sep le ganó a PLATANO TABASCO (que se vende en PIEZA) y el pedido de 20
+    piezas del Hospital de la Mujer salió en la lista de compras como 20 kilos.
+    El más viejo primero: la misma regla del dueño que le deja la clave de SAE
+    al producto viejo (18-sep).
     """
     return db.query(Producto).filter(
         Producto.tenant_id == tenant_id,
         Producto.deleted_at.is_(None),
         Producto.activo.is_(True),
-    ).all()
+    ).order_by(Producto.created_at, Producto.sku).all()
 
 
 def alias_del_tenant(db: Session, tenant_id: UUID) -> dict[str, UUID]:
