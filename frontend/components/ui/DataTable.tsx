@@ -38,6 +38,12 @@ export type Column<T> = {
   /** Valor a escribir al exportar a Excel/CSV. Si no se indica, usa `sortValue`
    *  o el `cell` cuando sea texto/número. Las columnas de acciones se omiten. */
   exportValue?: (row: T) => string | number | null | undefined;
+  /** Columna con VARIOS valores por fila (p. ej. las facturas que abona un
+   *  comprobante de pago): el embudo del encabezado lista cada valor por
+   *  separado —no la combinación «F12, F13»— y la fila pasa si trae ALGUNO de
+   *  los marcados. La condición («Contiene», «Es igual a»…) también se evalúa
+   *  valor por valor. Sin valores, la fila cuenta como «(vacío)». */
+  filterValues?: (row: T) => string[];
 };
 
 type SortState = { id: string; dir: "asc" | "desc" };
@@ -317,6 +323,22 @@ function cumpleCond(texto: string, c: ColCond): boolean {
       return c.op === "mayor" ? cmp > 0 : cmp < 0;
     }
   }
+}
+
+/** Los valores de la fila para el autofiltro de una columna con
+ *  `filterValues`; sin valores cuenta como «(vacío)», igual que una celda
+ *  vacía en las columnas de un solo valor. */
+function valoresFiltro<T>(col: Column<T>, row: T): string[] {
+  const vs = col.filterValues?.(row) ?? [];
+  return vs.length > 0 ? vs : [""];
+}
+
+/** ¿Pasa la condición una columna de varios valores? En positivo («Contiene»,
+ *  «Es igual a»…) basta con uno; en negativo («No contiene», «Es distinto
+ *  de») ninguno puede fallar: «distinto de F12» quiere decir sin la F12. */
+function cumpleCondValores(vals: string[], c: ColCond): boolean {
+  const negativa = c.op === "no_contiene" || c.op === "distinto";
+  return negativa ? vals.every((v) => cumpleCond(v, c)) : vals.some((v) => cumpleCond(v, c));
 }
 
 export type DataTableProps<T> = {
@@ -714,6 +736,18 @@ export function DataTable<T>({
     };
   }, [filterOpen]);
   const hayColFilters = Object.keys(colFilters).length > 0 || Object.keys(colConds).length > 0;
+  // Una columna de varios valores (`filterValues`) pasa con cualquiera de los
+  // suyos; las demás comparan el texto visible de la celda.
+  function pasaValores(id: string, col: Column<T>, row: T, vals: string[]): boolean {
+    return col.filterValues
+      ? valoresFiltro(col, row).some((v) => vals.includes(v))
+      : vals.includes(cellText(id, col, row));
+  }
+  function pasaCond(id: string, col: Column<T>, row: T, cond: ColCond): boolean {
+    return col.filterValues
+      ? cumpleCondValores(valoresFiltro(col, row), cond)
+      : cumpleCond(cellText(id, col, row), cond);
+  }
   // Diferido: teclear en el buscador actualiza el input al instante y el
   // re-filtrado del dataset corre como render de baja prioridad.
   const deferredSearch = useDeferredValue(search);
@@ -727,11 +761,11 @@ export function DataTable<T>({
       base = base.filter((row) =>
         activos.every(([id, vals]) => {
           const c = byId[id];
-          return c ? vals.includes(cellText(id, c.col, row)) : true;
+          return c ? pasaValores(id, c.col, row, vals) : true;
         }) &&
         conds.every(([id, cond]) => {
           const c = byId[id];
-          return c ? cumpleCond(cellText(id, c.col, row), cond) : true;
+          return c ? pasaCond(id, c.col, row, cond) : true;
         }),
       );
     }
@@ -764,12 +798,12 @@ export function DataTable<T>({
       Object.entries(colFilters).every(([cid, vals]) => {
         if (cid === excludeId) return true;
         const c = byId[cid];
-        return c ? vals.includes(cellText(cid, c.col, row)) : true;
+        return c ? pasaValores(cid, c.col, row, vals) : true;
       }) &&
       Object.entries(colConds).every(([cid, cond]) => {
         if (cid === excludeId) return true;
         const c = byId[cid];
-        return c ? cumpleCond(cellText(cid, c.col, row), cond) : true;
+        return c ? pasaCond(cid, c.col, row, cond) : true;
       }),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cellText es caché pura
@@ -1533,14 +1567,21 @@ function HeaderFilterPopup<T>({
   const valores = useMemo(() => {
     const vistos = new Map<string, number>();
     for (const r of rows) {
-      const v = exportText(col, r);
-      vistos.set(v, (vistos.get(v) ?? 0) + 1);
+      // Varios valores por fila: cada uno cuenta una vez por fila.
+      const vs = col.filterValues ? new Set(valoresFiltro(col, r)) : [exportText(col, r)];
+      for (const v of vs) vistos.set(v, (vistos.get(v) ?? 0) + 1);
     }
     return [...vistos.entries()].sort((a, b) => a[0].localeCompare(b[0], "es", { numeric: true }));
   }, [rows, col]);
 
   const q = norm(busca.trim());
   const listados = q ? valores.filter(([v]) => norm(v || "(vacío)").includes(q)) : valores;
+  // Filas detrás de lo listado. Con varios valores por fila no es la suma de
+  // los conteos (un comprobante con tres facturas contaría tres veces).
+  const listadosSet = new Set(listados.map(([v]) => v));
+  const filasListadas = col.filterValues
+    ? rows.filter((r) => valoresFiltro(col, r).some((v) => listadosSet.has(v))).length
+    : listados.reduce((n, [, c]) => n + c, 0);
 
   const marcado = (v: string) => (filtro ? filtro.includes(v) : true);
   const todosListadosMarcados = listados.length > 0 && listados.every(([v]) => marcado(v));
@@ -1659,7 +1700,7 @@ function HeaderFilterPopup<T>({
           disabled={listados.length === 0}
         />
         <span className="min-w-0 flex-1 truncate">(Seleccionar todo)</span>
-        <span className="tabular-nums font-normal text-muted">{listados.reduce((n, [, c]) => n + c, 0)}</span>
+        <span className="tabular-nums font-normal text-muted">{filasListadas}</span>
       </label>
       <div className="max-h-44 overflow-auto">
         {listados.length === 0 && <div className="px-1 py-1 text-xs text-muted">Sin valores</div>}

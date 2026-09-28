@@ -3,12 +3,14 @@
 // Comprobantes de pago (REP, CFDI tipo P) del periodo: cuelga de los mismos
 // filtros que ventas —rango y cliente—, pero por FECHA DE PAGO, que es la que
 // lleva el complemento y la que cuadra con el banco. Los borradores no salen:
-// nunca llegaron al SAT.
-import { useMemo } from "react";
+// nunca llegaron al SAT. La tabla es DataTableSmart: el embudo de «Facturas
+// relacionadas» lista cada factura por separado, para ver qué comprobantes
+// abonaron a una, y el conteo y el total siguen a lo que se ve.
+import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Spinner } from "@/components/ui/Spinner";
 import { folioRelacionado, type Recibo, type ReciboFactura } from "@/lib/cobranza";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
@@ -26,8 +28,9 @@ type Pagos = {
   total: string; comprobantes: number; total_cancelado: string; cancelados: number;
 };
 
-const relacionadas = (r: Comprobante) =>
-  r.facturas.map(folioRelacionado).join(", ");
+// Sin repetir: el espejo puede traer dos renglones de la misma factura.
+const foliosRelacionados = (r: Comprobante) => [...new Set(r.facturas.map(folioRelacionado))];
+const relacionadas = (r: Comprobante) => foliosRelacionados(r).join(", ");
 
 const suma = (fs: FacturaAbonada[], k: "subtotal" | "ieps" | "iva" | "total" | "importe_pagado") =>
   fs.reduce((t, f) => t + Number(f[k] ?? 0), 0);
@@ -96,6 +99,8 @@ export function ComprobantesPago({
 }) {
   const res = useResource<Pagos>(`/api/v1/reportes/pagos?${filtros}`);
   const d = res.data;
+  // Lo que queda tras el buscador y los embudos; null = aún sin filtrar.
+  const [visibles, setVisibles] = useState<Comprobante[] | null>(null);
 
   const cols: Column<Comprobante>[] = useMemo(() => [
     { header: "Fecha", className: "whitespace-nowrap", sortable: true,
@@ -116,6 +121,7 @@ export function ComprobantesPago({
         ? <span className="font-mono text-xs text-muted" title={r.uuid}>{r.uuid.slice(0, 8)}…</span>
         : <span className="text-muted">—</span> },
     { header: "Facturas relacionadas", truncate: true, exportValue: relacionadas,
+      filterValues: foliosRelacionados,
       cell: (r) => <span title={relacionadas(r)}>{relacionadas(r) || "—"}</span> },
     { header: "Monto pagado", className: "whitespace-nowrap text-right tabular-nums", sortable: true,
       sortValue: (r) => Number(r.monto), exportValue: (r) => r.monto,
@@ -130,6 +136,16 @@ export function ComprobantesPago({
         ? <Badge tone="success">Vigente</Badge>
         : <Badge tone="danger">Cancelado</Badge> },
   ], []);
+
+  // El conteo y el total siguen a lo VISIBLE (buscador y embudos), y como el
+  // del servidor, solo cuentan los vigentes: lo cancelado va aparte.
+  const suma = useMemo(() => {
+    const base = visibles ?? d?.items ?? [];
+    const vig = base.filter((r) => r.estado === "TIMBRADO");
+    const can = base.filter((r) => r.estado === "CANCELADO");
+    const monto = (xs: Comprobante[]) => xs.reduce((t, r) => t + Number(r.monto), 0);
+    return { vigentes: vig.length, total: monto(vig), cancelados: can.length, totalCancelado: monto(can) };
+  }, [visibles, d]);
 
   if (res.error) {
     return (
@@ -150,29 +166,31 @@ export function ComprobantesPago({
         <>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="text-muted">
-              {fmtNumber(d.comprobantes, 0)} {d.comprobantes === 1 ? "comprobante vigente" : "comprobantes vigentes"}
+              {fmtNumber(suma.vigentes, 0)} {suma.vigentes === 1 ? "comprobante vigente" : "comprobantes vigentes"}
+              {suma.vigentes !== d.comprobantes && ` de ${fmtNumber(d.comprobantes, 0)}`}
             </span>
             <span>
-              Total: <span className="font-semibold tabular-nums">{fmtMoney(d.total)}</span>
+              Total: <span className="font-semibold tabular-nums">{fmtMoney(suma.total)}</span>
             </span>
           </div>
           <div className={res.loading ? "opacity-50 transition-opacity" : "transition-opacity"}>
-            <DataTable
+            <DataTableSmart
               rows={d.items}
               rowKey={(r) => r.id}
               columns={cols}
               renderExpanded={(r) => <DetalleFacturas r={r} />}
               empty="Sin comprobantes de pago en el rango."
-              exportable
+              storageKey="reportes-comprobantes-pago"
+              searchPlaceholder="Folio, cliente o factura (p. ej. FEHMOHOS12)…"
               exportFilename="comprobantes-de-pago"
-              paginated
               defaultPageSize={50}
+              onFilteredRowsChange={setVisibles}
             />
           </div>
-          {d.cancelados > 0 && (
+          {suma.cancelados > 0 && (
             <p className="mt-3 text-xs text-muted">
-              Fuera del total: {fmtMoney(d.total_cancelado)} en {fmtNumber(d.cancelados, 0)}{" "}
-              {d.cancelados === 1 ? "comprobante cancelado" : "comprobantes cancelados"}.
+              Fuera del total: {fmtMoney(suma.totalCancelado)} en {fmtNumber(suma.cancelados, 0)}{" "}
+              {suma.cancelados === 1 ? "comprobante cancelado" : "comprobantes cancelados"}.
             </p>
           )}
         </>
