@@ -1420,6 +1420,145 @@ def test_sin_revisar_no_le_ensena_nada_al_catalogo(client, env, auth_as):
     assert codigos == 0
 
 
+def _platanos(env):
+    """Los tres PLATANO TABASCO del catálogo real, en su orden de alta real
+    invertido a propósito: el de solo KILO, el más viejo, sale primero."""
+    from datetime import datetime, timedelta, timezone
+    ahora = datetime.now(timezone.utc)
+    db = SessionLocal()
+    try:
+        tid = env["admin_a"]["tenant_id"]
+        comunes = dict(tenant_id=tid, clave_sat="01010101", unidad_sat="KGM")
+        solo_kilo = Producto(sku="PT-FRUT", nombre="PLATANO TABASCO", clave_sae="PLAT-FRUT-1095",
+                             unidad_base="KILO", presentacion_default="KILO",
+                             presentaciones={"KILO": 1}, created_at=ahora - timedelta(days=30),
+                             **comunes)
+        kilo_y_pieza = Producto(sku="PT-384", nombre="PLATANO TABASCO",
+                                clave_sae="PLATANOTABASCOKG", unidad_base="KILO",
+                                presentacion_default="KILO",
+                                presentaciones={"KILO": 1, "PIEZA": {"sat": "H87", "factor": 1}},
+                                created_at=ahora - timedelta(days=20), **comunes)
+        pieza = Producto(sku="PT-PZ", nombre="PLATANO TABASCO PIEZA", clave_sae="PLATANOTABPZ",
+                         unidad_base="PIEZA", presentacion_default="PIEZA",
+                         presentaciones={"PIEZA": 1}, created_at=ahora - timedelta(days=10),
+                         **comunes)
+        db.add_all([solo_kilo, kilo_y_pieza, pieza]); db.commit()
+        return {"solo_kilo": str(solo_kilo.id), "kilo_y_pieza": str(kilo_y_pieza.id),
+                "pieza": str(pieza.id)}
+    finally:
+        db.close()
+
+
+def _oc_platano(client, h, env, linea):
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(lineas=[linea])).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+    return oc
+
+
+def test_20_piezas_de_platano_no_entran_como_20_kilos(client, env, auth_as):
+    """El caso del 26-sep-2026, VH-38MUJ-SAB-B partida 34.
+
+    El documento pedía PLATANO TABASCO · PIEZA · 20 con la clave PLATANOTABPZ.
+    Cruzaron al 100 los dos «PLATANO TABASCO» por nombre y el «PIEZA» por su
+    clave; ganó el de solo KILO por ir primero y la partida entró como 20 KILO.
+    Con eso salió la lista de compras y se compraron kilos en vez de piezas.
+    """
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    ids = _platanos(env)
+    oc = _oc_platano(client, h, env, {"descripcion": "PLATANO TABASCO", "cantidad": "20",
+                                      "unidad": "PIEZA", "clave": "PLATANOTABPZ",
+                                      "precio": "5.5"})
+
+    det = client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()
+    ln = det["lineas"][0]
+    assert ln["candidatos"][0]["producto_id"] == ids["pieza"]
+    assert ln["presentacion_sugerida"] == "PIEZA"
+
+    r = client.post(
+        f"/api/v1/oc-recibidas/{oc['id']}/crear-remision-sin-revisar?almacen_id={env['alm']}",
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    rem = client.get(f"/api/v1/remisiones/{r.json()['remision_id']}", headers=h).json()
+    linea = rem["lineas"][0]
+    assert linea["producto_id"] == ids["pieza"]
+    assert linea["presentacion"] == "PIEZA"
+    assert float(linea["cantidad_solicitada"]) == 20
+    assert "no la vende" not in (linea["notas"] or "")
+
+
+def test_sin_clave_la_unidad_igual_escoge_al_gemelo_que_vende_pieza(client, env, auth_as):
+    """Sin clave en el documento el «PIEZA» no cruza al 100 (solo es prefijo),
+    pero entre los dos «PLATANO TABASCO» exactos gana el que sí vende pieza."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    ids = _platanos(env)
+    oc = _oc_platano(client, h, env, {"descripcion": "PLATANO TABASCO", "cantidad": "20",
+                                      "unidad": "PZA"})
+
+    ln = client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()["lineas"][0]
+    assert ln["candidatos"][0]["producto_id"] == ids["kilo_y_pieza"]
+    assert ln["presentacion_sugerida"] == "PIEZA"
+
+
+def test_si_el_primero_vende_la_unidad_no_se_reacomoda(client, env, auth_as):
+    """Un pedido en KILO se queda con el primero: el desempate solo actúa
+    cuando la unidad del documento no cabe en el que iba a entrar."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    ids = _platanos(env)
+    oc = _oc_platano(client, h, env, {"descripcion": "PLATANO TABASCO", "cantidad": "12",
+                                      "unidad": "KG"})
+
+    ln = client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()["lineas"][0]
+    assert ln["candidatos"][0]["producto_id"] == ids["solo_kilo"]
+    assert ln["presentacion_sugerida"] == "KILO"
+
+
+def test_el_vocabulario_del_cliente_no_lo_desplaza_la_unidad(client, env, auth_as):
+    """«El cliente gana» (regla del dueño, 27-sep-2026): si su vocabulario dice
+    que PLATANO TABASCO es el de solo KILO, el desempate por unidad no lo
+    cambia. La partida entra anotada para que la revise un humano."""
+    from app.models import ProductoAlias
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    ids = _platanos(env)
+    db = SessionLocal()
+    try:
+        db.add(ProductoAlias(tenant_id=env["admin_a"]["tenant_id"], producto_id=ids["solo_kilo"],
+                             cliente_id=env["ehmo"], alias="PLATANO TABASCO",
+                             alias_normalizado="platano tabasco"))
+        db.commit()
+    finally:
+        db.close()
+    oc = _oc_platano(client, h, env, {"descripcion": "PLATANO TABASCO", "cantidad": "20",
+                                      "unidad": "PIEZA", "clave": "PLATANOTABPZ"})
+
+    ln = client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()["lineas"][0]
+    assert ln["candidatos"][0]["producto_id"] == ids["solo_kilo"]
+    assert ln["candidatos"][0]["origen"] == "alias_cliente"
+
+
+def test_el_catalogo_sale_del_mas_viejo_al_mas_nuevo(env):
+    """Sin ORDER BY los gemelos salían en el orden físico de la tabla."""
+    from datetime import datetime, timedelta, timezone
+    from app.services.producto_match import productos_activos
+    ahora = datetime.now(timezone.utc)
+    db = SessionLocal()
+    try:
+        tid = env["admin_a"]["tenant_id"]
+        # El nuevo se inserta ANTES: el orden físico lo pondría primero.
+        nuevo = Producto(tenant_id=tid, sku="GM-NUEVO", nombre="GEMELO", clave_sat="01010101",
+                         unidad_sat="KGM", created_at=ahora - timedelta(days=1))
+        db.add(nuevo); db.flush()
+        viejo = Producto(tenant_id=tid, sku="GM-VIEJO", nombre="GEMELO", clave_sat="01010101",
+                         unidad_sat="KGM", created_at=ahora - timedelta(days=60))
+        db.add(viejo); db.commit()
+        skus = [p.sku for p in productos_activos(db, tid) if p.nombre == "GEMELO"]
+    finally:
+        db.close()
+    assert skus == ["GM-VIEJO", "GM-NUEVO"]
+
+
 def test_sin_revisar_no_se_confirma_ni_se_factura(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])

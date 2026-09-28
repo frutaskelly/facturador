@@ -12,12 +12,17 @@ CFDI, nada de borrar, nada de usuarios.
 
 Las dos usan el mismo prefijo `fi_ss_`: auth reconoce la clave por él y el tipo
 sale de la fila, no del texto.
+
+Smart Supply tiene UNA clave por empresa. Mini Conta tiene una por CUENTA (cada
+cuenta de Mini Conta es un cliente aparte), y cada una lleva su `alcance`: qué
+series y qué clientes puede leer y si comparte el catálogo. NULL = la clave de
+antes de 0092, sin límite, hasta que el dueño le ponga uno.
 """
 import hashlib
 import secrets
 
 from sqlalchemy import Column, DateTime, ForeignKey, String, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from ..core.db import Base
 from .base import tenant_fk, uuid_pk
@@ -60,3 +65,4 @@ class Conexion(Base):
     activada_at = Column(DateTime(timezone=True))
     ultimo_uso_at = Column(DateTime(timezone=True))
     revocada_at = Column(DateTime(timezone=True))
+    alcance = Column(JSONB)
