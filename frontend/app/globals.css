@@ -32,6 +32,17 @@
   --color-danger: var(--danger);
   --color-success: var(--success);
   --color-favorite: var(--favorite);
+  /* Pulso de clic de los íconos de acción de las tablas (DataTable). */
+  --animate-accion-pulso: accion-pulso 450ms ease-out;
+}
+
+@keyframes accion-pulso {
+  from { opacity: 0.28; transform: scale(0.6); }
+  to { opacity: 0; transform: scale(1.7); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-accion-pulso { animation: none; }
 }
 
 html,

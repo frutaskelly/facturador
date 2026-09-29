@@ -116,9 +116,17 @@ export default function SistemaDisenoPage() {
     },
   ];
 
-  // Columna de acciones: 3 íconos configurables (reordenar/ocultar con el menú ⋮).
+  // Columna de acciones: íconos configurables (reordenar/ocultar con el menú ⋮).
+  // Todo ícono da un pulso al pulsarlo; si `onClick` devuelve una promesa
+  // («Ver» simula una carga de 1.5 s), gira como spinner hasta que termina.
   const rowActions: RowAction<Demo>[] = [
-    { id: "ver", label: "Ver", icon: <Eye size={16} />, onClick: (r) => toast.success(`Ver ${r.nombre}`) },
+    {
+      id: "ver", label: "Ver", icon: <Eye size={16} />,
+      onClick: async (r) => {
+        await new Promise((ok) => setTimeout(ok, 1500));
+        toast.success(`Ver ${r.nombre}`);
+      },
+    },
     { id: "editar", label: "Editar", icon: <Pencil size={16} />, onClick: (r) => toast.success(`Editar ${r.nombre}`) },
     { id: "eliminar", label: "Eliminar", icon: <Trash2 size={16} />, tone: "danger", onClick: (r) => toast.error(`Eliminar ${r.nombre}`) },
   ];
