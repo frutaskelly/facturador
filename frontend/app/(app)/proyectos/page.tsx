@@ -28,7 +28,7 @@ const config: CrudConfig<Proyecto> = {
       hint: "Vacío = el proyecto es del grupo y lo pueden usar varios clientes." },
     { name: "sucursal_id", label: "Sucursal donde entrega", type: "select",
       filterBy: "cliente_id", colSpan: 2,
-      hint: "Un proyecto por plaza: HOSPITALES de Pachuca y de Tabasco son dos proyectos. Vacío = aplica en cualquier plaza." },
+      hint: "Un proyecto por plaza: HOSPITALES de Hidalgo y de Tabasco son dos proyectos. Vacío = aplica en cualquier plaza." },
     { name: "activo", label: "Activo", type: "switch" },
     // Ticket 86bbyveu1: las facturas del proyecto casi siempre van a las
     // mismas personas — el envío las prellena con esto (editable al enviar).

@@ -26,7 +26,7 @@ import type {
   Sucursal,
 } from "@/lib/types";
 
-// La sucursal es la PLAZA del negocio (Pachuca, Tabasco): una sola fila de la
+// La sucursal es la PLAZA del negocio (Hidalgo, Tabasco): una sola fila de la
 // que se surten varios clientes (rediseño 01-sep-2026). La serie de folios es
 // del VÍNCULO cliente×plaza — EHMO factura en Tabasco con ZEHMOVH mientras
 // Balles y Jubran comparten ZHGO en Pachuca — y el almacén es de la plaza.
@@ -471,8 +471,8 @@ export default function SucursalesPage() {
         }
       >
         <div className="space-y-3">
-          <Field label="Nombre" required hint="La plaza es una sola para todo el negocio: Pachuca existe una vez y de ella se surten todos sus clientes.">
-            <Input placeholder="Ej. Pachuca" value={nuevaSuc.nombre} onChange={(e) => setNuevaSuc({ ...nuevaSuc, nombre: e.target.value })} autoFocus />
+          <Field label="Nombre" required hint="La plaza es una sola para todo el negocio: Hidalgo existe una vez y de ella se surten todos sus clientes.">
+            <Input placeholder="Ej. Hidalgo" value={nuevaSuc.nombre} onChange={(e) => setNuevaSuc({ ...nuevaSuc, nombre: e.target.value })} autoFocus />
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Contacto">
