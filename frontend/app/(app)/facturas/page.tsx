@@ -826,16 +826,16 @@ export default function FacturasPage() {
     // Solo borradores nativos: una espejo se corrige en SAE y una timbrada ya
     // es un CFDI emitido (se sustituye o se cancela, no se edita).
     { id: "editar", label: "Editar", icon: <Pencil size={15} />,
-      onClick: (f) => { void accionesRef.current.abrirEditar(f); },
+      onClick: (f) => accionesRef.current.abrirEditar(f),
       hidden: (f) => !(canWrite && f.estado === "BORRADOR" && f.origen !== "ESPEJO_SAE") },
     { id: "preview", label: "Ver factura", icon: <Eye size={15} />,
       onClick: (f) => accionesRef.current.previsualizar(f), hidden: (f) => f.estado !== "TIMBRADA" },
     { id: "pdf", label: "Descargar PDF", icon: <Download size={15} />,
-      onClick: (f) => { void accionesRef.current.descargar(f, "pdf"); }, hidden: (f) => f.estado !== "TIMBRADA" },
+      onClick: (f) => accionesRef.current.descargar(f, "pdf"), hidden: (f) => f.estado !== "TIMBRADA" },
     // El XML nativo se pide a Facturama; una espejo no tiene facturama_id (su
     // XML vive en SAE — sincronizarlo es v2 del conector).
     { id: "xml", label: "Descargar XML", icon: <FileCode2 size={15} />,
-      onClick: (f) => { void accionesRef.current.descargar(f, "xml"); },
+      onClick: (f) => accionesRef.current.descargar(f, "xml"),
       hidden: (f) => f.estado !== "TIMBRADA" || f.origen === "ESPEJO_SAE" },
     { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />,
       onClick: (f) => accionesRef.current.abrirEnviar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },

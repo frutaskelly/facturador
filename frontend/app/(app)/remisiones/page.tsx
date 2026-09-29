@@ -2765,7 +2765,7 @@ export default function RemisionesPage() {
     return {
       ...a,
       icon: typeof icono === "function" ? (f: Fila) => (f.rem ? icono(f.rem) : null) : icono,
-      onClick: (f) => { if (f.rem) a.onClick(f.rem); },
+      onClick: (f) => (f.rem ? a.onClick(f.rem) : undefined),
       hidden: (f) => !f.rem || (a.hidden?.(f.rem) ?? false),
       disabled: a.disabled ? (f: Fila) => (f.rem ? a.disabled!(f.rem) : false) : undefined,
     };
@@ -2779,7 +2779,7 @@ export default function RemisionesPage() {
   // renglón en renglón: quien activaba «Ver la OC original» arriba no
   // entendía por qué en unas filas no estaba (no traen OC adjunta).
   const accionesRemision: RowAction<Remision>[] = [
-    { id: "editar", label: "Editar", icon: <Pencil size={15} />, onClick: (r) => { void filaRef.current.openEdit(r); },
+    { id: "editar", label: "Editar", icon: <Pencil size={15} />, onClick: (r) => filaRef.current.openEdit(r),
       hidden: () => !canWrite,
       disabled: (r) => puedeEditarse(r) ? false
         : r.estado === "CANCELADA" ? "La remisión está cancelada"
@@ -2796,7 +2796,7 @@ export default function RemisionesPage() {
     // «por revisar» tiene su propia acción aquí mismo). Un BORRADOR se
     // auto-confirma al facturar (mismo criterio que el botón del lote).
     { id: "facturar", label: "Facturar", icon: <FileText size={15} />, tone: "success",
-      onClick: (r) => { void filaRef.current.facturarUna(r); },
+      onClick: (r) => filaRef.current.facturarUna(r),
       hidden: () => !canWrite,
       disabled: (r) => r.estado === "CANCELADA" ? "La remisión está cancelada"
         : r.factura_id && r.factura_estado !== "CANCELADA" ? "Ya tiene una factura vigente"
@@ -2804,7 +2804,7 @@ export default function RemisionesPage() {
         : r.revision_pendiente ? "Primero hay que darla por revisada"
         : false },
     { id: "revisada", label: "Dar por revisada", icon: <Check size={15} />, tone: "success",
-      onClick: (r) => { void filaRef.current.darPorRevisada(r); },
+      onClick: (r) => filaRef.current.darPorRevisada(r),
       hidden: () => !canWrite,
       disabled: (r) => r.revision_pendiente ? false : "Esta remisión ya está revisada" },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
@@ -2820,7 +2820,7 @@ export default function RemisionesPage() {
         : r.export_sae_at ? "También salió en el masivo de factura: esa se libera cancelando en SAE"
         : false },
     { id: "devolucion", label: "Devolución", icon: <Undo2 size={15} />,
-      onClick: (r) => { void filaRef.current.abrirDevolucion(r); },
+      onClick: (r) => filaRef.current.abrirDevolucion(r),
       hidden: () => !canWrite,
       disabled: (r) => r.estado === "CONFIRMADA" ? false
         : r.estado === "CANCELADA" ? "La remisión está cancelada"
@@ -2831,7 +2831,7 @@ export default function RemisionesPage() {
       // motivo: es la que más se busca por fila.
       onClick: (r) => { if (r.oc_archivo_url) window.open(r.oc_archivo_url, "_blank", "noopener"); },
       disabled: (r) => r.oc_archivo_url ? false : "Esta remisión no tiene una OC adjunta" },
-    { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => { void filaRef.current.imprimirRemision(r); } },
+    { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => filaRef.current.imprimirRemision(r) },
     { id: "enviar-factura", label: "Enviar factura", icon: <Mail size={15} />,
       // La remisión ya facturada tiene DOS documentos: esta acción manda la
       // FACTURA timbrada (ticket 86bby3tx9); la de abajo sigue mandando la

@@ -1,8 +1,8 @@
 "use client";
 
-import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, ChevronRight, ChevronsUpDown, Columns3, Download, Eye, EyeOff, GripVertical, MoreVertical, Filter } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight, ChevronsUpDown, Columns3, Download, Eye, EyeOff, GripVertical, Loader2, MoreVertical, Filter } from "lucide-react";
 
 import { Alert } from "./Alert";
 import { EmptyState } from "./EmptyState";
@@ -56,8 +56,12 @@ export type RowAction<T> = {
   icon: ReactNode | ((row: T) => ReactNode);
   /** Texto del tooltip y nombre en el menú ⋮. */
   label: string;
-  /** Qué hacer al hacer clic en el ícono. */
-  onClick: (row: T) => void;
+  /** Qué hacer al hacer clic en el ícono. Si devuelve una promesa, el ícono
+   *  (o el ⋮, si se lanzó desde el menú) gira como spinner hasta que termine
+   *  y no admite otro clic mientras tanto: así se ve que la opción está
+   *  cargando y no se dispara dos veces. Devuelve la promesa en vez de
+   *  `void promesa` para ganarte ese aviso. */
+  onClick: (row: T) => void | Promise<unknown>;
   /** Color del ícono. */
   tone?: "default" | "danger" | "success";
   /** Oculta la acción en filas concretas (cuando no aplica a esa fila). */
@@ -71,6 +75,80 @@ export type RowAction<T> = {
   disabled?: (row: T) => string | false | null | undefined;
 };
 
+/** Lanza una acción de fila y avisa mientras corre. `onBusy(true)` solo se
+ *  llama si la acción devolvió una promesa; `onBusy(false)` cuando termina
+ *  (bien o mal — el error ya lo reporta la propia acción con su toast). */
+function correrAccion<T>(a: RowAction<T>, row: T, onBusy: (b: boolean) => void) {
+  let r: unknown;
+  try {
+    r = a.onClick(row);
+  } catch (e) {
+    console.error(e);
+    return;
+  }
+  if (r && typeof (r as Promise<unknown>).then === "function") {
+    onBusy(true);
+    (r as Promise<unknown>).catch((e) => console.error(e)).finally(() => onBusy(false));
+  }
+}
+
+/** Estado de «¿se hizo clic? ¿sigue cargando?» de un botón de acción. `pulso`
+ *  cambia en cada clic y sirve de `key` del anillo animado para que la onda
+ *  se repita aunque se pulse dos veces seguidas. El `vivo` evita actualizar
+ *  el estado de una fila que ya se desmontó (p. ej. la acción la sacó de la
+ *  página al recargar). */
+function useAccionFeedback() {
+  const [busy, setBusy] = useState(false);
+  const [pulso, setPulso] = useState(0);
+  const vivo = useRef(true);
+  useEffect(() => () => { vivo.current = false; }, []);
+  const onBusy = useCallback((b: boolean) => { if (vivo.current) setBusy(b); }, []);
+  const pulsar = useCallback(() => setPulso((n) => n + 1), []);
+  return { busy, pulso, onBusy, pulsar };
+}
+
+/** Anillo que se expande y se desvanece desde el ícono al hacer clic. */
+function PulsoClic({ n }: { n: number }) {
+  if (n === 0) return null;
+  return (
+    <span
+      key={n}
+      aria-hidden
+      className="pointer-events-none absolute inset-0 animate-accion-pulso rounded-md bg-current opacity-0"
+    />
+  );
+}
+
+/** Ícono suelto de la columna de acciones: se hunde al pulsar, suelta un
+ *  pulso y, si la acción es asíncrona, se vuelve spinner hasta que acaba. */
+function AccionIcono<T>({ action: a, row }: { action: RowAction<T>; row: T }) {
+  const { busy, pulso, onBusy, pulsar } = useAccionFeedback();
+  const icon = typeof a.icon === "function" ? a.icon(row) : a.icon;
+  const toneCls =
+    a.tone === "danger" ? "text-danger hover:bg-surface-2"
+    : a.tone === "success" ? "text-success hover:bg-surface-2"
+    : "text-muted hover:bg-surface-2 hover:text-foreground";
+  return (
+    <button
+      type="button"
+      title={busy ? `${a.label}…` : a.label}
+      aria-label={a.label}
+      aria-busy={busy || undefined}
+      disabled={busy}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (busy) return;
+        pulsar();
+        correrAccion(a, row, onBusy);
+      }}
+      className={`relative rounded-md p-1.5 transition-transform duration-100 active:scale-90 disabled:cursor-progress ${busy ? "bg-surface-2" : ""} ${toneCls}`}
+    >
+      <PulsoClic n={pulso} />
+      {busy ? <Loader2 size={15} className="animate-spin" /> : <span className="block">{icon}</span>}
+    </button>
+  );
+}
+
 /** Menú ⋮ de la fila: lista TODAS las acciones que aplican a esa fila (las que
  *  ya se ven como ícono suelto incluidas), en el orden configurado en el ⋮ del
  *  encabezado. Así lo que se activa arriba siempre se puede usar por línea,
@@ -82,6 +160,9 @@ export type RowAction<T> = {
  *  mismo z-index, pero posteriores en el DOM — lo tapaban a media altura. */
 function RowOverflowMenu<T>({ actions, row }: { actions: RowAction<T>[]; row: T }) {
   const [open, setOpen] = useState(false);
+  // La acción elegida en el menú corre con el menú ya cerrado: el aviso de
+  // «cargando» lo lleva el propio ⋮ (spinner), que es lo que queda a la vista.
+  const { busy, pulso, onBusy, pulsar } = useAccionFeedback();
   // `top`/`bottom`: el menú cuelga hacia abajo del botón; si la fila está al
   // final de la pantalla se ancla al revés para no quedar cortado. `maxHeight`
   // lo limita al hueco disponible y el resto se recorre con scroll: con diez
@@ -132,12 +213,15 @@ function RowOverflowMenu<T>({ actions, row }: { actions: RowAction<T>[]; row: T 
       <button
         ref={btnRef}
         type="button"
-        title="Más acciones"
         aria-label="Más acciones"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-busy={busy || undefined}
+        disabled={busy}
         onClick={(e) => {
           e.stopPropagation();
+          if (busy) return;
+          pulsar();
           const r = btnRef.current?.getBoundingClientRect();
           if (r) {
             const margen = 8;
@@ -155,9 +239,11 @@ function RowOverflowMenu<T>({ actions, row }: { actions: RowAction<T>[]; row: T 
           }
           setOpen((v) => !v);
         }}
-        className={`rounded-md p-1.5 ${open ? "bg-surface-2 text-foreground" : "text-muted hover:bg-surface-2 hover:text-foreground"}`}
+        title={busy ? "Cargando…" : "Más acciones"}
+        className={`relative rounded-md p-1.5 transition-transform duration-100 active:scale-90 disabled:cursor-progress ${open || busy ? "bg-surface-2 text-foreground" : "text-muted hover:bg-surface-2 hover:text-foreground"}`}
       >
-        <MoreVertical size={16} />
+        <PulsoClic n={pulso} />
+        {busy ? <Loader2 size={16} className="animate-spin" /> : <MoreVertical size={16} />}
       </button>
       {open && typeof document !== "undefined" && createPortal(
         <div
@@ -200,8 +286,8 @@ function RowOverflowMenu<T>({ actions, row }: { actions: RowAction<T>[]; row: T 
                 key={a.id}
                 type="button"
                 role="menuitem"
-                onClick={() => { setOpen(false); a.onClick(row); }}
-                className={`flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm hover:bg-surface-2 ${toneCls}`}
+                onClick={() => { setOpen(false); pulsar(); correrAccion(a, row, onBusy); }}
+                className={`flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm transition-colors hover:bg-surface-2 active:bg-border/60 ${toneCls}`}
               >
                 <span className="shrink-0 text-muted">{icon}</span>
                 <span>{a.label}</span>
@@ -1418,25 +1504,7 @@ export function DataTable<T>({
                             onClick={(e) => e.stopPropagation()}
                           >
                             <div className="flex items-center justify-end gap-0.5">
-                              {sueltas.map((a) => {
-                                const icon = typeof a.icon === "function" ? a.icon(row) : a.icon;
-                                const toneCls =
-                                  a.tone === "danger" ? "text-danger hover:bg-surface-2"
-                                  : a.tone === "success" ? "text-success hover:bg-surface-2"
-                                  : "text-muted hover:bg-surface-2 hover:text-foreground";
-                                return (
-                                  <button
-                                    key={a.id}
-                                    type="button"
-                                    title={a.label}
-                                    aria-label={a.label}
-                                    onClick={(e) => { e.stopPropagation(); a.onClick(row); }}
-                                    className={`rounded-md p-1.5 ${toneCls}`}
-                                  >
-                                    {icon}
-                                  </button>
-                                );
-                              })}
+                              {sueltas.map((a) => <AccionIcono key={a.id} action={a} row={row} />)}
                               {aplican.length > sueltas.length && <RowOverflowMenu actions={aplican} row={row} />}
                             </div>
                           </td>
