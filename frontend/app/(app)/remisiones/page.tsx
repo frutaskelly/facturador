@@ -454,25 +454,55 @@ export default function RemisionesPage() {
     [ctxPrecios],
   );
 
-  /** Guarda la clave en el PRODUCTO: queda para todos sus documentos futuros.
-   *  Se llama al salir del campo, sólo si cambió. */
-  async function guardarClaveSae(producto_id: string, valor: string) {
+  // Claves por presentación corregidas en esta captura: {producto: {PRES: clave}}.
+  // "" = se quitó (la línea vuelve a la cascada).
+  const [presEditadas, setPresEditadas] = useState<Record<string, Record<string, string>>>({});
+
+  /** La clave con la que sale ESTA línea (producto + presentación) y de dónde viene. */
+  function claveDeLinea(producto_id: string, presentacion: string) {
+    const pres = (presentacion || "").toUpperCase();
+    const propia = {
+      ...(ctxPrecios?.claves_sae_presentacion?.[producto_id] ?? {}),
+      ...(presEditadas[producto_id] ?? {}),
+    }[pres];
+    if (propia) return { clave: propia, origen: "presentacion" as const };
+    return {
+      clave: clavesSae[producto_id] ?? "",
+      origen: clavesDelCliente.has(producto_id) ? ("cliente" as const) : ("producto" as const),
+    };
+  }
+
+  /** Guarda la clave de la línea. El servidor decide el nivel: la presentación
+   *  (si no es la base o ya tenía una propia), la fila del catálogo del cliente
+   *  de la que sale, o la clave base del producto. */
+  async function guardarClaveSae(producto_id: string, presentacion: string, valor: string) {
     const clave = valor.trim().toUpperCase();
-    if (!producto_id || clave === (clavesSae[producto_id] ?? "")) return;
-    setClavesEditadas((m) => ({ ...m, [producto_id]: clave }));
+    if (!producto_id || clave === claveDeLinea(producto_id, presentacion).clave) return;
     try {
-      await apiFetch(`/api/v1/productos/${producto_id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ clave_sae: clave || null }),
-      });
-      toast.success(clave ? `Clave de SAE guardada: ${clave}` : "Clave de SAE quitada");
+      const r = await apiFetch<{ clave: string | null; origen: string; presentacion?: string | null }>(
+        `/api/v1/productos/${producto_id}/clave-sae`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            clave: clave || null,
+            presentacion: presentacion || null,
+            cliente_id: clienteId || null,
+            sucursal_id: sucursalId || null,
+          }),
+        },
+      );
+      if (r.origen === "presentacion") {
+        const pres = (presentacion || "").toUpperCase();
+        setPresEditadas((m) => ({ ...m, [producto_id]: { ...(m[producto_id] ?? {}), [pres]: r.clave ?? "" } }));
+      } else {
+        setClavesEditadas((m) => ({ ...m, [producto_id]: r.clave ?? "" }));
+      }
+      const donde =
+        r.origen === "presentacion" ? `en ${presentacion}`
+        : r.origen === "cliente" ? `en el catálogo de ${cliName[clienteId] ?? "este cliente"}`
+        : "en el producto";
+      toast.success(clave ? `Clave de SAE guardada ${donde}: ${clave}` : `Clave de SAE quitada ${donde}`);
     } catch (e) {
-      // Se revierte lo pintado: si no se guardó, no puede quedarse en pantalla.
-      setClavesEditadas((m) => {
-        const copia = { ...m };
-        delete copia[producto_id];
-        return copia;
-      });
       toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la clave de SAE");
     }
   }
@@ -3030,8 +3060,8 @@ export default function RemisionesPage() {
               <div className="col-span-3">{showMatchIA ? "Producto del cliente" : "Producto"}</div>
               {showMatchIA && <div className="col-span-3 inline-flex items-center gap-1"><Sparkles size={12} /> Match IA</div>}
               {/* Mientras se decide QUÉ producto es (Match IA), la clave es ruido. */}
-              {!showMatchIA && <div className="col-span-2">Clave SAE</div>}
               <div className={showMatchIA ? "col-span-2" : "col-span-1"}>Presentación</div>
+              {!showMatchIA && <div className="col-span-2">Clave SAE</div>}
               <div className="col-span-2">Precio</div>
               {!showMatchIA && <div className="col-span-1 text-right">IEPS</div>}
               {!showMatchIA && <div className="col-span-1 text-right">IVA</div>}
@@ -3102,57 +3132,6 @@ export default function RemisionesPage() {
                     )}
                   </div>
                 )}
-                {!showMatchIA && (
-                  <div className="col-span-5 sm:col-span-2">
-                    {l.producto_id ? (
-                      ctxPrecios?.claves_sae_presentacion?.[l.producto_id]?.[(l.presentacion || "").toUpperCase()] ? (
-                        // La presentación tiene su PROPIA clave (SANDIA en PIEZA =
-                        // SANDIAPZ): es la que sale a SAE y se cambia en Productos.
-                        <div
-                          className="truncate rounded-lg border border-border bg-surface-2 px-2 py-2 text-xs text-muted"
-                          title={`Clave de SAE de este producto en ${l.presentacion}. Cámbiala en Productos → Presentaciones y claves de SAE.`}
-                        >
-                          {ctxPrecios.claves_sae_presentacion[l.producto_id][(l.presentacion || "").toUpperCase()]} · {l.presentacion}
-                        </div>
-                      ) : clavesDelCliente.has(l.producto_id) ? (
-                        // Clave del catálogo de ESTE cliente: se enseña, pero
-                        // cambiarla aquí escribiría la del producto y el
-                        // documento seguiría saliendo con la del cliente.
-                        <div
-                          className="truncate rounded-lg border border-border bg-surface-2 px-2 py-2 text-xs text-muted"
-                          title={`Es la clave que ${cliName[clienteId] ?? "este cliente"} usa para este producto. Cámbiala en su catálogo.`}
-                        >
-                          {clavesSae[l.producto_id]} · del cliente
-                        </div>
-                      ) : (
-                        // Mismo buscador del aviso, con el catálogo de la
-                        // empresa de SAE que le toca a ESTE cliente y plaza.
-                        // Aquí guarda al elegir: la captura no recarga nada.
-                        <ClaveSaeInline
-                          compacto
-                          clienteId={clienteId || null}
-                          sucursalId={sucursalId || null}
-                          productoId={l.producto_id}
-                          productoNombre={l.label || l.texto}
-                          value={clavesBorrador[l.producto_id] ?? clavesSae[l.producto_id] ?? ""}
-                          onChange={(v) =>
-                            setClavesBorrador((m) => ({ ...m, [l.producto_id]: v }))
-                          }
-                          onElegir={(v) => {
-                            void guardarClaveSae(l.producto_id, v);
-                            setClavesBorrador((m) => {
-                              const copia = { ...m };
-                              delete copia[l.producto_id];
-                              return copia;
-                            });
-                          }}
-                        />
-                      )
-                    ) : (
-                      <span className="text-xs text-muted">—</span>
-                    )}
-                  </div>
-                )}
                 <div className={`col-span-4 ${showMatchIA ? "sm:col-span-2" : "sm:col-span-1"}`}>
                   <KeyboardCombobox
                     options={[
@@ -3174,6 +3153,49 @@ export default function RemisionesPage() {
                     placeholder="Presentación"
                   />
                 </div>
+                {!showMatchIA && (
+                  <div className="col-span-5 sm:col-span-2">
+                    {l.producto_id ? (() => {
+                      // Producto + presentación = clave: SANDIA en PIEZA es
+                      // SANDIAPZ y en KILO SANDIAKG. Todas se editan aquí; el
+                      // servidor la guarda en el nivel del que sale.
+                      const k = `${l.producto_id}|${(l.presentacion || "").toUpperCase()}`;
+                      const { clave, origen } = claveDeLinea(l.producto_id, l.presentacion);
+                      return (
+                        <div title={
+                          origen === "presentacion" ? `Clave de este producto en ${l.presentacion}`
+                          : origen === "cliente" ? `Clave del catálogo de ${cliName[clienteId] ?? "este cliente"}`
+                          : "Clave base del producto"
+                        }>
+                          <ClaveSaeInline
+                            compacto
+                            clienteId={clienteId || null}
+                            sucursalId={sucursalId || null}
+                            productoId={l.producto_id}
+                            productoNombre={l.label || l.texto}
+                            value={clavesBorrador[k] ?? clave}
+                            onChange={(v) => setClavesBorrador((m) => ({ ...m, [k]: v }))}
+                            onElegir={(v) => {
+                              void guardarClaveSae(l.producto_id, l.presentacion, v);
+                              setClavesBorrador((m) => {
+                                const copia = { ...m };
+                                delete copia[k];
+                                return copia;
+                              });
+                            }}
+                          />
+                          {origen !== "producto" && clave ? (
+                            <div className="mt-0.5 truncate text-[10px] text-muted">
+                              {origen === "cliente" ? "del cliente" : `por ${l.presentacion}`}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })() : (
+                      <span className="text-xs text-muted">—</span>
+                    )}
+                  </div>
+                )}
                 <div className="col-span-3 sm:col-span-2">
                   <Input
                     inputMode="decimal" placeholder="auto" value={l.precio}

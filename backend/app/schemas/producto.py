@@ -21,6 +21,22 @@ class PresentacionCreate(BaseModel):
     unidad_sat: Optional[str] = Field(default=None, max_length=3)
 
 
+class ClaveSaeLineaIn(BaseModel):
+    """La clave de SAE que se corrige desde una línea de remisión. El servidor
+    decide DÓNDE se guarda (presentación, catálogo del cliente o producto)."""
+    clave: Optional[str] = Field(default=None, max_length=50)
+    presentacion: Optional[str] = Field(default=None, max_length=20)
+    cliente_id: Optional[uuid.UUID] = None
+    sucursal_id: Optional[uuid.UUID] = None
+
+
+class ClaveSaeLineaOut(BaseModel):
+    clave: Optional[str] = None
+    # "presentacion" | "cliente" | "producto": dónde quedó guardada.
+    origen: str
+    presentacion: Optional[str] = None
+
+
 class ProductoBase(BaseModel):
     sku: str = Field(max_length=50)
     nombre: str = Field(max_length=254)
