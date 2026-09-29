@@ -1246,3 +1246,59 @@ def test_el_catalogo_es_por_empresa(client, env, auth_as, espejo_user):
                     json={"ids": [rem["id"]], "tipo": "FACTURA"})
     # sin espejo de la 02, no se valida (fail-open) — el de la 03 no aplica
     assert r.json()["ok"] is True
+
+
+def test_clave_por_presentacion_manda_en_su_presentacion(client, env, auth_as):
+    """SAE da de alta un artículo por unidad: SANDIA en KILO es SANDIAKG y en
+    PIEZA es SANDIAPZ. Con una sola clave por producto, la línea en PIEZA salía
+    como SANDIAKG y SAE facturaba kilos (29-sep-2026). La clave de la
+    presentación manda en esa presentación — incluso sobre el catálogo del
+    cliente, que es la del artículo en su unidad normal — y las demás siguen
+    con la cascada de siempre."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        sandia = Producto(tenant_id=env["tenant"], sku=f"6{suffix}", nombre="SANDIA",
+                          clave_sat="50304610", unidad_sat="KGM", clave_sae="SANDIAKG",
+                          unidad_base="KILO", presentaciones={"KILO": 1})
+        db.add(sandia); db.commit()
+        sid = str(sandia.id)
+    finally:
+        db.close()
+
+    # Se guarda por la API, con ruido: se normaliza como la clave base.
+    r = client.patch(f"/api/v1/productos/{sid}", headers=h, json={"presentaciones": {
+        "KILO": 1,
+        "PIEZA": {"factor": 10, "sat": "H87", "clave_sae": " sandiapz "},
+        "CAJA": {"factor": 30, "clave_sae": "  "},
+    }})
+    assert r.status_code == 200, r.text
+    pres = r.json()["presentaciones"]
+    assert pres["PIEZA"]["clave_sae"] == "SANDIAPZ"
+    assert pres["PIEZA"]["sat"] == "H87"          # lo demás de la forma rica sigue
+    assert "clave_sae" not in pres["CAJA"]         # vacía = sin clave propia
+
+    # El catálogo del cliente también la tiene (en su unidad normal).
+    client.put(f"/api/v1/clientes/{env['cli']}/catalogo/{sid}", headers=h,
+               json={"codigo_cliente": "SANDIACLIKG"})
+
+    rem = _rem(client, h, env, su_pedido="7788", lineas=[
+        {"producto_id": sid, "cantidad_solicitada": 12, "precio_unitario": 20,
+         "presentacion": "KILO"},
+        {"producto_id": sid, "cantidad_solicitada": 2, "precio_unitario": 250,
+         "presentacion": "PIEZA"},
+        {"producto_id": sid, "cantidad_solicitada": 1, "precio_unitario": 600,
+         "presentacion": "CAJA"},
+    ])
+    r = client.post("/api/v1/remisiones/export-sae", headers=h,
+                    json={"ids": [rem["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 950}})
+    assert r.status_code == 200, r.text
+    hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_name("Facturas")
+    claves = sorted(hoja.row(i)[4].value for i in range(1, hoja.nrows))
+    assert claves == ["SANDIACLIKG", "SANDIACLIKG", "SANDIAPZ"]
+
+    # La captura recibe el mapa para enseñarla por línea.
+    ctx = client.get("/api/v1/precios/contexto", headers=h,
+                     params={"cliente_id": env["cli"]}).json()
+    assert ctx["claves_sae_presentacion"][sid] == {"PIEZA": "SANDIAPZ"}

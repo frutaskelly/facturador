@@ -161,6 +161,10 @@ class ContextoPreciosOut(BaseModel):
     # editarlas es otra cosa (toca sólo a él), así que la pantalla no deja
     # cambiarlas de pasada.
     claves_del_cliente: list[uuid.UUID] = Field(default_factory=list)
+    # {producto: {PRESENTACION: clave}}: la clave propia de una presentación
+    # (SANDIA en PIEZA = SANDIAPZ). Si la línea va en esa presentación, MANDA
+    # sobre `claves_sae` — el export la pone primero.
+    claves_sae_presentacion: dict[uuid.UUID, dict[str, str]] = Field(default_factory=dict)
 
 
 # ── Cotización (precio resuelto) ──

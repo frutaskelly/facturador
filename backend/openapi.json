@@ -4097,6 +4097,16 @@
       "title": "Claves Sae",
       "type": "object"
      },
+     "claves_sae_presentacion": {
+      "additionalProperties": {
+       "additionalProperties": {
+        "type": "string"
+       },
+       "type": "object"
+      },
+      "title": "Claves Sae Presentacion",
+      "type": "object"
+     },
      "lista": {
       "anyOf": [
        {

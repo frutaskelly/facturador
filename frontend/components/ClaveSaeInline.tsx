@@ -13,6 +13,10 @@
 //
 // Y deja capturar a mano lo que no esté en el espejo: quien no corre el bot no
 // tiene espejo, y aun así tiene que poder trabajar.
+//
+// Sin remisión ni cliente (la ficha del producto) busca en el espejo de TODAS
+// las empresas y dice en cuáles vive cada clave: SANDIA PZA existe en la 03 y
+// está de baja en la 02, y eso se tiene que ver antes de elegirla.
 
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
@@ -23,6 +27,15 @@ type ClaveSugerida = {
   clave: string;
   descripcion?: string | null;
   activa: boolean;
+  producto_id?: string | null;
+  producto_nombre?: string | null;
+  /** Solo en la búsqueda sin cliente: en qué empresas vive y si está viva. */
+  empresas?: Record<string, { activa: boolean }>;
+};
+type ClaveBuscada = {
+  clave: string;
+  descripcion?: string | null;
+  empresas: Record<string, { activa: boolean }>;
   producto_id?: string | null;
   producto_nombre?: string | null;
 };
@@ -56,6 +69,7 @@ export function ClaveSaeInline({
   /** La captura todavía no tiene remisión: pregunta por cliente y plaza. */
   clienteId?: string | null;
   sucursalId?: string | null;
+  /** Vacío en un producto que todavía no se guarda. */
   productoId: string;
   productoNombre: string;
   /** La clave elegida y todavía sin guardar. */
@@ -92,12 +106,37 @@ export function ClaveSaeInline({
     setCargando(true);
     const q = (texto.trim() || productoNombre).slice(0, 80);
     const t = setTimeout(() => {
-      const p = new URLSearchParams({ q, producto_id: productoId });
+      if (!remisionId && !clienteId) {
+        // Ficha del producto: el espejo completo, sin cliente ni plaza.
+        if (!q) { setCargando(false); return; }
+        apiFetch<ClaveBuscada[]>(`/api/v1/productos/claves-sae?${new URLSearchParams({ q, limit: "20" })}`)
+          .then((items) => {
+            if (!vivo) return;
+            setDatos({
+              empresa: null,
+              espejo: items.length > 0,
+              motivo: items.length ? null : "Catálogo de SAE",
+              claves: items.map((c) => ({
+                clave: c.clave,
+                descripcion: c.descripcion,
+                activa: Object.values(c.empresas).some((e) => e.activa),
+                producto_id: c.producto_id,
+                producto_nombre: c.producto_nombre,
+                empresas: c.empresas,
+              })),
+              ya_usa: [],
+            });
+            setCargando(false);
+          })
+          .catch(() => { if (vivo) { setDatos(null); setCargando(false); } });
+        return;
+      }
+      const p = new URLSearchParams({ q });
+      if (productoId) p.set("producto_id", productoId);
       if (!remisionId && sucursalId) p.set("sucursal_id", sucursalId);
       const url = remisionId
         ? `/api/v1/remisiones/${remisionId}/claves-sae?${p.toString()}`
         : `/api/v1/clientes/${clienteId}/claves-sae?${p.toString()}`;
-      if (!remisionId && !clienteId) { setCargando(false); return; }
       apiFetch<Respuesta>(url)
         .then((r) => { if (vivo) { setDatos(r); setCargando(false); } })
         .catch(() => { if (vivo) { setDatos(null); setCargando(false); } });
@@ -114,6 +153,17 @@ export function ClaveSaeInline({
     onChange(clave);
     setAbierto(false);
     onElegir?.(clave);
+  }
+
+  /** «02 03 04» y cuáles de ésas la tienen de baja. */
+  function enEmpresas(empresas?: Record<string, { activa: boolean }>) {
+    if (!empresas) return { donde: null, baja: null };
+    const ks = Object.keys(empresas).sort();
+    const baja = ks.filter((k) => !empresas[k].activa);
+    return {
+      donde: ks.length ? `empresas ${ks.join(" ")}` : null,
+      baja: baja.length ? `de BAJA en ${baja.join(" ")}` : null,
+    };
   }
 
   function Fila({
@@ -183,7 +233,7 @@ export function ClaveSaeInline({
 
           <div className="px-3 pt-2 text-[11px] uppercase tracking-wide text-muted">
             {datos?.espejo
-              ? `Catálogo de SAE · empresa ${datos.empresa}`
+              ? datos.empresa ? `Catálogo de SAE · empresa ${datos.empresa}` : "Catálogo de SAE · todas las empresas"
               : datos?.motivo ?? "Catálogo de SAE"}
           </div>
           {cargando ? <div className="px-3 py-2 text-sm text-muted">Buscando…</div> : null}
@@ -193,20 +243,23 @@ export function ClaveSaeInline({
             </div>
           ) : null}
           {!cargando &&
-            (datos?.claves ?? []).map((c) => (
-              <Fila
-                key={c.clave}
-                clave={c.clave}
-                detalle={c.descripcion}
-                aviso={
-                  !c.activa
-                    ? "dada de BAJA en SAE: no factura"
-                    : c.producto_id && c.producto_id !== productoId
-                    ? `también la usa ${c.producto_nombre}`
-                    : null
-                }
-              />
-            ))}
+            (datos?.claves ?? []).map((c) => {
+              const { donde, baja } = enEmpresas(c.empresas);
+              return (
+                <Fila
+                  key={c.clave}
+                  clave={c.clave}
+                  detalle={[c.descripcion, donde].filter(Boolean).join(" · ")}
+                  aviso={
+                    !c.activa
+                      ? "dada de BAJA en SAE: no factura"
+                      : [baja, c.producto_id && c.producto_id !== productoId
+                          ? `también la usa ${c.producto_nombre}` : null]
+                          .filter(Boolean).join(" · ") || null
+                  }
+                />
+              );
+            })}
 
           {limpia && !enLista && !enUso ? (
             <button

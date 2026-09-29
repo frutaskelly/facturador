@@ -3105,7 +3105,16 @@ export default function RemisionesPage() {
                 {!showMatchIA && (
                   <div className="col-span-5 sm:col-span-2">
                     {l.producto_id ? (
-                      clavesDelCliente.has(l.producto_id) ? (
+                      ctxPrecios?.claves_sae_presentacion?.[l.producto_id]?.[(l.presentacion || "").toUpperCase()] ? (
+                        // La presentación tiene su PROPIA clave (SANDIA en PIEZA =
+                        // SANDIAPZ): es la que sale a SAE y se cambia en Productos.
+                        <div
+                          className="truncate rounded-lg border border-border bg-surface-2 px-2 py-2 text-xs text-muted"
+                          title={`Clave de SAE de este producto en ${l.presentacion}. Cámbiala en Productos → Presentaciones y claves de SAE.`}
+                        >
+                          {ctxPrecios.claves_sae_presentacion[l.producto_id][(l.presentacion || "").toUpperCase()]} · {l.presentacion}
+                        </div>
+                      ) : clavesDelCliente.has(l.producto_id) ? (
                         // Clave del catálogo de ESTE cliente: se enseña, pero
                         // cambiarla aquí escribiría la del producto y el
                         // documento seguiría saliendo con la del cliente.

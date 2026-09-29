@@ -31,6 +31,7 @@ from ..models.clave_sae import norm_clave
 from ..schemas.clave_sae import ClaveSaeBuscadaOut, ClaveSaeEnEmpresa, ClavesSaeResult
 from ..schemas.remision import ClaveSaeEnUso, ClaveSaeSugerida, ClavesSaeOut
 from .export_sae import _clave_para_remision, _claves_sae_de_clientes
+from .inventario import claves_sae_por_presentacion
 
 
 # ── Mantener el espejo ───────────────────────────────────────────────────────
@@ -300,6 +301,8 @@ def claves_que_ya_usa(
     usos: dict[str, str] = {}
     if (prod.clave_sae or "").strip():
         usos[norm_clave(prod.clave_sae)] = "clave del producto"
+    for pres, clave in claves_sae_por_presentacion(prod.presentaciones).items():
+        usos.setdefault(norm_clave(clave), f"clave del producto en {pres}")
     filas = (
         db.query(ProductoCliente, Cliente.legal_name, Sucursal.nombre)
         .join(Cliente, Cliente.id == ProductoCliente.cliente_id)

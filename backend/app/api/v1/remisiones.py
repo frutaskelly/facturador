@@ -1181,6 +1181,7 @@ def reporte_sin_precio(
         return {"productos": [], "remisiones": 0, "sin_clave": 0, "sin_precio": 0, **ventana}
 
     from ...services.export_sae import lineas_clave_no_facturable
+    from ...services.inventario import presentacion_clave_sae
 
     no_fact = lineas_clave_no_facturable(db, ctx.tenant_id, rems)
     por_id = {r.id: r for r in rems}
@@ -1210,7 +1211,9 @@ def reporte_sin_precio(
         folio = (normalizar_folio(rem.su_pedido) if rem and rem.su_pedido
                  else (rem.folio_interno if rem else None))
         desc = (prod.nombre if prod else None) or (ln.notas or "").strip() or "PARTIDA SIN PRODUCTO"
-        clave = (prod.clave_sae or "").strip() if prod else ""
+        # La de la presentación primero: SANDIA en PIEZA es SANDIAPZ, no SANDIAKG.
+        clave = ((presentacion_clave_sae(prod, ln.presentacion) or prod.clave_sae or "").strip()
+                 if prod else "")
         if not clave:
             anota("SIN CLAVE", None, desc, ln.presentacion, ln.cantidad_solicitada, folio)
         else:
