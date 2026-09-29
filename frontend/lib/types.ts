@@ -204,6 +204,9 @@ export type ContextoPrecios = {
   /** De ésas, las que vienen del catálogo del cliente y no del producto: se
    *  muestran pero no se editan de pasada (tocarlas afecta sólo a él). */
   claves_del_cliente: string[];
+  /** {producto_id: {PRESENTACION: clave}}: la clave propia de una presentación
+   *  (SANDIA en PIEZA = SANDIAPZ). Si la línea va en esa, MANDA. */
+  claves_sae_presentacion?: Record<string, Record<string, string>>;
 };
 
 export type TipoSerie = "FISCAL" | "NO_FISCAL";

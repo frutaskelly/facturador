@@ -13,6 +13,7 @@ import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { ClaveSaeInline } from "@/components/ClaveSaeInline";
 import { ProductoAliasPanel } from "@/components/ProductoAliasPanel";
 import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { SatClaveCombobox } from "@/components/SatClaveCombobox";
@@ -49,7 +50,23 @@ const UNIDADES_SAT: { code: string; nombre: string }[] = [
 ];
 
 type SatOpcion = { clave_sat: string; descripcion: string };
-type PresRow = { nombre: string; factor: string };
+// `extra` guarda lo demás de la forma rica ({sat, estimado, …}): el formulario
+// solo edita factor y clave, y reescribir la presentación como número a secas
+// borraba la unidad SAT de la CAJA/PIEZA al guardar cualquier otra cosa.
+type PresRow = { nombre: string; factor: string; clave_sae: string; extra: Record<string, unknown> };
+
+/** La clave de SAE de cada presentación del producto ({PIEZA: "SANDIAPZ"}). */
+function clavesPorPresentacion(p: Producto): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [nombre, v] of Object.entries(p.presentaciones ?? {})) {
+    const raw = v as unknown;
+    if (raw && typeof raw === "object") {
+      const clave = String((raw as { clave_sae?: string }).clave_sae ?? "").trim();
+      if (clave) out[nombre] = clave;
+    }
+  }
+  return out;
+}
 
 type FormState = {
   sku: string;
@@ -93,8 +110,11 @@ function toForm(p: Producto): FormState {
     .filter(([nombre]) => nombre !== base)
     .map(([nombre, factor]) => {
       const f = factor as unknown;
-      const num = typeof f === "object" && f !== null ? (f as { factor?: number }).factor ?? 1 : (f as number);
-      return { nombre, factor: String(num) };
+      if (typeof f === "object" && f !== null) {
+        const { factor: num, clave_sae, ...extra } = f as { factor?: number; clave_sae?: string };
+        return { nombre, factor: String(num ?? 1), clave_sae: clave_sae ?? "", extra };
+      }
+      return { nombre, factor: String(f as number), clave_sae: "", extra: {} };
     });
   return {
     sku: p.sku,
@@ -224,7 +244,7 @@ export default function ProductosPage() {
     }
     const unidadBase = form.unidad_base.trim() || "KILO";
     // Build the presentation→base-units map; the base unit is always 1:1.
-    const presentaciones: Record<string, number> = { [unidadBase]: 1 };
+    const presentaciones: Record<string, number | Record<string, unknown>> = { [unidadBase]: 1 };
     for (const r of form.presentaciones) {
       const nombre = r.nombre.trim();
       if (!nombre || nombre === unidadBase) continue;
@@ -233,7 +253,12 @@ export default function ProductosPage() {
         toast.error(`Factor inválido para "${nombre}" (debe ser mayor a 0)`);
         return;
       }
-      presentaciones[nombre] = factor;
+      const clave = r.clave_sae.trim().toUpperCase();
+      // Número a secas solo si no hay nada más que guardar (la forma de siempre).
+      presentaciones[nombre] =
+        clave || Object.keys(r.extra).length
+          ? { ...r.extra, factor, ...(clave ? { clave_sae: clave } : {}) }
+          : factor;
     }
     const payload = {
       ...(form.sku.trim() ? { sku: form.sku.trim() } : {}),  // vacío → backend autogenera
@@ -313,11 +338,25 @@ export default function ProductosPage() {
     {
       header: "Clave SAE",
       sortValue: (p) => p.clave_sae ?? "",
-      exportValue: (p) => p.clave_sae ?? "",
-      cell: (p) =>
-        p.clave_sae
-          ? <span className="tabular-nums">{p.clave_sae}</span>
-          : <span className="text-warning" title="Sin ella, este producto sale «sin clave» en cada cliente que no lo tenga en su catálogo">—</span>,
+      // Con las de cada presentación: buscar «SANDIAPZ» tiene que encontrar la SANDIA.
+      exportValue: (p) =>
+        [p.clave_sae ?? "", ...Object.entries(clavesPorPresentacion(p)).map(([k, v]) => `${k}: ${v}`)]
+          .filter(Boolean).join(" · "),
+      cell: (p) => {
+        const porPres = Object.entries(clavesPorPresentacion(p));
+        return (
+          <div>
+            {p.clave_sae
+              ? <span className="tabular-nums">{p.clave_sae}</span>
+              : <span className="text-warning" title="Sin ella, este producto sale «sin clave» en cada cliente que no lo tenga en su catálogo">—</span>}
+            {porPres.map(([pres, clave]) => (
+              <div key={pres} className="text-xs text-muted tabular-nums">
+                {pres}: {clave}
+              </div>
+            ))}
+          </div>
+        );
+      },
     },
     {
       // La descripción oficial del SAT para esa clave: la resuelve el backend
@@ -527,17 +566,6 @@ export default function ProductosPage() {
               <Field label="SKU" hint={editingId ? undefined : "Se genera automáticamente al guardar"}>
                 <Input value={editingId ? form.sku : ""} placeholder="(automático)" disabled className="max-w-[14rem]" />
               </Field>
-              <Field
-                label="Clave en SAE"
-                hint="La misma en todas las empresas de SAE. Con ella, el producto ya no sale «sin clave» en ningún cliente."
-              >
-                <Input
-                  value={form.clave_sae}
-                  placeholder="AJOPRIMERAKG"
-                  onChange={(e) => setForm({ ...form, clave_sae: e.target.value.toUpperCase() })}
-                  className="max-w-[14rem]"
-                />
-              </Field>
             </div>
             {/* nombre + unidad base */}
             <Field label="Nombre" required>
@@ -629,12 +657,25 @@ export default function ProductosPage() {
             </div>
 
             <div className="sm:col-span-2 rounded-lg border border-border bg-surface-2/40 p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-medium">Presentaciones</span>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-medium">Presentaciones y claves de SAE</span>
                 <span className="text-xs text-muted">Factor = unidades base por presentación</span>
               </div>
-              <div className="mb-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
-                Base: <b>{form.unidad_base}</b> = 1 — la unidad de inventario
+              <p className="mb-2 text-xs text-muted">
+                SAE tiene un artículo por unidad (SANDIAKG, SANDIAPZ): pon la clave de cada una y la
+                línea sale a SAE con la de SU presentación. Sin clave propia, usa la de la base.
+              </p>
+              <div className="mb-2 grid grid-cols-[1fr_6rem_minmax(0,12rem)_2rem] items-center gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
+                <span>Base: <b>{form.unidad_base}</b> <span className="text-xs text-muted">(inventario)</span></span>
+                <span className="text-muted">= 1</span>
+                <ClaveSaeInline
+                  compacto
+                  productoId={editingId ?? ""}
+                  productoNombre={form.nombre}
+                  value={form.clave_sae}
+                  onChange={(v) => setForm((f) => (f ? { ...f, clave_sae: v.toUpperCase() } : f))}
+                />
+                <span />
               </div>
               <div className="space-y-2">
                 {form.presentaciones.map((r, i) => {
@@ -643,7 +684,7 @@ export default function ProductosPage() {
                   const opts = UNIDADES_BASE.filter((u) => u !== form.unidad_base);
                   const nombreOpts = r.nombre && !opts.includes(r.nombre) ? [r.nombre, ...opts] : opts;
                   return (
-                  <div key={i} className="grid grid-cols-[1fr_6rem_auto] items-center gap-2">
+                  <div key={i} className="grid grid-cols-[1fr_6rem_minmax(0,12rem)_2rem] items-center gap-2 px-3">
                     <Select
                       value={r.nombre}
                       onChange={(e) => {
@@ -669,6 +710,20 @@ export default function ProductosPage() {
                         setForm({ ...form, presentaciones: next });
                       }}
                     />
+                    <ClaveSaeInline
+                      compacto
+                      productoId={editingId ?? ""}
+                      productoNombre={form.nombre}
+                      value={r.clave_sae}
+                      onChange={(v) =>
+                        setForm((f) => {
+                          if (!f) return f;
+                          const next = [...f.presentaciones];
+                          next[i] = { ...next[i], clave_sae: v.toUpperCase() };
+                          return { ...f, presentaciones: next };
+                        })
+                      }
+                    />
                     <button
                       type="button"
                       onClick={() => setForm({ ...form, presentaciones: form.presentaciones.filter((_, j) => j !== i) })}
@@ -688,7 +743,7 @@ export default function ProductosPage() {
                 type="button"
                 variant="secondary"
                 className="mt-2"
-                onClick={() => setForm({ ...form, presentaciones: [...form.presentaciones, { nombre: "", factor: "" }] })}
+                onClick={() => setForm({ ...form, presentaciones: [...form.presentaciones, { nombre: "", factor: "", clave_sae: "", extra: {} }] })}
               >
                 <Plus size={16} /> Agregar presentación
               </Button>

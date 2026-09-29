@@ -78,6 +78,31 @@ def presentacion_sat(producto: Optional[Producto], presentacion: Optional[str]) 
     return getattr(producto, "unidad_sat", None)
 
 
+def presentacion_clave_sae(producto: Optional[Producto], presentacion: Optional[str]) -> Optional[str]:
+    """La clave de SAE propia de ESA presentación, o None.
+
+    SAE da de alta un artículo por unidad (SANDIAKG y SANDIAPZ son dos claves),
+    y el Facturador un producto con varias presentaciones: esta es la llave que
+    los junta. Sin ella la línea en PIEZA salía con la clave del kilo y SAE
+    facturaba kilos (29-sep-2026). Solo existe en la forma rica."""
+    raw = _presentacion_entry(producto, presentacion)
+    if isinstance(raw, dict):
+        clave = str(raw.get("clave_sae") or "").strip().upper()
+        return clave or None
+    return None
+
+
+def claves_sae_por_presentacion(presentaciones) -> dict[str, str]:
+    """{PRESENTACION: clave} de un mapa `presentaciones` (solo las que tienen)."""
+    out: dict[str, str] = {}
+    for nombre, raw in (presentaciones or {}).items():
+        if isinstance(raw, dict):
+            clave = str(raw.get("clave_sae") or "").strip().upper()
+            if clave:
+                out[str(nombre).strip().upper()] = clave
+    return out
+
+
 def weighted_cost(qty_old: Decimal, cost_old: Decimal, qty_in: Decimal, cost_in: Decimal) -> Decimal:
     """New weighted-average unit cost after adding `qty_in` at `cost_in`."""
     total = qty_old + qty_in

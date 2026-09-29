@@ -121,6 +121,20 @@ def _clave_sae_limpia(db: Session, ctx: AuthContext, data: dict, obj=None) -> No
 
     NO se defiende unicidad: una clave de SAE puede ampararse varios productos
     (regla del dueño, 23-sep-2026; la 0085 quitó el índice único)."""
+    if isinstance(data.get("presentaciones"), dict):
+        # La clave de cada presentación, con el mismo trato; vacía se quita
+        # para que la línea vuelva a caer en la clave base.
+        limpias = {}
+        for nombre, raw in data["presentaciones"].items():
+            if isinstance(raw, dict) and "clave_sae" in raw:
+                raw = dict(raw)
+                clave = str(raw.get("clave_sae") or "").strip().upper()[:50]
+                if clave:
+                    raw["clave_sae"] = clave
+                else:
+                    raw.pop("clave_sae")
+            limpias[nombre] = raw
+        data["presentaciones"] = limpias
     if "clave_sae" not in data:
         return
     clave = (data.get("clave_sae") or "").strip().upper()

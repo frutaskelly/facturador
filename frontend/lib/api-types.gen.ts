@@ -7099,6 +7099,12 @@ export interface components {
             claves_sae?: {
                 [key: string]: string;
             };
+            /** Claves Sae Presentacion */
+            claves_sae_presentacion?: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            };
             lista?: components["schemas"]["ContextoListaOut"] | null;
             /**
              * Listas Por Proyecto Omitidas

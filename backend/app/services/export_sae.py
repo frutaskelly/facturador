@@ -52,6 +52,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
+from sqlalchemy import Text, cast
 from sqlalchemy.orm import Session, selectinload
 
 from ..models import (
@@ -64,7 +65,12 @@ from ..models import (
     ProductoCliente,
     Remision,
 )
+from .inventario import claves_sae_por_presentacion
 from .series import resolver_serie
+
+# Llave de las claves por presentación en el dict de _codigos_cliente: un
+# string, así que no choca con un cliente_id (UUID) ni con la base (None).
+_PRES = "PRES"
 
 # La marca del espejo ("ZHGO 233") también se captura a mano (PATCH de la
 # remisión), así que el cruce tolera espacios y ceros — el mismo criterio en
@@ -253,6 +259,17 @@ def _codigos_cliente(
         qb = qb.filter(Producto.id.in_(producto_ids or [None]))
     for pid, clave in qb.all():
         out[(None, pid, None)] = clave
+    # Y la de cada PRESENTACIÓN bajo (_PRES, producto, PRESENTACION): SANDIA en
+    # PIEZA es SANDIAPZ aunque su clave base sea SANDIAKG.
+    qp = db.query(Producto.id, Producto.presentaciones).filter(
+        Producto.tenant_id == tenant_id,
+        cast(Producto.presentaciones, Text).like('%"clave_sae"%'),
+    )
+    if producto_ids is not None:
+        qp = qp.filter(Producto.id.in_(producto_ids or [None]))
+    for pid, pres in qp.all():
+        for nombre, clave in claves_sae_por_presentacion(pres).items():
+            out[(_PRES, pid, nombre)] = clave
     return out
 
 
@@ -273,10 +290,15 @@ def catalogo_sae(db: Session, tenant_id: UUID, empresa: Optional[str]) -> Option
 
 
 def codigo_cliente_de(
-    codigos: dict, cliente_id, producto_id, sucursal_id
+    codigos: dict, cliente_id, producto_id, sucursal_id, presentacion: Optional[str] = None
 ) -> Optional[str]:
-    """La clave para UNA línea: la fila de SU sucursal gana; si no hay, cae la
-    genérica del cliente; y si tampoco, la clave BASE del producto.
+    """La clave para UNA línea: la de su PRESENTACIÓN manda si el producto la
+    tiene; si no, la fila de SU sucursal; si no, la genérica del cliente; y si
+    tampoco, la clave BASE del producto.
+
+    La de la presentación va primero porque la del catálogo del cliente es la
+    del artículo en su unidad normal: AJOKG no ampara una línea en PIEZA, y
+    SAE facturaría kilos donde se entregaron piezas (29-sep-2026).
 
     La clave de OTRA plaza jamás ampara (misma regla que _clave_para_remision):
     prestarla mandaría a la otra empresa SAE una clave que su inventario no
@@ -284,6 +306,10 @@ def codigo_cliente_de(
     todas, porque es justo lo que significa: el mismo artículo en las tres
     empresas (decisión del dueño, 18-sep-2026).
     """
+    if presentacion:
+        clave = codigos.get((_PRES, producto_id, presentacion.strip().upper()))
+        if clave is not None:
+            return clave
     if sucursal_id is not None:
         clave = codigos.get((cliente_id, producto_id, sucursal_id))
         if clave is not None:
@@ -335,6 +361,7 @@ def lineas_sin_clave(db: Session, tenant_id: UUID, rems: list) -> dict:
             LineaRemision.remision_id,
             LineaRemision.producto_id,
             LineaRemision.cantidad_solicitada,
+            LineaRemision.presentacion,
         )
         .filter(LineaRemision.remision_id.in_(ids))
         .order_by(LineaRemision.numero_linea)
@@ -347,12 +374,12 @@ def lineas_sin_clave(db: Session, tenant_id: UUID, rems: list) -> dict:
         producto_ids={f.producto_id for f in filas},
     )
     out: dict = {}
-    for rem_id, producto_id, cantidad in filas:
+    for rem_id, producto_id, cantidad, presentacion in filas:
         if Decimal(str(cantidad or 0)) <= 0:
             continue
         rem = por_rem[rem_id]
         clave = codigo_cliente_de(
-            codigos, rem.cliente_facturacion_id, producto_id, rem.sucursal_id
+            codigos, rem.cliente_facturacion_id, producto_id, rem.sucursal_id, presentacion
         )
         if clave is None:
             out.setdefault(rem_id, []).append(producto_id)
@@ -382,6 +409,7 @@ def lineas_clave_no_facturable(db: Session, tenant_id: UUID, rems: list) -> dict
             LineaRemision.remision_id,
             LineaRemision.producto_id,
             LineaRemision.cantidad_solicitada,
+            LineaRemision.presentacion,
         )
         .filter(LineaRemision.remision_id.in_(list(por_rem)))
         .all()
@@ -404,7 +432,7 @@ def lineas_clave_no_facturable(db: Session, tenant_id: UUID, rems: list) -> dict
             empresa_de[r.id] = par[0]
     catalogos: dict = {}
     out: dict = {}
-    for rem_id, producto_id, cantidad in filas:
+    for rem_id, producto_id, cantidad, presentacion in filas:
         if Decimal(str(cantidad or 0)) <= 0:
             continue
         empresa = empresa_de.get(rem_id)
@@ -417,7 +445,7 @@ def lineas_clave_no_facturable(db: Session, tenant_id: UUID, rems: list) -> dict
             continue
         rem = por_rem[rem_id]
         clave = codigo_cliente_de(
-            codigos, rem.cliente_facturacion_id, producto_id, rem.sucursal_id
+            codigos, rem.cliente_facturacion_id, producto_id, rem.sucursal_id, presentacion
         )
         if clave is None:
             continue                      # eso lo reporta lineas_sin_clave
@@ -600,7 +628,8 @@ def preparar(
         sin_codigo = [
             ln for ln in vivas
             if codigo_cliente_de(
-                codigos, rem.cliente_facturacion_id, ln.producto_id, rem.sucursal_id
+                codigos, rem.cliente_facturacion_id, ln.producto_id, rem.sucursal_id,
+                ln.presentacion,
             ) is None
         ]
         if sin_codigo:
@@ -637,7 +666,8 @@ def preparar(
             desconocidas, de_baja = [], []
             for ln in vivas:
                 clave = codigo_cliente_de(
-                    codigos, rem.cliente_facturacion_id, ln.producto_id, rem.sucursal_id
+                    codigos, rem.cliente_facturacion_id, ln.producto_id, rem.sucursal_id,
+                    ln.presentacion,
                 )
                 estado = cat.get((clave or "").strip().upper())
                 if estado is None:
@@ -1002,7 +1032,8 @@ def generar(
         # 0, y SAE importaría un concepto en cero que el PAC rechaza.
         for ln in (x for x in rem.lineas if Decimal(str(x.cantidad_solicitada or 0)) > 0):
             clave = codigo_cliente_de(
-                codigos, rem.cliente_facturacion_id, ln.producto_id, rem.sucursal_id
+                codigos, rem.cliente_facturacion_id, ln.producto_id, rem.sucursal_id,
+                ln.presentacion,
             )
             if clave is None:
                 # preparar(bloquear=True) ya validó: llegar aquí sin clave es un

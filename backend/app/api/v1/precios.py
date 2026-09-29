@@ -437,6 +437,20 @@ def contexto_precios(
                     claves[pid] = cod
                     del_cliente.add(pid)
 
+    from ...services.inventario import claves_sae_por_presentacion
+    from sqlalchemy import Text as _Text, cast as _cast
+
+    por_pres: dict = {}
+    for pid, pres in (
+        db.query(Producto.id, Producto.presentaciones)
+        .filter(Producto.tenant_id == ctx.tenant_id,
+                _cast(Producto.presentaciones, _Text).like('%"clave_sae"%'))
+        .all()
+    ):
+        mapa = claves_sae_por_presentacion(pres)
+        if mapa:
+            por_pres[pid] = mapa
+
     return ContextoPreciosOut(
         lista=lista_out,
         listas_por_sucursal_omitidas=omitidas,
@@ -444,6 +458,7 @@ def contexto_precios(
         productos_con_precio=sorted(con_precio, key=str),
         claves_sae=claves,
         claves_del_cliente=sorted(del_cliente, key=str),
+        claves_sae_presentacion=por_pres,
     )
 
 
