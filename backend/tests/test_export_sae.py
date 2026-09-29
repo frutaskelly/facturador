@@ -1302,3 +1302,49 @@ def test_clave_por_presentacion_manda_en_su_presentacion(client, env, auth_as):
     ctx = client.get("/api/v1/precios/contexto", headers=h,
                      params={"cliente_id": env["cli"]}).json()
     assert ctx["claves_sae_presentacion"][sid] == {"PIEZA": "SANDIAPZ"}
+
+
+def test_clave_desde_la_linea_se_guarda_en_su_nivel(client, env, auth_as):
+    """Toda clave de la línea es editable, y la corrección cae en el nivel del
+    que sale hoy: presentación no base → esa presentación; base con clave del
+    cliente → esa fila del catálogo (sin tocar el nombre); si no → el producto."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        p = Producto(tenant_id=env["tenant"], sku=f"7{suffix}", nombre="SANDIA",
+                     clave_sat="50304610", unidad_sat="KGM", clave_sae="SANDIAKG",
+                     unidad_base="KILO", presentaciones={"KILO": 1, "PIEZA": 10})
+        db.add(p); db.commit()
+        pid = str(p.id)
+    finally:
+        db.close()
+    url = f"/api/v1/productos/{pid}/clave-sae"
+
+    # PIEZA (no base, sin clave todavía) → la presentación; el factor se queda.
+    r = client.put(url, headers=h, json={"clave": "sandiapz", "presentacion": "PIEZA",
+                                         "cliente_id": env["cli"]})
+    assert r.json() == {"clave": "SANDIAPZ", "origen": "presentacion", "presentacion": "PIEZA"}
+    prod = client.get(f"/api/v1/productos/{pid}", headers=h).json()
+    assert prod["presentaciones"]["PIEZA"] == {"factor": 10, "clave_sae": "SANDIAPZ"}
+
+    # KILO sin catálogo del cliente → la base del producto.
+    r = client.put(url, headers=h, json={"clave": "SANDIAKG2", "presentacion": "KILO",
+                                         "cliente_id": env["cli"]})
+    assert r.json()["origen"] == "producto"
+    assert client.get(f"/api/v1/productos/{pid}", headers=h).json()["clave_sae"] == "SANDIAKG2"
+
+    # KILO con clave del cliente → su fila, y el nombre del cliente se conserva.
+    client.put(f"/api/v1/clientes/{env['cli']}/catalogo/{pid}", headers=h,
+               json={"codigo_cliente": "SANDIACLI", "nombre_cliente": "SANDIA ROJA"})
+    r = client.put(url, headers=h, json={"clave": "SANDIACLI2", "presentacion": "KILO",
+                                         "cliente_id": env["cli"]})
+    assert r.json()["origen"] == "cliente"
+    cat = client.get(f"/api/v1/clientes/{env['cli']}/catalogo", headers=h).json()
+    fila = next(f for f in (cat["items"] if isinstance(cat, dict) else cat) if f["producto_id"] == pid)
+    assert (fila["codigo_cliente"], fila["nombre_cliente"]) == ("SANDIACLI2", "SANDIA ROJA")
+
+    # Vacía en PIEZA la quita: la línea vuelve a la cascada.
+    r = client.put(url, headers=h, json={"clave": "", "presentacion": "PIEZA"})
+    assert r.json()["origen"] == "presentacion"
+    assert client.get(f"/api/v1/productos/{pid}", headers=h).json()["presentaciones"]["PIEZA"] == {"factor": 10}

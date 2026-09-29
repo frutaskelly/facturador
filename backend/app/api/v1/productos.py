@@ -43,6 +43,8 @@ from ...models import (
     Sucursal,
 )
 from ...schemas.producto import (
+    ClaveSaeLineaIn,
+    ClaveSaeLineaOut,
     AliasIn,
     AliasOut,
     AliasReapuntarIn,
@@ -2535,6 +2537,74 @@ def update_producto(
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)
     return obj
+
+
+@router.put("/{producto_id}/clave-sae", response_model=ClaveSaeLineaOut)
+def guardar_clave_sae_linea(
+    producto_id: UUID,
+    payload: ClaveSaeLineaIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Corrige la clave de SAE desde una línea de remisión, en el MISMO nivel
+    del que sale hoy — así la línea cambia de verdad y no se pisa otra capa:
+
+    1. La presentación ya tiene clave propia, o no es la unidad base (SANDIA
+       en PIEZA): se guarda en ESA presentación.
+    2. La unidad base con clave del catálogo del cliente: se corrige esa fila
+       (la de su plaza si existe, si no la genérica). Sólo el código; el nombre
+       con el que el cliente conoce el producto no se toca.
+    3. Si no, la clave base del producto.
+
+    Vacía quita la clave de ese nivel y la línea cae al siguiente.
+    """
+    prod = get_or_404(db, Producto, producto_id)
+    clave = (payload.clave or "").strip().upper()[:50] or None
+    pres = (payload.presentacion or "").strip().upper()
+    base = (prod.unidad_base or "").strip().upper()
+    mapa = dict(prod.presentaciones or {})
+    llave_pres = next((k for k in mapa if str(k).strip().upper() == pres), None) if pres else None
+
+    raw = mapa.get(llave_pres) if llave_pres is not None else None
+    tiene_propia = isinstance(raw, dict) and str(raw.get("clave_sae") or "").strip()
+    if llave_pres is not None and (tiene_propia or pres != base):
+        entrada = dict(raw) if isinstance(raw, dict) else {"factor": raw if raw is not None else 1}
+        if clave:
+            entrada["clave_sae"] = clave
+        else:
+            entrada.pop("clave_sae", None)
+        # Dict NUEVO: mutar el del ORM no marca el JSONB sucio.
+        prod.presentaciones = {**mapa, llave_pres: entrada}
+        prod.updated_by = ctx.user_id
+        db.flush()
+        return ClaveSaeLineaOut(clave=clave, origen="presentacion", presentacion=pres)
+
+    if payload.cliente_id is not None:
+        filas = (
+            db.query(ProductoCliente)
+            .filter(ProductoCliente.cliente_id == payload.cliente_id,
+                    ProductoCliente.producto_id == producto_id,
+                    ProductoCliente.codigo_cliente.isnot(None))
+            .all()
+        )
+        fila = next((f for f in filas if payload.sucursal_id is not None
+                     and f.sucursal_id == payload.sucursal_id), None) or next(
+            (f for f in filas if f.sucursal_id is None), None)
+        if fila is not None:
+            fila.updated_by = ctx.user_id
+            if clave:
+                fila.codigo_cliente = clave
+            elif (fila.nombre_cliente or "").strip():
+                fila.codigo_cliente = None
+            else:
+                db.delete(fila)
+            db.flush()
+            return ClaveSaeLineaOut(clave=clave, origen="cliente", presentacion=pres or None)
+
+    prod.clave_sae = clave
+    prod.updated_by = ctx.user_id
+    db.flush()
+    return ClaveSaeLineaOut(clave=clave, origen="producto", presentacion=pres or None)
 
 
 @router.post("/{producto_id}/presentaciones", response_model=ProductoOut)

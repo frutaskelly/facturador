@@ -4061,6 +4061,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/{producto_id}/clave-sae": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Guardar Clave Sae Linea
+         * @description Corrige la clave de SAE desde una línea de remisión, en el MISMO nivel
+         *     del que sale hoy — así la línea cambia de verdad y no se pisa otra capa:
+         *
+         *     1. La presentación ya tiene clave propia, o no es la unidad base (SANDIA
+         *        en PIEZA): se guarda en ESA presentación.
+         *     2. La unidad base con clave del catálogo del cliente: se corrige esa fila
+         *        (la de su plaza si existe, si no la genérica). Sólo el código; el nombre
+         *        con el que el cliente conoce el producto no se toca.
+         *     3. Si no, la clave base del producto.
+         *
+         *     Vacía quita la clave de ese nivel y la línea cae al siguiente.
+         */
+        put: operations["guardar_clave_sae_linea_api_v1_productos__producto_id__clave_sae_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/{producto_id}/presentaciones": {
         parameters: {
             query?: never;
@@ -6466,6 +6496,30 @@ export interface components {
             clave: string;
             /** Descripcion */
             descripcion?: string | null;
+        };
+        /**
+         * ClaveSaeLineaIn
+         * @description La clave de SAE que se corrige desde una línea de remisión. El servidor
+         *     decide DÓNDE se guarda (presentación, catálogo del cliente o producto).
+         */
+        ClaveSaeLineaIn: {
+            /** Clave */
+            clave?: string | null;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Presentacion */
+            presentacion?: string | null;
+            /** Sucursal Id */
+            sucursal_id?: string | null;
+        };
+        /** ClaveSaeLineaOut */
+        ClaveSaeLineaOut: {
+            /** Clave */
+            clave?: string | null;
+            /** Origen */
+            origen: string;
+            /** Presentacion */
+            presentacion?: string | null;
         };
         /**
          * ClaveSaeSugerida
@@ -21204,6 +21258,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AliasOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    guardar_clave_sae_linea_api_v1_productos__producto_id__clave_sae_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                producto_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClaveSaeLineaIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaveSaeLineaOut"];
                 };
             };
             /** @description Validation Error */

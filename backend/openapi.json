@@ -2173,6 +2173,96 @@
     "title": "ClaveSaeItem",
     "type": "object"
    },
+   "ClaveSaeLineaIn": {
+    "description": "La clave de SAE que se corrige desde una línea de remisión. El servidor\ndecide DÓNDE se guarda (presentación, catálogo del cliente o producto).",
+    "properties": {
+     "clave": {
+      "anyOf": [
+       {
+        "maxLength": 50,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "presentacion": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     },
+     "sucursal_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sucursal Id"
+     }
+    },
+    "title": "ClaveSaeLineaIn",
+    "type": "object"
+   },
+   "ClaveSaeLineaOut": {
+    "properties": {
+     "clave": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "presentacion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     }
+    },
+    "required": [
+     "origen"
+    ],
+    "title": "ClaveSaeLineaOut",
+    "type": "object"
+   },
    "ClaveSaeSugerida": {
     "description": "Una clave del espejo de SAE (INVE##) tal como la conoce la empresa que\nle toca a esta remisión.",
     "properties": {
@@ -39048,6 +39138,81 @@
      }
     ],
     "summary": "Listar Alias",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/{producto_id}/clave-sae": {
+   "put": {
+    "description": "Corrige la clave de SAE desde una línea de remisión, en el MISMO nivel\ndel que sale hoy — así la línea cambia de verdad y no se pisa otra capa:\n\n1. La presentación ya tiene clave propia, o no es la unidad base (SANDIA\n   en PIEZA): se guarda en ESA presentación.\n2. La unidad base con clave del catálogo del cliente: se corrige esa fila\n   (la de su plaza si existe, si no la genérica). Sólo el código; el nombre\n   con el que el cliente conoce el producto no se toca.\n3. Si no, la clave base del producto.\n\nVacía quita la clave de ese nivel y la línea cae al siguiente.",
+    "operationId": "guardar_clave_sae_linea_api_v1_productos__producto_id__clave_sae_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "producto_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Producto Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ClaveSaeLineaIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ClaveSaeLineaOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Guardar Clave Sae Linea",
     "tags": [
      "productos"
     ]
