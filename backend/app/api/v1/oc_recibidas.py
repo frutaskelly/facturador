@@ -335,7 +335,7 @@ def _candado_folio_repetido(db: Session, ctx: AuthContext, payload) -> None:
 
 
 # La base termina en el día (HO-39ACT-LUN-2, VH-38PAL-MIE-B-2) o, desde la
-# semana 40, en la fecha (TBVH-ROV-20261007-2). Ver services/folio_oc.
+# semana 40, en la fecha (TBVH-ROVIR-20261007-2). Ver services/folio_oc.
 _RE_SUFIJO_APARTE = re.compile(r"^(.*-(?:[A-Z]{2,3}(?:-B)?|\d{8}))-(\d{1,2})$")
 
 
@@ -473,9 +473,7 @@ def _folio_sin_semana(folio: str) -> Optional[str]:
 def _proyecto_y_punto(folio: str) -> Optional[tuple[str, str]]:
     """(proyecto, punto) de un folio del bot, en cualquiera de los dos formatos.
 
-    Es lo que comparten «VH-40ROV-LUN» y «TBVH-ROV-20261005»: el día y la
-    semana del viejo los da ya la fecha de entrega, que el candado compara
-    aparte. Las entregas aparte (…-2) no entran, como en el formato viejo.
+    Las entregas aparte (…-2) no entran, como en el formato viejo.
     """
     nuevo = folio_oc.parse_nuevo(folio)
     if nuevo is not None:
@@ -488,9 +486,10 @@ def _misma_entrega_otro_folio(a: str, b: str) -> bool:
     """¿Dos folios del mismo punto y fecha son la misma entrega con otro nombre?
 
     Viejo contra viejo: iguales salvo la semana (el caso del 13-sep). Viejo
-    contra nuevo: mismo proyecto y punto — la misma entrega que llegó una vez
-    antes y otra después del cambio de formato (semana 40). Nuevo contra nuevo
-    no puede pasar: con la fecha adentro, la misma entrega trae el mismo folio.
+    contra nuevo («VH-40ROV-LUN» y «TBVH-ROVIR-20261005»): el mismo PROYECTO —
+    el punto ya lo comparó el candado por su nombre, y su código no se puede
+    comparar (3 letras en uno, 5 en el otro). Nuevo contra nuevo no puede pasar:
+    con la fecha adentro, la misma entrega trae el mismo folio.
     """
     viejo_a, viejo_b = _folio_sin_semana(a), _folio_sin_semana(b)
     if viejo_a and viejo_b:
@@ -498,7 +497,7 @@ def _misma_entrega_otro_folio(a: str, b: str) -> bool:
     if (folio_oc.parse_nuevo(a) is None) == (folio_oc.parse_nuevo(b) is None):
         return False
     pa, pb = _proyecto_y_punto(a), _proyecto_y_punto(b)
-    return pa is not None and pa == pb
+    return pa is not None and pb is not None and pa[0] == pb[0]
 
 
 def _candado_misma_entrega_otra_semana(db: Session, ctx: AuthContext, payload) -> None:
@@ -692,7 +691,7 @@ def ubicaciones_conocidas(
     vistas: dict[str, dict] = {}
     for punto, folio, cuando in q.order_by(OCRecibida.recibida_at.desc()).all():
         nombre = " ".join((punto or "").upper().split())
-        # Desde la semana 40 el folio empieza con la sucursal (TBVH-ROV-…): el
+        # Desde la semana 40 el folio empieza con la sucursal (TBVH-ROVIR-…): el
         # prefijo que el bot traduce a proyecto es el que va después.
         nuevo = folio_oc.parse_nuevo(folio)
         prefijo = nuevo.proyecto if nuevo else (folio or "").strip().upper()[:2]
@@ -1847,7 +1846,7 @@ def crear_remision(
     # facturadas, comparten «CEN-35HUA-FYV»), así que ahí un duplicado no se
     # puede deducir del texto y no se bloquea nada.
     #
-    # El formato nuevo del bot (semana 40: «TBVH-ROV-20261007») SÍ identifica:
+    # El formato nuevo del bot (semana 40: «TBVH-ROVIR-20261007») SÍ identifica:
     # lleva la fecha exacta de entrega, así que la misma cadena en el mismo
     # cliente es el mismo pedido. Se compara entero, sin normalizar.
     m = re.fullmatch(r"(?:OC[\s.:-]*)?0*(\d+)", folio, re.IGNORECASE)

@@ -65,7 +65,7 @@ def extraer_semana(*textos: Optional[str]) -> Optional[int]:
         if m:
             return int(m.group(1))
         # Desde la semana 40 el folio trae la fecha, no la semana
-        # (TBVH-ROV-20261007): se calcula como la cuenta el equipo.
+        # (TBVH-ROVIR-20261007): se calcula como la cuenta el equipo.
         m = folio_oc.RE_NUEVO_EN_TEXTO.search(t)
         nuevo = folio_oc.parse_nuevo(m.group(1)) if m else None
         if nuevo is not None:
@@ -97,7 +97,7 @@ def extraer_oc(observaciones: Optional[str]) -> Optional[str]:
     remisión, así que también sirve de llave; sin reconocerlo, 46 facturas
     reales quedaron sin ligar a su entrega (detectado el 30-ago buscando
     SN-33NER-JUE). Desde la semana 40 el folio del bot lleva la fecha
-    (TBVH-ROV-20261007) y se reconoce igual.
+    (TBVH-ROVIR-20261007) y se reconoce igual.
     """
     texto = (observaciones or "").upper()
     m = _RE_OC_OBS.search(texto)

@@ -4,11 +4,11 @@ Viejo (entregas hasta el 4-oct-2026, semana 39): proyecto + SEMANA + punto + dí
     VH-39ROV-MIE, HO-38IMS-LUN, VH-38ROV-LUN-B (la B del corte de 25-sep).
 
 Nuevo (entregas desde el 5-oct-2026, semana 40): sucursal + proyecto, punto y la
-FECHA exacta de entrega. Decisión del dueño 29-sep-2026: la semana es un número
+FECHA exacta de entrega; el punto va con cinco letras (30-sep: ROV → ROVIR). Decisión del dueño 29-sep-2026: la semana es un número
 que se CALCULA —y cada cambio de cálculo (13-sep, 38-B) dejó entregas dobles—;
 la fecha no se interpreta.
-    TBVH-ROV-20260930   Tabasco · hospitales VH · Rovirosa · 30-sep
-    HGHO-IMS-20261005   Hidalgo · Hospitales · IMSS · 5-oct
+    TBVH-ROVIR-20260930   Tabasco · hospitales VH · Rovirosa · 30-sep
+    HGHO-IMSSB-20261005   Hidalgo · Hospitales · IMSS Bienestar · 5-oct
 
 Los dos llevan el sufijo de entrega aparte al final: …-2. Cualquier otro folio
 (Río Libre, los numéricos de Balles/Jubran) es libre y no se interpreta.
@@ -24,9 +24,9 @@ from datetime import date, timedelta
 from typing import Optional
 
 # Sucursal (2 letras) pegada al proyecto (2-3, el prefijo del formato viejo).
-_RE_NUEVO = re.compile(r"^([A-Z]{2})([A-Z]{2,3})-([A-Z]{2,4})-(\d{8})(?:-(\d{1,2}))?$")
+_RE_NUEVO = re.compile(r"^([A-Z]{2})([A-Z]{2,3})-([A-Z]{3,5})-(\d{8})(?:-(\d{1,2}))?$")
 # El mismo, para buscarlo dentro de un texto (la observación de SAE).
-RE_NUEVO_EN_TEXTO = re.compile(r"\b([A-Z]{4,5}-[A-Z]{2,4}-\d{8}(?:-\d{1,2})?)\b")
+RE_NUEVO_EN_TEXTO = re.compile(r"\b([A-Z]{4,5}-[A-Z]{3,5}-\d{8}(?:-\d{1,2})?)\b")
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ class FolioNuevo:
 
 
 def parse_nuevo(folio: Optional[str]) -> Optional[FolioNuevo]:
-    """«TBVH-ROV-20260930-2» → sus partes; None si no es del formato nuevo."""
+    """«TBVH-ROVIR-20260930-2» → sus partes; None si no es del formato nuevo."""
     m = _RE_NUEVO.match((folio or "").strip().upper())
     if not m:
         return None
