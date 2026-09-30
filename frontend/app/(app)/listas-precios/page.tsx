@@ -36,6 +36,16 @@ function presentacionOptions(p: Producto | undefined): string[] {
   return keys.length > 0 ? keys : [];
 }
 
+/** El artículo de SAE con el que sale esa presentación: la base usa la clave
+ *  del producto y las demás la suya (SANDIA · PIEZA → SANDIAPZ). Vacía si esa
+ *  presentación no tiene — no se le presta la de la base. */
+function claveSaeDe(p: Producto | undefined, presentacion: string): string {
+  if (!p) return "";
+  if (presentacion === (p.unidad_base ?? p.presentacion_default)) return p.clave_sae ?? "";
+  const raw = (p.presentaciones ?? {})[presentacion] as unknown;
+  return raw && typeof raw === "object" ? String((raw as { clave_sae?: string }).clave_sae ?? "") : "";
+}
+
 /** Default presentación for a producto: presentacion_default, else unidad_base. */
 function defaultPresentacion(p: Producto | undefined): string {
   if (!p) return "";
@@ -348,6 +358,15 @@ export default function ListasPreciosPage() {
   const preciosCols: Column<Precio>[] = useMemo(() => [
     { header: "Producto", cell: (p) => prodName[p.producto_id] ?? p.producto_id },
     { header: "Present.", cell: (p) => p.presentacion },
+    {
+      header: "Clave SAE",
+      cell: (p) => {
+        const clave = claveSaeDe(prodById[p.producto_id], p.presentacion);
+        return clave
+          ? <span className="tabular-nums">{clave}</span>
+          : <span className="text-warning" title="Esta presentación no tiene clave de SAE">—</span>;
+      },
+    },
     { header: "Desde cant.", cell: (p) => p.cantidad_minima, className: "text-right" },
     { header: "Precio", cell: (p) => fmtMoney(p.precio_unitario), className: "text-right" },
     {
@@ -358,7 +377,7 @@ export default function ListasPreciosPage() {
         </button>
       ) : null,
     },
-  ], [prodName, canWrite]);
+  ], [prodName, prodById, canWrite]);
 
   return (
     <div>

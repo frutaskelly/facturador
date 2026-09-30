@@ -659,7 +659,10 @@ def test_importar_excel_actualiza_sin_duplicar(client, env, auth_as):
     ws = wb.active
     filas = list(ws.iter_rows(min_row=2, values_only=True))
     assert filas, "el export vino vacío"
-    sku, nombre, pres, cant, _ = filas[0]
+    assert [c.value for c in ws[1]] == ["SKU", "PRODUCTO", "PRESENTACION", "DESDE CANTIDAD",
+                                         "PRECIO", "CLAVE SAE"]
+    # La CLAVE SAE es informativa: el mismo archivo de 6 columnas se vuelve a subir.
+    sku, nombre, pres, cant, *_ = filas[0]
 
     def total():
         return client.get(f"/api/v1/listas-precios/{lista}/precios", headers=h,
@@ -728,3 +731,17 @@ def test_catalogo_con_precio_usa_la_misma_cascada_que_cotiza(client, env, auth_a
     r2 = client.get("/api/v1/precios/catalogo", headers=h,
                     params={"cliente_id": env["cli1"], "solo_con_precio": True})
     assert all(x["precio"] is not None for x in r2.json()["items"])
+
+
+def test_clave_sae_de_la_presentacion():
+    """La lista enseña con qué artículo de SAE sale cada precio: la base con la
+    clave del producto, las demás con la suya, y vacía si no tiene (no se le
+    presta la de la base: SANDIA en PIEZA NO es SANDIAKG)."""
+    from app.models import Producto
+    from app.services.lista_export import clave_sae_de
+
+    sandia = Producto(unidad_base="KILO", clave_sae="SANDIAKG", presentaciones={
+        "KILO": 1, "PIEZA": {"sat": "H87", "factor": 1, "clave_sae": "SANDIAPZ"}, "CAJA": 30})
+    assert clave_sae_de(sandia, "KILO") == "SANDIAKG"
+    assert clave_sae_de(sandia, "PIEZA") == "SANDIAPZ"
+    assert clave_sae_de(sandia, "CAJA") == ""

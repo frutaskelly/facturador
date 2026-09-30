@@ -26,20 +26,32 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from ..models import ListaPrecios, Precio, Producto
-from .inventario import presentacion_declarada
+from .inventario import claves_sae_por_presentacion, presentacion_declarada
 
 HDR = ["SKU", "PRODUCTO", "PRESENTACION", "DESDE CANTIDAD", "PRECIO"]
+# Informativa: el import la ignora (sólo valida y lee las cinco de HDR), así
+# que un archivo viejo sin ella sigue subiendo igual.
+HDR_CLAVE = "CLAVE SAE"
+
+
+def clave_sae_de(prod: Producto, presentacion: str) -> str:
+    """El artículo de SAE con el que sale esa presentación: la base usa la del
+    producto; las demás, la suya (vacía si no tiene — no se inventa la base)."""
+    if presentacion == (prod.unidad_base or prod.presentacion_default):
+        return prod.clave_sae or ""
+    return claves_sae_por_presentacion(prod.presentaciones).get(presentacion.strip().upper(), "")
 
 
 def _filas(db: Session, lista: ListaPrecios) -> list[tuple]:
     q = (
-        db.query(Precio, Producto.sku, Producto.nombre)
+        db.query(Precio, Producto)
         .join(Producto, Producto.id == Precio.producto_id)
         .filter(Precio.lista_id == lista.id, Producto.deleted_at.is_(None))
         .order_by(Producto.nombre.asc(), Precio.presentacion.asc(), Precio.cantidad_minima.asc())
     )
-    return [(sku, nombre, p.presentacion, p.cantidad_minima, p.precio_unitario)
-            for p, sku, nombre in q.all()]
+    return [(prod.sku, prod.nombre, p.presentacion, p.cantidad_minima, p.precio_unitario,
+             clave_sae_de(prod, p.presentacion))
+            for p, prod in q.all()]
 
 
 def exportar_xlsx(db: Session, lista: ListaPrecios) -> bytes:
@@ -48,11 +60,11 @@ def exportar_xlsx(db: Session, lista: ListaPrecios) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Precios"
-    ws.append(HDR)
-    for sku, nombre, pres, cant, precio in _filas(db, lista):
-        ws.append([sku, nombre, pres, float(cant), float(precio)])
+    ws.append([*HDR, HDR_CLAVE])
+    for sku, nombre, pres, cant, precio, clave in _filas(db, lista):
+        ws.append([sku, nombre, pres, float(cant), float(precio), clave])
     # anchos legibles: nadie quiere reacomodar columnas antes de trabajar
-    for col, ancho in zip("ABCDE", (14, 46, 14, 16, 12)):
+    for col, ancho in zip("ABCDEF", (14, 46, 14, 16, 12, 18)):
         ws.column_dimensions[col].width = ancho
     buf = io.BytesIO()
     wb.save(buf)
@@ -67,7 +79,7 @@ def exportar_pdf(db: Session, lista: ListaPrecios, tenant) -> bytes:
     from reportlab.platypus import Paragraph
 
     filas = []
-    for _sku, nombre, pres, cant, precio in _filas(db, lista):
+    for _sku, nombre, pres, cant, precio, _clave in _filas(db, lista):
         etiqueta = pres if cant in (1, Decimal("1")) else f"{pres} (desde {cant})"
         filas.append([Paragraph(nombre, CELDA), etiqueta, f"${Decimal(precio):,.2f}"])
     partes = membrete(tenant, "Lista de precios",
