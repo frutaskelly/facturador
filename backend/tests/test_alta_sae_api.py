@@ -385,3 +385,49 @@ def test_una_clave_que_solo_existe_en_el_sae9_no_frena_el_alta_del_sae10(client,
     b91 = client.get("/api/v1/productos/claves-sae",
                      params={"clave": "AJOKG", "empresa": "91"}, headers=h)
     assert b91.status_code == 200 and len(b91.json()) == 1
+
+
+def test_alta_completa_solo_las_empresas_donde_falta(client, env, auth_as):
+    """Una clave que existe en 02 y falta en 03 se completa pidiendo SÓLO la 03
+    (30-sep-2026). Pedirla también en la 02 sigue siendo 409: ahí ya existe."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    with SessionLocal() as s:
+        s.add(ClaveSae(tenant_id=env["tenant_id"], empresa="02", clave="AJOKG",
+                       descripcion="AJO", activa=True))
+        s.commit()
+    r = _pedir(client, h, empresas=["02", "03"])
+    assert r.status_code == 409 and "empresa 02" in r.json()["detail"]
+    r = _pedir(client, h, producto_id=env["prod"], empresas=["03", "04", "05"])
+    assert r.status_code == 201, r.text
+    assert r.json()["empresas"] == ["03", "04", "05"]
+
+
+def test_me_dice_si_el_tenant_tiene_sae(client, env, auth_as, monkeypatch):
+    """La pantalla enseña «Dar de alta en SAE» sólo al tenant dueño."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    t = client.get("/api/v1/auth/me", headers=h).json()["active_tenant"]
+    assert t["sae_conectado"] is True and t["sae_escritor"] in ("FACTURADOR", "BOT")
+    monkeypatch.setattr(settings, "ESPEJO_SAE_TENANT_ID", str(uuid.uuid4()))
+    t = client.get("/api/v1/auth/me", headers=h).json()["active_tenant"]
+    assert t["sae_conectado"] is False
+
+
+def test_alta_de_clave_de_presentacion_no_se_estampa_en_la_base(client, env, auth_as, conector):
+    """SANDIAPZ es la clave de la PIEZA: confirmada en SAE no se vuelve la clave
+    base del producto (el kilo saldría con la clave de la pieza)."""
+    with SessionLocal() as s:
+        p = s.get(Producto, uuid.UUID(env["prod"]))
+        p.unidad_base = "KILO"
+        p.presentaciones = {"KILO": 1, "PIEZA": {"factor": 8, "clave_sae": "AJOPZ"}}
+        s.commit()
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    sol = _pedir(client, h, clave="AJOPZ", unidad="PIEZA", producto_id=env["prod"],
+                 empresas=["02"]).json()
+    auth_as(conector)
+    client.get("/api/v1/productos/alta-sae/pendiente", headers=h)
+    rep = client.post(f"/api/v1/productos/alta-sae/{sol['id']}/reporte", headers=h,
+                      json={"por_empresa": {"02": {"ok": True, "clave": "AJOPZ"}}})
+    assert rep.json()["estado"] == "OK"
+    auth_as(env["admin"])
+    assert client.get(f"/api/v1/productos/{env['prod']}",
+                      headers=h).json()["clave_sae"] in (None, "")

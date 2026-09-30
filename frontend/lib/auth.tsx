@@ -17,7 +17,15 @@ export type Me = {
   auth_user_id: string;
   user_id: string;
   email: string | null;
-  active_tenant: { tenant_id: string; role: string; is_owner: boolean };
+  active_tenant: {
+    tenant_id: string;
+    role: string;
+    is_owner: boolean;
+    /** Este tenant es el dueño del SAE del despliegue: puede pedir altas allá. */
+    sae_conectado?: boolean;
+    /** Quién escribe hoy la cola de SAE. */
+    sae_escritor?: "FACTURADOR" | "BOT";
+  };
   tenants: {
     tenant_id: string;
     slug: string;

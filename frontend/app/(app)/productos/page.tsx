@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
-import { FileUp, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { FileUp, PackagePlus, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 
+import { AltaSaeModal } from "@/components/AltaSaeModal";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -18,7 +19,7 @@ import { ProductoAliasPanel } from "@/components/ProductoAliasPanel";
 import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { SatClaveCombobox } from "@/components/SatClaveCombobox";
 import { ApiError, apiFetch } from "@/lib/api";
-import { can, useAuth } from "@/lib/auth";
+import { can, canAny, useAuth } from "@/lib/auth";
 import { useListadoCompleto, useMutation, useResource, type Page } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import type { Categoria, EsquemaImpuesto, Producto } from "@/lib/types";
@@ -26,6 +27,8 @@ import type { Categoria, EsquemaImpuesto, Producto } from "@/lib/types";
 const WRITE = "producto:gestionar";
 // Borrar un producto es un permiso aparte de gestionarlo (producto:eliminar).
 const DELETE = "producto:eliminar";
+// Pedir el alta en SAE: quien gestiona el catálogo o quien sólo puede pedirlas.
+const ALTA_SAE = "producto:alta_sae";
 
 // Unidades base más comunes (unidad interna de inventario).
 const UNIDADES_BASE = [
@@ -139,6 +142,9 @@ export default function ProductosPage() {
   const { post, patch, del, loading: saving } = useMutation();
   const canWrite = can(me, WRITE);
   const canDelete = can(me, DELETE);
+  // Sólo el tenant dueño de SAE: a cualquier otro la cola le contesta 403.
+  const canAltaSae = !!me?.active_tenant.sae_conectado && canAny(me, [WRITE, ALTA_SAE]);
+  const [altaSae, setAltaSae] = useState<Producto | null>(null);
 
   const categoriasRes = useResource<Page<Categoria>>("/api/v1/categorias?limit=200");
   const categorias = useMemo(() => categoriasRes.data?.items ?? [], [categoriasRes.data]);
@@ -376,8 +382,21 @@ export default function ProductosPage() {
       header: "",
       className: "text-right w-1",
       cell: (p) =>
-        canWrite || canDelete ? (
+        canWrite || canDelete || canAltaSae ? (
           <div className="flex justify-end gap-1">
+            {canAltaSae && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAltaSae(p);
+                }}
+                className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
+                aria-label="Dar de alta en SAE"
+                title="Dar de alta en SAE"
+              >
+                <PackagePlus size={16} />
+              </button>
+            )}
             {canWrite && (
               <button
                 onClick={(e) => {
@@ -405,7 +424,7 @@ export default function ProductosPage() {
           </div>
         ) : null,
     },
-  ], [catName, esqName, canWrite, canDelete, openEdit]);
+  ], [catName, esqName, canWrite, canDelete, canAltaSae, openEdit]);
 
   return (
     <div>
@@ -427,6 +446,13 @@ export default function ProductosPage() {
             </div>
           ) : undefined
         }
+      />
+
+      <AltaSaeModal
+        producto={altaSae}
+        esquemas={esquemasTodos}
+        escritor={me?.active_tenant.sae_escritor}
+        onClose={() => setAltaSae(null)}
       />
 
       <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin productos" storageKey="productos" />
