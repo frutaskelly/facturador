@@ -1404,7 +1404,13 @@ def _nueva_version_pedido(rem: Remision, ctx: AuthContext) -> Optional[str]:
     marca = f"{rem.export_pedido_at:%d/%m/%Y %H:%M}"
     folio = rem.export_pedido_folio or "s/folio"
     rem.export_pedido_at = None
-    rem.export_pedido_folio = None
+    # El FOLIO se queda (30-sep-2026): aquel pedido SÍ existe en SAE, y el
+    # sugeridor de folios de pedido solo conoce los que el Facturador propuso
+    # (`_folios_pedido_propuestos`). Borrarlo liberó el 02:2045 de la 276 y el
+    # siguiente export se lo dio a la 275. Sin `export_pedido_at` la remisión
+    # ya no está congelada; el folio viejo solo sigue ocupando su número hasta
+    # que un nuevo export lo reemplace (con uno mayor). Liberar del pedido sí
+    # lo borra: ahí se afirma que aquel archivo no se importó.
     return (f"[{datetime.now(timezone.utc):%d/%m/%Y %H:%M} UTC] Nueva versión del pedido "
             f"{folio} (exportado {marca}): se editó en el Facturador; ésta es la que "
             "se factura. Volver a exportarla y cancelar en SAE el pedido anterior.")
