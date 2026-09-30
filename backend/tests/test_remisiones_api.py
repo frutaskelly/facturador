@@ -778,7 +778,61 @@ def test_exportada_a_sae_se_congela_para_todos(client, env, auth_as):
         s.commit()
     r = client.patch(f"/api/v1/remisiones/{rem2['id']}", headers=h, json={"notas": "x"})
     assert r.status_code == 409, r.text
-    assert "ya salió en un pedido de SAE" in r.json()["detail"]
+    # El mensaje dice la salida: editar desde la pantalla la vuelve nueva versión.
+    assert "NUEVA VERSIÓN del pedido" in r.json()["detail"]
+
+
+def test_editar_pedido_exportado_lo_vuelve_nueva_version(client, env, auth_as):
+    """Editar un pedido ya exportado arma su nueva versión (30-sep-2026).
+
+    La pantalla manda `nueva_version_pedido`: el guardado pasa, suelta la marca
+    del pedido y deja el rastro en las notas — aunque el cuerpo traiga las
+    notas completas. El masivo de FACTURA sigue congelado y la conexión
+    también: la bandera no les abre nada.
+    """
+    from app.core.rbac import get_auth_context
+    from app.models.remision import Remision
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    rem = _create_rem(client, h, env, "3", "7").json()
+    with SessionLocal() as s:
+        r = s.query(Remision).filter(Remision.id == uuid.UUID(rem["id"])).one()
+        r.export_pedido_at = datetime.now(timezone.utc)
+        r.export_pedido_folio = "02:1234"
+        s.commit()
+
+    cuerpo = {"notas": "nota de siempre", "nueva_version_pedido": True,
+              "lineas": [{"producto_id": env["prod_a"],
+                          "cantidad_solicitada": "5", "precio_unitario": "7"}]}
+
+    # Una conexión no arma versiones: se topa con el candado.
+    app.dependency_overrides[get_auth_context] = (
+        lambda: _ctx_de_conexion(env["admin_a"]["tenant_id"]))
+    try:
+        assert client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h,
+                            json=cuerpo).status_code == 409
+    finally:
+        app.dependency_overrides.pop(get_auth_context, None)
+
+    r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json=cuerpo)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["export_pedido_at"] is None and out["export_pedido_folio"] is None
+    assert float(out["subtotal"]) == 35
+    assert out["notas"].startswith("nota de siempre\n")
+    assert "Nueva versión del pedido 02:1234" in out["notas"]
+
+    # El masivo de FACTURA no se abre con la bandera.
+    rem2 = _create_rem(client, h, env, "3", "7").json()
+    with SessionLocal() as s:
+        r2 = s.query(Remision).filter(Remision.id == uuid.UUID(rem2["id"])).one()
+        r2.export_pedido_at = datetime.now(timezone.utc)
+        r2.export_sae_at = datetime.now(timezone.utc)
+        s.commit()
+    r = client.patch(f"/api/v1/remisiones/{rem2['id']}", headers=h,
+                     json={"notas": "x", "nueva_version_pedido": True})
+    assert r.status_code == 409, r.text
+    assert "masivo de SAE" in r.json()["detail"]
 
 
 def test_exportada_deja_pasar_solo_el_acuse_de_sae(client, env, auth_as):

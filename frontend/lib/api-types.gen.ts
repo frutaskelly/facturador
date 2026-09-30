@@ -12193,6 +12193,11 @@ export interface components {
             nota_entrega?: string | null;
             /** Notas */
             notas?: string | null;
+            /**
+             * Nueva Version Pedido
+             * @default false
+             */
+            nueva_version_pedido: boolean;
             /** Partidas Por Cruzar */
             partidas_por_cruzar?: components["schemas"]["PartidaPorCruzarOut"][] | null;
             /**

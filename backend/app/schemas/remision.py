@@ -114,6 +114,12 @@ class RemisionUpdate(BaseModel):
     # Sobregiro autorizado al re-descontar inventario de una CONFIRMADA
     # (misma política que confirmar/facturar — decisión 2026-07-29 #5).
     permitir_negativos: bool = False
+    # EDITAR UN PEDIDO YA EXPORTADO = NUEVA VERSIÓN (30-sep-2026, dueño). Quien
+    # edita desde la pantalla lo hace para armar el pedido corregido que se va a
+    # facturar: con esto el PATCH suelta el candado del pedido (no el del
+    # masivo de factura), deja el rastro en las notas y guarda. Como
+    # `permitir_negativos`, no es un campo del documento.
+    nueva_version_pedido: bool = False
 
 
 class RemisionOut(ORMModel):

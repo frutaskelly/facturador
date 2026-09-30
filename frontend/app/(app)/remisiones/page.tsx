@@ -373,6 +373,10 @@ export default function RemisionesPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [editEstado, setEditEstado] = useState<string | null>(null);   // estado de la remisión editada
   const [editFolio, setEditFolio] = useState<string | null>(null);     // folio real de la remisión editada
+  // Remisión que ya salió en un pedido de SAE (y no en el masivo de factura):
+  // editarla ES armar la nueva versión del pedido (dueño, 30-sep-2026). El
+  // guardado manda `nueva_version_pedido` y el backend suelta el candado.
+  const [editPedido, setEditPedido] = useState<{ folio: string; at: string } | null>(null);
   const [clienteId, setClienteId] = useState("");
   const [sucursalId, setSucursalId] = useState("");
   const [almacenId, setAlmacenId] = useState("");
@@ -623,6 +627,7 @@ export default function RemisionesPage() {
     setEditId(null);
     setEditEstado(null);
     setEditFolio(null);
+    setEditPedido(null);
     resetForm();
     setMode("create");
   }
@@ -696,6 +701,10 @@ export default function RemisionesPage() {
       setEditId(r.id);
       setEditEstado(r.estado);
       setEditFolio(det.folio_interno);
+      setEditPedido(det.export_pedido_at && !det.export_sae_at
+        ? { folio: (det.export_pedido_folio ?? "").split(":").pop() || "s/folio",
+            at: det.export_pedido_at }
+        : null);
       setMode("create");
       setRefrescarReferencias(true);              // trae el precio de catálogo de cada línea
     } catch (e) {
@@ -706,7 +715,8 @@ export default function RemisionesPage() {
   // Crea (POST) o actualiza (PATCH) según si estamos editando.
   function persistirRemision(payload: unknown) {
     return editId
-      ? patch<RemisionDetail>(`/api/v1/remisiones/${editId}`, payload)
+      ? patch<RemisionDetail>(`/api/v1/remisiones/${editId}`,
+          editPedido ? { ...(payload as object), nueva_version_pedido: true } : payload)
       : post<RemisionDetail>("/api/v1/remisiones", payload);
   }
 
@@ -1185,7 +1195,9 @@ export default function RemisionesPage() {
         permitirNegativos ? { ...payload, permitir_negativos: true } : payload,
       );
       invalidarDetalles([rem.id]);
-      toast.success(`Remisión ${rem.folio_interno} actualizada`);
+      toast.success(editPedido
+        ? `Remisión ${rem.folio_interno} guardada como nueva versión del pedido: vuelve a exportarla`
+        : `Remisión ${rem.folio_interno} actualizada`);
       setEditSobregiro(null);
       setEditId(null); setEditEstado(null);
       resetForm();
@@ -1212,7 +1224,9 @@ export default function RemisionesPage() {
     try {
       const rem = await persistirRemision(payload);
       invalidarDetalles([rem.id]);
-      toast.success(`Remisión ${rem.folio_interno} ${editId ? "actualizada" : "guardada (borrador)"}`);
+      toast.success(editId && editPedido
+        ? `Remisión ${rem.folio_interno} guardada como nueva versión del pedido: vuelve a exportarla`
+        : `Remisión ${rem.folio_interno} ${editId ? "actualizada" : "guardada (borrador)"}`);
       setEditId(null);
       resetForm();
       setMode("list");
@@ -2912,6 +2926,19 @@ export default function RemisionesPage() {
             : "Borrador — al confirmar se reserva el inventario"}
           actions={<Button variant="secondary" onClick={() => { setEditId(null); setEditEstado(null); setMode("list"); }}><X size={16} /> Cancelar</Button>}
         />
+
+        {editId && editPedido && (
+          <div className="mb-4 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
+            <p className="font-medium">
+              Esta remisión ya salió en el pedido {editPedido.folio} de SAE ({fmtDate(editPedido.at)}).
+            </p>
+            <p className="mt-1 text-muted">
+              Al guardar, tus cambios se vuelven la <b>nueva versión del pedido</b>, que es la
+              que se va a facturar. Después vuelve a exportarla en el archivo de pedidos y
+              cancela en SAE el pedido {editPedido.folio}. El cambio queda anotado en las notas.
+            </p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-4 rounded-xl border border-border p-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Cliente" required hint="Escribe y usa ↑/↓ · Enter para seleccionar y avanzar">
