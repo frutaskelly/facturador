@@ -2017,19 +2017,21 @@ def pedir_alta_sae(
     if viva is not None:
         return viva
 
-    ya = (db.query(ClaveSae)
-          .filter(ClaveSae.tenant_id == ctx.tenant_id,
-                  # Sólo el SAE 10, que es donde se escribe. El catálogo del
-                  # SAE 9 (91/92/94) vive en el mismo tenant desde el 26-sep-2026
-                  # y una clave que sólo existe allá no hace a esta alta repetida.
-                  ClaveSae.empresa.in_(_EMPRESAS_SAE),
-                  func.upper(func.btrim(ClaveSae.clave)) == clave,
-                  ClaveSae.activa.is_(True))
-          .first())
-    if ya is not None:
+    # Sólo cuentan las empresas que se piden (30-sep-2026): una clave creada en
+    # 02 y que falta en 03 se completa pidiendo SÓLO la 03. Pedirla también
+    # donde ya existe sigue siendo 409. Y sólo el SAE 10, que es donde se
+    # escribe: el catálogo del SAE 9 (91/92/94) vive en el mismo tenant desde
+    # el 26-sep-2026 y una clave que sólo existe allá no hace a esta alta repetida.
+    ya = sorted({e for (e,) in (db.query(ClaveSae.empresa)
+                                .filter(ClaveSae.tenant_id == ctx.tenant_id,
+                                        ClaveSae.empresa.in_(empresas),
+                                        func.upper(func.btrim(ClaveSae.clave)) == clave,
+                                        ClaveSae.activa.is_(True))
+                                .all())})
+    if ya:
         raise HTTPException(
             status_code=409,
-            detail=(f"La clave {clave} ya existe en SAE (empresa {ya.empresa}); "
+            detail=(f"La clave {clave} ya existe en SAE (empresa {', '.join(ya)}); "
                     "no hay que crearla, hay que ligarla al producto."),
         )
 
@@ -2363,8 +2365,15 @@ def cerrar_solicitud_sae(db: Session, tenant_id, solicitud_id, por_empresa: Opti
                         Producto.deleted_at.is_(None))
                 .one_or_none())
         # No se pisa una clave que el producto ya traía: si son distintas, eso
-        # es un conflicto que decide una persona, no este reporte.
-        if prod is not None and not (prod.clave_sae or "").strip():
+        # es un conflicto que decide una persona, no este reporte. Y la clave de
+        # una PRESENTACIÓN (SANDIAPZ) ya vive en su presentación: estamparla
+        # como la de la base haría salir el kilo con la clave de la pieza.
+        de_presentacion = {
+            str(v.get("clave_sae") or "").strip().upper()
+            for v in (prod.presentaciones or {}).values() if isinstance(v, dict)
+        } if prod is not None else set()
+        if (prod is not None and not (prod.clave_sae or "").strip()
+                and sol.clave.strip().upper() not in de_presentacion):
             confirmada = next((por_empresa[e].get("clave") for e in creadas
                                if (por_empresa[e].get("clave") or "").strip()), None)
             prod.clave_sae = (confirmada or sol.clave).strip().upper()[:50]

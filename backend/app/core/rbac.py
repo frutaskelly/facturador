@@ -399,6 +399,16 @@ def require_permission(*needed: str):
     return _dep
 
 
+def es_duenio_de_sae(tenant_id) -> bool:
+    """¿Este tenant es el dueño del SAE del despliegue (`ESPEJO_SAE_TENANT_ID`)?
+    Falla cerrado: sin valor, o con uno que no es UUID, nadie lo es."""
+    duenio = (settings.ESPEJO_SAE_TENANT_ID or "").strip()
+    try:
+        return bool(duenio) and UUID(duenio) == UUID(str(tenant_id))
+    except ValueError:
+        return False
+
+
 def require_duenio_de_sae(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
     """Sólo el tenant dueño del SAE que lee y escribe el Facturador.
 
@@ -412,12 +422,7 @@ def require_duenio_de_sae(ctx: AuthContext = Depends(get_auth_context)) -> AuthC
     Falla cerrado: sin `ESPEJO_SAE_TENANT_ID` (o con uno que no es UUID) no
     pasa nadie.
     """
-    duenio = (settings.ESPEJO_SAE_TENANT_ID or "").strip()
-    try:
-        es_suyo = bool(duenio) and UUID(duenio) == UUID(str(ctx.tenant_id))
-    except ValueError:
-        es_suyo = False
-    if not es_suyo:
+    if not es_duenio_de_sae(ctx.tenant_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Esta empresa no tiene SAE conectado")
     return ctx

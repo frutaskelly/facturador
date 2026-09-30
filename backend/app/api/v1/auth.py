@@ -8,7 +8,8 @@ gated by `require_permission`, never by what the client claims.
 """
 from fastapi import APIRouter, Depends
 
-from ...core.rbac import AuthContext, get_auth_context
+from ...core.rbac import AuthContext, es_duenio_de_sae, get_auth_context
+from ...services import sae_escritura
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -24,6 +25,12 @@ def me(ctx: AuthContext = Depends(get_auth_context)) -> dict:
             "tenant_id": str(ctx.tenant_id),
             "role": ctx.role_name,
             "is_owner": ctx.is_owner,
+            # La pantalla enseña «Dar de alta en SAE» sólo aquí: la cola de
+            # SAE contesta 403 a cualquier otro tenant (require_duenio_de_sae).
+            "sae_conectado": es_duenio_de_sae(ctx.tenant_id),
+            # Quién escribe hoy la cola: el Facturador con su reloj encendido,
+            # o el conector del bot mientras siga apagado.
+            "sae_escritor": "FACTURADOR" if sae_escritura.activo() else "BOT",
         },
         "tenants": [
             {
