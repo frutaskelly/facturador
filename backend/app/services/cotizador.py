@@ -149,14 +149,27 @@ def _norm_codigo(v: str) -> str:
     return "".join(ch for ch in s.upper() if ch.isalnum() or ch == "-")
 
 
-def _presentacion_para(prod: Producto, unidad: str, preferida: Optional[str]) -> str:
+def _presentacion_para(prod: Producto, unidad: str, preferida: Optional[str], *,
+                       texto: str = "", vocab: Optional[dict] = None) -> str:
+    """La presentación de la partida, con el MISMO orden que la bandeja
+    (`producto_match.decidir_unidad`): el vocabulario con la unidad de la
+    orden, la unidad de la orden, el vocabulario del texto, y sólo al final la
+    habitual del cliente. Antes la del cliente iba PRIMERO: EHMO tiene la
+    SANDIA registrada en KILO y «2 PZ» se cotizaba como 2 KILO."""
     pres = list((prod.presentaciones or {}).keys())
-    if preferida and any(k.upper() == preferida.upper() for k in pres):
-        return preferida
+
+    def vendida(nombre: Optional[str]) -> Optional[str]:
+        return next((k for k in pres if nombre and k.upper() == nombre.strip().upper()), None)
+
+    dec = producto_match.decidir_unidad(
+        texto=texto, unidad_raw=unidad, producto_id=prod.id,
+        presentaciones=prod.presentaciones or {}, unidad_base=prod.unidad_base,
+        presentacion_default=prod.presentacion_default, vocab=vocab or {},
+        habitual_cliente=preferida,
+    )
     u = (unidad or "").strip().upper()
-    norm = _UNIDAD_ALIAS.get(u, u)
-    hit = next((k for k in pres if k.upper() == norm), None)
-    return hit or prod.presentacion_default or prod.unidad_base or (pres[0] if pres else "KILO")
+    return (vendida(dec.presentacion) or vendida(_UNIDAD_ALIAS.get(u, u)) or vendida(preferida)
+            or prod.presentacion_default or prod.unidad_base or (pres[0] if pres else "KILO"))
 
 
 def productos_cotizables(db: Session, tenant_id: UUID, cliente_id: UUID) -> Optional[set[UUID]]:
@@ -250,6 +263,7 @@ def cotizar_documento(
     # entero (60 partidas × catálogo completo, puro CPU en el worker).
     aliases = producto_match.alias_del_tenant(db, tenant_id)
     norms = producto_match.normalizar_catalogo(prods)
+    vocab_uni = producto_match.vocabulario_unidades(db, tenant_id, cliente_id, sucursal_id)
 
     # Primera pasada: SOLO el cruce. El precio se resuelve al final en lote —
     # partida por partida eran ~8-15 consultas por renglón contra el pooler.
@@ -290,7 +304,8 @@ def cotizar_documento(
             })
             continue
 
-        presentacion = _presentacion_para(prod, pt["unidad"], presentacion_cliente.get(prod.id))
+        presentacion = _presentacion_para(prod, pt["unidad"], presentacion_cliente.get(prod.id),
+                                          texto=pt["descripcion"], vocab=vocab_uni)
         pendientes.append((pt, prod, via, presentacion))
 
     cots = resolver_precios_lote(
@@ -435,6 +450,7 @@ def cotizar_requisicion(
     # del catálogo completo.
     aliases = producto_match.alias_del_tenant(db, tenant_id)
     norms = producto_match.normalizar_catalogo(prods)
+    vocab_uni = producto_match.vocabulario_unidades(db, tenant_id, cliente.id)
 
     # ── cruce primero, precios en LOTE después: partida por partida eran
     # ~8-15 consultas por renglón contra el pooler.
@@ -459,7 +475,8 @@ def cotizar_requisicion(
             continue
         cant = float(pt.get("cantidad") or 0)
         presentacion = _presentacion_para(prod, pt.get("unidad") or "",
-                                          presentacion_cliente.get(prod.id))
+                                          presentacion_cliente.get(prod.id),
+                                          texto=pt.get("descripcion") or "", vocab=vocab_uni)
         # Cantidades fraccionarias (0.5 kg) se cotizan con el escalón base:
         # los tramos arrancan en cantidad_minima=1 y sin esto medio kilo se
         # quedaría "sin precio" — el bot (SAE) cobra la lista a cualquier

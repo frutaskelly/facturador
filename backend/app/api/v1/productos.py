@@ -104,10 +104,13 @@ from ...services.producto_match import (
     buscar,
     normalizar,
     normalizar_catalogo,
+    normalizar_unidad_oc,
     parsear_pegado,
     productos_activos,
     sugerir_con_ia,
 )
+from ...services.inventario import presentacion_declarada
+from ...services.lista_export import clave_sae_de
 from ...services.sucursales import es_sucursal_de
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
@@ -503,6 +506,8 @@ def crear_alias(
     exactamente el caso del bot enseñando "chile tampico"→serrano para un solo
     cliente sin poder envenenar a los demás."""
     ensure_fk(db, Producto, payload.producto_id, "producto_id")
+    presentacion = _presentacion_del_alias(db, payload.producto_id, payload.presentacion)
+    unidad_oc = normalizar_unidad_oc(payload.unidad_oc)
     if payload.cliente_id is not None:
         ensure_fk(db, Cliente, payload.cliente_id, "cliente_id")
         # Sin validar la sucursal, el INSERT viola su FK dentro del savepoint de
@@ -511,6 +516,7 @@ def crear_alias(
         aprender_alias(
             db, ctx.tenant_id, payload.texto, payload.producto_id,
             cliente_id=payload.cliente_id, sucursal_id=payload.sucursal_id,
+            unidad_oc=unidad_oc, presentacion=presentacion,
             origen="MANUAL", user_id=ctx.user_id,
         )
         return {"ok": True}
@@ -519,6 +525,9 @@ def crear_alias(
         .filter(
             ProductoAlias.alias_normalizado == normalizar(payload.texto),
             ProductoAlias.cliente_id.is_(None),
+            ProductoAlias.sucursal_id.is_(None),
+            (ProductoAlias.unidad_oc == unidad_oc) if unidad_oc
+            else ProductoAlias.unidad_oc.is_(None),
         )
         .one_or_none()
     )
@@ -535,8 +544,25 @@ def crear_alias(
                 "permiso de gestión de productos"
             ),
         )
-    aprender_alias(db, ctx.tenant_id, payload.texto, payload.producto_id, origen="MANUAL", user_id=ctx.user_id)
+    aprender_alias(db, ctx.tenant_id, payload.texto, payload.producto_id,
+                   unidad_oc=unidad_oc, presentacion=presentacion,
+                   origen="MANUAL", user_id=ctx.user_id)
     return {"ok": True}
+
+
+def _presentacion_del_alias(db: Session, producto_id: UUID, presentacion: Optional[str]) -> Optional[str]:
+    """La unidad del sistema de un renglón del vocabulario, validada: tiene que
+    ser una que el producto venda (si no, la partida entraría en una unidad sin
+    precio ni clave de SAE)."""
+    if not presentacion or not presentacion.strip():
+        return None
+    prod = db.get(Producto, producto_id)
+    if not presentacion_declarada(prod, presentacion):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{prod.nombre if prod else 'El producto'} no se vende en {presentacion.strip().upper()}",
+        )
+    return presentacion.strip().upper()
 
 
 @router.get("/vocabulario", response_model=Page[VocabularioOut])
@@ -602,6 +628,7 @@ def vocabulario(
                 ProductoAlias.cliente_id,
                 ProductoAlias.sucursal_id,
                 ProductoAlias.producto_id,
+                ProductoAlias.unidad_oc,
             )
             .filter(
                 ProductoAlias.tenant_id == ctx.tenant_id,
@@ -609,13 +636,14 @@ def vocabulario(
             )
             .all()
         )
-        por_alcance: dict[tuple[str, Optional[UUID], Optional[UUID]], set[UUID]] = {}
+        por_alcance: dict[tuple, set[UUID]] = {}
         por_cliente: dict[str, list[tuple[UUID, UUID]]] = {}
-        for norm, cli_id, suc_id, prod_id in hermanos:
-            por_alcance.setdefault((norm, cli_id, suc_id), set()).add(prod_id)
+        for norm, cli_id, suc_id, prod_id, uoc in hermanos:
+            # «SANDIA | KG» y «SANDIA | PZ» son reglas distintas, no un choque.
+            por_alcance.setdefault((norm, cli_id, suc_id, uoc), set()).add(prod_id)
             if cli_id is not None:
                 por_cliente.setdefault(norm, []).append((cli_id, prod_id))
-        ambiguos = {norm for (norm, _, _), prods in por_alcance.items() if len(prods) > 1}
+        ambiguos = {llave[0] for llave, prods in por_alcance.items() if len(prods) > 1}
         for a, _, _, _ in filas:
             if a.cliente_id is not None:
                 continue
@@ -632,6 +660,9 @@ def vocabulario(
                 producto_id=p.id, producto_sku=p.sku, producto_nombre=p.nombre,
                 cliente_id=a.cliente_id, cliente_nombre=cli,
                 sucursal_id=a.sucursal_id, sucursal_nombre=suc,
+                unidad_oc=a.unidad_oc, presentacion=a.presentacion,
+                producto_presentaciones=_unidades_de(p),
+                clave_sae=(clave_sae_de(p, a.presentacion) or None) if a.presentacion else None,
                 ambiguo=a.alias_normalizado in ambiguos,
                 pisado_por=pisado.get((a.alias_normalizado, a.producto_id), 0),
             )
@@ -639,6 +670,13 @@ def vocabulario(
         ],
         total=total, limit=limit, offset=offset,
     )
+
+
+def _unidades_de(p: Producto) -> list[str]:
+    """Las unidades que vende el producto, la base primero."""
+    base = p.unidad_base or p.presentacion_default
+    resto = [k for k in (p.presentaciones or {}) if k != base]
+    return ([base] if base else []) + resto
 
 
 def _alias_editable(db: Session, alias_id: UUID, ctx: AuthContext) -> ProductoAlias:
@@ -671,7 +709,15 @@ def reapuntar_alias(
     alias = _alias_editable(db, alias_id, ctx)
     if payload.producto_id is not None:
         ensure_fk(db, Producto, payload.producto_id, "producto_id")
+        if payload.producto_id != alias.producto_id and "presentacion" not in payload.model_fields_set:
+            # La unidad era del producto anterior: si el nuevo no la vende, se quita.
+            if not presentacion_declarada(db.get(Producto, payload.producto_id), alias.presentacion):
+                alias.presentacion = None
         alias.producto_id = payload.producto_id
+    if "presentacion" in payload.model_fields_set:
+        alias.presentacion = _presentacion_del_alias(db, alias.producto_id, payload.presentacion)
+    if "unidad_oc" in payload.model_fields_set:
+        alias.unidad_oc = normalizar_unidad_oc(payload.unidad_oc)
     if payload.texto is not None:
         norm = normalizar(payload.texto)[:254]
         if not norm:
@@ -694,7 +740,7 @@ def reapuntar_alias(
     alias.origen = "MANUAL"        # lo decidió una persona: deja de ser importado
     # El índice único es (tenant, cliente, sucursal, texto normalizado): al
     # reescribir el texto se puede chocar con otro renglón del MISMO alcance.
-    flush_or_conflict(db, detail="Ese texto ya está en el vocabulario de ese alcance")
+    flush_or_conflict(db, detail="Ese texto (con esa unidad de la orden) ya está en el vocabulario de ese alcance")
     return None
 
 

@@ -209,6 +209,11 @@ class AliasReapuntarIn(BaseModel):
     texto: Optional[str] = Field(default=None, min_length=1, max_length=254)
     producto_id: Optional[uuid.UUID] = None
     sucursal_id: Optional[uuid.UUID] = None
+    # La unidad (0093), mismas reglas que la sucursal: ausente = no se toca,
+    # `null` = se quita. `unidad_oc` es como la escribe la orden («PZ»);
+    # `presentacion` la del sistema (PIEZA), una que el producto venda.
+    unidad_oc: Optional[str] = Field(default=None, max_length=20)
+    presentacion: Optional[str] = Field(default=None, max_length=20)
 
 
 class VocabularioOut(BaseModel):
@@ -223,6 +228,16 @@ class VocabularioOut(BaseModel):
     sucursal_id: Optional[uuid.UUID] = None
     sucursal_nombre: Optional[str] = None
     origen: str
+    # (texto + unidad OC) → (producto + unidad del sistema), 0093. `unidad_oc`
+    # vacía = la orden no trae unidad o la trae en el texto; `presentacion`
+    # vacía = el renglón sólo dice el producto (la unidad la decide la orden).
+    unidad_oc: Optional[str] = None
+    presentacion: Optional[str] = None
+    # Las unidades que vende el producto, para el selector de la pantalla.
+    producto_presentaciones: list[str] = []
+    # El artículo de SAE con el que sale esa unidad del sistema (vacío si no
+    # tiene propia, o si el renglón no fija unidad).
+    clave_sae: Optional[str] = None
     # Dos reglas del MISMO alcance llevan a productos distintos: nadie decide.
     # Que el mismo texto lleve a otro producto para otro cliente NO entra aquí
     # — eso lo resuelve la cascada (cliente+sucursal > cliente > global).
@@ -240,6 +255,9 @@ class AliasIn(BaseModel):
     # pelearse con el de otro.
     cliente_id: Optional[uuid.UUID] = None
     sucursal_id: Optional[uuid.UUID] = None
+    # La unidad (0093): como la escribe la orden y a cuál del sistema va.
+    unidad_oc: Optional[str] = Field(default=None, max_length=20)
+    presentacion: Optional[str] = Field(default=None, max_length=20)
 
 
 # ─── Importación masiva (plantilla o lista de precios con IA) ────────────────

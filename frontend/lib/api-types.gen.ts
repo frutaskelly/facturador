@@ -5739,6 +5739,8 @@ export interface components {
         AliasIn: {
             /** Cliente Id */
             cliente_id?: string | null;
+            /** Presentacion */
+            presentacion?: string | null;
             /**
              * Producto Id
              * Format: uuid
@@ -5748,6 +5750,8 @@ export interface components {
             sucursal_id?: string | null;
             /** Texto */
             texto: string;
+            /** Unidad Oc */
+            unidad_oc?: string | null;
         };
         /**
          * AliasOut
@@ -5805,12 +5809,16 @@ export interface components {
          *     Omitirla la deja como está (por eso se distingue ausente de `null`).
          */
         AliasReapuntarIn: {
+            /** Presentacion */
+            presentacion?: string | null;
             /** Producto Id */
             producto_id?: string | null;
             /** Sucursal Id */
             sucursal_id?: string | null;
             /** Texto */
             texto?: string | null;
+            /** Unidad Oc */
+            unidad_oc?: string | null;
         };
         /** AlmacenCreate */
         AlmacenCreate: {
@@ -9256,6 +9264,8 @@ export interface components {
             presentacion_sugerida?: string | null;
             /** Unidad */
             unidad?: string | null;
+            /** Unidad Conflicto */
+            unidad_conflicto?: string | null;
         };
         /** LineaPegadaOut */
         LineaPegadaOut: {
@@ -13086,6 +13096,8 @@ export interface components {
              * @default false
              */
             ambiguo: boolean;
+            /** Clave Sae */
+            clave_sae?: string | null;
             /** Cliente Id */
             cliente_id?: string | null;
             /** Cliente Nombre */
@@ -13102,6 +13114,8 @@ export interface components {
              * @default 0
              */
             pisado_por: number;
+            /** Presentacion */
+            presentacion?: string | null;
             /**
              * Producto Id
              * Format: uuid
@@ -13109,6 +13123,11 @@ export interface components {
             producto_id: string;
             /** Producto Nombre */
             producto_nombre: string;
+            /**
+             * Producto Presentaciones
+             * @default []
+             */
+            producto_presentaciones: string[];
             /** Producto Sku */
             producto_sku: string;
             /** Sucursal Id */
@@ -13117,6 +13136,8 @@ export interface components {
             sucursal_nombre?: string | null;
             /** Texto */
             texto: string;
+            /** Unidad Oc */
+            unidad_oc?: string | null;
         };
         /** ContactoIn */
         app__api__v1__cobranza_auto__ContactoIn: {

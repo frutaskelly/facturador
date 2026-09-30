@@ -148,6 +148,9 @@ class LineaOCRecibidaOut(BaseModel):
     # cliente o del producto. El carril automático no acepta una adivinanza en
     # productos con varias presentaciones: el factor cambia cantidad y precio.
     presentacion_adivinada: bool = False
+    # La orden y el vocabulario dicen unidades distintas (0093): no se escoge
+    # sola, la partida queda por revisar.
+    unidad_conflicto: Optional[str] = None
     candidatos: list[CandidatoLineaOut] = Field(default_factory=list)
 
 
