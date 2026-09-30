@@ -827,6 +827,29 @@ def test_pedido_ya_capturado_a_mano_no_genera_otra_remision(client, env, auth_as
     assert r.status_code == 200, r.text
 
 
+def test_folio_nuevo_ya_capturado_a_mano_no_genera_otra_remision(client, env, auth_as):
+    """Con la fecha adentro, «TBVH-ROV-20261007» sí identifica un pedido: si
+    ya se capturó a mano en el mismo cliente, la bandeja no genera otra."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    manual = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["ehmo"], "almacen_id": env["alm"],
+        "su_pedido": "TBVH-ROV-20261007",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": "25",
+                    "precio_unitario": "18.50"}],
+    })
+    assert manual.status_code == 201, manual.text
+
+    oc = client.post("/api/v1/oc-recibidas", headers=h,
+                     json=_oc(folio_externo="TBVH-ROV-20261007")).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+    body = {"almacen_id": env["alm"], "lineas": [{
+        "producto_id": env["prod"], "cantidad": "25", "precio_unitario": "18.50"}]}
+    r = client.post(f"/api/v1/oc-recibidas/{oc['id']}/crear-remision", headers=h, json=body)
+    assert r.status_code == 409, r.text
+    assert manual.json()["folio_interno"] in r.json()["detail"]
+
+
 def test_pedido_con_formato_se_repite_y_no_bloquea(client, env, auth_as):
     """EHMO y Río Libre no mandan folio: mandan «HO-34VIL-MIE», donde el número
     es la SEMANA y las letras la plaza, el punto de entrega y el día. Ese texto
@@ -1990,6 +2013,92 @@ def test_folio_sin_semana_quita_la_b():
     m = _RE_SUFIJO_APARTE.match("VH-38ROV-LUN-B-2")
     assert m and m.group(1) == "VH-38ROV-LUN-B" and m.group(2) == "2"
     assert _RE_SUFIJO_APARTE.match("VH-38ROV-LUN-B") is None
+
+
+# ─── folio con fecha (semana 40, 5-oct-2026) ─────────────────────────────────
+# Decisión del dueño 29-sep: el folio del bot deja la SEMANA y lleva la FECHA
+# exacta de entrega, con la sucursal al frente: VH-39ROV-MIE → TBVH-ROV-20260930.
+# Los dos formatos conviven: el cambio cae a media historia.
+
+def test_folio_nuevo_se_interpreta():
+    from datetime import date
+    from app.api.v1.oc_recibidas import _RE_SUFIJO_APARTE
+    from app.services.folio_oc import parse_nuevo, semana_equipo
+
+    f = parse_nuevo("tbvh-rov-20260930")
+    assert f and (f.sucursal, f.proyecto, f.punto, f.fecha, f.aparte) == (
+        "TB", "VH", "ROV", date(2026, 9, 30), None)
+    assert parse_nuevo("HGHO-IMS-20261005-2").aparte == 2
+    assert parse_nuevo("VH-39ROV-MIE") is None
+    assert parse_nuevo("TBVH-ROV-20261332") is None       # fecha imposible
+    assert parse_nuevo("CEN-35HUA-EMB") is None           # Río Libre: libre
+
+    # la semana del equipo cuenta desde el primer lunes de enero, no ISO
+    assert semana_equipo(date(2026, 9, 21)) == 38
+    assert semana_equipo(date(2026, 9, 30)) == 39
+    assert semana_equipo(date(2026, 10, 5)) == 40
+    assert semana_equipo(date(2027, 1, 4)) == 1
+    assert semana_equipo(date(2027, 1, 1)) == semana_equipo(date(2026, 12, 28))
+
+    m = _RE_SUFIJO_APARTE.match("TBVH-ROV-20261007-2")
+    assert m and m.group(1) == "TBVH-ROV-20261007" and m.group(2) == "2"
+    assert _RE_SUFIJO_APARTE.match("TBVH-ROV-20261007") is None
+
+
+def test_ubicaciones_con_folio_nuevo_dan_el_prefijo_del_proyecto(client, env, auth_as):
+    """El bot traduce el prefijo a proyecto (VH → HOSPITALES). Con la sucursal
+    al frente, las dos primeras letras serían «TB» y la OC nacería con el
+    proyecto por omisión — precios en cero, sin error."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="TBVH-ROV-20261005", ubicacion="ROVIROSA"))
+    r = client.get("/api/v1/oc-recibidas/ubicaciones", headers=h)
+    por_nombre = {u["ubicacion"]: u["prefijo"] for u in r.json()["ubicaciones"]}
+    assert por_nombre["ROVIROSA"] == "VH"
+
+
+def test_la_misma_entrega_antes_y_despues_del_cambio_de_formato(client, env, auth_as):
+    """Una entrega del 5-oct que llegó con el folio viejo (VH-40ROV-LUN) y se
+    reenvía con el nuevo (TBVH-ROV-20261005) es la misma: el mismo proyecto y
+    punto, la misma fecha. Otro punto el mismo día no se frena."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    comun = dict(ubicacion="ROVIROSA", fecha_entrega="2026-10-05", lineas=_lineas(21))
+    r1 = client.post("/api/v1/oc-recibidas", headers=h,
+                     json=_oc(folio_externo="VH-40ROV-LUN", **comun))
+    assert r1.status_code == 201, r1.text
+    r2 = client.post("/api/v1/oc-recibidas", headers=h,
+                     json=_oc(folio_externo="TBVH-ROV-20261005", **comun))
+    assert r2.status_code == 409, r2.text
+    assert "VH-40ROV-LUN" in r2.json()["detail"]
+
+    otro = dict(comun, ubicacion="ROVIROSA", lineas=_lineas(21, desde=40))
+    r3 = client.post("/api/v1/oc-recibidas", headers=h,
+                     json=_oc(folio_externo="TBVH-PAL-20261005", **otro))
+    assert r3.status_code == 201, r3.text
+
+
+def test_el_antigemela_con_folio_nuevo_mira_la_semana_de_la_fecha(client, env, auth_as):
+    """Sin semana en el folio, la ventana es lunes a domingo de la fecha de
+    entrega: la misma foto reenviada otro día de la semana se frena; la semana
+    siguiente, no."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    base = _lineas(6)
+    r1 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="TBVH-SSP-20261008", ubicacion="SSP", fecha_entrega="2026-10-08",
+        lineas=base))
+    assert r1.status_code == 201, r1.text
+    r2 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="TBVH-SSP-20261005", ubicacion="SSP", fecha_entrega="2026-10-05",
+        lineas=base))
+    assert r2.status_code == 409, r2.text
+    assert "TBVH-SSP-20261008" in r2.json()["detail"]
+    r3 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="TBVH-SSP-20261012", ubicacion="SSP", fecha_entrega="2026-10-12",
+        lineas=base))
+    assert r3.status_code == 201, r3.text
 
 
 # ─── el lote también destraba las órdenes SIN CLIENTE (26-sep-2026) ──────────

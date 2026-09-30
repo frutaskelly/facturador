@@ -31,7 +31,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer, selectinload
 
@@ -60,7 +60,7 @@ from ...schemas.oc_recibida import (
     ResolverCambioIn,
 )
 from ...models import ProductoCliente
-from ...services import cliente_match, oc_cambios
+from ...services import cliente_match, folio_oc, oc_cambios
 from ...services.precios import resolver_precios_lote
 from ...services.proyecto_alcance import proyecto_aplica
 from ...services.sucursales import es_sucursal_de
@@ -334,7 +334,9 @@ def _candado_folio_repetido(db: Session, ctx: AuthContext, payload) -> None:
     )
 
 
-_RE_SUFIJO_APARTE = re.compile(r"^(.*-[A-Z]{2,3}(?:-B)?)-(\d{1,2})$")
+# La base termina en el día (HO-39ACT-LUN-2, VH-38PAL-MIE-B-2) o, desde la
+# semana 40, en la fecha (TBVH-ROV-20261007-2). Ver services/folio_oc.
+_RE_SUFIJO_APARTE = re.compile(r"^(.*-(?:[A-Z]{2,3}(?:-B)?|\d{8}))-(\d{1,2})$")
 
 
 @router.get("/sufijos-aparte")
@@ -468,6 +470,37 @@ def _folio_sin_semana(folio: str) -> Optional[str]:
     return f"{m.group(1)}{m.group(3)}" if m else None
 
 
+def _proyecto_y_punto(folio: str) -> Optional[tuple[str, str]]:
+    """(proyecto, punto) de un folio del bot, en cualquiera de los dos formatos.
+
+    Es lo que comparten «VH-40ROV-LUN» y «TBVH-ROV-20261005»: el día y la
+    semana del viejo los da ya la fecha de entrega, que el candado compara
+    aparte. Las entregas aparte (…-2) no entran, como en el formato viejo.
+    """
+    nuevo = folio_oc.parse_nuevo(folio)
+    if nuevo is not None:
+        return None if nuevo.aparte else (nuevo.proyecto, nuevo.punto)
+    m = _RE_SEMANA_EN_FOLIO.match((folio or "").strip().upper())
+    return (m.group(1).rstrip("-"), m.group(3).split("-")[0]) if m else None
+
+
+def _misma_entrega_otro_folio(a: str, b: str) -> bool:
+    """¿Dos folios del mismo punto y fecha son la misma entrega con otro nombre?
+
+    Viejo contra viejo: iguales salvo la semana (el caso del 13-sep). Viejo
+    contra nuevo: mismo proyecto y punto — la misma entrega que llegó una vez
+    antes y otra después del cambio de formato (semana 40). Nuevo contra nuevo
+    no puede pasar: con la fecha adentro, la misma entrega trae el mismo folio.
+    """
+    viejo_a, viejo_b = _folio_sin_semana(a), _folio_sin_semana(b)
+    if viejo_a and viejo_b:
+        return viejo_a == viejo_b
+    if (folio_oc.parse_nuevo(a) is None) == (folio_oc.parse_nuevo(b) is None):
+        return False
+    pa, pb = _proyecto_y_punto(a), _proyecto_y_punto(b)
+    return pa is not None and pa == pb
+
+
 def _candado_misma_entrega_otra_semana(db: Session, ctx: AuthContext, payload) -> None:
     """La misma entrega que vuelve a llegar con OTRO número de semana.
 
@@ -497,8 +530,8 @@ def _candado_misma_entrega_otra_semana(db: Session, ctx: AuthContext, payload) -
         return
     punto = (getattr(payload, "ubicacion", None) or "").strip()
     fecha = _fecha_entrega(payload)
-    sin_semana = _folio_sin_semana(payload.folio_externo or "")
-    if not punto or fecha is None or not sin_semana:
+    folio = (payload.folio_externo or "").strip().upper()
+    if not punto or fecha is None or not _proyecto_y_punto(folio):
         return
     for oc in (db.query(OCRecibida)
                .filter(OCRecibida.tenant_id == ctx.tenant_id,
@@ -507,7 +540,7 @@ def _candado_misma_entrega_otra_semana(db: Session, ctx: AuthContext, payload) -
                        OCRecibida.origen_externo != payload.origen_externo,
                        OCRecibida.estado != "DESCARTADA")
                .all()):
-        if _folio_sin_semana(oc.folio_externo or "") != sin_semana:
+        if not _misma_entrega_otro_folio(oc.folio_externo or "", folio):
             continue
         raise HTTPException(
             status_code=409,
@@ -576,10 +609,27 @@ def _candado_antigemela(db: Session, ctx: AuthContext, payload) -> None:
     firma = _firma_entrega(getattr(payload, "lineas", None))
     if len(firma) < _MINIMO_FIRMA:
         return
-    m = _RE_SEMANA_FOLIO.match((payload.folio_externo or "").strip().upper())
-    if not m:
+    folio = (payload.folio_externo or "").strip().upper()
+    nuevo = folio_oc.parse_nuevo(folio)
+    m = None if nuevo else _RE_SEMANA_FOLIO.match(folio)
+    # Desde la semana 40 la semana ya no viene en el folio sino la fecha: las
+    # candidatas son las del mismo proyecto con entrega de lunes a domingo de
+    # esa semana, en cualquiera de los dos formatos (el cambio cae a media
+    # historia y una gemela puede haber llegado con el viejo).
+    if nuevo is not None:
+        prefijo, semana, fecha = nuevo.proyecto, f"{folio_oc.semana_equipo(nuevo.fecha):02d}", nuevo.fecha
+        del_formato_nuevo = OCRecibida.folio_externo.like(f"{nuevo.prefijo}-%")
+    elif m is not None:
+        prefijo, semana, fecha = m.group(1), m.group(2), _fecha_entrega(payload)
+        del_formato_nuevo = OCRecibida.folio_externo.like(f"__{prefijo}-%")
+    else:
         return
-    prefijo, semana = m.group(1), m.group(2)
+    mismo_folio = OCRecibida.folio_externo.like(f"{prefijo}-{semana}%")
+    if fecha is not None:
+        lunes = folio_oc.lunes_de(fecha)
+        mismo_folio = or_(mismo_folio, and_(
+            del_formato_nuevo,
+            OCRecibida.fecha_entrega.between(lunes, lunes + timedelta(days=6))))
     # UN DOCUMENTO NO ES GEMELO DE SÍ MISMO (25-sep-2026). En la hoja la firma
     # cubría todos los días de la foto a la vez; aquí cada día llega como su
     # propia orden, así que una foto que pide lo mismo el lunes y el martes
@@ -588,7 +638,7 @@ def _candado_antigemela(db: Session, ctx: AuthContext, payload) -> None:
     archivo = (getattr(payload, "archivo_nombre", None) or "").strip()
     for oc in (db.query(OCRecibida)
                .filter(OCRecibida.tenant_id == ctx.tenant_id,
-                       OCRecibida.folio_externo.like(f"{prefijo}-{semana}%"),
+                       mismo_folio,
                        OCRecibida.origen_externo != payload.origen_externo,
                        OCRecibida.estado != "DESCARTADA")
                .all()):
@@ -642,7 +692,10 @@ def ubicaciones_conocidas(
     vistas: dict[str, dict] = {}
     for punto, folio, cuando in q.order_by(OCRecibida.recibida_at.desc()).all():
         nombre = " ".join((punto or "").upper().split())
-        prefijo = (folio or "").strip().upper()[:2]
+        # Desde la semana 40 el folio empieza con la sucursal (TBVH-ROV-…): el
+        # prefijo que el bot traduce a proyecto es el que va después.
+        nuevo = folio_oc.parse_nuevo(folio)
+        prefijo = nuevo.proyecto if nuevo else (folio or "").strip().upper()[:2]
         if not nombre or len(prefijo) < 2 or not prefijo.isalpha() or nombre in vistas:
             continue
         vistas[nombre] = {"ubicacion": nombre, "prefijo": prefijo,
@@ -1793,9 +1846,26 @@ def crear_remision(
     # un folio: se repiten legítimamente entre entregas (RRIO7 y RRIO21, ambas
     # facturadas, comparten «CEN-35HUA-FYV»), así que ahí un duplicado no se
     # puede deducir del texto y no se bloquea nada.
+    #
+    # El formato nuevo del bot (semana 40: «TBVH-ROV-20261007») SÍ identifica:
+    # lleva la fecha exacta de entrega, así que la misma cadena en el mismo
+    # cliente es el mismo pedido. Se compara entero, sin normalizar.
     m = re.fullmatch(r"(?:OC[\s.:-]*)?0*(\d+)", folio, re.IGNORECASE)
     clave = m.group(1) if m else None
-    if clave:
+    dup = None
+    if folio_oc.parse_nuevo(folio) is not None:
+        dup = (
+            db.query(Remision)
+            .filter(
+                Remision.cliente_facturacion_id == oc.cliente_id,
+                Remision.deleted_at.is_(None),
+                Remision.estado != "CANCELADA",
+                func.upper(func.trim(Remision.su_pedido)) == folio.upper(),
+            )
+            .order_by(Remision.created_at)
+            .first()
+        )
+    elif clave:
         dup = (
             db.query(Remision)
             .filter(
@@ -1819,15 +1889,15 @@ def crear_remision(
             .order_by(Remision.created_at)
             .first()
         )
-        if dup is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"El pedido {folio} ya está en la remisión "
-                    f"{dup.folio_interno} de este cliente; revísala (o cancélala) "
-                    "antes de generar otra desde la bandeja."
-                ),
-            )
+    if dup is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"El pedido {folio} ya está en la remisión "
+                f"{dup.folio_interno} de este cliente; revísala (o cancélala) "
+                "antes de generar otra desde la bandeja."
+            ),
+        )
     # Las observaciones de la remisión: se imprimen en su PDF y pasan tal cual a
     # las de la factura al facturarla. El punto de entrega va primero porque es
     # lo que el equipo busca ahí. «OC <folio>» se conserva con ese formato exacto
