@@ -54,7 +54,13 @@ def env(db_engine):
                         unidad_sat="KGM", unidad_base="KILO")
         del_ = Producto(tenant_id=tid, sku="DEL", nombre="Borrado", clave_sat="50300000",
                         unidad_sat="KGM", unidad_base="KILO")
-        db.add_all([agua, caja, nada, del_]); db.flush()
+        # La sandía: se vende por KILO y por PIEZA, cada una con su precio. La
+        # PIEZA no se convierte (factor 1): es otra unidad de venta, no 1 kilo.
+        sand = Producto(tenant_id=tid, sku="SAND", nombre="Sandía", clave_sat="50304610",
+                        unidad_sat="KGM", unidad_base="KILO",
+                        presentaciones={"KILO": 1, "PIEZA": {"sat": "H87", "factor": 1}},
+                        presentacion_default="KILO")
+        db.add_all([agua, caja, nada, del_, sand]); db.flush()
         del_.deleted_at = db.execute(text("SELECT now()")).scalar()
 
         cli = Cliente(tenant_id=tid, codigo="C1", legal_name="Cliente SA", rfc="XAXX010101000")
@@ -94,6 +100,10 @@ def env(db_engine):
             (l_for, agua, "KILO", "15", 1, None, None),
             (l_for, agua, "KILO", "13", 10, None, None),
             (l_for, caja, "KILO", "27", 1, None, None),
+            # sandía: la lista del cliente trae KILO y PIEZA — lista POR UNIDAD
+            (l_cli, sand, "KILO", "20.5", 1, None, None),
+            (l_cli, sand, "PIEZA", "250", 1, None, None),
+            (base, sand, "KILO", "22", 1, None, None),
         ]
         for lp, prod, pres, precio, cmin, desde, hasta in precios:
             db.add(Precio(tenant_id=tid, lista_id=lp.id, producto_id=prod.id,
@@ -115,6 +125,9 @@ def env(db_engine):
                            presentacion="KILO", precio_unitario=Decimal("26")),
             PrecioOverride(tenant_id=tid, sucursal_id=suc.id, producto_id=caja.id,
                            presentacion="KILO", precio_unitario=Decimal("24")),
+            # Precio especial de la plaza SÓLO por kilo: no debe hablar por la pieza.
+            PrecioOverride(tenant_id=tid, sucursal_id=suc.id, producto_id=sand.id,
+                           presentacion="KILO", precio_unitario=Decimal("20.68")),
             PrecioOverride(tenant_id=tid, sucursal_id=suc.id, producto_id=agua.id,
                            presentacion="KILO", precio_unitario=Decimal("2"),
                            vigencia_hasta=hoy - timedelta(days=1)),
@@ -123,7 +136,7 @@ def env(db_engine):
 
         yield {
             "db": db, "tid": tid,
-            "agua": agua.id, "caja": caja.id, "nada": nada.id, "del": del_.id,
+            "agua": agua.id, "caja": caja.id, "nada": nada.id, "del": del_.id, "sand": sand.id,
             "cli": cli.id, "suc": suc.id, "serie": serie.id, "proy": proy.id,
             "l_for": l_for.id, "l_cli": l_cli.id, "l_ven": l_ven.id, "base": base.id,
         }
@@ -188,6 +201,8 @@ def _items(env):
         {"producto_id": env["nada"], "presentacion": "KILO", "cantidad": Decimal("1")},    # solo en... nada
         {"producto_id": env["del"], "presentacion": "KILO", "cantidad": Decimal("1")},     # borrado
         {"producto_id": env["agua"], "presentacion": "COSTAL", "cantidad": Decimal("1")},  # presentación inexistente
+        {"producto_id": env["sand"], "presentacion": "KILO", "cantidad": Decimal("9.3")},
+        {"producto_id": env["sand"], "presentacion": "PIEZA", "cantidad": Decimal("2")},   # precio propio
     ]
 
 
@@ -290,3 +305,27 @@ def test_desempate_determinista_en_overrides(env, db_engine):
                               cantidad=Decimal("1"), cliente_id=env["cli"])
     assert lote[0] == uno
     assert lote[0]["origen"] == "override_cliente"
+
+
+def test_dos_precios_por_unidad_del_mismo_producto(env, db_engine):
+    """Regla del dueño (30-sep-2026): la lista es POR UNIDAD. Un cliente con
+    precio por KILO y por PIEZA de la sandía cobra cada una con el suyo, aunque
+    haya un precio especial más específico que sólo existe por KILO: ese NO se
+    traduce a pieza (antes: override KILO $20.68 × factor 1 = pieza a $20.68).
+    Sólo si la PIEZA no tiene precio en ningún escalón se deriva del KILO."""
+    ctx = {"cliente_id": env["cli"], "sucursal_id": env["suc"]}
+    items = [
+        {"producto_id": env["sand"], "presentacion": "KILO", "cantidad": Decimal("9.3")},
+        {"producto_id": env["sand"], "presentacion": "PIEZA", "cantidad": Decimal("2")},
+    ]
+    with _sesion_tenant(db_engine, env["tid"]) as db:
+        lote = resolver_precios_lote(db, items=items, **ctx)
+        uno = [resolver_precio(db, producto_id=it["producto_id"], presentacion=it["presentacion"],
+                               cantidad=it["cantidad"], **ctx) for it in items]
+        # Sin la lista del cliente (sólo la base, que no trae PIEZA): se deriva.
+        derivado = resolver_precio(db, producto_id=env["sand"], presentacion="PIEZA",
+                                   cantidad=Decimal("1"))
+    assert lote == uno
+    assert lote[0]["precio"] == Decimal("20.68") and lote[0]["origen"] == "override_sucursal"
+    assert lote[1]["precio"] == Decimal("250") and lote[1]["origen"] == "lista_cliente"
+    assert derivado["precio"] == Decimal("22") and derivado["origen"] == "lista_base"

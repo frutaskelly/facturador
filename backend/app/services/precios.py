@@ -241,33 +241,72 @@ def resolver_precio(
     Si la presentación pedida no tiene precio propio, se deriva del precio de la
     unidad base × el factor de la presentación (p. ej. CAJA = PIEZA × 12). La
     cantidad se convierte a unidades base para elegir el tramo correcto.
+
+    La lista es POR UNIDAD (regla del dueño, 30-sep-2026): un cliente puede
+    tener precio por KILO y por PIEZA del mismo producto. Por eso la cascada
+    corre DOS veces — primero sólo con la presentación pedida y, sólo si en
+    ningún escalón hay precio para ella, con la base × factor. Antes el derivado
+    competía en cada escalón y un override por KILO le ganaba al precio por
+    PIEZA de la lista del cliente: la sandía por pieza salía a $20.50.
     """
     fecha = fecha or date.today()
     cantidad = Decimal(cantidad)
 
-    # Intentos de presentación: exacta primero; si falla, la unidad base × factor.
-    # Cada intento es (presentacion, multiplicador_del_precio, cantidad_para_el_tramo).
-    intentos: list[tuple[str, Decimal, Decimal]] = [(presentacion, Decimal(1), cantidad)]
     prod = (
         db.query(Producto)
         .filter(Producto.id == producto_id, Producto.deleted_at.is_(None))
         .one_or_none()
     )
-    if prod:
-        pres = prod.presentaciones or {}
-        base = prod.unidad_base or prod.presentacion_default
-        if base and base != presentacion and presentacion in pres and base in pres:
-            ratio = _factor(pres[presentacion]) / _factor(pres[base])
-            if ratio > 0:
-                intentos.append((base, ratio, cantidad * ratio))
+    derivado = _intento_derivado(prod, presentacion, cantidad)
+    res = _cascada_precio(
+        db, (presentacion, Decimal(1), cantidad), producto_id=producto_id,
+        cliente_id=cliente_id, sucursal_id=sucursal_id, serie_id=serie_id,
+        proyecto_id=proyecto_id, lista_id=lista_id, fecha=fecha,
+    )
+    if res is None and derivado is not None:
+        res = _cascada_precio(
+            db, derivado, producto_id=producto_id,
+            cliente_id=cliente_id, sucursal_id=sucursal_id, serie_id=serie_id,
+            proyecto_id=proyecto_id, lista_id=lista_id, fecha=fecha,
+        )
+    return res
+
+
+def _intento_derivado(prod, presentacion: str, cantidad: Decimal):
+    """(base, multiplicador_del_precio, cantidad_en_base) si la presentación se
+    puede traducir a la unidad base del producto; None si no."""
+    if not prod:
+        return None
+    pres = prod.presentaciones or {}
+    base = prod.unidad_base or prod.presentacion_default
+    if base and base != presentacion and presentacion in pres and base in pres:
+        ratio = _factor(pres[presentacion]) / _factor(pres[base])
+        if ratio > 0:
+            return (base, ratio, cantidad * ratio)
+    return None
+
+
+def _cascada_precio(
+    db: Session,
+    intento: tuple[str, Decimal, Decimal],
+    *,
+    producto_id: UUID,
+    cliente_id: Optional[UUID],
+    sucursal_id: Optional[UUID],
+    serie_id: Optional[UUID],
+    proyecto_id: Optional[UUID],
+    lista_id: Optional[UUID],
+    fecha: date,
+) -> Optional[dict]:
+    """La cascada de `resolver_precio` con UN solo intento de presentación."""
+    pres_try, mult, cant_try = intento
 
     def _resolver(src) -> Optional[Decimal]:
-        """src(presentacion, cantidad) -> precio_unitario | None, aplicando intentos."""
-        for pres_try, mult, cant_try in intentos:
-            p = src(pres_try, cant_try)
-            if p is not None:
-                return p if mult == 1 else (p * mult).quantize(Decimal("0.01"))
-        return None
+        """src(presentacion, cantidad) -> precio_unitario | None, con el multiplicador."""
+        p = src(pres_try, cant_try)
+        if p is None:
+            return None
+        return p if mult == 1 else (p * mult).quantize(Decimal("0.01"))
 
     # 1. override sucursal (con el cliente: el exacto gana al de la plaza sola)
     if sucursal_id:
@@ -353,20 +392,16 @@ def resolver_precios_lote(
     }
 
     # Los intentos de cada partida: la presentación pedida y, si el producto la
-    # traduce, la unidad base × factor — mismos criterios que resolver_precio.
+    # traduce, la unidad base × factor — mismos criterios que resolver_precio,
+    # y como allá cada uno recorre la cascada COMPLETA por separado.
     intentos_por_item: list[list[tuple[str, Decimal, Decimal]]] = []
     for it in items:
         cantidad = Decimal(it["cantidad"])
         presentacion = it["presentacion"]
         intentos: list[tuple[str, Decimal, Decimal]] = [(presentacion, Decimal(1), cantidad)]
-        prod = prods.get(it["producto_id"])
-        if prod:
-            pres = prod.presentaciones or {}
-            base = prod.unidad_base or prod.presentacion_default
-            if base and base != presentacion and presentacion in pres and base in pres:
-                ratio = _factor(pres[presentacion]) / _factor(pres[base])
-                if ratio > 0:
-                    intentos.append((base, ratio, cantidad * ratio))
+        derivado = _intento_derivado(prods.get(it["producto_id"]), presentacion, cantidad)
+        if derivado is not None:
+            intentos.append(derivado)
         intentos_por_item.append(intentos)
 
     # Overrides de sucursal y de cliente: una consulta por dimensión, indexada
@@ -433,16 +468,14 @@ def resolver_precios_lote(
                 return precio
         return filas[-1][1] if filas else None
 
-    resultados: list[Optional[dict]] = []
-    for it, intentos in zip(items, intentos_por_item):
-        pid = it["producto_id"]
+    def _cascada(pid, intento) -> Optional[dict]:
+        pres_try, mult, cant_try = intento
 
         def _resolver(src) -> Optional[Decimal]:
-            for pres_try, mult, cant_try in intentos:
-                p = src(pres_try, cant_try)
-                if p is not None:
-                    return p if mult == 1 else (p * mult).quantize(Decimal("0.01"))
-            return None
+            p = src(pres_try, cant_try)
+            if p is None:
+                return None
+            return p if mult == 1 else (p * mult).quantize(Decimal("0.01"))
 
         res: Optional[dict] = None
         if sucursal_id:
@@ -477,5 +510,14 @@ def resolver_precios_lote(
             p = _resolver(lambda pr, cant: _precio_en(base_lp.id, pid, pr, cant))
             if p is not None:
                 res = {"precio": p, "origen": "lista_base", "lista_id": str(base_lp.id)}
+        return res
+
+    resultados: list[Optional[dict]] = []
+    for it, intentos in zip(items, intentos_por_item):
+        res: Optional[dict] = None
+        for intento in intentos:
+            res = _cascada(it["producto_id"], intento)
+            if res is not None:
+                break
         resultados.append(res)
     return resultados
