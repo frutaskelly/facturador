@@ -28,6 +28,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from ..models import Cliente, Factura, Remision
+from . import folio_oc
 from .series import resolver_serie
 
 _RE_OC_OBS = re.compile(r"\bOC[\s:]+([A-Z0-9][A-Z0-9\-\/\.]*)")
@@ -63,6 +64,12 @@ def extraer_semana(*textos: Optional[str]) -> Optional[int]:
         m = _RE_SEMANA_OBS.search(t) or _RE_SEMANA_FOLIO.search(t)
         if m:
             return int(m.group(1))
+        # Desde la semana 40 el folio trae la fecha, no la semana
+        # (TBVH-ROVIR-20261007): se calcula como la cuenta el equipo.
+        m = folio_oc.RE_NUEVO_EN_TEXTO.search(t)
+        nuevo = folio_oc.parse_nuevo(m.group(1)) if m else None
+        if nuevo is not None:
+            return folio_oc.semana_equipo(nuevo.fecha)
     return None
 
 
@@ -89,13 +96,14 @@ def extraer_oc(observaciones: Optional[str]) -> Optional[str]:
     20/08/2026 SN-33NER-JUE». Ese folio es igualmente el `su_pedido` de la
     remisión, así que también sirve de llave; sin reconocerlo, 46 facturas
     reales quedaron sin ligar a su entrega (detectado el 30-ago buscando
-    SN-33NER-JUE).
+    SN-33NER-JUE). Desde la semana 40 el folio del bot lleva la fecha
+    (TBVH-ROVIR-20261007) y se reconoce igual.
     """
     texto = (observaciones or "").upper()
     m = _RE_OC_OBS.search(texto)
     if m:
         return norm_oc(m.group(1).rstrip(_PUNTUACION_FINAL))
-    m = _RE_FOLIO_INTERNO.search(texto)
+    m = _RE_FOLIO_INTERNO.search(texto) or folio_oc.RE_NUEVO_EN_TEXTO.search(texto)
     return norm_oc(m.group(1)) if m else None
 
 

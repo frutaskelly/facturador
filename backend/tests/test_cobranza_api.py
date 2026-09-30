@@ -615,3 +615,17 @@ def test_extraer_oc_semana_repetida_b():
     assert extraer_oc("SEM 38 HOSPITAL ROVIROSA 14 SEPTIEMBRE 2026. VH-38ROV-LUN") == "VH-38ROV-LUN"
     assert extraer_oc("ENTREGA VH-38BAL-LUN-BAÑOS") == "VH-38BAL-LUN"
     assert extraer_semana("SEM 38-B HOSPITAL ROVIROSA", "VH-38ROV-LUN-B") == 38
+
+
+def test_extraer_oc_y_semana_del_folio_con_fecha():
+    """Desde la semana 40 el folio del bot lleva la fecha (TBVH-ROVIR-20261007):
+    el espejo lo reconoce en la observación de SAE para ligar la factura, y la
+    semana sale de la fecha."""
+    from app.services.espejo_cruce import extraer_oc, extraer_semana
+
+    assert extraer_oc("SEM 40 HOSPITAL ROVIROSA 7 OCTUBRE 2026. TBVH-ROVIR-20261007") == "TBVH-ROVIR-20261007"
+    assert extraer_oc("SEM 40 HOSPITAL ROVIROSA TBVH-ROVIR-20261007-2") == "TBVH-ROVIR-20261007-2"
+    assert extraer_oc("OC HGHO-IMSSB-20261005 ENTREGA") == "HGHO-IMSSB-20261005"
+    assert extraer_semana(None, "TBVH-ROVIR-20261007") == 40
+    assert extraer_semana(None, "HGHO-IMSSB-20261004") == 39
+    assert extraer_semana("SEM 40 ROVIROSA", "HGHO-IMSSB-20261004") == 40   # la escrita gana
