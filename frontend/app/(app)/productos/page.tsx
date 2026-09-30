@@ -71,6 +71,26 @@ function clavesPorPresentacion(p: Producto): Record<string, string> {
   return out;
 }
 
+/** Un renglón de la tabla: el producto EN UNA de sus unidades. La SANDIA sale
+ *  dos veces (KILO → SANDIAKG, PIEZA → SANDIAPZ): es un solo producto con un
+ *  solo SKU, pero en SAE son dos artículos y cada unidad tiene su precio. */
+type FilaUnidad = { p: Producto; unidad: string; esBase: boolean; clave: string | null };
+
+function filasPorUnidad(productos: Producto[]): FilaUnidad[] {
+  const out: FilaUnidad[] = [];
+  for (const p of productos) {
+    const base = p.unidad_base ?? "KILO";
+    const porPres = clavesPorPresentacion(p);
+    // La base primero; luego las demás en el orden en que están guardadas.
+    const unidades = [base, ...Object.keys(p.presentaciones ?? {}).filter((k) => k !== base)];
+    for (const unidad of unidades) {
+      const esBase = unidad === base;
+      out.push({ p, unidad, esBase, clave: (esBase ? p.clave_sae : porPres[unidad]) || null });
+    }
+  }
+  return out;
+}
+
 type FormState = {
   sku: string;
   nombre: string;
@@ -170,7 +190,11 @@ export default function ProductosPage() {
   const { data, loading, error, reload } = useListadoCompleto<Producto>(
     "/api/v1/productos"
   );
-  const rows = data?.items ?? [];
+  const rows = useMemo(() => data?.items ?? [], [data]);
+  const filas = useMemo(() => filasPorUnidad(rows), [rows]);
+  // Los desactivados (gemelos ya fusionados) estorban al buscar: se esconden
+  // salvo que se pidan.
+  const [verInactivos, setVerInactivos] = useState(false);
 
   const [form, setForm] = useState<FormState | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -322,66 +346,61 @@ export default function ProductosPage() {
   // Cada columna lleva `sortValue`: es el texto que el buscador de la tabla
   // indexa (y el que sale al exportar a Excel). Sin él, las celdas JSX no
   // aportan texto y buscar no encontraba nada.
-  const columns = useMemo<Column<Producto>[]>(() => [
-    { header: "SKU", sortValue: (p) => p.sku, cell: (p) => <span className="font-medium">{p.sku}</span> },
-    { header: "Nombre", truncate: true, sortValue: (p) => p.nombre, cell: (p) => <span title={p.nombre}>{p.nombre}</span> },
+  const columns = useMemo<Column<FilaUnidad>[]>(() => [
+    { header: "SKU", sortValue: ({ p }) => p.sku, cell: ({ p }) => <span className="font-medium">{p.sku}</span> },
+    { header: "Nombre", truncate: true, sortValue: ({ p }) => p.nombre, cell: ({ p }) => <span title={p.nombre}>{p.nombre}</span> },
+    { header: "Unidad", sortValue: (f) => f.unidad, cell: (f) => f.unidad },
+    {
+      header: "Clave SAE",
+      sortValue: (f) => f.clave ?? "",
+      cell: (f) =>
+        f.clave ? (
+          <span className="tabular-nums">{f.clave}</span>
+        ) : (
+          <span
+            className="text-warning"
+            title={f.esBase
+              ? "Sin ella, este producto sale «sin clave» en cada cliente que no lo tenga en su catálogo"
+              : `${f.unidad} no tiene clave propia: al exportar saldría con la de ${f.p.unidad_base ?? "la unidad base"}`}
+          >
+            —
+          </span>
+        ),
+    },
     {
       header: "Categoría",
-      sortValue: (p) => (p.categoria_id ? catName[p.categoria_id] ?? "" : ""),
-      cell: (p) => (p.categoria_id ? catName[p.categoria_id] ?? "—" : "—"),
+      sortValue: ({ p }) => (p.categoria_id ? catName[p.categoria_id] ?? "" : ""),
+      cell: ({ p }) => (p.categoria_id ? catName[p.categoria_id] ?? "—" : "—"),
     },
     {
       header: "Esquema de impuesto",
-      sortValue: (p) => (p.esquema_impuesto_id ? esqName[p.esquema_impuesto_id] ?? "" : "Sin esquema"),
-      cell: (p) =>
+      sortValue: ({ p }) => (p.esquema_impuesto_id ? esqName[p.esquema_impuesto_id] ?? "" : "Sin esquema"),
+      cell: ({ p }) =>
         p.esquema_impuesto_id ? (
           esqName[p.esquema_impuesto_id] ?? "—"
         ) : (
           <span className="text-danger">Sin esquema</span>
         ),
     },
-    { header: "Clave SAT", sortValue: (p) => p.clave_sat, cell: (p) => <span className="text-muted">{p.clave_sat}</span> },
-    {
-      header: "Clave SAE",
-      sortValue: (p) => p.clave_sae ?? "",
-      // Con las de cada presentación: buscar «SANDIAPZ» tiene que encontrar la SANDIA.
-      exportValue: (p) =>
-        [p.clave_sae ?? "", ...Object.entries(clavesPorPresentacion(p)).map(([k, v]) => `${k}: ${v}`)]
-          .filter(Boolean).join(" · "),
-      cell: (p) => {
-        const porPres = Object.entries(clavesPorPresentacion(p));
-        return (
-          <div>
-            {p.clave_sae
-              ? <span className="tabular-nums">{p.clave_sae}</span>
-              : <span className="text-warning" title="Sin ella, este producto sale «sin clave» en cada cliente que no lo tenga en su catálogo">—</span>}
-            {porPres.map(([pres, clave]) => (
-              <div key={pres} className="text-xs text-muted tabular-nums">
-                {pres}: {clave}
-              </div>
-            ))}
-          </div>
-        );
-      },
-    },
+    { header: "Clave SAT", sortValue: ({ p }) => p.clave_sat, cell: ({ p }) => <span className="text-muted">{p.clave_sat}</span> },
     {
       // La descripción oficial del SAT para esa clave: la resuelve el backend
       // (el producto solo guarda la clave). Sin ella, los 8 dígitos no dicen
       // nada al revisar si la clave que quedó es la correcta.
       header: "Descripción SAT",
       truncate: true,
-      sortValue: (p) => p.clave_sat_descripcion ?? "",
-      cell: (p) => <span className="text-muted" title={p.clave_sat_descripcion ?? ""}>{p.clave_sat_descripcion || "—"}</span>,
+      sortValue: ({ p }) => p.clave_sat_descripcion ?? "",
+      cell: ({ p }) => <span className="text-muted" title={p.clave_sat_descripcion ?? ""}>{p.clave_sat_descripcion || "—"}</span>,
     },
     {
       header: "Estado",
-      sortValue: (p) => (p.activo ? "Activo" : "Inactivo"),
-      cell: (p) => <Badge tone={p.activo ? "success" : "muted"}>{p.activo ? "Activo" : "Inactivo"}</Badge>,
+      sortValue: ({ p }) => (p.activo ? "Activo" : "Inactivo"),
+      cell: ({ p }) => <Badge tone={p.activo ? "success" : "muted"}>{p.activo ? "Activo" : "Inactivo"}</Badge>,
     },
     {
       header: "",
       className: "text-right w-1",
-      cell: (p) =>
+      cell: ({ p }) =>
         canWrite || canDelete || canAltaSae ? (
           <div className="flex justify-end gap-1">
             {canAltaSae && (
@@ -455,7 +474,24 @@ export default function ProductosPage() {
         onClose={() => setAltaSae(null)}
       />
 
-      <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin productos" storageKey="productos" />
+      <DataTableSmart
+        columns={columns}
+        rows={filas}
+        rowKey={(f) => `${f.p.id}:${f.unidad}`}
+        rowFilter={(f) => verInactivos || f.p.activo}
+        rowFilterKey={verInactivos ? "todos" : "activos"}
+        toolbarExtra={
+          <label className="flex items-center gap-2 text-sm text-muted">
+            <Switch checked={verInactivos} onChange={setVerInactivos} /> Ver inactivos
+          </label>
+        }
+        loading={loading}
+        error={error}
+        empty="Sin productos"
+        // Clave nueva: la tabla cambió de forma (un renglón por unidad) y el
+        // orden/visibilidad guardados de la anterior no le aplican.
+        storageKey="productos-por-unidad"
+      />
 
       {/* Alta: buscar primero (evita duplicados) → elegir existente o crear nuevo */}
       <Modal
