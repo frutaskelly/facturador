@@ -24,8 +24,8 @@ class ProductoAlias(Base):
     __tablename__ = "producto_alias"
     # La unicidad vive en el índice funcional `uq_alias_tenant_alcance_norm`
     # (migración 0053): UNIQUE (tenant, COALESCE(cliente), COALESCE(sucursal),
-    # alias_normalizado). No se declara aquí porque SQLAlchemy no expresa
-    # COALESCE en UniqueConstraint.
+    # alias_normalizado, COALESCE(unidad_oc, '')) — la unidad entró en la 0093.
+    # No se declara aquí porque SQLAlchemy no expresa COALESCE en UniqueConstraint.
 
     id = uuid_pk()
     tenant_id = tenant_fk()
@@ -36,6 +36,14 @@ class ProductoAlias(Base):
     sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id", ondelete="CASCADE"), nullable=True)
     alias = Column(String(254), nullable=False)
     alias_normalizado = Column(String(254), nullable=False)
+    # La unidad (0093): (texto + unidad OC) → (producto + unidad del sistema).
+    # `unidad_oc` es la de la orden tal cual, normalizada con
+    # `producto_match.normalizar_unidad_oc` («Pz.» → «PZ»); NULL = la orden no
+    # trae unidad o la trae en el texto («SANDIA PZA»). `presentacion` es la
+    # presentación del producto a la que se traduce; NULL = sólo dice el
+    # producto (los renglones de antes de la 0093).
+    unidad_oc = Column(String(20), nullable=True)
+    presentacion = Column(String(20), nullable=True)
     origen = Column(String(12), nullable=False, server_default="MANUAL")  # MANUAL | IA | IMPORT
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=False)

@@ -2432,3 +2432,102 @@ def test_el_lote_no_revive_lo_que_se_descarto_mientras_corria(client, env, auth_
     assert sigue["estado"] == "DESCARTADA" and sigue["motivo"] == "basura"
     assert sigue["remision_id"] is None
     assert client.get("/api/v1/remisiones", headers=h).json()["total"] == 0
+
+
+# ── Vocabulario con unidad (0093): (texto + unidad OC) → (producto + unidad sistema) ──
+
+
+def _sandia(env):
+    """SANDIA como quedó en prod el 30-sep: un producto, KILO → SANDIAKG y
+    PIEZA → SANDIAPZ."""
+    db = SessionLocal()
+    try:
+        p = Producto(tenant_id=env["admin_a"]["tenant_id"], sku="SAND", nombre="SANDIA",
+                     clave_sat="50304610", unidad_sat="KGM", clave_sae="SANDIAKG",
+                     unidad_base="KILO", presentacion_default="KILO",
+                     presentaciones={"KILO": 1, "PIEZA": {"sat": "H87", "factor": 1,
+                                                          "clave_sae": "SANDIAPZ"}})
+        db.add(p); db.commit()
+        return str(p.id)
+    finally:
+        db.close()
+
+
+def _linea(client, h, env, linea):
+    oc = _oc_platano(client, h, env, linea)
+    return oc, client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()["lineas"][0]
+
+
+def test_vocabulario_con_unidad_traduce_texto_y_unidad(client, env, auth_as):
+    """Los cuatro casos de la regla del dueño con la SANDIA:
+    - «SANDIA | KG»: el diccionario general basta → KILO;
+    - «SANDIA | MALLA»: unidad rara, la traduce su renglón → PIEZA;
+    - «SANDIA PZA» sin unidad: la trae el texto, la da su renglón → PIEZA;
+    - «SANDIA PZA | KG»: se contradicen → por revisar, no se escoge sola."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    sid = _sandia(env)
+    for body in (
+        {"texto": "SANDIA", "producto_id": sid, "unidad_oc": "malla", "presentacion": "pieza"},
+        {"texto": "SANDIA PZA", "producto_id": sid, "presentacion": "PIEZA"},
+    ):
+        r = client.post("/api/v1/productos/alias", headers=h, json=body)
+        assert r.status_code == 201, r.text
+
+    _, ln = _linea(client, h, env, {"descripcion": "SANDIA", "cantidad": "30", "unidad": "KG"})
+    assert (ln["presentacion_sugerida"], ln["presentacion_adivinada"]) == ("KILO", False)
+
+    _, ln = _linea(client, h, env, {"descripcion": "SANDIA", "cantidad": "2", "unidad": "Malla"})
+    assert ln["candidatos"][0]["producto_id"] == sid
+    assert (ln["presentacion_sugerida"], ln["presentacion_adivinada"]) == ("PIEZA", False)
+
+    _, ln = _linea(client, h, env, {"descripcion": "SANDIA PZA", "cantidad": "2"})
+    assert ln["candidatos"][0]["producto_id"] == sid
+    assert (ln["presentacion_sugerida"], ln["presentacion_adivinada"]) == ("PIEZA", False)
+    assert ln["unidad_conflicto"] is None
+
+    oc, ln = _linea(client, h, env, {"descripcion": "SANDIA PZA", "cantidad": "9.3", "unidad": "KG"})
+    assert ln["unidad_conflicto"] and "PIEZA" in ln["unidad_conflicto"]
+    det = client.get(f"/api/v1/oc-recibidas/{oc['id']}", headers=h).json()
+    assert det["auto"]["ok"] is False
+    assert any(pb["tipo"] == "unidad" and "vocabulario" in pb["mensaje"]
+               for pb in det["auto"]["problemas"])
+
+
+def test_el_vocabulario_lista_y_edita_la_unidad(client, env, auth_as):
+    """La pantalla ve las dos unidades y las unidades del producto; la del
+    sistema tiene que ser una que el producto venda."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    sid = _sandia(env)
+    r = client.post("/api/v1/productos/alias", headers=h,
+                    json={"texto": "SANDIA PZ", "producto_id": sid, "presentacion": "CAJA"})
+    assert r.status_code == 422, r.text          # SANDIA no se vende en CAJA
+    r = client.post("/api/v1/productos/alias", headers=h,
+                    json={"texto": "SANDIA PZ", "producto_id": sid, "presentacion": "PIEZA"})
+    assert r.status_code == 201, r.text
+    # «SANDIA | KG» y «SANDIA | PZ» conviven: la unidad es parte de la llave.
+    for uoc, pres in (("KG", "KILO"), ("Pz.", "PIEZA")):
+        r = client.post("/api/v1/productos/alias", headers=h,
+                        json={"texto": "SANDIA", "producto_id": sid, "unidad_oc": uoc,
+                              "presentacion": pres})
+        assert r.status_code == 201, r.text
+
+    filas = client.get("/api/v1/productos/vocabulario", headers=h,
+                       params={"q": "sandia"}).json()["items"]
+    vistas = {(f["texto"], f["unidad_oc"], f["presentacion"]) for f in filas}
+    assert vistas == {("SANDIA PZ", None, "PIEZA"), ("SANDIA", "KG", "KILO"),
+                      ("SANDIA", "PZ", "PIEZA")}
+    assert not any(f["ambiguo"] for f in filas)
+    assert filas[0]["producto_presentaciones"] == ["KILO", "PIEZA"]
+    claves = {(f["texto"], f["unidad_oc"]): f["clave_sae"] for f in filas}
+    assert claves[("SANDIA", "PZ")] == "SANDIAPZ" and claves[("SANDIA", "KG")] == "SANDIAKG"
+
+    fila = next(f for f in filas if f["texto"] == "SANDIA PZ")
+    r = client.patch(f"/api/v1/productos/alias/{fila['id']}", headers=h,
+                     json={"presentacion": "KILO", "unidad_oc": "kg"})
+    assert r.status_code == 204, r.text
+    r = client.patch(f"/api/v1/productos/alias/{fila['id']}", headers=h,
+                     json={"presentacion": "BULTO"})
+    assert r.status_code == 422, r.text
+    filas = client.get("/api/v1/productos/vocabulario", headers=h,
+                       params={"q": "sandia pz"}).json()["items"]
+    assert (filas[0]["unidad_oc"], filas[0]["presentacion"]) == ("KG", "KILO")

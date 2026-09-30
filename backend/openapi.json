@@ -222,6 +222,18 @@
       ],
       "title": "Cliente Id"
      },
+     "presentacion": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     },
      "producto_id": {
       "format": "uuid",
       "title": "Producto Id",
@@ -244,6 +256,18 @@
       "minLength": 1,
       "title": "Texto",
       "type": "string"
+     },
+     "unidad_oc": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Oc"
      }
     },
     "required": [
@@ -346,6 +370,18 @@
    "AliasReapuntarIn": {
     "description": "Corrige una fila del vocabulario: el texto, el producto, o los dos.\n\nEl CLIENTE no se toca aquí: pasar el alias de un cliente al global\nconvertiría su corrección en una regla para todos, y esa es otra decisión\n(con otro permiso). Para eso se quita y se vuelve a escribir.\n\nLa SUCURSAL sí, dentro del mismo cliente: mandarla con valor acota la regla\na esa plaza; mandarla en `null` la abre a todas las sucursales del cliente.\nOmitirla la deja como está (por eso se distingue ausente de `null`).",
     "properties": {
+     "presentacion": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     },
      "producto_id": {
       "anyOf": [
        {
@@ -382,6 +418,18 @@
        }
       ],
       "title": "Texto"
+     },
+     "unidad_oc": {
+      "anyOf": [
+       {
+        "maxLength": 20,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Oc"
      }
     },
     "title": "AliasReapuntarIn",
@@ -9680,6 +9728,17 @@
        }
       ],
       "title": "Unidad"
+     },
+     "unidad_conflicto": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Conflicto"
      }
     },
     "required": [
@@ -21257,6 +21316,17 @@
       "title": "Ambiguo",
       "type": "boolean"
      },
+     "clave_sae": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sae"
+     },
      "cliente_id": {
       "anyOf": [
        {
@@ -21294,6 +21364,17 @@
       "title": "Pisado Por",
       "type": "integer"
      },
+     "presentacion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     },
      "producto_id": {
       "format": "uuid",
       "title": "Producto Id",
@@ -21302,6 +21383,14 @@
      "producto_nombre": {
       "title": "Producto Nombre",
       "type": "string"
+     },
+     "producto_presentaciones": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Producto Presentaciones",
+      "type": "array"
      },
      "producto_sku": {
       "title": "Producto Sku",
@@ -21333,6 +21422,17 @@
      "texto": {
       "title": "Texto",
       "type": "string"
+     },
+     "unidad_oc": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Oc"
      }
     },
     "required": [

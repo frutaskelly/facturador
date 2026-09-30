@@ -29,6 +29,14 @@ type Fila = {
   sucursal_id: string | null;
   sucursal_nombre: string | null;
   origen: string;
+  /** Como escribe la unidad la orden («PZ», «MALLA»). null = la orden no trae
+   *  unidad o la trae en el texto («SANDIA PZA»). */
+  unidad_oc: string | null;
+  /** La unidad del SISTEMA a la que se traduce (KILO, PIEZA…): decide precio y
+   *  clave de SAE. null = el renglón sólo dice el producto. */
+  presentacion: string | null;
+  producto_presentaciones: string[];
+  clave_sae: string | null;
   ambiguo: boolean;
   /** Sólo en las filas globales: a cuántos clientes se les dijo que ese texto
    *  es OTRO producto. No es un error — la cascada lo resuelve — pero un global
@@ -108,6 +116,8 @@ export default function VocabularioPage() {
   const [edTexto, setEdTexto] = useState("");
   const [edProducto, setEdProducto] = useState<ProductoPick | null>(null);
   const [edSucursal, setEdSucursal] = useState(TODAS);
+  const [edUnidadOc, setEdUnidadOc] = useState("");
+  const [edPres, setEdPres] = useState("");
 
   // Alta: «lo que escriben» = «qué es», para quién.
   const [alta, setAlta] = useState(false);
@@ -115,6 +125,8 @@ export default function VocabularioPage() {
   const [nuevoAlcance, setNuevoAlcance] = useState(GLOBAL);
   const [nuevoProducto, setNuevoProducto] = useState<ProductoPick | null>(null);
   const [nuevaSucursal, setNuevaSucursal] = useState(TODAS);
+  const [nuevaUnidadOc, setNuevaUnidadOc] = useState("");
+  const [nuevaPres, setNuevaPres] = useState("");
 
   // Las plazas que surten al cliente del modal abierto (alta o edición).
   const clienteModal = editar ? editar.cliente_id : alta && nuevoAlcance !== GLOBAL ? nuevoAlcance : null;
@@ -141,18 +153,27 @@ export default function VocabularioPage() {
     setEdTexto(f.texto);
     setEdProducto(null);
     setEdSucursal(f.sucursal_id ?? TODAS);
+    setEdUnidadOc(f.unidad_oc ?? "");
+    setEdPres(f.presentacion ?? "");
   }, []);
 
   async function guardarEdicion() {
     if (!editar) return;
     const texto = edTexto.trim();
-    const body: { texto?: string; producto_id?: string; sucursal_id?: string | null } = {};
+    const body: {
+      texto?: string; producto_id?: string; sucursal_id?: string | null;
+      unidad_oc?: string | null; presentacion?: string | null;
+    } = {};
     if (texto && texto !== editar.texto) body.texto = texto;
     if (edProducto && edProducto.producto_id !== editar.producto_id) {
       body.producto_id = edProducto.producto_id;
     }
     const sucursal = edSucursal === TODAS ? null : edSucursal;
     if (editar.cliente_id && sucursal !== editar.sucursal_id) body.sucursal_id = sucursal;
+    const uoc = edUnidadOc.trim() || null;
+    if (uoc !== editar.unidad_oc) body.unidad_oc = uoc;
+    const pres = edPres || null;
+    if (pres !== editar.presentacion) body.presentacion = pres;
     if (Object.keys(body).length === 0) {
       setEditar(null);
       return;
@@ -164,7 +185,9 @@ export default function VocabularioPage() {
           ? `«${texto || editar.texto}» ahora es otro producto`
           : body.texto
             ? `Ahora también se reconoce «${texto}»`
-            : "Sucursal actualizada"
+            : "presentacion" in body || "unidad_oc" in body
+              ? "Unidad actualizada"
+              : "Sucursal actualizada"
       );
       setEditar(null);
       void cargar();
@@ -178,6 +201,8 @@ export default function VocabularioPage() {
     setNuevoProducto(null);
     setNuevoAlcance(puedeGlobal ? GLOBAL : (clientes[0]?.id ?? GLOBAL));
     setNuevaSucursal(TODAS);
+    setNuevaUnidadOc("");
+    setNuevaPres("");
     setAlta(true);
   }
 
@@ -191,6 +216,10 @@ export default function VocabularioPage() {
       toast.error("Elige el producto del catálogo");
       return;
     }
+    if (!nuevaPres) {
+      toast.error("Elige la unidad del sistema: con ella salen el precio y la clave de SAE");
+      return;
+    }
     try {
       await post("/api/v1/productos/alias", {
         texto,
@@ -198,6 +227,8 @@ export default function VocabularioPage() {
         cliente_id: nuevoAlcance === GLOBAL ? null : nuevoAlcance,
         sucursal_id:
           nuevoAlcance === GLOBAL || nuevaSucursal === TODAS ? null : nuevaSucursal,
+        unidad_oc: nuevaUnidadOc.trim() || null,
+        presentacion: nuevaPres || null,
       });
       toast.success(`«${texto}» agregado al vocabulario`);
       setAlta(false);
@@ -246,6 +277,19 @@ export default function VocabularioPage() {
       ),
     },
     {
+      header: "Unidad OC",
+      key: "unidad_oc",
+      sortable: true,
+      sortValue: (f) => f.unidad_oc ?? "",
+      exportValue: (f) => f.unidad_oc ?? "",
+      cell: (f) =>
+        f.unidad_oc ? (
+          <span className="font-medium">{f.unidad_oc}</span>
+        ) : (
+          <span className="text-muted" title="La orden no trae unidad, o la trae en el texto">—</span>
+        ),
+    },
+    {
       header: "…es este producto",
       key: "producto",
       sortable: true,
@@ -255,12 +299,38 @@ export default function VocabularioPage() {
       cell: (f) => <span className="font-medium">{f.producto_nombre}</span>,
     },
     {
+      header: "Unidad sistema",
+      key: "presentacion",
+      sortable: true,
+      sortValue: (f) => f.presentacion ?? "",
+      exportValue: (f) => f.presentacion ?? "",
+      cell: (f) =>
+        f.presentacion ? (
+          <span className="font-medium">{f.presentacion}</span>
+        ) : (
+          <span
+            className="text-warning"
+            title="Sin unidad fija: entra en la que diga la orden y, si no dice, se supone"
+          >
+            —
+          </span>
+        ),
+    },
+    {
       header: "SKU",
       key: "sku",
       sortable: true,
       sortValue: (f) => f.producto_sku,
       exportValue: (f) => f.producto_sku,
       cell: (f) => <span className="text-xs text-muted">{f.producto_sku}</span>,
+    },
+    {
+      header: "Clave SAE",
+      key: "clave_sae",
+      sortable: true,
+      sortValue: (f) => f.clave_sae ?? "",
+      exportValue: (f) => f.clave_sae ?? "",
+      cell: (f) => <span className="text-xs tabular-nums text-muted">{f.clave_sae ?? "—"}</span>,
     },
     {
       header: "Cliente",
@@ -452,9 +522,21 @@ export default function VocabularioPage() {
           >
             <ProductoCombobox
               placeholder="Buscar otro producto…"
-              onSelect={(p) => setEdProducto(p)}
+              onSelect={(p) => {
+                setEdProducto(p);
+                // La unidad era del producto anterior: si el nuevo no la vende, se limpia.
+                if (p && !unidadesDe(p).includes(edPres)) setEdPres("");
+              }}
             />
           </Field>
+          <CamposUnidad
+            unidadOc={edUnidadOc}
+            onUnidadOc={setEdUnidadOc}
+            pres={edPres}
+            onPres={setEdPres}
+            unidades={edProducto ? unidadesDe(edProducto) : (editar?.producto_presentaciones ?? [])}
+            vacio="— Sin fijar (la de la orden) —"
+          />
         </div>
       </Modal>
 
@@ -526,9 +608,20 @@ export default function VocabularioPage() {
           >
             <ProductoCombobox
               placeholder="Buscar producto…"
-              onSelect={(p) => setNuevoProducto(p)}
+              onSelect={(p) => {
+                setNuevoProducto(p);
+                if (p && !unidadesDe(p).includes(nuevaPres)) setNuevaPres("");
+              }}
             />
           </Field>
+          <CamposUnidad
+            unidadOc={nuevaUnidadOc}
+            onUnidadOc={setNuevaUnidadOc}
+            pres={nuevaPres}
+            onPres={setNuevaPres}
+            unidades={nuevoProducto ? unidadesDe(nuevoProducto) : []}
+            vacio="— Elige —"
+          />
         </div>
       </Modal>
 
@@ -546,6 +639,49 @@ export default function VocabularioPage() {
         onClose={() => setAQuitar(null)}
         loading={saving}
       />
+    </div>
+  );
+}
+
+/** Las unidades que vende un producto elegido en el buscador, la base primero. */
+function unidadesDe(p: ProductoPick): string[] {
+  const base = p.unidad_base ?? p.presentacion_default ?? "";
+  const resto = Object.keys(p.presentaciones ?? {}).filter((k) => k !== base);
+  return base ? [base, ...resto] : resto;
+}
+
+/** (texto + unidad OC) → (producto + unidad sistema): los dos campos de la unidad. */
+function CamposUnidad({
+  unidadOc, onUnidadOc, pres, onPres, unidades, vacio,
+}: {
+  unidadOc: string;
+  onUnidadOc: (v: string) => void;
+  pres: string;
+  onPres: (v: string) => void;
+  unidades: string[];
+  vacio: string;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <Field
+        label="Unidad OC"
+        hint="Como la escribe la orden (KG, PZ, MALLA). Vacía = la orden no trae unidad o viene en el texto"
+      >
+        <Input value={unidadOc} onChange={(e) => onUnidadOc(e.target.value)} placeholder="PZ" />
+      </Field>
+      <Field
+        label="Unidad sistema"
+        hint="Con ésta entra la partida: decide el precio y la clave de SAE"
+      >
+        <Select value={pres} onChange={(e) => onPres(e.target.value)} disabled={unidades.length === 0}>
+          <option value="">{vacio}</option>
+          {unidades.map((u) => (
+            <option key={u} value={u}>
+              {u}
+            </option>
+          ))}
+        </Select>
+      </Field>
     </div>
   );
 }

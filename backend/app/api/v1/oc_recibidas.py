@@ -70,9 +70,13 @@ from ...services.producto_match import (
     alias_de_cliente,
     alias_del_tenant,
     buscar,
+    decidir_unidad,
+    normalizar,
     normalizar_catalogo,
     normalizar_unidad,
+    normalizar_unidad_oc,
     productos_activos,
+    vocabulario_unidades,
 )
 from ._helpers import ensure_fk, get_or_404, paginate
 
@@ -1193,14 +1197,20 @@ def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
             if k_cod not in cache:
                 cache[k_cod] = _codigos_para(db, oc.cliente_id)
             cods_cli, cods_otros, pres_cli = cache[k_cod]
+            k_uni = ("vocab_unidades", oc.cliente_id, oc.sucursal_id)
+            if k_uni not in cache:
+                cache[k_uni] = vocabulario_unidades(db, oc.tenant_id, oc.cliente_id, oc.sucursal_id)
+            vocab_uni = cache[k_uni]
         else:
             norms = normalizar_catalogo(catalogo)
             aliases = alias_del_tenant(db, oc.tenant_id)
             aliases_cli = alias_de_cliente(db, oc.tenant_id, oc.cliente_id, oc.sucursal_id)
             cods_cli, cods_otros, pres_cli = _codigos_para(db, oc.cliente_id)
+            vocab_uni = vocabulario_unidades(db, oc.tenant_id, oc.cliente_id, oc.sucursal_id)
     else:
         norms, aliases, aliases_cli = {}, {}, {}
         cods_cli, cods_otros, pres_cli = {}, {}, {}
+        vocab_uni = {}
     by_id = {p.id: p for p in catalogo}
     lineas = []
     for i, ln in enumerate(lineas_raw, start=1):
@@ -1256,16 +1266,33 @@ def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
                 c for c in cands if c.producto_id not in vistos
             ]
         cands = _primero_el_que_vende(cands, unidad_norm)
+        # El renglón del vocabulario con ESTA unidad de la orden («SANDIA | PZ»)
+        # dice producto Y unidad: va primero, como el vocabulario del cliente.
+        uoc = normalizar_unidad_oc(str(ln.get("unidad") or ""))
+        regla = vocab_uni.get((normalizar(texto)[:254], uoc)) if (texto and uoc) else None
+        if regla is not None and regla.producto_id in by_id:
+            cands = [_cand_de(by_id[regla.producto_id], 100,
+                              "alias_cliente" if regla.con_alcance else "alias")] + [
+                c for c in cands if c.producto_id != regla.producto_id]
         top = cands[0] if cands else None
-        # La presentación con la que entraría la línea: la unidad del documento;
-        # si no dice (o dice una que no reconocemos), la habitual de ese cliente
-        # y en último caso la del producto — pero eso ES una adivinanza y se
-        # marca como tal: el factor de la presentación cambia cantidad y precio.
+        # La presentación con la que entraría la línea (`decidir_unidad`): el
+        # vocabulario con la unidad de la orden, la unidad de la orden, el
+        # vocabulario del texto y, si nadie dijo nada, la habitual del cliente o
+        # la del producto — eso ES una adivinanza y se marca: el factor de la
+        # presentación cambia cantidad y precio. Si la orden y el vocabulario se
+        # contradicen, `unidad_conflicto` la manda a revisión.
         pres_sugerida = unidad_norm
         pres_adivinada = False
-        if pres_sugerida is None and top is not None:
-            pres_sugerida = pres_cli.get(top.producto_id) or top.presentacion_default or top.unidad_base
-            pres_adivinada = True
+        unidad_conflicto = None
+        if top is not None:
+            dec = decidir_unidad(
+                texto=texto, unidad_raw=str(ln.get("unidad") or ""),
+                producto_id=top.producto_id, presentaciones=top.presentaciones,
+                unidad_base=top.unidad_base, presentacion_default=top.presentacion_default,
+                vocab=vocab_uni, habitual_cliente=pres_cli.get(top.producto_id),
+            )
+            pres_sugerida, pres_adivinada, unidad_conflicto = (
+                dec.presentacion, dec.adivinada, dec.conflicto)
         lineas.append({
             "numero": i,
             "descripcion": texto,
@@ -1283,6 +1310,7 @@ def _detalle(db: Session, oc: OCRecibida, *, vistazo: bool = False) -> dict:
             "desc_pct": ln.get("desc_pct"),
             "presentacion_sugerida": pres_sugerida,
             "presentacion_adivinada": pres_adivinada,
+            "unidad_conflicto": unidad_conflicto,
             "candidatos": [
                 {"producto_id": c.producto_id, "sku": c.sku, "nombre": c.nombre,
                  "score": c.score, "origen": c.origen,
@@ -1504,6 +1532,10 @@ def _auto_de(db: Session, oc: OCRecibida, lineas: list[dict], by_id: dict) -> di
             falla(ln, "unidad",
                   f"La partida {ln['numero']} {etiqueta} pide una unidad "
                   f"({ln.get('unidad') or 'sin unidad'}) que el producto no vende")
+            continue
+        if ln.get("unidad_conflicto"):
+            falla(ln, "unidad",
+                  f"La partida {ln['numero']} {etiqueta}: {ln['unidad_conflicto']} — confírmala a mano")
             continue
         # La presentación ADIVINADA sugiere, no decide: el documento no dijo
         # unidad (o dijo una que no reconocemos) y el factor cambia cantidad y
@@ -2157,6 +2189,8 @@ def _sin_revisar_de(db: Session, oc: OCRecibida, lineas: list[dict]) -> tuple[li
                 f"la unidad del documento ({ln.get('unidad') or 'sin unidad'}) no la vende "
                 f"el producto: entró como {pres}"
             )
+        elif ln.get("unidad_conflicto"):
+            motivos.append(ln["unidad_conflicto"])
         elif ln.get("presentacion_adivinada") and len(presentaciones) > 1:
             motivos.append(f"el documento no dijo unidad: se supuso {pres}")
         pendientes.append((ln, prod, pres, motivos))

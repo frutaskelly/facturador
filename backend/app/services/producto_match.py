@@ -70,6 +70,17 @@ def normalizar_unidad(texto: Optional[str]) -> Optional[str]:
     return _UNIDAD_A_PRESENTACION.get(llave)
 
 
+def normalizar_unidad_oc(texto: Optional[str]) -> Optional[str]:
+    """La unidad de la orden TAL CUAL, para buscarla en el vocabulario:
+    «Pz.» → «PZ», «kilo gramo» → «KILOGRAMO». None si viene vacía.
+
+    No traduce (eso es `normalizar_unidad`): el vocabulario guarda lo que
+    escribe cada cliente, incluidas unidades que el diccionario no conoce
+    («MALLA CHICA», «ATADO»)."""
+    llave = normalizar(texto or "").replace(" ", "").upper()[:20]
+    return llave or None
+
+
 def _singular(token: str) -> str:
     """'acelgas' → 'acelga', 'limones' → 'limon'.
 
@@ -158,12 +169,15 @@ def alias_del_tenant(db: Session, tenant_id: UUID) -> dict[str, UUID]:
     catálogo son del tenant entero; el vocabulario privado de un cliente se
     carga aparte con `alias_de_cliente` cuando el documento ya sabe de quién es.
     """
+    # Sólo los renglones SIN unidad de la OC: los que traen unidad los
+    # resuelve `vocabulario_unidades` junto con la unidad de la partida.
     return {
         a.alias_normalizado: a.producto_id
         for a in db.query(ProductoAlias.alias_normalizado, ProductoAlias.producto_id)
         .filter(
             ProductoAlias.tenant_id == tenant_id,
             ProductoAlias.cliente_id.is_(None),
+            ProductoAlias.unidad_oc.is_(None),
         )
         .all()
     }
@@ -184,6 +198,7 @@ def alias_de_cliente(
         .filter(
             ProductoAlias.tenant_id == tenant_id,
             ProductoAlias.cliente_id == cliente_id,
+            ProductoAlias.unidad_oc.is_(None),
         )
         .all()
     )
@@ -302,6 +317,7 @@ def buscar(
                     ProductoAlias.tenant_id == tenant_id,
                     ProductoAlias.alias_normalizado == norm,
                     ProductoAlias.cliente_id.is_(None),
+                    ProductoAlias.unidad_oc.is_(None),
                 )
                 .one_or_none()
             )
@@ -362,7 +378,7 @@ def buscar(
 
 
 def _alias_en_alcance(db: Session, tenant_id: UUID, norm: str, cliente_id,
-                      sucursal_id) -> Optional[ProductoAlias]:
+                      sucursal_id, unidad_oc: Optional[str] = None) -> Optional[ProductoAlias]:
     """El alias de ESE alcance exacto (NULL cuenta como valor), o None.
 
     El lookup filtra por cliente/sucursal a propósito: aprender el alias de un
@@ -376,6 +392,8 @@ def _alias_en_alcance(db: Session, tenant_id: UUID, norm: str, cliente_id,
         else q.filter(ProductoAlias.cliente_id.is_(None))
     q = q.filter(ProductoAlias.sucursal_id == sucursal_id) if sucursal_id is not None \
         else q.filter(ProductoAlias.sucursal_id.is_(None))
+    q = q.filter(ProductoAlias.unidad_oc == unidad_oc) if unidad_oc is not None \
+        else q.filter(ProductoAlias.unidad_oc.is_(None))
     return q.one_or_none()
 
 
@@ -383,27 +401,36 @@ def aprender_alias(
     db: Session, tenant_id: UUID, texto: str, producto_id: UUID, *,
     origen: str = "MANUAL", user_id=None,
     cliente_id: Optional[UUID] = None, sucursal_id: Optional[UUID] = None,
+    unidad_oc: Optional[str] = None, presentacion: Optional[str] = None,
 ) -> Optional[ProductoAlias]:
     """Guarda (o reapunta) el alias normalizado → producto EN SU ALCANCE. Idempotente.
 
     Sin cliente_id escribe el alias global (comportamiento histórico); con
     cliente_id escribe/reapunta SOLO el de ese cliente (y sucursal), sin tocar
-    el global."""
+    el global. `unidad_oc` es parte de la llave (0093: «SANDIA | KG» y
+    «SANDIA | PZ» son dos renglones); `presentacion` sólo se escribe si viene —
+    aprender el producto de un texto no borra la unidad que ya tenía."""
+    unidad_oc = normalizar_unidad_oc(unidad_oc)
     # NFKD puede ALARGAR el texto (ligaduras); sin truncar, un alias de 254
     # chars revienta la columna String(254) con DataError 500.
     norm = normalizar(texto)[:254]
     if not norm:
         return None
-    existing = _alias_en_alcance(db, tenant_id, norm, cliente_id, sucursal_id)
+    existing = _alias_en_alcance(db, tenant_id, norm, cliente_id, sucursal_id, unidad_oc)
     if existing is not None:
+        if existing.producto_id != producto_id and presentacion is None:
+            existing.presentacion = None   # la unidad era del producto anterior
         existing.producto_id = producto_id
         existing.origen = origen
+        if presentacion is not None:
+            existing.presentacion = presentacion
         db.flush()
         return existing
     alias = ProductoAlias(
         tenant_id=tenant_id, producto_id=producto_id, alias=texto.strip()[:254],
         alias_normalizado=norm, origen=origen, created_by=user_id,
         cliente_id=cliente_id, sucursal_id=sucursal_id,
+        unidad_oc=unidad_oc, presentacion=presentacion,
     )
     try:
         # Savepoint: si otro request insertó el mismo alias en paralelo, el
@@ -413,10 +440,12 @@ def aprender_alias(
             db.flush()
         return alias
     except IntegrityError:
-        existing = _alias_en_alcance(db, tenant_id, norm, cliente_id, sucursal_id)
+        existing = _alias_en_alcance(db, tenant_id, norm, cliente_id, sucursal_id, unidad_oc)
         if existing is not None:
             existing.producto_id = producto_id
             existing.origen = origen
+            if presentacion is not None:
+                existing.presentacion = presentacion
             db.flush()
         return existing
 
@@ -437,6 +466,7 @@ def _alias_vigente_de_cliente(
             ProductoAlias.tenant_id == tenant_id,
             ProductoAlias.alias_normalizado == norm,
             ProductoAlias.cliente_id == cliente_id,
+            ProductoAlias.unidad_oc.is_(None),
         )
         .all()
     )
@@ -781,3 +811,109 @@ def parsear_pegado(texto: str, *, usar_ia: bool = True) -> list[dict]:
         if filas is not None:
             return filas
     return parsear_pegado_deterministico(texto)
+
+
+# ── La unidad: (texto + unidad OC) → (producto + unidad del sistema) ──
+# Regla del dueño (30-sep-2026): un producto tiene variantes por unidad (SANDIA
+# en KILO → SANDIAKG, en PIEZA → SANDIAPZ, cada una con su precio) y la partida
+# tiene que entrar en la correcta. Orden para decidirla:
+#   1. el renglón del vocabulario con ESA unidad de la orden («SANDIA | PZ»);
+#   2. la unidad de la orden por el diccionario general (KG → KILO);
+#   3. el renglón del vocabulario SIN unidad («SANDIA PZA» → PIEZA): la orden
+#      no trae unidad o la trae en el texto;
+#   4. la habitual del cliente / la del producto — eso ya es adivinar.
+# Si 2 y 3 se contradicen no se escoge: la partida queda por revisar.
+
+
+@dataclass
+class ReglaUnidad:
+    producto_id: UUID
+    presentacion: Optional[str]
+    con_alcance: bool      # del cliente (o su sucursal), no global
+
+
+def vocabulario_unidades(
+    db: Session, tenant_id: UUID, cliente_id: Optional[UUID] = None,
+    sucursal_id: Optional[UUID] = None,
+) -> dict[tuple[str, str], ReglaUnidad]:
+    """{(alias_normalizado, unidad_oc | ""): regla} de los renglones que dicen
+    algo de la unidad (traen unidad de la OC o unidad del sistema).
+
+    Mismo alcance que el resto del vocabulario: el de la sucursal pisa al del
+    cliente y éste al global."""
+    q = db.query(ProductoAlias).filter(
+        ProductoAlias.tenant_id == tenant_id,
+        (ProductoAlias.unidad_oc.isnot(None)) | (ProductoAlias.presentacion.isnot(None)),
+    )
+    filas = q.all()
+
+    def rango(a) -> int:
+        if a.cliente_id is None:
+            return 0 if a.sucursal_id is None else -1
+        if a.cliente_id != cliente_id:
+            return -1
+        if a.sucursal_id is None:
+            return 1
+        return 2 if a.sucursal_id == sucursal_id else -1
+
+    out: dict[tuple[str, str], ReglaUnidad] = {}
+    mejor: dict[tuple[str, str], int] = {}
+    for a in filas:
+        r = rango(a)
+        if r < 0:
+            continue
+        llave = (a.alias_normalizado, a.unidad_oc or "")
+        if r > mejor.get(llave, -1):
+            mejor[llave] = r
+            out[llave] = ReglaUnidad(a.producto_id, a.presentacion, r > 0)
+    return out
+
+
+@dataclass
+class UnidadDecidida:
+    presentacion: Optional[str]
+    adivinada: bool                 # nadie la dijo: se supuso
+    conflicto: Optional[str] = None  # la orden y el vocabulario se contradicen
+    fuente: str = ""                 # vocabulario_unidad | orden | vocabulario | cliente | producto
+
+
+def decidir_unidad(
+    *, texto: str, unidad_raw: Optional[str], producto_id: UUID,
+    presentaciones: dict, unidad_base: Optional[str], presentacion_default: Optional[str],
+    vocab: dict[tuple[str, str], ReglaUnidad], habitual_cliente: Optional[str] = None,
+) -> UnidadDecidida:
+    """La unidad del sistema con la que entra la partida (ver el orden arriba)."""
+    norm = normalizar(texto)[:254]
+    uoc = normalizar_unidad_oc(unidad_raw)
+    por_diccionario = normalizar_unidad(unidad_raw) if uoc else None
+    vende = {str(k).strip().upper() for k in (presentaciones or {})}
+    if unidad_base:
+        vende.add(unidad_base.strip().upper())
+
+    def suya(regla: Optional[ReglaUnidad]) -> Optional[str]:
+        if regla is None or regla.producto_id != producto_id or not regla.presentacion:
+            return None
+        return regla.presentacion if regla.presentacion.strip().upper() in vende else None
+
+    # 1. el renglón con la unidad EXACTA de la orden manda sobre el diccionario
+    exacta = suya(vocab.get((norm, uoc))) if uoc else None
+    if exacta:
+        return UnidadDecidida(exacta, False, fuente="vocabulario_unidad")
+    del_texto = suya(vocab.get((norm, "")))
+    # 2. la unidad de la orden, traducida por el diccionario general
+    if por_diccionario:
+        if del_texto and del_texto.upper() != por_diccionario.upper():
+            return UnidadDecidida(
+                por_diccionario, True,
+                conflicto=(f"la orden dice {unidad_raw} ({por_diccionario}) pero el vocabulario "
+                           f"dice que «{texto}» es {del_texto}"),
+                fuente="orden",
+            )
+        return UnidadDecidida(por_diccionario, False, fuente="orden")
+    # 3. sin unidad (o una que no se reconoce): la del renglón del texto
+    if del_texto:
+        return UnidadDecidida(del_texto, False, fuente="vocabulario")
+    # 4. adivinar
+    if habitual_cliente and habitual_cliente.strip().upper() in vende:
+        return UnidadDecidida(habitual_cliente, True, fuente="cliente")
+    return UnidadDecidida(presentacion_default or unidad_base, True, fuente="producto")
