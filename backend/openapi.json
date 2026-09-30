@@ -18633,6 +18633,11 @@
       ],
       "title": "Notas"
      },
+     "nueva_version_pedido": {
+      "default": false,
+      "title": "Nueva Version Pedido",
+      "type": "boolean"
+     },
      "partidas_por_cruzar": {
       "anyOf": [
        {

@@ -1354,6 +1354,22 @@ def _exigir_no_exportada(rem: Remision) -> None:
     # Lo que sigue sin llave: `export_pedido_at` no se limpia en ningún lado.
     # Cinco de las 41 congeladas hoy son solo-pedido y no tienen salida; eso
     # necesita una regla del dueño y está reportado aparte.
+    #
+    # 30-sep-2026: el pedido ya tiene salida al editar desde la pantalla (ver
+    # `_nueva_version_pedido`); este mensaje queda para las otras puertas
+    # (cruzar una partida, conexiones) y dice cuál es esa salida.
+    if rem.export_sae_at is None and rem.export_pedido_at is not None:
+        folio = (rem.export_pedido_folio or "").split(":", 1)[-1] or "s/folio"
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"La remisión {rem.folio_interno} salió en el pedido {folio} de SAE "
+                f"({rem.export_pedido_at:%d/%m/%Y %H:%M}). Para cambiarla ábrela con "
+                "Editar y guarda: se vuelve la NUEVA VERSIÓN del pedido, que es la "
+                "que se va a facturar. Después vuelve a exportarla y cancela en SAE "
+                "el pedido anterior."
+            ),
+        )
     marca = rem.export_sae_at or rem.export_pedido_at
     if marca is not None:
         cual = "el masivo de SAE" if rem.export_sae_at else "un pedido de SAE"
@@ -1368,6 +1384,32 @@ def _exigir_no_exportada(rem: Remision) -> None:
         )
 
 
+def _nueva_version_pedido(rem: Remision, ctx: AuthContext) -> Optional[str]:
+    """Suelta el candado del PEDIDO porque la edición ES la nueva versión.
+
+    Decisión del dueño (30-sep-2026): una remisión que salió en un pedido de
+    SAE se edita justamente para armar el pedido corregido que se va a
+    facturar. Congelarla obligaba a dar un rodeo por «Liberar del pedido»; aquí
+    el guardado mismo lo hace y deja el rastro en las notas, igual que aquella
+    llave. Solo el pedido: el masivo de FACTURA sigue congelado (su llave es
+    cancelar en SAE). Y solo personas, por la misma razón que liberar.
+
+    Devuelve el sello para las notas; se escribe DESPUÉS de aplicar el cuerpo,
+    porque la pantalla reenvía `notas` completas y lo pisaría.
+    """
+    if rem.export_pedido_at is None or rem.export_sae_at is not None:
+        return None
+    if ctx.conexion_id is not None:
+        return None     # la conexión se topa con el candado, como antes
+    marca = f"{rem.export_pedido_at:%d/%m/%Y %H:%M}"
+    folio = rem.export_pedido_folio or "s/folio"
+    rem.export_pedido_at = None
+    rem.export_pedido_folio = None
+    return (f"[{datetime.now(timezone.utc):%d/%m/%Y %H:%M} UTC] Nueva versión del pedido "
+            f"{folio} (exportado {marca}): se editó en el Facturador; ésta es la que "
+            "se factura. Volver a exportarla y cancelar en SAE el pedido anterior.")
+
+
 @router.patch("/{rem_id}", response_model=RemisionDetailOut)
 def update_remision(
     rem_id: UUID,
@@ -1380,6 +1422,7 @@ def update_remision(
     # El acuse de SAE pasa aunque esté congelada; cualquier otra cosa, no.
     # `permitir_negativos` no es un campo del documento (es una autorización de
     # sobregiro), así que no cuenta para decidir si esto es solo un acuse.
+    nueva_version = bool(data.pop("nueva_version_pedido", False))
     tocados = set(data) - {"permitir_negativos"}
     # LA LOGÍSTICA NO ES FISCAL (22-sep-2026, autorizado por el dueño). La fecha
     # de entrega en bodega y la marca de revisada no tocan el CFDI, ni los
@@ -1400,7 +1443,10 @@ def update_remision(
     solo_logistica = bool(tocados) and tocados <= _CAMPOS_LOGISTICOS
     if not solo_logistica:
         _exigir_editable(db, rem)
+    sello_version = None
     if tocados != {"factura_sae"}:
+        if nueva_version:
+            sello_version = _nueva_version_pedido(rem, ctx)
         _exigir_no_exportada(rem)
     era_confirmada = rem.estado == "CONFIRMADA"
     almacen_anterior = rem.almacen_id           # para detectar cambio de almacén
@@ -1464,6 +1510,8 @@ def update_remision(
 
     for key, value in data.items():
         setattr(rem, key, value)
+    if sello_version:
+        rem.notas = f"{rem.notas}\n{sello_version}" if rem.notas else sello_version
 
     if revisada is False:
         if rem.partidas_por_cruzar:
