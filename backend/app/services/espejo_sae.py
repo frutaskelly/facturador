@@ -420,15 +420,21 @@ def sincronizar(db: Session, ctx: AuthContext, empresa: str, series: list[str],
         vistos = {c["folio"] for c in cabs}
         previas = leer_encabezados(empresa, serie, desde_fecha=desde, limite=limite)
         en_espejo = {
-            f.folio: (f.estado, float(f.saldo_insoluto) if f.saldo_insoluto is not None else None)
+            f.folio: (f.estado, float(f.saldo_insoluto) if f.saldo_insoluto is not None else None,
+                      _msj(f.cancelacion_msj))
             for f in db.query(Factura).filter(
                 Factura.origen == "ESPEJO_SAE", Factura.espejo_empresa == empresa,
                 Factura.serie == serie_f, Factura.fecha >= desde).all()
         }
+        # El estado Y el aviso de cancelación: pedirla al SAT no cambia el
+        # estado (SAE la deja viva hasta que el SAT contesta), y es justo lo
+        # que saca la factura de la cartera.
         cambiadas = [c for c in previas
                      if c["folio"] not in vistos
                      and c["folio"] in en_espejo
-                     and en_espejo[c["folio"]][0] != c["estado"]]
+                     and (en_espejo[c["folio"]][0] != c["estado"]
+                          or (c["estado"] != "CANCELADA"
+                              and en_espejo[c["folio"]][2] != _msj(c["cancelacion_msj"])))]
 
         # EL PAGO LLEGA DÍAS DESPUÉS DE LA FACTURA, así que ninguna ventana por
         # fecha del documento lo ve. Sin esto el estado de cuenta sigue cobrando
@@ -732,6 +738,85 @@ def cuadre_saldos(db: Session, ctx: AuthContext, empresa: str, series: list[str]
     return res
 
 
+def _msj(v) -> Optional[str]:
+    """El aviso de cancelación como se guarda: sin espacios, y vacío = None."""
+    return str(v or "").strip() or None
+
+
+def estados_de_serie(empresa: str, serie: str) -> dict[int, tuple[bool, Optional[str]]]:
+    """{folio: (cancelada, aviso de cancelación)} de TODA la serie, en una consulta.
+
+    Sin partidas ni importes: es lo que hace falta para ver si una factura ya
+    reflejada se canceló o tiene la cancelación pedida al SAT.
+    """
+    factf = sae_lectura.tabla("FACTF", empresa)
+    cfdi = sae_lectura.tabla("CFDI", empresa)
+    sql = ("SELECT F.FOLIO AS folio, RTRIM(ISNULL(F.STATUS,'')) AS status, "
+           "LTRIM(RTRIM(ISNULL(C.FECHA_CANCELA,''))) AS fecha_cancela, "
+           "LTRIM(RTRIM(ISNULL(C.MSJ_CANC,''))) AS cancelacion_msj "
+           f"FROM {factf} F "
+           f"LEFT JOIN {cfdi} C ON RTRIM(C.CVE_DOC)=RTRIM(F.CVE_DOC) AND C.TIPO_DOC='F' "
+           "WHERE RTRIM(F.SERIE) = %s")
+    estados: dict[int, tuple[bool, Optional[str]]] = {}
+    for r in sae_lectura.consultar(sql, (serie,)):
+        try:
+            folio = int(r.get("folio"))
+        except (TypeError, ValueError):
+            continue
+        cancelada = (str(r.get("status") or "").strip().upper() == "C"
+                     or bool(str(r.get("fecha_cancela") or "").strip()))
+        estados[folio] = (cancelada, _msj(r.get("cancelacion_msj")))
+    return estados
+
+
+def cuadre_cancelaciones(db: Session, ctx: AuthContext, empresa: str, series: list[str],
+                         reparar: bool = True, tope: int = 25) -> dict[str, Any]:
+    """Estado contra estado: ¿lo que el espejo da por vivo sigue vivo en SAE?
+
+    LA PASADA SÓLO MIRA TRES DÍAS POR FECHA DE LA FACTURA. Una cancelación que
+    se pide (o se completa) después de eso no la ve nadie, y la factura se
+    queda cobrándose en la cartera. Caso real (1-oct-2026): ZEHMOHOS 906
+    cancelada en SAE el 17-sep seguía viva aquí, y ZEHMOHOS 877 y 991 y ZMAFAN
+    187 —$72,470 con la cancelación pedida al SAT— se cobraban como vigentes.
+
+    Una consulta de tres columnas por serie, con el cuadre de folios: una vez
+    al día y con el botón. Repara hasta `tope`: si cientos difieren, algo se
+    rompió, y cancelar cientos de facturas a escondidas sería peor que el hueco.
+    """
+    res: dict[str, Any] = {"empresa": empresa, "distintas": 0, "corregidas": 0,
+                           "series": {}, "errores": []}
+    for serie in series:
+        serie_f = serie_facturador(serie)
+        try:
+            en_sae = estados_de_serie(empresa, serie)
+        except Exception as e:
+            res["errores"].append(f"cancelaciones {serie}: {type(e).__name__}: {e}")
+            continue
+        folios = []
+        for f in db.query(Factura.folio, Factura.cancelacion_msj).filter(
+                Factura.origen == "ESPEJO_SAE", Factura.espejo_empresa == empresa,
+                Factura.serie == serie_f, Factura.estado != "CANCELADA",
+                Factura.deleted_at.is_(None)).all():
+            sae = en_sae.get(f.folio)
+            if sae is None:      # el hueco lo cuenta `cuadre`, no esto
+                continue
+            cancelada, msj = sae
+            if cancelada or msj != _msj(f.cancelacion_msj):
+                folios.append(f.folio)
+        folios.sort()
+        info = {"distintas": len(folios), "folios": folios[:50], "corregidas": 0}
+        res["distintas"] += len(folios)
+        if folios and reparar and len(folios) <= tope:
+            info["corregidas"], _ = _traer_folios(db, ctx, empresa, serie, folios, res["errores"])
+            res["corregidas"] += info["corregidas"]
+        elif folios and reparar:
+            res["errores"].append(
+                f"cancelaciones {serie}: {len(folios)} facturas con estado distinto al de SAE, "
+                f"más del tope de {tope} — no las corrijo a escondidas")
+        res["series"][serie_f] = info
+    return res
+
+
 def _traer_folios(db: Session, ctx: AuthContext, empresa: str, serie: str,
                   folios: list[int], errores: list,
                   saldos: Optional[dict[int, float]] = None) -> tuple[int, int]:
@@ -1029,6 +1114,14 @@ def _pasada_del_tenant(tenant, emps: list, banderas: dict, con_boton: bool,
                                 saldos_distintos=cs["distintos"],
                                 saldos_corregidos=cs["corregidos"])
                             parcial["errores"].extend(cs.get("errores", []))
+                            # ESTADO CONTRA ESTADO: la cancelación que llega
+                            # después de la ventana de la pasada (ver
+                            # cuadre_cancelaciones).
+                            cc = cuadre_cancelaciones(db, ctx, emp.codigo, series)
+                            parcial["cuadre"][emp.codigo].update(
+                                cancelaciones_distintas=cc["distintas"],
+                                cancelaciones_corregidas=cc["corregidas"])
+                            parcial["errores"].extend(cc.get("errores", []))
                     if banderas["cobranza"] and not fb:
                         cb = cobranza_sae.sincronizar(db, ctx, emp.codigo)
                         _anotar_cobranza(parcial, emp.codigo, cb)
