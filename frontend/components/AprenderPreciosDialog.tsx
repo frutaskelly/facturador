@@ -8,16 +8,13 @@
 // remisión. Por eso este diálogo no elige por ti: enseña los dos destinos y
 // arranca en "solo en esta remisión".
 //
-// Los dos destinos no son intercambiables:
-//   · precio especial  → `precio_overrides`, toca SOLO a este cliente. Se
-//     escribe SIEMPRE con el cliente; si el documento trae plaza se agrega
-//     además, que es el override más específico (ese cliente en esa plaza).
-//     Nunca solo la plaza: desde el rediseño del 1-sep la sucursal es del
-//     negocio, y un override sin cliente le fija el precio a TODOS los que se
-//     surten de ahí — justo lo que este diálogo existe para no hacer sin avisar.
-//   · toda la lista    → `precios`, toca a TODOS los que cuelgan de la lista.
-// Las listas se comparten entre clientes, así que la segunda opción dice a
-// cuántos alcanza antes de que le des clic.
+// El único destino es la lista (`precios`), que toca a TODOS los que cuelgan
+// de ella; por eso dice a cuántos clientes alcanza antes de que le des clic.
+//
+// Ya NO ofrece «precio especial» (`precio_overrides`): el dueño los borró el
+// 1-oct porque se iban acumulando desde aquí — 25 de EHMO en un mes, cada uno
+// ganándole a la lista para siempre. Un precio especial se da de alta a mano
+// en Sucursales → Precios especiales, no como efecto de capturar una remisión.
 
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle } from "lucide-react";
@@ -47,7 +44,6 @@ export type PrecioDivergente = {
 };
 
 const SOLO_DOCUMENTO = "";
-const OVERRIDE = "override";
 
 type ListaCandidata = { lista_id: string; nombre: string; alcance: string; clientes: number };
 
@@ -85,19 +81,12 @@ export function AprenderPreciosDialog({
   open,
   lineas,
   clienteId,
-  clienteNombre,
-  sucursalId,
-  sucursalNombre,
   onCancel,
   onDone,
 }: {
   open: boolean;
   lineas: PrecioDivergente[];
   clienteId: string;
-  clienteNombre: string;
-  /** Cuando viene, el precio especial se acota además a ESA plaza. */
-  sucursalId?: string;
-  sucursalNombre?: string;
   onCancel: () => void;
   /** Se llama cuando el usuario decidió: sigue el guardado del documento. */
   onDone: () => void;
@@ -156,13 +145,6 @@ export function AprenderPreciosDialog({
   const opcionesDestino = (
     <>
       <option value={SOLO_DOCUMENTO}>Solo en esta remisión (respetar precio de la OC)</option>
-      {/* Nombra el destino REAL: con sucursal el precio especial es
-          de esa plaza, no del cliente entero. */}
-      <option value={OVERRIDE}>
-        {sucursalId
-          ? `Precio especial de ${clienteNombre || "este cliente"} en ${sucursalNombre || "esta plaza"}`
-          : `Precio especial de ${clienteNombre || "este cliente"} (todas las plazas)`}
-      </option>
       {listas.map((li) => (
         <option key={li.lista_id} value={li.lista_id}>
           Toda la lista «{li.nombre}»
@@ -181,12 +163,10 @@ export function AprenderPreciosDialog({
     setGuardando(true);
     // Las de lista se agrupan por lista: un bulk por destino, no uno por línea.
     const porLista = new Map<string, PrecioDivergente[]>();
-    const overrides: PrecioDivergente[] = [];
     for (const l of lineas) {
       const d = destino[l.key];
       if (!d || d === SOLO_DOCUMENTO) continue;
-      if (d === OVERRIDE) overrides.push(l);
-      else porLista.set(d, [...(porLista.get(d) ?? []), l]);
+      porLista.set(d, [...(porLista.get(d) ?? []), l]);
     }
     let ok = 0;
     const fallos: string[] = [];
@@ -209,23 +189,6 @@ export function AprenderPreciosDialog({
           ok += items.length;
         } catch (e) {
           fallos.push(e instanceof ApiError ? e.message : "no se pudo escribir la lista");
-        }
-      }
-      for (const l of overrides) {
-        try {
-          await apiFetch("/api/v1/precios/overrides", {
-            method: "POST",
-            body: JSON.stringify({
-              cliente_id: clienteId,
-              ...(sucursalId ? { sucursal_id: sucursalId } : {}),
-              producto_id: l.producto_id,
-              presentacion: l.presentacion,
-              precio_unitario: l.precio,
-            }),
-          });
-          ok += 1;
-        } catch (e) {
-          fallos.push(e instanceof ApiError ? e.message : `no se pudo guardar ${l.label}`);
         }
       }
       if (ok > 0) toast.success(`${ok} ${ok === 1 ? "precio guardado" : "precios guardados"}`);
@@ -251,13 +214,13 @@ export function AprenderPreciosDialog({
           </Button>
           {/* El camino explícito del ticket 86bbyw35w: los precios vienen
               negociados SOLO para esta orden — se usan en la remisión y no se
-              escribe nada en listas ni precios especiales, aunque abajo se
+              escribe nada en las listas, aunque abajo se
               hubiera elegido algún destino. */}
           <Button
             variant="secondary"
             onClick={() => { setDestino({}); onDone(); }}
             disabled={guardando}
-            title="Usa estos precios SOLO en esta remisión: no crea ni actualiza listas ni precios especiales"
+            title="Usa estos precios SOLO en esta remisión: no actualiza ninguna lista"
           >
             Respetar precios de la OC
           </Button>
@@ -275,8 +238,8 @@ export function AprenderPreciosDialog({
         </p>
         <p className="text-sm text-muted">
           ¿Los precios vienen negociados <b>solo para esta orden de compra</b>?{" "}
-          <b>«Respetar precios de la OC»</b> los usa en la remisión y no toca ninguna lista
-          ni precio especial.
+          <b>«Respetar precios de la OC»</b> los usa en la remisión y no toca ninguna
+          lista.
         </p>
 
         {lineas.length > 1 && (
@@ -297,7 +260,7 @@ export function AprenderPreciosDialog({
                 Aplicar a todas
               </Button>
             </div>
-            {masivo !== SOLO_DOCUMENTO && masivo !== OVERRIDE &&
+            {masivo !== SOLO_DOCUMENTO &&
               (listas.find((x) => x.lista_id === masivo)?.clientes ?? 0) > 1 && (
                 <p className="mt-2 flex items-start gap-1.5 text-xs text-warning">
                   <AlertTriangle size={13} className="mt-0.5 shrink-0" />
@@ -338,7 +301,6 @@ export function AprenderPreciosDialog({
               </div>
               {destino[l.key] &&
                 destino[l.key] !== SOLO_DOCUMENTO &&
-                destino[l.key] !== OVERRIDE &&
                 (listas.find((x) => x.lista_id === destino[l.key])?.clientes ?? 0) > 1 && (
                   <p className="mt-2 flex items-start gap-1.5 text-xs text-warning">
                     <AlertTriangle size={13} className="mt-0.5 shrink-0" />
