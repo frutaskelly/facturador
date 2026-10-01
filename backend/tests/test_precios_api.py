@@ -409,11 +409,11 @@ def test_proyecto_codigo_se_autogenera(client, env, auth_as):
     r = client.post("/api/v1/proyectos", headers=h,
                     json={"nombre": "Ceresos y Seguridad Pública"})
     assert r.status_code == 201, r.text
-    assert r.json()["codigo"] == "CERESOSYSE"
+    assert r.json()["codigo"] == "CERESOSYSEGURIDADPUB"
     # Mismo nombre otra vez → sufijo, no choque contra el índice único.
     otro = client.post("/api/v1/proyectos", headers=h,
                        json={"nombre": "Ceresos y Seguridad Pública"})
-    assert otro.status_code == 201 and otro.json()["codigo"] == "CERESOSYSE2"
+    assert otro.status_code == 201 and otro.json()["codigo"] == "CERESOSYSEGURIDADPU2"
 
 
 def test_cotizar_reporta_el_tramo_aplicado(client, env, auth_as):
