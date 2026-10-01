@@ -46,9 +46,30 @@ class Proyecto(Base, TimestampMixin, SoftDeleteMixin):
     # usuario los puede corregir antes de mandar. Lista de correos.
     correos_facturas = Column(JSONB, nullable=False, server_default="[]")
     notas = Column(Text)
+    # Las series de factura que son de este proyecto (migr 0094): con ellas una
+    # factura del espejo de SAE cae sola en su proyecto. Si varios comparten una
+    # serie (ZMAFAN), `palabras_obs` decide por la observación de la factura y
+    # el que no tiene palabras se queda con el resto.
+    series = Column(JSONB, nullable=False, server_default="[]")
+    palabras_obs = Column(JSONB, nullable=False, server_default="[]")
+    # Cobra con su propia lista pero se reporta dentro de otro proyecto
+    # (NERI y SEGURIDAD PÚBLICA → CERESOS). Un solo nivel.
+    reporta_en_id = Column(
+        UUID(as_uuid=True), ForeignKey("proyectos.id", ondelete="SET NULL")
+    )
 
     cliente = relationship("Cliente")
     sucursal = relationship("Sucursal")
+    reporta_en = relationship("Proyecto", remote_side="Proyecto.id")
+    # La lista de precios del proyecto vive en su renglón de asignación
+    # (especificidad 8): la ficha la muestra y la cambia ahí mismo.
+    asignaciones = relationship(
+        "ListaAsignacion",
+        primaryjoin="and_(Proyecto.id == foreign(ListaAsignacion.proyecto_id), "
+                    "ListaAsignacion.serie_id.is_(None))",
+        viewonly=True,
+        lazy="selectin",
+    )
 
     @property
     def cliente_nombre(self):
@@ -57,3 +78,21 @@ class Proyecto(Base, TimestampMixin, SoftDeleteMixin):
     @property
     def sucursal_nombre(self):
         return self.sucursal.nombre if self.sucursal else None
+
+    @property
+    def reporta_en_nombre(self):
+        return self.reporta_en.nombre if self.reporta_en else None
+
+    @property
+    def _asignacion(self):
+        return self.asignaciones[0] if self.asignaciones else None
+
+    @property
+    def lista_id(self):
+        a = self._asignacion
+        return a.lista_id if a else None
+
+    @property
+    def lista_nombre(self):
+        a = self._asignacion
+        return a.lista.nombre if a and a.lista else None

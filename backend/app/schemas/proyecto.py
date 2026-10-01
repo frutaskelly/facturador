@@ -30,6 +30,19 @@ def _normalizar_correos(v: Optional[list[str]]) -> Optional[list[str]]:
     return limpios
 
 
+def _normalizar_lista(v: Optional[list[str]]) -> Optional[list[str]]:
+    """Series y palabras se guardan como se comparan: mayúsculas, sin espacios
+    sobrantes, sin repetidos. «zehmotg » y «ZEHMOTG» son la misma serie."""
+    if v is None:
+        return v
+    limpios: list[str] = []
+    for x in v:
+        x = " ".join((x or "").split()).upper()
+        if x and x not in limpios:
+            limpios.append(x)
+    return limpios
+
+
 class ProyectoCreate(BaseModel):
     nombre: str = Field(max_length=254)
     cliente_id: Optional[uuid.UUID] = None
@@ -40,8 +53,16 @@ class ProyectoCreate(BaseModel):
     sucursal_id: Optional[uuid.UUID] = None
     # Destinatarios predeterminados de las facturas del proyecto (86bbyveu1).
     correos_facturas: list[str] = Field(default_factory=list, max_length=20)
+    # Series de factura del proyecto y, si la comparte con otro, las palabras de
+    # la observación que lo distinguen (migr 0094).
+    series: list[str] = Field(default_factory=list, max_length=20)
+    palabras_obs: list[str] = Field(default_factory=list, max_length=20)
+    reporta_en_id: Optional[uuid.UUID] = None
+    # La lista con la que cobra el proyecto (su renglón de asignación).
+    lista_id: Optional[uuid.UUID] = None
 
     _correos = field_validator("correos_facturas")(_normalizar_correos)
+    _listas = field_validator("series", "palabras_obs")(_normalizar_lista)
 
 
 class ProyectoUpdate(BaseModel):
@@ -51,8 +72,13 @@ class ProyectoUpdate(BaseModel):
     notas: Optional[str] = None
     sucursal_id: Optional[uuid.UUID] = None
     correos_facturas: Optional[list[str]] = Field(default=None, max_length=20)
+    series: Optional[list[str]] = Field(default=None, max_length=20)
+    palabras_obs: Optional[list[str]] = Field(default=None, max_length=20)
+    reporta_en_id: Optional[uuid.UUID] = None
+    lista_id: Optional[uuid.UUID] = None
 
     _correos = field_validator("correos_facturas")(_normalizar_correos)
+    _listas = field_validator("series", "palabras_obs")(_normalizar_lista)
 
 
 class ProyectoOut(ORMModel):
@@ -68,5 +94,11 @@ class ProyectoOut(ORMModel):
     # Para pintar la columna sin otra consulta ("Pachuca").
     sucursal_nombre: Optional[str] = None
     correos_facturas: list[str] = []
+    series: list[str] = []
+    palabras_obs: list[str] = []
+    reporta_en_id: Optional[uuid.UUID] = None
+    reporta_en_nombre: Optional[str] = None
+    lista_id: Optional[uuid.UUID] = None
+    lista_nombre: Optional[str] = None
     created_at: datetime
     updated_at: datetime

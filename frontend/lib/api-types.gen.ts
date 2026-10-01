@@ -11685,10 +11685,18 @@ export interface components {
             cliente_id?: string | null;
             /** Correos Facturas */
             correos_facturas?: string[];
+            /** Lista Id */
+            lista_id?: string | null;
             /** Nombre */
             nombre: string;
             /** Notas */
             notas?: string | null;
+            /** Palabras Obs */
+            palabras_obs?: string[];
+            /** Reporta En Id */
+            reporta_en_id?: string | null;
+            /** Series */
+            series?: string[];
             /** Sucursal Id */
             sucursal_id?: string | null;
         };
@@ -11717,10 +11725,28 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Lista Id */
+            lista_id?: string | null;
+            /** Lista Nombre */
+            lista_nombre?: string | null;
             /** Nombre */
             nombre: string;
             /** Notas */
             notas?: string | null;
+            /**
+             * Palabras Obs
+             * @default []
+             */
+            palabras_obs: string[];
+            /** Reporta En Id */
+            reporta_en_id?: string | null;
+            /** Reporta En Nombre */
+            reporta_en_nombre?: string | null;
+            /**
+             * Series
+             * @default []
+             */
+            series: string[];
             /** Sucursal Id */
             sucursal_id?: string | null;
             /** Sucursal Nombre */
@@ -11744,10 +11770,18 @@ export interface components {
             cliente_id?: string | null;
             /** Correos Facturas */
             correos_facturas?: string[] | null;
+            /** Lista Id */
+            lista_id?: string | null;
             /** Nombre */
             nombre?: string | null;
             /** Notas */
             notas?: string | null;
+            /** Palabras Obs */
+            palabras_obs?: string[] | null;
+            /** Reporta En Id */
+            reporta_en_id?: string | null;
+            /** Series */
+            series?: string[] | null;
             /** Sucursal Id */
             sucursal_id?: string | null;
         };

@@ -15,10 +15,10 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
-from app.models import Cliente, Membership, Role, Tenant, User
+from app.models import Cliente, ListaPrecios, Membership, Role, Tenant, User
 from .conftest import crear_sucursal
 
-_PURGE = ("proyectos", "cliente_sucursales", "sucursales", "clientes")
+_PURGE = ("lista_asignaciones", "listas_precios", "proyectos", "cliente_sucursales", "sucursales", "clientes")
 
 
 @pytest.fixture
@@ -51,6 +51,9 @@ def env(db_engine):
         s1a = crear_sucursal(db, tenant_id=tid, cliente_id=cli1.id, nombre="Pachuca")
         s1b = crear_sucursal(db, tenant_id=tid, cliente_id=cli1.id, nombre="Tulancingo")
         s2a = crear_sucursal(db, tenant_id=tid, cliente_id=cli2.id, nombre="Actopan")
+        lista_a = ListaPrecios(tenant_id=tid, codigo="LA", nombre="Lista A")
+        lista_b = ListaPrecios(tenant_id=tid, codigo="LB", nombre="Lista B")
+        db.add_all([lista_a, lista_b])
         db.commit()
 
         yield {
@@ -58,6 +61,7 @@ def env(db_engine):
             "admin": {"sub": sub, "email": u.email, "tenant_id": tid},
             "cli1": str(cli1.id), "cli2": str(cli2.id),
             "s1a": str(s1a.id), "s1b": str(s1b.id), "s2a": str(s2a.id),
+            "lista_a": str(lista_a.id), "lista_b": str(lista_b.id),
         }
     finally:
         for table in _PURGE:
@@ -226,3 +230,78 @@ def test_correos_facturas_se_guardan_normalizados_y_validados(client, env, auth_
     # y se pueden vaciar explícitamente
     v = client.patch(f"/api/v1/proyectos/{body['id']}", headers=h, json={"correos_facturas": []})
     assert v.status_code == 200 and v.json()["correos_facturas"] == []
+
+
+# ─── La ficha del proyecto manda (migr 0094, 1-oct-2026) ────────────────────
+
+def test_lista_de_precios_desde_la_ficha(client, env, auth_as):
+    """La lista se escoge en la ficha y queda como su renglón de asignación:
+    ya no hace falta ir a «Asignación de precios»."""
+    auth_as(env["admin"])
+    h = _hdr(env["admin"])
+    r = client.post("/api/v1/proyectos", headers=h, json={
+        "nombre": "Hospitales Tuxtla", "cliente_id": env["cli1"], "lista_id": env["lista_a"],
+    })
+    assert r.status_code == 201, r.text
+    p = r.json()
+    assert p["lista_id"] == env["lista_a"] and p["lista_nombre"] == "Lista A"
+    assert p["codigo"] == "HOSPITALESTUXTLA"
+
+    r = client.patch(f"/api/v1/proyectos/{p['id']}", headers=h, json={"lista_id": env["lista_b"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["lista_nombre"] == "Lista B"
+    db = SessionLocal()
+    try:
+        n = db.execute(text("SELECT count(*) FROM lista_asignaciones WHERE proyecto_id = :p"),
+                       {"p": p["id"]}).scalar()
+    finally:
+        db.close()
+    assert n == 1                                 # se cambió, no se duplicó
+
+    r = client.patch(f"/api/v1/proyectos/{p['id']}", headers=h, json={"lista_id": None})
+    assert r.json()["lista_id"] is None
+
+
+def test_series_normalizadas_y_sin_choque(client, env, auth_as):
+    """Una serie es de un proyecto; si dos la comparten, sólo uno puede quedarse
+    sin palabras de la observación (el que se lleva el resto)."""
+    auth_as(env["admin"])
+    h = _hdr(env["admin"])
+    r = client.post("/api/v1/proyectos", headers=h, json={
+        "nombre": "Ceresos", "series": [" zmafan ", "ZMAFAN"],
+    })
+    assert r.status_code == 201, r.text
+    assert r.json()["series"] == ["ZMAFAN"]
+
+    r = client.post("/api/v1/proyectos", headers=h, json={"nombre": "Otro", "series": ["ZMAFAN"]})
+    assert r.status_code == 409 and "Ceresos" in r.json()["detail"]
+
+    r = client.post("/api/v1/proyectos", headers=h, json={
+        "nombre": "Dif Hidalgo", "series": ["ZMAFAN"], "palabras_obs": ["dif", "costales"],
+    })
+    assert r.status_code == 201, r.text
+    assert r.json()["palabras_obs"] == ["DIF", "COSTALES"]
+
+
+def test_se_reporta_en_un_solo_nivel(client, env, auth_as):
+    auth_as(env["admin"])
+    h = _hdr(env["admin"])
+    ceresos = client.post("/api/v1/proyectos", headers=h, json={"nombre": "Ceresos"}).json()
+    neri = client.post("/api/v1/proyectos", headers=h, json={
+        "nombre": "Secretario Neri", "reporta_en_id": ceresos["id"],
+    })
+    assert neri.status_code == 201, neri.text
+    assert neri.json()["reporta_en_nombre"] == "Ceresos"
+
+    # Ni a sí mismo, ni a uno que ya se reporta en otro, ni el padre hacia abajo.
+    r = client.patch(f"/api/v1/proyectos/{ceresos['id']}", headers=h,
+                     json={"reporta_en_id": ceresos["id"]})
+    assert r.status_code == 422
+    r = client.post("/api/v1/proyectos", headers=h, json={
+        "nombre": "Nieto", "reporta_en_id": neri.json()["id"],
+    })
+    assert r.status_code == 422
+    otro = client.post("/api/v1/proyectos", headers=h, json={"nombre": "Otro"}).json()
+    r = client.patch(f"/api/v1/proyectos/{ceresos['id']}", headers=h,
+                     json={"reporta_en_id": otro["id"]})
+    assert r.status_code == 422

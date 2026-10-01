@@ -7,7 +7,7 @@ from app.core.db import SessionLocal
 from app.models import Factura
 
 from tests.test_cobranza_api import (  # noqa: F401
-    _factura_ppd_timbrada, _h, auth, auth_atado, env,
+    _factura_ppd_timbrada, _h, _proyecto, auth, auth_atado, env,
 )
 
 
@@ -31,6 +31,7 @@ def _factura_del_dia(env, *, total, dias_atras, folio, serie="F", cliente=None):
 def test_cartera_agrupa_y_reparte_la_antiguedad(client, env, auth):
     """Las cubetas son por MES y el total cuadra con la suma de las filas."""
     # cliente con 30 días de crédito (fixture): 40 días atrás vence hace 10 → mes_1
+    _proyecto(env, "HOSPITALES TUXTLA", series=["ZEHMOTG"])
     _factura_ppd_timbrada(env, total=1000, dias_atras=40, folio=31, serie="ZEHMOTG")
     _factura_ppd_timbrada(env, total=500, dias_atras=100, folio=32, serie="ZEHMOTG")   # vence hace 70 → mes_3
     _factura_ppd_timbrada(env, total=200, dias_atras=5, folio=33, serie="ZEHMOVH")     # por vencer

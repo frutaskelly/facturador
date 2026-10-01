@@ -16924,6 +16924,18 @@
       "title": "Correos Facturas",
       "type": "array"
      },
+     "lista_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Id"
+     },
      "nombre": {
       "maxLength": 254,
       "title": "Nombre",
@@ -16939,6 +16951,34 @@
        }
       ],
       "title": "Notas"
+     },
+     "palabras_obs": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Palabras Obs",
+      "type": "array"
+     },
+     "reporta_en_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reporta En Id"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Series",
+      "type": "array"
      },
      "sucursal_id": {
       "anyOf": [
@@ -17010,6 +17050,29 @@
       "title": "Id",
       "type": "string"
      },
+     "lista_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Id"
+     },
+     "lista_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Nombre"
+     },
      "nombre": {
       "title": "Nombre",
       "type": "string"
@@ -17024,6 +17087,45 @@
        }
       ],
       "title": "Notas"
+     },
+     "palabras_obs": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Palabras Obs",
+      "type": "array"
+     },
+     "reporta_en_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reporta En Id"
+     },
+     "reporta_en_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reporta En Nombre"
+     },
+     "series": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
      },
      "sucursal_id": {
       "anyOf": [
@@ -17111,6 +17213,18 @@
       ],
       "title": "Correos Facturas"
      },
+     "lista_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Id"
+     },
      "nombre": {
       "anyOf": [
        {
@@ -17133,6 +17247,48 @@
        }
       ],
       "title": "Notas"
+     },
+     "palabras_obs": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 20,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Palabras Obs"
+     },
+     "reporta_en_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reporta En Id"
+     },
+     "series": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 20,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Series"
      },
      "sucursal_id": {
       "anyOf": [
