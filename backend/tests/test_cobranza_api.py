@@ -15,7 +15,7 @@ from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.core.rbac import invalidate_auth_cache
 from app.main import app
-from app.models import Cliente, Factura, Membership, Role, Tenant, User
+from app.models import Cliente, Factura, Membership, Proyecto, Role, Tenant, User
 
 _PURGE = ("recibo_pago_facturas", "recibos_pago", "timbrado_intentos", "lineas_factura", "facturas", "clientes")
 
@@ -95,8 +95,23 @@ def _h(env):
     return {"X-Tenant-Id": str(env["tenant_id"])}
 
 
+def _proyecto(env, nombre, *, series=(), palabras=(), reporta_en=None):
+    """Un proyecto del catálogo con sus series: de aquí sale la fila del GRAL."""
+    db = SessionLocal()
+    try:
+        p = Proyecto(
+            tenant_id=uuid.UUID(str(env["tenant_id"])), codigo=nombre.replace(" ", "")[:20],
+            nombre=nombre, series=list(series), palabras_obs=list(palabras),
+            reporta_en_id=uuid.UUID(reporta_en) if reporta_en else None,
+        )
+        db.add(p); db.commit()
+        return str(p.id)
+    finally:
+        db.close()
+
+
 def _factura_ppd_timbrada(env, *, total, dias_atras, metodo="PPD", folio, serie="F", notas=None,
-                          cancelacion_msj=None):
+                          cancelacion_msj=None, proyecto_id=None):
     """Inserta una factura TIMBRADA directamente (sin PAC) con fecha dada."""
     db = SessionLocal()
     try:
@@ -108,6 +123,7 @@ def _factura_ppd_timbrada(env, *, total, dias_atras, metodo="PPD", folio, serie=
             fecha=datetime.now(timezone.utc) - timedelta(days=dias_atras),
             saldo_insoluto=Decimal(str(total)) if metodo == "PPD" else Decimal("0"),
             cancelacion_msj=cancelacion_msj,
+            proyecto_id=uuid.UUID(proyecto_id) if proyecto_id else None,
         )
         db.add(f); db.commit()
         return str(f.id)
@@ -173,9 +189,14 @@ def test_estado_cuenta_excluye_las_que_van_camino_a_cancelarse(client, env, auth
 
 
 def test_saldos_por_proyecto(client, env, auth):
-    """El resumen GRAL: la serie decide la fila, ZMAFAN se parte por la
-    observación, lo inclasificable tiene fila propia, y las que van camino a
-    cancelarse quedan fuera del total por omisión."""
+    """El resumen GRAL sale del catálogo: la serie del proyecto decide la fila,
+    ZMAFAN se parte por las palabras de la observación, «se reporta en» sube
+    a NERI a CERESOS, lo que no es de ningún proyecto sale con el cliente, y
+    las que van camino a cancelarse quedan fuera del total por omisión."""
+    _proyecto(env, "HOSPITALES TUXTLA", series=["ZEHMOTG"])
+    ceresos = _proyecto(env, "CERESOS", series=["ZMAFAN"])
+    _proyecto(env, "DIF HIDALGO", series=["ZMAFAN"], palabras=["DIF", "COSTALES"])
+    neri = _proyecto(env, "SECRETARIO NERI", reporta_en=ceresos)
     _factura_ppd_timbrada(env, total=100, dias_atras=40, folio=21, serie="ZEHMOTG")
     _factura_ppd_timbrada(env, total=200, dias_atras=1, folio=22, serie="ZEHMOTG")
     _factura_ppd_timbrada(env, total=50, dias_atras=40, folio=23, serie="ZMAFAN",
@@ -184,6 +205,10 @@ def test_saldos_por_proyecto(client, env, auth):
                           notas="SEMANA 31 COSTALES SERIGRAFIADOS ENTREGA")
     _factura_ppd_timbrada(env, total=30, dias_atras=1, folio=26, serie="ZMAFAN",
                           notas="SEMANA 35 SECRETARIO NERI ENTREGA")
+    # Con proyecto propio que se reporta en CERESOS, aunque su serie no diga nada.
+    _factura_ppd_timbrada(env, total=5, dias_atras=1, folio=27, serie="FMAFAN", proyecto_id=neri)
+    # Serie sin proyecto: la fila es el cliente.
+    _factura_ppd_timbrada(env, total=11, dias_atras=1, folio=28, serie="ZHGO")
     _factura_ppd_timbrada(env, total=999, dias_atras=1, folio=25, serie="ZEHMOTG",
                           cancelacion_msj="En espera de aprobación")
 
@@ -195,14 +220,25 @@ def test_saldos_por_proyecto(client, env, auth):
     assert float(tuxtla["saldo"]) == 300.0 and tuxtla["facturas"] == 2
     assert float(tuxtla["vencido"]) == 100.0          # 30 días de crédito: solo la vieja venció
     # CERESOS es el cajón del dueño: Neri cae ahí; los costales son del DIF.
-    assert float(filas["CERESOS"]["saldo"]) == 80.0
+    assert float(filas["CERESOS"]["saldo"]) == 85.0
     assert float(filas["DIF HIDALGO"]["saldo"]) == 70.0
-    assert float(d["saldo_total"]) == 450.0            # la 25 quedó fuera
+    assert "SECRETARIO NERI" not in filas
+    assert float(filas["Cliente Cobranza"]["saldo"]) == 11.0
+    assert float(d["saldo_total"]) == 466.0            # la 25 quedó fuera
     assert float(d["saldo_en_cancelacion"]) == 999.0
 
     d2 = client.get("/api/v1/cobranza/saldos-por-proyecto",
                     params={"incluir_en_cancelacion": "true"}, headers=_h(env)).json()
-    assert float(d2["saldo_total"]) == 1449.0
+    assert float(d2["saldo_total"]) == 1465.0
+
+    # El estado de cuenta pone el mismo proyecto en cada factura.
+    ec = client.get(f"/api/v1/cobranza/estado-cuenta/{env['cli']}", headers=_h(env))
+    assert ec.status_code == 200, ec.text
+    por_folio = {x["folio"]: x["proyecto"] for x in ec.json()["facturas"]}
+    assert por_folio[21] == "HOSPITALES TUXTLA"
+    assert por_folio[24] == "DIF HIDALGO"
+    assert por_folio[27] == "CERESOS"
+    assert por_folio[28] is None
 
 
 def test_estado_cuenta_vacio(client, env, auth):

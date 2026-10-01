@@ -26,7 +26,8 @@ from ...models import (
     Cliente, ClienteSucursal, ClienteSucursalSerie, Factura, NotaCredito, NotaCreditoFactura,
     ReciboPago, ReciboPagoFactura, Serie, Sucursal,
 )
-from .cobranza import _en_cancelacion, _fila_de_reporte, _recibo_out
+from ...services.proyecto_de_factura import ProyectoDeFactura
+from .cobranza import _en_cancelacion, _recibo_out
 
 router = APIRouter(prefix="/reportes", tags=["reportes"])
 
@@ -102,9 +103,10 @@ Agrupar = Literal["proyecto", "cliente", "sucursal"]
 def _etiquetador(db: Session, tenant_id, agrupar: str):
     """La fila a la que va cada factura según la dimensión pedida.
 
-    Cartera y sumario de ventas reparten por el mismo criterio —proyecto por
-    serie, cliente por razón social, plaza por serie o por plaza única—, así
-    que una factura cae en la misma fila en las dos vistas.
+    Cartera y sumario de ventas reparten por el mismo criterio —proyecto del
+    catálogo (services/proyecto_de_factura.py), cliente por razón social, plaza
+    por serie o por plaza única—, así que una factura cae en la misma fila en
+    las dos vistas.
     """
     if agrupar == "cliente":
         return lambda f, nombre_cliente, cliente_id: nombre_cliente
@@ -114,7 +116,8 @@ def _etiquetador(db: Session, tenant_id, agrupar: str):
         return lambda f, nombre_cliente, cliente_id: (
             serie_plaza.get(f.serie or "") or plaza_unica.get(cliente_id) or "Sin plaza"
         )
-    return lambda f, nombre_cliente, cliente_id: _fila_de_reporte(f, nombre_cliente)
+    clasificador = ProyectoDeFactura(db, tenant_id)
+    return lambda f, nombre_cliente, cliente_id: clasificador.fila(f, nombre_cliente)
 
 
 @router.get("/cartera")
@@ -711,7 +714,7 @@ def notas_credito(
 #
 # Una fila por factura con su remisión, su OC, su cobranza y sus NC. El armado
 # vive en services/master_facturas.py; aquí solo el rango, los candados y los
-# dos rescates (plaza y proyecto por serie) que ya usa la cartera.
+# el rescate de plaza y el clasificador de proyecto que ya usa la cartera.
 
 def _master(db: Session, ctx: AuthContext, desde, hasta, cliente_id, estado):
     from ...services import master_facturas as mf
@@ -729,7 +732,7 @@ def _master(db: Session, ctx: AuthContext, desde, hasta, cliente_id, estado):
     filas = mf.construir(
         db, ctx, desde=desde, hasta=hasta, cliente_id=cliente_id, estados=pedidos or None,
         plaza_de=lambda f, cid: serie_plaza.get(f.serie or "") or plaza_unica.get(cid),
-        proyecto_de_serie=_fila_de_reporte,
+        proyecto_de=ProyectoDeFactura(db, ctx.tenant_id).nombre,
     )
     return desde, hasta, filas
 

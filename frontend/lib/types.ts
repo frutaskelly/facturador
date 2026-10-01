@@ -114,6 +114,16 @@ export type Proyecto = {
   sucursal_nombre?: string | null;
   /** Destinatarios predeterminados de las facturas del proyecto (86bbyveu1). */
   correos_facturas?: string[];
+  /** Series de factura del proyecto: una factura del espejo cae aquí por su serie. */
+  series?: string[];
+  /** Si comparte serie con otro (ZMAFAN): palabras de la observación que lo distinguen. */
+  palabras_obs?: string[];
+  /** Cobra con su lista pero se reporta dentro de otro (NERI → CERESOS). */
+  reporta_en_id?: string | null;
+  reporta_en_nombre?: string | null;
+  /** La lista con la que cobra (su renglón de asignación). */
+  lista_id?: string | null;
+  lista_nombre?: string | null;
   created_at: string;
   updated_at: string;
 };

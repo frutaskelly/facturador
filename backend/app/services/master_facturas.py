@@ -109,13 +109,14 @@ def estado_master(f: Factura, intento: TimbradoIntento | None) -> tuple[str, str
 
 def construir(
     db: Session, ctx, *, desde: date, hasta: date, cliente_id=None,
-    estados: set[str] | None = None, plaza_de=None, proyecto_de_serie=None,
+    estados: set[str] | None = None, plaza_de=None, proyecto_de=None,
 ) -> list[dict]:
     """Las filas del master, ya en el orden del reporte (fecha desc, folio desc).
 
-    `plaza_de(f, cliente_id)` y `proyecto_de_serie(f, nombre_cliente)` son los
-    rescates de reportes.py para las facturas sin remisión ni proyecto ligados:
-    la misma plaza y el mismo proyecto con que la cartera las reparte.
+    `plaza_de(f, cliente_id)` es el rescate de reportes.py para la plaza de las
+    facturas sin remisión ligada; `proyecto_de(f)` es el clasificador único
+    (services/proyecto_de_factura.py): el mismo proyecto con que la cartera
+    las reparte.
     """
     import sqlalchemy as sa
 
@@ -218,10 +219,10 @@ def construir(
             sucursal = sucursales[proyecto.sucursal_id]
         if sucursal is None and plaza_de is not None:
             sucursal = plaza_de(f, c.id)
-        nombre_proyecto = proyecto.nombre if proyecto else (
-            proyecto_de_serie(f, c.legal_name) if proyecto_de_serie else None)
-        if nombre_proyecto == c.legal_name:
-            nombre_proyecto = None      # el rescate cae al cliente: no es un proyecto
+        if proyecto_de is not None:
+            nombre_proyecto = proyecto_de(f)
+        else:
+            nombre_proyecto = proyecto.nombre if proyecto else None
 
         su_pedido = f.su_pedido or next((r.su_pedido for r in rs if r.su_pedido), None)
         oc_lista = [

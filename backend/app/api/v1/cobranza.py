@@ -7,7 +7,6 @@ VENCIMIENTO (fecha de la factura + días de crédito del cliente) en intervalos 
 """
 from __future__ import annotations
 
-import re
 
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -25,13 +24,14 @@ from ...core.db import set_role_tenant
 from ...core.ratelimit import enforce
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
-    Cliente, Factura, Proyecto, ReciboPago, ReciboPagoFactura, Remision, Tenant,
+    Cliente, Factura, ReciboPago, ReciboPagoFactura, Remision, Tenant,
     TimbradoIntento,
 )
 from ...services.cfdi import emisor_rfc_esperado
 from ...services.espejo_cruce import extraer_semana
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.onboarding import exigir_listo_para_facturar
+from ...services.proyecto_de_factura import ProyectoDeFactura
 from ...services.rep import build_payload_rep
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import get_or_404
@@ -132,21 +132,20 @@ def _armar_estado_cuenta(
     if solo_facturas is not None:
         facturas = [f for f in facturas if f.id in solo_facturas]
 
-    # La semana y el proyecto viven en la remisión ligada (`su_pedido`,
-    # `proyecto_id`) o en las observaciones que el espejo trae de SAE
-    # (`facturas.notas`): una sola consulta para todo el estado de cuenta.
-    datos_remision: dict = {}
+    # La semana vive en la remisión ligada (`su_pedido`) o en las observaciones
+    # que el espejo trae de SAE (`facturas.notas`); el proyecto, en el
+    # clasificador único que también usan los reportes.
+    pedido_de_remision: dict = {}
     ids = [f.id for f in facturas]
     if ids:
         filas = (
-            db.query(Remision.factura_id, Remision.su_pedido, Proyecto.nombre)
-            .outerjoin(Proyecto, Proyecto.id == Remision.proyecto_id)
+            db.query(Remision.factura_id, Remision.su_pedido)
             .filter(Remision.factura_id.in_(ids), Remision.deleted_at.is_(None))
             .all()
         )
-        for factura_id, su_pedido, proyecto in filas:
-            previo = datos_remision.get(factura_id, (None, None))
-            datos_remision[factura_id] = (previo[0] or su_pedido, previo[1] or proyecto)
+        for factura_id, su_pedido in filas:
+            pedido_de_remision[factura_id] = pedido_de_remision.get(factura_id) or su_pedido
+    clasificador = ProyectoDeFactura(db, cliente.tenant_id)
 
     antiguedad = {"por_vencer": Decimal("0"), "d1_30": Decimal("0"),
                   "d31_60": Decimal("0"), "d61_90": Decimal("0"), "d90_mas": Decimal("0")}
@@ -159,7 +158,7 @@ def _armar_estado_cuenta(
         saldo = Decimal(f.saldo_insoluto)
         saldo_total += saldo
         antiguedad[_bucket(dias_vencida)] += saldo
-        su_pedido, proyecto = datos_remision.get(f.id, (None, None))
+        su_pedido = pedido_de_remision.get(f.id)
         docs.append({
             "factura_id": str(f.id),
             "serie": f.serie,
@@ -171,22 +170,9 @@ def _armar_estado_cuenta(
             "total": f.total,
             "saldo_insoluto": saldo,
             "semana": extraer_semana(f.notas, su_pedido),
-            "proyecto": proyecto,
+            "proyecto": clasificador.nombre(f),
             "cancelacion_msj": f.cancelacion_msj,
         })
-
-    # Solo ~1 de cada 5 facturas espejo tiene remisión ligada, pero dentro de
-    # un cliente la serie ES la plaza: si todas las ligadas de una serie caen
-    # en el mismo proyecto, las sueltas de esa serie también son de él. Con
-    # proyectos mezclados (ZMAFAN) no se adivina y quedan en blanco.
-    proyectos_por_serie: dict[str, set] = {}
-    for d in docs:
-        if d["proyecto"]:
-            proyectos_por_serie.setdefault(d["serie"] or "", set()).add(d["proyecto"])
-    for d in docs:
-        unicos = proyectos_por_serie.get(d["serie"] or "", set())
-        if d["proyecto"] is None and len(unicos) == 1:
-            d["proyecto"] = next(iter(unicos))
 
     return {
         "cliente_id": str(cliente.id),
@@ -214,50 +200,9 @@ def _armar_estado_cuenta(
 # el cliente (EHMO tiene cinco) ni la serie a secas (ZMAFAN mezcla cuatro
 # negociaciones): es la NEGOCIACIÓN, con el nombre con el que el dueño la llama.
 #
-# La serie decide casi todo; ZMAFAN se parte leyendo la observación que el
-# espejo trae de SAE (igual que la semana), porque es donde el propio negocio
-# escribe a qué proyecto fue cada factura. Lo que no se puede clasificar se
-# reporta como fila propia en vez de esconderse en otra.
-_PROYECTO_POR_SERIE = {
-    "ZEHMOVH":  "VILLAHERMOSA HOSPITALES 2026",
-    "ZDIF":     "CHIAPAS DIF",
-    "ZSUR":     "COMEDORES TUXTLA",
-    "ZEHMOTG":  "HOSPITALES TUXTLA",
-    "ZECA":     "CAMPECHE HOSPITALES",
-    "ZEHMOHOS": "HOSPITALES HIDALGO",
-    "ZEHMOFAC": "HOSPITALES HIDALGO",
-    "ZBPT":     "BODEGA DE DON PEDRO",
-    "ZCH5C":    "CODISEL",
-    "MIN5C":    "CODISEL",
-    "ZCS":      "CASA DE SOCTONES",
-    "ZVIDA":    "CENTRO DE VIDA SANA",
-    "ZHGO":     None,   # Balles y Jubran comparten serie: la fila es el cliente
-}
-
-# El desglose de ZMAFAN COPIA el criterio del dueño, no el de las listas de
-# precios: en su hoja GRAL solo existen tres destinos (DIF, CDMX y CERESOS), y
-# CERESOS es el cajón de todo lo demás — ahí caen también Neri y Seguridad
-# Pública, que aunque negocian con lista propia se cobran bajo el mismo techo.
-# "COSTAL" identifica a los costales serigrafiados del programa del DIF: sus
-# observaciones no dicen "DIF", pero el dueño los clasifica ahí (ZMAFAN 144 y
-# 161 en su propio estado de cuenta).
-_MAFAN_EN_OBS = (
-    (re.compile(r"\bDIF\b|COSTAL", re.I),    "DIF HIDALGO"),
-    (re.compile(r"CDMX|AZCAPOTZALCO", re.I), "CDMX AZCAPOTZALCO"),
-)
-
-
-def _fila_de_reporte(f, nombre_cliente: str) -> str:
-    etiqueta = _PROYECTO_POR_SERIE.get(f.serie or "")
-    if etiqueta:
-        return etiqueta
-    if (f.serie or "") == "ZMAFAN":
-        for patron, nombre in _MAFAN_EN_OBS:
-            if patron.search(f.notas or ""):
-                return nombre
-        return "CERESOS"
-    # Series sin mapa (ZHGO, RIO, series nativas nuevas): la fila es el cliente.
-    return nombre_cliente
+# La fila sale del catálogo (Catálogo → Proyectos: series, palabras de la
+# observación y «se reporta en») vía services/proyecto_de_factura.py; lo que no
+# cae en ningún proyecto se reporta con el nombre del cliente.
 
 
 @router.get("/saldos-por-proyecto")
@@ -285,6 +230,7 @@ def saldos_por_proyecto(
     )
     filas: dict[str, dict] = {}
     en_cancelacion = ZERO
+    clasificador = ProyectoDeFactura(db, ctx.tenant_id)
     for f, nombre_cliente, dias_credito, cliente_id in q.all():
         if not ctx.cliente_permitido(cliente_id):
             continue                      # el portal solo ve su propio cliente
@@ -293,7 +239,7 @@ def saldos_por_proyecto(
             en_cancelacion += saldo
             if not incluir_en_cancelacion:
                 continue
-        fila = filas.setdefault(_fila_de_reporte(f, nombre_cliente), {
+        fila = filas.setdefault(clasificador.fila(f, nombre_cliente), {
             "saldo": ZERO, "vencido": ZERO, "facturas": 0,
             "cliente_id": str(cliente_id), "serie": f.serie,
         })
