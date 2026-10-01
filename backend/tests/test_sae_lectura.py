@@ -378,3 +378,53 @@ def test_la_pasada_reporta_aunque_nadie_haya_presionado_el_boton(monkeypatch):
     monkeypatch.setattr(s, "ESPEJO_SAE_EMPRESAS", "99")   # empresa sin series
     espejo_sae.pasada_programada()
     assert reclamos and reportes, "el botón se reclama y la pasada se reporta"
+
+
+def _viva(folio, msj=None):
+    return type("F", (), {"folio": folio, "cancelacion_msj": msj})()
+
+
+def test_el_cuadre_de_cancelaciones_ve_lo_que_la_ventana_no_ve(monkeypatch):
+    """Caso real del 1-oct-2026: la pasada sólo revisa tres días por fecha de
+    la factura. ZEHMOHOS 906 se canceló en SAE el 17-sep (era del 14) y 991 y
+    877 pidieron su cancelación al SAT días después: las tres seguían vivas en
+    la cartera."""
+    from app.services import espejo_sae
+    db = _FacturasDB([
+        _viva(906, "En espera de aprobación"),   # SAE ya la canceló
+        _viva(991),                               # SAE: cancelación pedida
+        _viva(877),                               # idem
+        _viva(500),                               # viva en los dos: bien
+        _viva(600, "En espera de aprobación"),   # el SAT la negó: vuelve a cobrarse
+        _viva(700),                               # no está en SAE: eso es de `cuadre`
+    ])
+    monkeypatch.setattr(espejo_sae, "estados_de_serie", lambda e, s: {
+        906: (True, "201 - UUID cancelado"),
+        991: (False, "En espera de aprobación"),
+        877: (False, "En espera de aprobación"),
+        500: (False, None),
+        600: (False, None),
+    })
+    traidas = []
+
+    def _traer(db, ctx, e, s, folios, errores, saldos=None):
+        traidas.extend(folios)
+        return len(folios), 0
+
+    monkeypatch.setattr(espejo_sae, "_traer_folios", _traer)
+    r = espejo_sae.cuadre_cancelaciones(db, None, "02", ["ZEHMOHOS"])
+    assert traidas == [600, 877, 906, 991], traidas
+    assert r["distintas"] == 4 and r["corregidas"] == 4 and r["errores"] == []
+
+
+def test_el_cuadre_de_cancelaciones_no_corrige_de_mas(monkeypatch):
+    from app.services import espejo_sae
+    db = _FacturasDB([_viva(n) for n in range(1, 6)])
+    monkeypatch.setattr(espejo_sae, "estados_de_serie",
+                        lambda e, s: {n: (True, None) for n in range(1, 6)})
+    traidas = []
+    monkeypatch.setattr(espejo_sae, "_traer_folios",
+                        lambda *a, **k: (traidas.extend(a[4]) or len(a[4]), 0))
+    r = espejo_sae.cuadre_cancelaciones(db, None, "02", ["ZEHMOHOS"], tope=3)
+    assert traidas == [] and r["corregidas"] == 0 and r["distintas"] == 5
+    assert any("no las corrijo a escondidas" in e for e in r["errores"]), r["errores"]
