@@ -27,7 +27,7 @@ def _norm(serie: str | None) -> str:
 
 
 class ProyectoDeFactura:
-    def __init__(self, db: Session, tenant_id):
+    def __init__(self, db: Session, tenant_id, factura_ids=None):
         # Borrados incluidos: una factura vieja sigue siendo de su proyecto
         # aunque el proyecto ya no se use. El filtro por inquilino va explícito
         # aunque RLS lo haga en producción: la BD de pruebas corre sin RLS.
@@ -43,24 +43,32 @@ class ProyectoDeFactura:
         # queda con el resto.
         for lista in self._por_serie.values():
             lista.sort(key=lambda p: (not p.palabras_obs, p.nombre))
-        self._de_remision = dict(
-            db.query(Remision.factura_id, Remision.proyecto_id)
-            .filter(
-                Remision.tenant_id == tenant_id,
-                Remision.factura_id.isnot(None),
-                Remision.proyecto_id.isnot(None),
-                Remision.deleted_at.is_(None),
-            )
-            .all()
+        # `factura_ids` acota las remisiones a las de una página del listado;
+        # sin él se cargan todas (los reportes recorren el histórico entero).
+        q = db.query(Remision.factura_id, Remision.proyecto_id).filter(
+            Remision.tenant_id == tenant_id,
+            Remision.factura_id.isnot(None),
+            Remision.proyecto_id.isnot(None),
+            Remision.deleted_at.is_(None),
         )
+        if factura_ids is not None:
+            q = q.filter(Remision.factura_id.in_(list(factura_ids)))
+        self._de_remision = dict(q.all()) if factura_ids is None or factura_ids else {}
 
-    def proyecto(self, f) -> Proyecto | None:
-        """El proyecto de la factura, ya llevado a la fila donde se reporta."""
+    def propio(self, f) -> Proyecto | None:
+        """El proyecto de la factura tal cual (NERI es NERI): el que muestran
+        los listados de Facturas. Los reportes usan `proyecto`, que lo sube a
+        la fila donde se reporta."""
         p = self._por_id.get(getattr(f, "proyecto_id", None))
         if p is None:
             p = self._por_id.get(self._de_remision.get(f.id))
         if p is None:
             p = self._por_serie_y_obs(f)
+        return p
+
+    def proyecto(self, f) -> Proyecto | None:
+        """El proyecto de la factura, ya llevado a la fila donde se reporta."""
+        p = self.propio(f)
         if p is not None and p.reporta_en_id in self._por_id:
             p = self._por_id[p.reporta_en_id]
         return p

@@ -2721,6 +2721,18 @@ export default function RemisionesPage() {
       },
     },
     {
+      // La negociación del documento: con ella se cobró (su lista de precios).
+      header: "Proyecto",
+      sortable: true,
+      truncate: true,
+      sortValue: (f) => (f.rem ? f.rem.proyecto_nombre ?? "" : f.oc.proyecto_nombre ?? ""),
+      exportValue: (f) => (f.rem ? f.rem.proyecto_nombre ?? "" : f.oc.proyecto_nombre ?? ""),
+      cell: (f) => {
+        const n = f.rem ? f.rem.proyecto_nombre : f.oc.proyecto_nombre;
+        return <span title={n ?? ""}>{n || "—"}</span>;
+      },
+    },
+    {
       header: "Fecha",
       sortable: true,
       // La de la orden es la de RECEPCIÓN: es la única que tiene, y es la que
