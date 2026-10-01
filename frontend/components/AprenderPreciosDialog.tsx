@@ -5,8 +5,11 @@
 // Cobrar otra cosa siempre es válido y no necesita permiso de nadie: la línea
 // lleva su precio y ya. Lo que sí es una decisión aparte es que ese precio se
 // QUEDE, porque escribe en otra pantalla — el catálogo de precios — desde una
-// remisión. Por eso este diálogo no elige por ti: enseña los dos destinos y
-// arranca en "solo en esta remisión".
+// remisión. Regla del dueño (1-oct): el precio cambiado en la remisión SÍ va a
+// la lista del cliente, así que cada línea llega ya apuntando a la lista de la
+// que salió su precio (o, si no tenía, a la lista que cobra este documento).
+// Sigue siendo un clic visible —nunca silencioso— y «Respetar precios de la
+// OC» lo deja solo en la remisión. La lista BASE nunca se preselecciona.
 //
 // El único destino es la lista (`precios`), que toca a TODOS los que cuelgan
 // de ella; por eso dice a cuántos clientes alcanza antes de que le des clic.
@@ -44,6 +47,8 @@ export type PrecioDivergente = {
 };
 
 const SOLO_DOCUMENTO = "";
+/** Solo en el bloque masivo: cada línea a la lista de la que salió su precio. */
+const DE_CADA_LINEA = "__de_cada_linea";
 
 type ListaCandidata = { lista_id: string; nombre: string; alcance: string; clientes: number };
 
@@ -81,12 +86,16 @@ export function AprenderPreciosDialog({
   open,
   lineas,
   clienteId,
+  listaDocumento,
   onCancel,
   onDone,
 }: {
   open: boolean;
   lineas: PrecioDivergente[];
   clienteId: string;
+  /** La lista que cobra este documento (sin la base): destino de las líneas
+   *  que no traían precio de ninguna lista. */
+  listaDocumento?: { lista_id: string; nombre: string } | null;
   onCancel: () => void;
   /** Se llama cuando el usuario decidió: sigue el guardado del documento. */
   onDone: () => void;
@@ -100,14 +109,19 @@ export function AprenderPreciosDialog({
   const [listas, setListas] = useState<ListaCandidata[]>([]);
   const [guardando, setGuardando] = useState(false);
 
+  /** La lista del cliente que le toca a la línea: de la que salió su precio,
+   *  o la del documento si no salió de ninguna. */
+  const listaDe = (l: PrecioDivergente) =>
+    l.precioListaId ?? listaDocumento?.lista_id ?? SOLO_DOCUMENTO;
+
   // Al abrir: las listas que le aplican a este cliente y a cuántos clientes
   // toca cada una. El conteo es el dato que evita el accidente — mover la lista
   // de Balles le cambia el precio a Jubran, porque cuelgan de la misma.
   useEffect(() => {
     if (!open || !clienteId) return;
     let vivo = true;
-    setDestino({});
-    setMasivo(SOLO_DOCUMENTO);
+    setDestino(Object.fromEntries(lineas.map((l) => [l.key, listaDe(l)])));
+    setMasivo(DE_CADA_LINEA);
     (async () => {
       try {
         const r = await apiFetch<{ listas: { lista_id: string; nombre: string; alcance: string }[] }>(
@@ -137,7 +151,18 @@ export function AprenderPreciosDialog({
     return () => {
       vivo = false;
     };
+    // `lineas` y `listaDocumento` se leen al abrir; recalcular a media
+    // decisión borraría lo que el usuario ya cambió.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, clienteId]);
+
+  // Una lista preseleccionada que no vino en listas-del-cliente (p.ej. sin
+  // permiso de verlas) igual necesita su <option>, o el select la pierde.
+  const faltantes = useMemo(() => {
+    const ya = new Set(listas.map((x) => x.lista_id));
+    return [...new Set(lineas.map(listaDe).filter((id) => id && !ya.has(id)))];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listas, lineas, listaDocumento]);
 
   // Las MISMAS opciones en el bloque masivo y en cada línea: el alcance del
   // cambio (solo este cliente vs toda la lista compartida) es la decisión que
@@ -145,6 +170,13 @@ export function AprenderPreciosDialog({
   const opcionesDestino = (
     <>
       <option value={SOLO_DOCUMENTO}>Solo en esta remisión (respetar precio de la OC)</option>
+      {faltantes.map((id) => (
+        <option key={id} value={id}>
+          {id === listaDocumento?.lista_id
+            ? `Toda la lista «${listaDocumento.nombre}»`
+            : "La lista de la que salió el precio"}
+        </option>
+      ))}
       {listas.map((li) => (
         <option key={li.lista_id} value={li.lista_id}>
           Toda la lista «{li.nombre}»
@@ -232,9 +264,9 @@ export function AprenderPreciosDialog({
     >
       <div className="space-y-4">
         <p className="text-sm text-muted">
-          La remisión se va a cobrar con lo que capturaste, elijas lo que elijas. Lo que se
-          pregunta aquí es si además <b>se queda guardado</b> — eso cambia el catálogo de
-          precios desde esta pantalla, y por eso no se hace solo.
+          La remisión se va a cobrar con lo que capturaste, elijas lo que elijas. Cada línea
+          ya viene apuntando a <b>la lista de precios del cliente</b> de la que salió su
+          precio: «Guardar precios y continuar» la actualiza ahí.
         </p>
         <p className="text-sm text-muted">
           ¿Los precios vienen negociados <b>solo para esta orden de compra</b>?{" "}
@@ -250,12 +282,13 @@ export function AprenderPreciosDialog({
             <div className="flex flex-wrap items-center gap-2">
               <div className="min-w-64 flex-1">
                 <Select value={masivo} onChange={(e) => setMasivo(e.target.value)}>
+                  <option value={DE_CADA_LINEA}>La lista de cada línea (de donde salió su precio)</option>
                   {opcionesDestino}
                 </Select>
               </div>
               <Button
                 variant="secondary"
-                onClick={() => setDestino(Object.fromEntries(lineas.map((l) => [l.key, masivo])))}
+                onClick={() => setDestino(Object.fromEntries(lineas.map((l) => [l.key, masivo === DE_CADA_LINEA ? listaDe(l) : masivo])))}
               >
                 Aplicar a todas
               </Button>

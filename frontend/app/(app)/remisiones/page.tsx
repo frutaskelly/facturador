@@ -3373,6 +3373,11 @@ export default function RemisionesPage() {
           open={aprender !== null}
           lineas={aprender ?? []}
           clienteId={clienteId}
+          listaDocumento={
+            ctxPrecios?.lista && ctxPrecios.lista.origen !== "lista_base"
+              ? { lista_id: ctxPrecios.lista.lista_id, nombre: ctxPrecios.lista.lista_nombre }
+              : null
+          }
           onCancel={() => setAprender(null)}
           onDone={() => {
             setAprender(null);
