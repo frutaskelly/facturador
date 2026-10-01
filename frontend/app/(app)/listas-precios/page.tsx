@@ -13,6 +13,7 @@ import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { SimuladorLista } from "@/components/SimuladorLista";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiDownload, apiFetch, apiOpenInTab } from "@/lib/api";
@@ -383,7 +384,7 @@ export default function ListasPreciosPage() {
     <div>
       <PageHeader
         title="Listas de precios"
-        subtitle="Niveles de venta (único, menudeo, mayoreo…) con precios por presentación y volumen."
+        subtitle="Los precios de cada negociación. Qué lista cobra cada quien se escoge en la ficha del proyecto, en el cliente dentro de su plaza (Sucursales y precios) o en la ficha del cliente."
         actions={
           <>
             {/* Sin «Sincronizar SAE» aquí (26-sep-2026): las listas de precios de
@@ -397,6 +398,8 @@ export default function ListasPreciosPage() {
           </>
         }
       />
+
+      <SimuladorLista listas={listas} />
 
       <DataTableSmart
         columns={columns}

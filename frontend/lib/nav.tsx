@@ -27,7 +27,6 @@ import {
   Store,
   ShoppingCart,
   Tag,
-  Target,
   Truck,
   UserCog,
   Users,
@@ -115,7 +114,6 @@ export const NAV: NavSection[] = [
     icon: SlidersHorizontal,
     items: [
       { label: "Listas de precios", href: "/listas-precios", perm: "menu:listas_precios", icon: Tag },
-      { label: "Asignación de precios", href: "/asignaciones-precios", perm: "menu:listas_precios", icon: Target },
       { label: "Esquemas de impuesto", href: "/esquemas-impuesto", perm: "menu:esquemas_impuesto", icon: Percent },
       { label: "Series y folios", href: "/ajustes/series", perm: "menu:series", icon: Hash },
       { label: "Punto de venta", href: "/ajustes/pos", perm: "membership:gestionar", icon: Store },

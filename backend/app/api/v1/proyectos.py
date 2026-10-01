@@ -18,7 +18,8 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Cliente, ListaAsignacion, ListaPrecios, Proyecto, Sucursal
+from ...models import Cliente, ListaAsignacion, Proyecto, Sucursal
+from ...services.lista_asignada import fijar_lista
 from ...services.sucursales import es_sucursal_de
 from ...schemas.common import Page
 from ...schemas.proyecto import ProyectoCreate, ProyectoOut, ProyectoUpdate
@@ -141,29 +142,6 @@ def _validar_series(db: Session, obj: Proyecto) -> None:
             )
 
 
-def _guardar_lista(db: Session, obj: Proyecto, lista_id) -> None:
-    """La lista del proyecto es su renglón de asignación (especificidad 8): se
-    cambia ahí mismo, para que no haga falta ir a otra pantalla a «asignar»."""
-    actuales = (
-        db.query(ListaAsignacion)
-        .filter(ListaAsignacion.proyecto_id == obj.id, ListaAsignacion.serie_id.is_(None))
-        .all()
-    )
-    if lista_id is None:
-        for a in actuales:
-            db.delete(a)
-        return
-    ensure_fk(db, ListaPrecios, lista_id, "lista_id")
-    if actuales:
-        for a in actuales:
-            a.lista_id = lista_id
-        return
-    db.add(ListaAsignacion(
-        tenant_id=obj.tenant_id, lista_id=lista_id,
-        cliente_id=obj.cliente_id, proyecto_id=obj.id,
-    ))
-
-
 @router.get("", response_model=Page[ProyectoOut])
 def list_proyectos(
     cliente_id: Optional[UUID] = Query(default=None),
@@ -226,7 +204,8 @@ def create_proyecto(
     db.add(obj)
     flush_or_conflict(db, detail="Ya existe un proyecto con ese código")
     if payload.lista_id is not None:
-        _guardar_lista(db, obj, payload.lista_id)
+        # La lista del proyecto es su renglón de asignación (especificidad 8).
+        fijar_lista(db, ctx, payload.lista_id, cliente_id=obj.cliente_id, proyecto_id=obj.id)
         db.flush()
     db.refresh(obj)
     return obj
@@ -260,7 +239,7 @@ def update_proyecto(
     if "series" in data or "palabras_obs" in data:
         _validar_series(db, obj)
     if cambia_lista:
-        _guardar_lista(db, obj, lista_id)
+        fijar_lista(db, ctx, lista_id, cliente_id=obj.cliente_id, proyecto_id=obj.id)
     flush_or_conflict(db, detail="Ya existe un proyecto con ese código")
     db.expire(obj, ["asignaciones"])
     db.refresh(obj)

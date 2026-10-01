@@ -191,6 +191,9 @@ export type ClienteSucursal = {
   series_factura_ids?: string[];
   series_remision_ids?: string[];
   es_default?: boolean;
+  /** La lista con la que se le cobra al cliente EN esta plaza. */
+  lista_id?: string | null;
+  lista_nombre?: string | null;
 };
 
 /** GET /precios/contexto: qué lista aplica al documento y qué tiene precio. */
@@ -293,6 +296,9 @@ export type Cliente = {
   custom_fields: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  /** La lista con la que se le cobra en cualquier plaza. */
+  lista_id?: string | null;
+  lista_nombre?: string | null;
 };
 
 export type ExistenciaRow = {
