@@ -124,6 +124,9 @@ export type Proyecto = {
   /** La lista con la que cobra (su renglón de asignación). */
   lista_id?: string | null;
   lista_nombre?: string | null;
+  /** De dónde sale su mercancía (gana sobre plaza y cliente). */
+  almacen_id?: string | null;
+  almacen_nombre?: string | null;
   created_at: string;
   updated_at: string;
 };

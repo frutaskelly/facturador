@@ -122,7 +122,9 @@ def siguiente_folio(db: Session, tenant_id: UUID, *, codigo: str, tipo_documento
 # ─── Almacén: de dónde sale la mercancía ─────────────────────────────────────
 # Vive aquí, junto a la resolución de serie, porque es EXACTAMENTE la misma
 # cascada y conviene que no se separen: si una cambia, la otra debería cambiar
-# con ella. Orden: elección manual → sucursal → cliente → predeterminado.
+# con ella. Orden: elección manual → proyecto → sucursal → cliente →
+# predeterminado. El proyecto va antes que la plaza (dueño, 1-oct-2026): «el
+# almacén es de donde sale la mercancía del proyecto».
 
 
 def resolver_almacen(
@@ -130,6 +132,7 @@ def resolver_almacen(
     tenant_id,
     *,
     almacen_id=None,
+    proyecto_id=None,
     sucursal_id=None,
     cliente_id=None,
 ):
@@ -155,7 +158,17 @@ def resolver_almacen(
     if hit:
         return hit
 
-    # 2) almacén de la sucursal
+    # 2) almacén del proyecto
+    if proyecto_id:
+        from ..models import Proyecto
+
+        proy = db.query(Proyecto).filter(Proyecto.id == proyecto_id).one_or_none()
+        if proy:
+            hit = _vivo(proy.almacen_id)
+            if hit:
+                return hit
+
+    # 3) almacén de la sucursal
     if sucursal_id:
         suc = db.query(Sucursal).filter(Sucursal.id == sucursal_id).one_or_none()
         if suc:
@@ -163,7 +176,7 @@ def resolver_almacen(
             if hit:
                 return hit
 
-    # 3) almacén del cliente
+    # 4) almacén del cliente
     if cliente_id:
         cli = db.query(Cliente).filter(Cliente.id == cliente_id).one_or_none()
         if cli:
@@ -171,7 +184,7 @@ def resolver_almacen(
             if hit:
                 return hit
 
-    # 4) el predeterminado del inquilino
+    # 5) el predeterminado del inquilino
     row = (
         db.query(Almacen.id)
         .filter(

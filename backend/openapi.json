@@ -17008,6 +17008,18 @@
       "title": "Activo",
       "type": "boolean"
      },
+     "almacen_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Almacen Id"
+     },
      "cliente_id": {
       "anyOf": [
        {
@@ -17108,6 +17120,29 @@
      "activo": {
       "title": "Activo",
       "type": "boolean"
+     },
+     "almacen_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Almacen Id"
+     },
+     "almacen_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Almacen Nombre"
      },
      "cliente_id": {
       "anyOf": [
@@ -17289,6 +17324,18 @@
        }
       ],
       "title": "Activo"
+     },
+     "almacen_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Almacen Id"
      },
      "cliente_id": {
       "anyOf": [

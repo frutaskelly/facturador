@@ -1852,12 +1852,13 @@ def crear_remision(
             status_code=422, detail="Asigna primero el cliente de la orden"
         )
     ensure_fk(db, Almacen, payload.almacen_id, "almacen_id")
-    # Si no se eligió almacén, se resuelve como la serie: sucursal → cliente →
-    # predeterminado. El bot no tiene cómo elegirlo, y dejarlo vacío significaría
+    # Si no se eligió almacén, se resuelve como la serie: proyecto → sucursal →
+    # cliente → predeterminado. El bot no tiene cómo elegirlo, y dejarlo vacío significaría
     # que la remisión no descuenta inventario sin que nadie lo haya decidido.
     almacen_id = resolver_almacen(
         db, ctx.tenant_id,
         almacen_id=payload.almacen_id,
+        proyecto_id=oc.proyecto_id,
         sucursal_id=oc.sucursal_id,
         cliente_id=oc.cliente_id,
     )

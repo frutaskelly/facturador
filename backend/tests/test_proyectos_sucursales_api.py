@@ -15,10 +15,10 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
-from app.models import Cliente, ListaPrecios, Membership, Role, Tenant, User
+from app.models import Almacen, Cliente, ListaPrecios, Membership, Role, Tenant, User
 from .conftest import crear_sucursal
 
-_PURGE = ("lista_asignaciones", "listas_precios", "proyectos", "cliente_sucursales", "sucursales", "clientes")
+_PURGE = ("lista_asignaciones", "listas_precios", "proyectos", "cliente_sucursales", "sucursales", "clientes", "almacenes")
 
 
 @pytest.fixture
@@ -54,6 +54,9 @@ def env(db_engine):
         lista_a = ListaPrecios(tenant_id=tid, codigo="LA", nombre="Lista A")
         lista_b = ListaPrecios(tenant_id=tid, codigo="LB", nombre="Lista B")
         db.add_all([lista_a, lista_b])
+        alm_pachuca = Almacen(tenant_id=tid, codigo="ALM-01", nombre="Pachuca", es_default=True)
+        alm_vh = Almacen(tenant_id=tid, codigo="ALM-03", nombre="Villa Hermosa")
+        db.add_all([alm_pachuca, alm_vh])
         db.commit()
 
         yield {
@@ -62,6 +65,7 @@ def env(db_engine):
             "cli1": str(cli1.id), "cli2": str(cli2.id),
             "s1a": str(s1a.id), "s1b": str(s1b.id), "s2a": str(s2a.id),
             "lista_a": str(lista_a.id), "lista_b": str(lista_b.id),
+            "alm_pachuca": str(alm_pachuca.id), "alm_vh": str(alm_vh.id),
         }
     finally:
         for table in _PURGE:
@@ -364,3 +368,37 @@ def test_lista_del_cliente_en_cualquier_plaza(client, env, auth_as):
     r = client.patch(f"/api/v1/clientes/{env['cli1']}", headers=h,
                      json={"lista_id": env["lista_a"], "dias_credito": 15})
     assert r.status_code == 200 and r.json()["lista_nombre"] == "Lista A"
+
+
+
+# ─── El almacén es de donde sale la mercancía del proyecto (migr 0095) ──────
+
+def test_almacen_del_proyecto_gana_en_la_cascada(client, env, auth_as):
+    """manual → proyecto → plaza → cliente → predeterminado."""
+    from app.services.series import resolver_almacen
+
+    auth_as(env["admin"])
+    h = _hdr(env["admin"])
+    r = client.post("/api/v1/proyectos", headers=h, json={
+        "nombre": "Hospitales Villahermosa", "cliente_id": env["cli1"],
+        "almacen_id": env["alm_vh"],
+    })
+    assert r.status_code == 201, r.text
+    p = r.json()
+    assert p["almacen_nombre"] == "Villa Hermosa"
+
+    db = SessionLocal()
+    try:
+        tid = env["tenant"]
+        # Sin proyecto: el predeterminado (Pachuca).
+        assert str(resolver_almacen(db, tid, cliente_id=env["cli1"])) == env["alm_pachuca"]
+        # Con proyecto: el suyo.
+        assert str(resolver_almacen(db, tid, proyecto_id=p["id"], cliente_id=env["cli1"])) == env["alm_vh"]
+        # La elección manual le gana al proyecto.
+        assert str(resolver_almacen(db, tid, almacen_id=env["alm_pachuca"],
+                                    proyecto_id=p["id"])) == env["alm_pachuca"]
+    finally:
+        db.close()
+
+    r = client.patch(f"/api/v1/proyectos/{p['id']}", headers=h, json={"almacen_id": None})
+    assert r.status_code == 200 and r.json()["almacen_id"] is None

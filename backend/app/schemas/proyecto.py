@@ -60,6 +60,8 @@ class ProyectoCreate(BaseModel):
     reporta_en_id: Optional[uuid.UUID] = None
     # La lista con la que cobra el proyecto (su renglón de asignación).
     lista_id: Optional[uuid.UUID] = None
+    # De dónde sale su mercancía (gana sobre plaza y cliente).
+    almacen_id: Optional[uuid.UUID] = None
 
     _correos = field_validator("correos_facturas")(_normalizar_correos)
     _listas = field_validator("series", "palabras_obs")(_normalizar_lista)
@@ -76,6 +78,7 @@ class ProyectoUpdate(BaseModel):
     palabras_obs: Optional[list[str]] = Field(default=None, max_length=20)
     reporta_en_id: Optional[uuid.UUID] = None
     lista_id: Optional[uuid.UUID] = None
+    almacen_id: Optional[uuid.UUID] = None
 
     _correos = field_validator("correos_facturas")(_normalizar_correos)
     _listas = field_validator("series", "palabras_obs")(_normalizar_lista)
@@ -100,5 +103,7 @@ class ProyectoOut(ORMModel):
     reporta_en_nombre: Optional[str] = None
     lista_id: Optional[uuid.UUID] = None
     lista_nombre: Optional[str] = None
+    almacen_id: Optional[uuid.UUID] = None
+    almacen_nombre: Optional[str] = None
     created_at: datetime
     updated_at: datetime
