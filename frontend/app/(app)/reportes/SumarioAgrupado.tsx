@@ -4,9 +4,10 @@
 // con el selector de dimensión y el total arriba. La usan la cartera («cuánto
 // nos deben, por quién») y el sumario de venta («cuánto facturamos, a quién»):
 // son la misma lectura con otro monto, y así se ven y se tocan igual.
-import Link from "next/link";
-import type { ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { useMemo, useState, type ReactNode } from "react";
 
+import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { fmtMoney } from "@/lib/format";
 
 export type Agrupar = "proyecto" | "cliente" | "sucursal";
@@ -55,6 +56,41 @@ export function SumarioAgrupado({
   vacio: string;
   cargando?: boolean;
 }) {
+  const router = useRouter();
+  // Lo que queda tras el buscador y los embudos; null = aún sin filtrar.
+  const [visibles, setVisibles] = useState<FilaSumario[] | null>(null);
+
+  const cols: Column<FilaSumario>[] = useMemo(() => [
+    // Clave fija: el encabezado cambia con la dimensión, el ancho no.
+    { key: "etiqueta", header: ETIQUETA_AGRUPAR[agrupar], truncate: true, sortable: true,
+      sortValue: (f) => f.etiqueta, exportValue: (f) => f.etiqueta,
+      cell: (f) => (
+        <span title={f.etiqueta} className={f.href ? "hover:underline" : undefined}>{f.etiqueta}</span>
+      ) },
+    { key: "facturas", header: "Facturas", className: "text-right tabular-nums", sortable: true,
+      sortValue: (f) => f.facturas, exportValue: (f) => f.facturas,
+      cell: (f) => <span className="text-muted">{f.facturas}</span> },
+    { key: "monto", header: columnaMonto, className: "whitespace-nowrap text-right tabular-nums",
+      sortable: true, sortValue: (f) => Number(f.monto), exportValue: (f) => Number(f.monto),
+      cell: (f) => fmtMoney(f.monto) },
+    ...(columnaAlerta ? [{
+      key: "alerta", header: columnaAlerta, className: "whitespace-nowrap text-right tabular-nums",
+      sortable: true, sortValue: (f: FilaSumario) => Number(f.alerta ?? 0),
+      exportValue: (f: FilaSumario) => Number(f.alerta ?? 0),
+      cell: (f: FilaSumario) => Number(f.alerta ?? 0) > 0
+        ? <span className="font-medium text-danger">{fmtMoney(f.alerta ?? 0)}</span>
+        : <span className="text-muted">—</span>,
+    }] : []),
+  ], [agrupar, columnaMonto, columnaAlerta]);
+
+  const sumaVisible = useMemo(() => {
+    const base = visibles ?? filas;
+    return {
+      monto: base.reduce((t, f) => t + Number(f.monto), 0),
+      alerta: base.reduce((t, f) => t + Number(f.alerta ?? 0), 0),
+    };
+  }, [visibles, filas]);
+
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -82,56 +118,28 @@ export function SumarioAgrupado({
         <p className="py-8 text-center text-sm text-muted">{vacio}</p>
       ) : (
         <div className={cargando ? "opacity-50 transition-opacity" : "transition-opacity"}>
-          {/* Teléfono: renglones apilados. Escritorio: tabla. */}
-          <div className="sm:hidden">
-            {filas.map((f) => {
-              const fila = (
-                <div className="flex items-baseline justify-between gap-2 border-b border-border/60 py-2">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm">{f.etiqueta}</div>
-                    <div className="text-xs text-muted">
-                      {f.facturas} fact.
-                      {columnaAlerta && Number(f.alerta ?? 0) > 0 && (
-                        <> · {etiquetaAlerta ?? columnaAlerta.toLowerCase()}{" "}
-                          <span className="font-medium text-danger">{fmtMoney(f.alerta ?? 0)}</span></>
-                      )}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-sm font-medium tabular-nums">{fmtMoney(f.monto)}</div>
-                </div>
-              );
-              return f.href
-                ? <Link key={f.etiqueta} href={f.href} className="block">{fila}</Link>
-                : <div key={f.etiqueta}>{fila}</div>;
-            })}
-          </div>
-          <table className="hidden w-full text-sm sm:table">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted">
-                <th className="py-1.5">{ETIQUETA_AGRUPAR[agrupar]}</th>
-                <th className="py-1.5 text-right">{columnaMonto}</th>
-                {columnaAlerta && <th className="py-1.5 text-right">{columnaAlerta}</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {filas.map((f) => (
-                <tr key={f.etiqueta} className="border-b border-border/60">
-                  <td className="py-1.5 pr-2">
-                    {f.href ? <Link href={f.href} className="hover:underline">{f.etiqueta}</Link> : f.etiqueta}
-                    <span className="text-xs text-muted"> · {f.facturas}</span>
-                  </td>
-                  <td className="py-1.5 text-right tabular-nums">{fmtMoney(f.monto)}</td>
-                  {columnaAlerta && (
-                    <td className="py-1.5 text-right tabular-nums">
-                      {Number(f.alerta ?? 0) > 0
-                        ? <span className="font-medium text-danger">{fmtMoney(f.alerta ?? 0)}</span>
-                        : <span className="text-muted">—</span>}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {visibles && visibles.length !== filas.length && (
+            <p className="mb-2 text-right text-xs text-muted">
+              Lo filtrado ({visibles.length} de {filas.length}):{" "}
+              <span className="font-semibold tabular-nums text-foreground">{fmtMoney(sumaVisible.monto)}</span>
+              {columnaAlerta && (
+                <> · {etiquetaAlerta ?? columnaAlerta.toLowerCase()}{" "}
+                  <span className="font-semibold tabular-nums text-danger">{fmtMoney(sumaVisible.alerta)}</span></>
+              )}
+            </p>
+          )}
+          <DataTableSmart
+            rows={filas}
+            rowKey={(f) => f.etiqueta}
+            columns={cols}
+            empty={vacio}
+            storageKey={`reportes-sumario-${columnaMonto.toLowerCase()}`}
+            searchPlaceholder={`Buscar ${ETIQUETA_AGRUPAR[agrupar].toLowerCase()}…`}
+            exportFilename={`${columnaMonto.toLowerCase()}-por-${agrupar}`}
+            defaultPageSize={50}
+            onRowClick={(f) => { if (f.href) router.push(f.href); }}
+            onFilteredRowsChange={setVisibles}
+          />
         </div>
       )}
 
