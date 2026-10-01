@@ -3373,9 +3373,6 @@ export default function RemisionesPage() {
           open={aprender !== null}
           lineas={aprender ?? []}
           clienteId={clienteId}
-          clienteNombre={cliName[clienteId] ?? ""}
-          sucursalId={sucursalId || undefined}
-          sucursalNombre={sucursales.find((x) => x.id === sucursalId)?.nombre}
           onCancel={() => setAprender(null)}
           onDone={() => {
             setAprender(null);

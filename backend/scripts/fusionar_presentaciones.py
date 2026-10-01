@@ -140,30 +140,15 @@ def fusionar(cur, tid, f: dict, respaldo: list, kilos_como_pieza: bool) -> None:
             respaldo.append(["precio+", f["sobreviviente"], "", f"{lista} {destino} {precio}"])
             print(f"      precio {lista}: ${precio:,.2f} {destino} — copiado")
 
-        # 3b. overrides de cliente/sucursal, mismo criterio
+        # 3b. overrides de cliente/sucursal: NO se copian (dueño, 1-oct). Los
+        # precios especiales se borraron y no deben renacer como efecto de una
+        # fusión; solo se avisa para que alguien decida a mano.
         cur.execute(
-            """
-            select o.cliente_id, o.sucursal_id, o.precio_unitario, o.vigencia_desde, o.vigencia_hasta,
-                   (select x.precio_unitario from precio_overrides x
-                     where x.producto_id = %(viv)s and x.presentacion = %(dest)s
-                       and x.cliente_id is not distinct from o.cliente_id
-                       and x.sucursal_id is not distinct from o.sucursal_id limit 1)
-              from precio_overrides o where o.producto_id = %(abs)s
-            """,
-            {"viv": viv["id"], "abs": a["id"], "dest": destino},
+            "select count(*) from precio_overrides where producto_id = %s", (a["id"],)
         )
-        for cli, suc, precio, desde, hasta, ya in cur.fetchall():
-            if ya is not None:
-                print(f"      override ${precio:,.2f} {destino} — ya existe (${ya:,.2f})")
-                continue
-            cur.execute(
-                "insert into precio_overrides (id, tenant_id, cliente_id, sucursal_id, producto_id,"
-                " presentacion, precio_unitario, vigencia_desde, vigencia_hasta)"
-                " values (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s)",
-                (tid, cli, suc, viv["id"], destino, precio, desde, hasta),
-            )
-            respaldo.append(["override+", f["sobreviviente"], "", f"{cli}/{suc} {destino} {precio}"])
-            print(f"      override ${precio:,.2f} {destino} — copiado")
+        (n_ovr,) = cur.fetchone()
+        if n_ovr:
+            print(f"      {n_ovr} precio(s) especial(es) del gemelo — NO se copian")
 
         # 4. alias: los suyos pasan; su nombre queda como alias global
         cur.execute("select id, alias from producto_alias where producto_id = %s", (a["id"],))
