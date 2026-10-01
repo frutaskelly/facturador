@@ -559,6 +559,14 @@ export default function RemisionesPage() {
     if (!proyectoId && clienteId && proyectoOpts.length === 1) setProyectoId(proyectoOpts[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, editId, clienteId, sucursalId, proyectoOpts]);
+  // El almacén sale del proyecto (dueño, 1-oct-2026): al elegirlo, si el
+  // proyecto dice de dónde sale su mercancía, se propone ese (sigue editable).
+  useEffect(() => {
+    if (mode !== "create" || editId || !proyectoId) return;
+    const alm = proyectos.find((p) => p.id === proyectoId)?.almacen_id;
+    if (alm && almacenes.some((a) => a.id === alm)) setAlmacenId(alm);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, editId, proyectoId]);
   const serieOpts: ComboOption[] = useMemo(
     () => [
       { value: "", label: `Automática${serieResuelta ? ` · ${serieResuelta.codigo}` : ""}` },

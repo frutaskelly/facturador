@@ -57,10 +57,14 @@ class Proyecto(Base, TimestampMixin, SoftDeleteMixin):
     reporta_en_id = Column(
         UUID(as_uuid=True), ForeignKey("proyectos.id", ondelete="SET NULL")
     )
+    # De dónde sale la mercancía del proyecto (migr 0095): gana sobre el
+    # almacén de la plaza y del cliente; la elección manual le gana a él.
+    almacen_id = Column(UUID(as_uuid=True), ForeignKey("almacenes.id", ondelete="SET NULL"))
 
     cliente = relationship("Cliente")
     sucursal = relationship("Sucursal")
     reporta_en = relationship("Proyecto", remote_side="Proyecto.id")
+    almacen = relationship("Almacen")
     # La lista de precios del proyecto vive en su renglón de asignación
     # (especificidad 8): la ficha la muestra y la cambia ahí mismo.
     asignaciones = relationship(
@@ -78,6 +82,10 @@ class Proyecto(Base, TimestampMixin, SoftDeleteMixin):
     @property
     def sucursal_nombre(self):
         return self.sucursal.nombre if self.sucursal else None
+
+    @property
+    def almacen_nombre(self):
+        return self.almacen.nombre if self.almacen else None
 
     @property
     def reporta_en_nombre(self):

@@ -25,6 +25,7 @@ const config: CrudConfig<Proyecto> = {
     { header: "Sucursal", cell: (p) => p.sucursal_nombre ?? "(todas)" },
     { header: "Series", cell: (p) => (p.series ?? []).join(", ") || "—" },
     { header: "Lista de precios", cell: (p) => p.lista_nombre ?? "—" },
+    { header: "Almacén", cell: (p) => p.almacen_nombre ?? "—" },
     { header: "Se reporta en", cell: (p) => p.reporta_en_nombre ?? "—" },
     { header: "Estado", cell: (p) => <Badge tone={p.activo ? "success" : "muted"}>{p.activo ? "Activo" : "Inactivo"}</Badge> },
   ],
@@ -37,6 +38,8 @@ const config: CrudConfig<Proyecto> = {
       hint: "Un proyecto por sucursal. Vacío = aplica en cualquier sucursal." },
     { name: "lista_id", label: "Lista de precios", type: "select", search: true, colSpan: 2,
       hint: "Con esta lista se cobran las remisiones del proyecto. Vacío = la del cliente o la plaza." },
+    { name: "almacen_id", label: "Almacén", type: "select", search: true, colSpan: 2,
+      hint: "De dónde sale la mercancía del proyecto: sus remisiones descuentan inventario de aquí. Vacío = el de la plaza, el del cliente o el predeterminado." },
     { name: "series", label: "Series de factura", type: "multisearch", colSpan: 2,
       placeholder: "Busca la serie (ZEHMOTG…)", allowCustom: true,
       normalize: (s) => s.replace(/[\s,;]+/g, "").toUpperCase(),
@@ -77,6 +80,11 @@ const config: CrudConfig<Proyecto> = {
       value: (r) => String(r.id),
       label: (r) => String(r.nombre),
     },
+    almacen_id: {
+      path: "/api/v1/almacenes?limit=200",
+      value: (r) => String(r.id),
+      label: (r) => String(r.nombre),
+    },
     reporta_en_id: {
       path: "/api/v1/proyectos?limit=500",
       value: (r) => String(r.id),
@@ -84,7 +92,7 @@ const config: CrudConfig<Proyecto> = {
     },
   },
   newValues: () => ({
-    codigo: "", nombre: "", cliente_id: "", sucursal_id: "", lista_id: "", series: "",
+    codigo: "", nombre: "", cliente_id: "", sucursal_id: "", lista_id: "", almacen_id: "", series: "",
     palabras_obs: "", reporta_en_id: "", activo: true, correos_facturas: "", notas: "",
   }),
   toForm: (p) => ({
@@ -93,6 +101,7 @@ const config: CrudConfig<Proyecto> = {
     cliente_id: p.cliente_id ?? "",
     sucursal_id: p.sucursal_id ?? "",
     lista_id: p.lista_id ?? "",
+    almacen_id: p.almacen_id ?? "",
     series: (p.series ?? []).join(","),
     palabras_obs: (p.palabras_obs ?? []).join(", "),
     reporta_en_id: p.reporta_en_id ?? "",
@@ -106,6 +115,7 @@ const config: CrudConfig<Proyecto> = {
     cliente_id: (v.cliente_id as string) || null,
     sucursal_id: (v.sucursal_id as string) || null,
     lista_id: (v.lista_id as string) || null,
+    almacen_id: (v.almacen_id as string) || null,
     // Texto libre → lista: el backend normaliza (mayúsculas, sin repetidos).
     series: lista(v.series),
     palabras_obs: frases(v.palabras_obs),

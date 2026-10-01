@@ -18,7 +18,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Cliente, ListaAsignacion, Proyecto, Sucursal
+from ...models import Almacen, Cliente, ListaAsignacion, Proyecto, Sucursal
 from ...services.lista_asignada import fijar_lista
 from ...services.sucursales import es_sucursal_de
 from ...schemas.common import Page
@@ -193,6 +193,7 @@ def create_proyecto(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     ensure_fk(db, Cliente, payload.cliente_id, "cliente_id")
+    ensure_fk(db, Almacen, payload.almacen_id, "almacen_id")
     obj = Proyecto(
         **payload.model_dump(exclude={"lista_id"}),
         tenant_id=ctx.tenant_id,
@@ -224,6 +225,8 @@ def update_proyecto(
     lista_id = data.pop("lista_id", None)
     if "cliente_id" in data:
         ensure_fk(db, Cliente, data["cliente_id"], "cliente_id")
+    if data.get("almacen_id") is not None:
+        ensure_fk(db, Almacen, data["almacen_id"], "almacen_id")
     for key, value in data.items():
         setattr(obj, key, value)
     # El código sigue al nombre: si no, un proyecto renombrado se queda con las

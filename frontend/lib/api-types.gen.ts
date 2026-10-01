@@ -11699,6 +11699,8 @@ export interface components {
              * @default true
              */
             activo: boolean;
+            /** Almacen Id */
+            almacen_id?: string | null;
             /** Cliente Id */
             cliente_id?: string | null;
             /** Correos Facturas */
@@ -11722,6 +11724,10 @@ export interface components {
         ProyectoOut: {
             /** Activo */
             activo: boolean;
+            /** Almacen Id */
+            almacen_id?: string | null;
+            /** Almacen Nombre */
+            almacen_nombre?: string | null;
             /** Cliente Id */
             cliente_id?: string | null;
             /** Cliente Nombre */
@@ -11784,6 +11790,8 @@ export interface components {
         ProyectoUpdate: {
             /** Activo */
             activo?: boolean | null;
+            /** Almacen Id */
+            almacen_id?: string | null;
             /** Cliente Id */
             cliente_id?: string | null;
             /** Correos Facturas */
