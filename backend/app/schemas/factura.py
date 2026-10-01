@@ -232,6 +232,9 @@ class FacturaOut(ORMModel):
     # El proyecto heredado de las remisiones: el envío por correo prellena los
     # destinatarios configurados en él (ticket 86bbyveu1).
     proyecto_id: Optional[uuid.UUID] = None
+    # El proyecto como lo ve Reportes (guardado, de su remisión o por su serie);
+    # sólo lo llena el listado.
+    proyecto_nombre: Optional[str] = None
     # Solo directas: almacén del que descuenta al timbrar. La UI lo usa además
     # para distinguir el borrador DIRECTO (líneas editables) del resto.
     almacen_id: Optional[uuid.UUID] = None

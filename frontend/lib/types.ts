@@ -340,6 +340,8 @@ export type Remision = {
   sucursal_id?: string | null;
   lista_precios_id?: string | null;
   proyecto_id?: string | null;
+  /** Para la columna Proyecto de la lista (en Facturas: guardado, de su remisión o por su serie). */
+  proyecto_nombre?: string | null;
   serie_id?: string | null;
   fecha_remision: string;
   fecha_entrega?: string | null;
@@ -456,6 +458,8 @@ export type Factura = {
   /** El proyecto heredado de las remisiones: el envío por correo prellena
       los destinatarios configurados en él (ticket 86bbyveu1). */
   proyecto_id?: string | null;
+  /** Para la columna Proyecto de la lista (en Facturas: guardado, de su remisión o por su serie). */
+  proyecto_nombre?: string | null;
   // Solo directas: almacén del que descuenta al timbrar. La UI lo usa además
   // para distinguir el borrador DIRECTO (líneas editables) del resto.
   almacen_id?: string | null;

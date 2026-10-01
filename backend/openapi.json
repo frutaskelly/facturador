@@ -7052,6 +7052,17 @@
       ],
       "title": "Proyecto Id"
      },
+     "proyecto_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Nombre"
+     },
      "remisiones_folios": {
       "default": [],
       "items": {
@@ -7654,6 +7665,17 @@
        }
       ],
       "title": "Proyecto Id"
+     },
+     "proyecto_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Nombre"
      },
      "remisiones_folios": {
       "default": [],
@@ -18249,6 +18271,17 @@
       ],
       "title": "Proyecto Id"
      },
+     "proyecto_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Nombre"
+     },
      "revision_pendiente": {
       "default": false,
       "title": "Revision Pendiente",
@@ -18633,6 +18666,17 @@
        }
       ],
       "title": "Proyecto Id"
+     },
+     "proyecto_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto Nombre"
      },
      "revision_pendiente": {
       "default": false,

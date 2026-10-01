@@ -134,6 +134,8 @@ class RemisionOut(ORMModel):
     sucursal_id: Optional[uuid.UUID] = None
     lista_precios_id: Optional[uuid.UUID] = None
     proyecto_id: Optional[uuid.UUID] = None
+    # Para la columna Proyecto de la lista sin otra consulta.
+    proyecto_nombre: Optional[str] = None
     serie_id: Optional[uuid.UUID] = None
     fecha_remision: date
     fecha_entrega: Optional[date] = None

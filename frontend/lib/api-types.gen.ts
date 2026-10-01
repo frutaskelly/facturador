@@ -8289,6 +8289,8 @@ export interface components {
             pdf_url?: string | null;
             /** Proyecto Id */
             proyecto_id?: string | null;
+            /** Proyecto Nombre */
+            proyecto_nombre?: string | null;
             /**
              * Remisiones Folios
              * @default []
@@ -8475,6 +8477,8 @@ export interface components {
             pdf_url?: string | null;
             /** Proyecto Id */
             proyecto_id?: string | null;
+            /** Proyecto Nombre */
+            proyecto_nombre?: string | null;
             /**
              * Remisiones Folios
              * @default []
@@ -12073,6 +12077,8 @@ export interface components {
             pos_etapa?: string | null;
             /** Proyecto Id */
             proyecto_id?: string | null;
+            /** Proyecto Nombre */
+            proyecto_nombre?: string | null;
             /**
              * Revision Pendiente
              * @default false
@@ -12187,6 +12193,8 @@ export interface components {
             pos_etapa?: string | null;
             /** Proyecto Id */
             proyecto_id?: string | null;
+            /** Proyecto Nombre */
+            proyecto_nombre?: string | null;
             /**
              * Revision Pendiente
              * @default false

@@ -137,6 +137,7 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     # refacturabilidad se deriva del estado de esa factura (CANCELADA → libre).
     factura = relationship("Factura", foreign_keys=[factura_id])
     devoluciones = relationship("Devolucion", order_by="Devolucion.created_at")
+    proyecto = relationship("Proyecto", foreign_keys=[proyecto_id])
 
     # La OC original que dio origen a la remisión (bandeja de órdenes). No es
     # una relación: se resuelve en lote en la lista y el detalle —por
@@ -158,6 +159,10 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     @property
     def factura_estado(self) -> Optional[str]:
         return self.factura.estado if self.factura else None
+
+    @property
+    def proyecto_nombre(self) -> Optional[str]:
+        return self.proyecto.nombre if self.proyecto else None
 
 
 class LineaRemision(Base):

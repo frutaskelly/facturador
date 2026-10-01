@@ -665,3 +665,20 @@ def test_extraer_oc_y_semana_del_folio_con_fecha():
     assert extraer_semana(None, "TBVH-ROVIR-20261007") == 40
     assert extraer_semana(None, "HGHO-IMSSB-20261004") == 39
     assert extraer_semana("SEM 40 ROVIROSA", "HGHO-IMSSB-20261004") == 40   # la escrita gana
+
+
+def test_listado_de_facturas_trae_el_proyecto(client, env, auth):
+    """La columna Proyecto de Facturas usa el criterio de Reportes, pero sin
+    subir a «se reporta en»: NERI se ve como NERI."""
+    ceresos = _proyecto(env, "CERESOS", series=["ZMAFAN"])
+    neri = _proyecto(env, "SECRETARIO NERI", reporta_en=ceresos)
+    _factura_ppd_timbrada(env, total=10, dias_atras=1, folio=81, serie="ZMAFAN")
+    _factura_ppd_timbrada(env, total=10, dias_atras=1, folio=82, serie="FMAFAN", proyecto_id=neri)
+    _factura_ppd_timbrada(env, total=10, dias_atras=1, folio=83, serie="ZHGO")
+
+    r = client.get("/api/v1/facturas", params={"limit": 100}, headers=_h(env))
+    assert r.status_code == 200, r.text
+    por_folio = {x["folio"]: x["proyecto_nombre"] for x in r.json()["items"]}
+    assert por_folio[81] == "CERESOS"
+    assert por_folio[82] == "SECRETARIO NERI"
+    assert por_folio[83] is None

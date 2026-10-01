@@ -341,8 +341,14 @@ def _con_remisiones(db: Session, rows: list[Factura]) -> None:
             fid = espejo.get(parsear_marca(marca or ""))
             if fid is not None and folio not in folios[fid]:
                 folios[fid].append(folio)
+    # El proyecto de cada factura con el mismo criterio que Reportes (también
+    # las del espejo, que no lo traen): por su remisión o por su serie.
+    from ...services.proyecto_de_factura import ProyectoDeFactura
+    clasificador = ProyectoDeFactura(db, rows[0].tenant_id, factura_ids=list(folios))
     for f in rows:
         f.remisiones_folios = folios[f.id]
+        p = clasificador.propio(f)
+        f.proyecto_nombre = p.nombre if p else None
 
 
 @router.get("/pdf")
@@ -2196,7 +2202,11 @@ def enviar_facturas_lote(
     if payload.to:
         destinatarios = [c for c in payload.to.replace(",", " ").split() if c]
     if not destinatarios:
-        proy_ids = {f.proyecto_id for f in facturas}
+        # El proyecto de cada factura con el criterio de Reportes: las del
+        # espejo no lo traen guardado, pero su serie dice de cuál son.
+        from ...services.proyecto_de_factura import ProyectoDeFactura
+        clasificador = ProyectoDeFactura(db, ctx.tenant_id, factura_ids=[f.id for f in facturas])
+        proy_ids = {getattr(clasificador.propio(f), "id", None) for f in facturas}
         if len(proy_ids) == 1 and next(iter(proy_ids)) is not None:
             proy = db.query(Proyecto).filter(Proyecto.id == next(iter(proy_ids))).one_or_none()
             if proy is not None and isinstance(proy.correos_facturas, list):

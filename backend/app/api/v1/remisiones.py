@@ -303,7 +303,7 @@ def list_remisiones(
 ):
     query = (
         db.query(Remision)
-        .options(joinedload(Remision.factura))
+        .options(joinedload(Remision.factura), joinedload(Remision.proyecto))
         .filter(Remision.deleted_at.is_(None))
     )
     if ctx.cliente_scope:

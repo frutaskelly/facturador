@@ -789,6 +789,12 @@ export default function FacturasPage() {
       exportValue: (f) => cliName[f.cliente_id] ?? "",
       sortValue: (f) => cliName[f.cliente_id] ?? "",
       cell: (f) => <span title={cliName[f.cliente_id] ?? ""}>{cliName[f.cliente_id] ?? "—"}</span> },
+    // El proyecto con el criterio de Reportes (también las del espejo de SAE,
+    // que lo toman de su serie); se filtra con el embudo del encabezado.
+    { header: "Proyecto", truncate: true, sortable: true,
+      exportValue: (f) => f.proyecto_nombre ?? "",
+      sortValue: (f) => f.proyecto_nombre ?? "",
+      cell: (f) => <span title={f.proyecto_nombre ?? ""}>{f.proyecto_nombre ?? "—"}</span> },
     { header: "Fecha", className: "whitespace-nowrap", sortable: true,
       sortValue: (f) => f.fecha, exportValue: (f) => fmtDate(f.fecha),
       cell: (f) => fmtDate(f.fecha) },
