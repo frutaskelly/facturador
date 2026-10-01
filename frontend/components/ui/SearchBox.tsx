@@ -184,3 +184,163 @@ export function SearchSelect({
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3) MultiSearchSelect — búsqueda + dropdown que junta VARIOS valores (chips)
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Como SearchSelect, pero cada elección se suma como chip. Con `allowCustom`
+ * se puede agregar lo escrito aunque no esté en la lista (p. ej. una serie que
+ * sólo existe en el SAE): Enter o la opción «Agregar …». `normalize` pasa lo
+ * escrito a su forma canónica antes de agregarlo (mayúsculas, sin espacios).
+ */
+export function MultiSearchSelect({
+  options,
+  values,
+  onChange,
+  placeholder = "Buscar y agregar…",
+  emptyText = "Sin coincidencias.",
+  allowCustom = false,
+  normalize = (s: string) => s.trim(),
+  className,
+}: {
+  options: SearchOption[];
+  values: string[];
+  onChange: (values: string[]) => void;
+  placeholder?: string;
+  emptyText?: ReactNode;
+  allowCustom?: boolean;
+  normalize?: (s: string) => string;
+  className?: string;
+}) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const ql = norm(q.trim());
+  const filtered = options.filter(
+    (o) => !values.includes(o.value) && (!ql || norm(`${o.label} ${o.hint ?? ""}`).includes(ql)),
+  );
+  const custom = allowCustom ? normalize(q) : "";
+  const ofrecerCustom =
+    !!custom && !values.includes(custom) && !options.some((o) => o.value === custom);
+  // Lista navegable: las coincidencias y, al final, «Agregar …» si aplica.
+  const items: SearchOption[] = ofrecerCustom
+    ? [...filtered, { value: custom, label: `Agregar «${custom}»` }]
+    : filtered;
+  const etiqueta = (v: string) => options.find((o) => o.value === v)?.label ?? v;
+
+  useEffect(() => setHi(0), [q, open]);
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  function add(v: string) {
+    if (v && !values.includes(v)) onChange([...values, v]);
+    setQ("");
+    inputRef.current?.focus();
+  }
+
+  return (
+    <div ref={boxRef} className={`relative ${className ?? ""}`}>
+      <div
+        className="flex min-h-[38px] w-full flex-wrap items-center gap-1 rounded-lg border border-border bg-background py-1 pl-2 pr-8 text-sm focus-within:border-accent"
+        onClick={() => inputRef.current?.focus()}
+      >
+        {values.map((v) => (
+          <span
+            key={v}
+            className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-2 py-0.5 text-xs font-medium"
+          >
+            {etiqueta(v)}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onChange(values.filter((x) => x !== v));
+              }}
+              aria-label={`Quitar ${etiqueta(v)}`}
+              className="rounded text-muted hover:text-foreground"
+            >
+              <X size={12} />
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          type="text"
+          role="combobox"
+          aria-expanded={open}
+          aria-label={placeholder}
+          value={q}
+          placeholder={values.length ? "" : placeholder}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setOpen(true);
+              setHi((h) => Math.min(h + 1, Math.max(items.length - 1, 0)));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setHi((h) => Math.max(h - 1, 0));
+            } else if (e.key === "Enter" || e.key === ",") {
+              // Coma = separador, como en el campo de texto de antes.
+              if (e.key === "," && !q.trim()) {
+                e.preventDefault();
+              } else if (open && items[hi]) {
+                e.preventDefault();
+                add(items[hi].value);
+              }
+            } else if (e.key === "Backspace" && !q && values.length) {
+              onChange(values.slice(0, -1));
+            } else if (e.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+          className="min-w-[6rem] flex-1 bg-transparent py-1 outline-none"
+        />
+      </div>
+      <ChevronDown
+        size={15}
+        className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted transition-transform ${open ? "rotate-180" : ""}`}
+      />
+
+      {open && (
+        <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-border bg-surface shadow-lg">
+          {items.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-muted">{emptyText}</div>
+          ) : (
+            items.map((o, i) => (
+              <button
+                key={o.value + (i === filtered.length ? ":custom" : "")}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  add(o.value);
+                }}
+                onMouseEnter={() => setHi(i)}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${
+                  i === hi ? "bg-accent/10" : "hover:bg-surface-2"
+                }`}
+              >
+                <span className="font-medium">{o.label}</span>
+                {o.hint && <span className="text-xs text-muted">{o.hint}</span>}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

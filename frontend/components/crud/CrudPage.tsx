@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
+import { MultiSearchSelect, SearchSelect } from "@/components/ui/SearchBox";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
@@ -25,7 +26,7 @@ function _tagIncluye(tag: string | undefined, filtro: string): boolean {
 export type CrudField = {
   name: string;
   label: string;
-  type?: "text" | "number" | "decimal" | "textarea" | "switch" | "select" | "multiselect";
+  type?: "text" | "number" | "decimal" | "textarea" | "switch" | "select" | "multiselect" | "multisearch";
   required?: boolean;
   /** Ayuda bajo el campo. Como función se recalcula con el formulario, para
    *  interruptores en los que cada posición significa algo distinto y hay que
@@ -45,6 +46,13 @@ export type CrudField = {
    * join/split.
    */
   filterBy?: string;
+  /** Solo `select`: caja de búsqueda + dropdown en vez del select nativo
+   *  (catálogos largos: escribir filtra). */
+  search?: boolean;
+  /** Solo `multisearch`: acepta lo escrito aunque no venga en el lookup (p. ej.
+   *  una serie que sólo existe en el SAE); `normalize` lo pasa a su forma canónica. */
+  allowCustom?: boolean;
+  normalize?: (s: string) => string;
   /** Solo `multiselect`: texto cuando no queda ninguna opción que palomear. */
   emptyText?: string;
   /** Campo no editable (se muestra deshabilitado). */
@@ -200,6 +208,9 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
 
   const [lookupOpts, setLookupOpts] = useState<Record<string, { value: string; label: string; tag?: string }[]>>({});
   const lookupsLoaded = useRef(false);
+  // Lookups que fallaron al cargar: un dropdown vacío por error de red no debe
+  // parecer «no hay nada que elegir».
+  const [lookupFallo, setLookupFallo] = useState<Set<string>>(new Set());
 
   // Campo cuyo catálogo se está creando desde el propio formulario (mini-modal).
   const [inlineFor, setInlineFor] = useState<CrudField | null>(null);
@@ -224,29 +235,52 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
 
   // Lookups de los selects del formulario: se cargan la primera vez que se abre
   // el formulario, no al montar la página (ahorra peticiones en la carga inicial).
+  // Depende de `formAbierto`, NO de `form`: con `form` cada tecla corría la
+  // limpieza y descartaba la carga en vuelo — si se escribía el nombre antes de
+  // que terminaran los lookups, los selects se quedaban vacíos para siempre.
+  const formAbierto = form !== null;
   useEffect(() => {
-    if (!config.lookups || form === null || lookupsLoaded.current) return;
+    if (!config.lookups || !formAbierto || lookupsLoaded.current) return;
     lookupsLoaded.current = true;
     let active = true;
+    let terminado = false;
     (async () => {
-      const out: Record<string, { value: string; label: string }[]> = {};
-      for (const [field, lk] of Object.entries(config.lookups!)) {
-        try {
-          const pageData = await apiFetch<Page<Record<string, unknown>>>(lk.path);
-          out[field] = pageData.items.map((r) => ({ value: lk.value(r), label: lk.label(r), tag: lk.tag?.(r) }));
-        } catch {
-          out[field] = [];
-        }
-      }
+      const out: Record<string, { value: string; label: string; tag?: string }[]> = {};
+      const fallos = new Set<string>();
+      // En paralelo: en serie, cuatro catálogos tardaban lo bastante como para
+      // que el usuario abriera el dropdown todavía vacío.
+      await Promise.all(
+        Object.entries(config.lookups!).map(async ([field, lk]) => {
+          try {
+            const pageData = await apiFetch<Page<Record<string, unknown>>>(lk.path);
+            out[field] = pageData.items.map((r) => ({ value: lk.value(r), label: lk.label(r), tag: lk.tag?.(r) }));
+          } catch {
+            out[field] = [];
+            fallos.add(field);
+          }
+        }),
+      );
+      terminado = true;
+      if (!active) return;
+      // Un fallo se reintenta al volver a abrir el formulario.
+      if (fallos.size) lookupsLoaded.current = false;
+      setLookupFallo(fallos);
       // Merge conservando lo ya presente: si una creación inline refrescó un
       // lookup mientras esta carga inicial seguía en vuelo, no se pisa con la
       // foto vieja (el id recién creado quedaría seleccionado pero invisible).
-      if (active) setLookupOpts((prev) => ({ ...out, ...prev }));
+      // (Un lookup previo VACÍO no cuenta: es el de una carga que falló.)
+      setLookupOpts((prev) => {
+        const merged = { ...prev };
+        for (const [k, v] of Object.entries(out)) if (!prev[k]?.length) merged[k] = v;
+        return merged;
+      });
     })();
     return () => {
       active = false;
+      // Cerrado antes de terminar: la próxima apertura vuelve a cargar.
+      if (!terminado) lookupsLoaded.current = false;
     };
-  }, [config.lookups, form]);
+  }, [config.lookups, formAbierto]);
 
   // Multiselect con `filterBy`: al cambiar el campo del que depende, las
   // palomeadas que quedaron fuera del filtro se sueltan del valor. Solo con el
@@ -478,7 +512,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
       <Modal
         open={form !== null}
         onClose={() => setForm(null)}
-        title={editingId ? `Editar ${lower}` : `Nuevo ${lower}`}
+        title={editingId ? `Editar ${lower}` : config.newLabel ?? `Nuevo ${lower}`}
         wide={config.wide}
         footer={
           <>
@@ -520,6 +554,23 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                       (() => {
                         const filtro = f.filterBy ? String(form[f.filterBy] ?? "") : "";
                         const visibles = filtro ? opts.filter((o) => _tagIncluye(o.tag, filtro)) : opts;
+                        if (f.search) {
+                          return (
+                            <SearchSelect
+                              options={visibles}
+                              value={String(val ?? "")}
+                              onSelect={(o) => setField(f.name, o?.value ?? "")}
+                              placeholder="Escribe para buscar…"
+                              emptyText={
+                                lookupFallo.has(f.name)
+                                  ? "No se pudo cargar la lista. Cierra y vuelve a abrir."
+                                  : filtro
+                                    ? "Nada vinculado a lo elegido arriba."
+                                    : "Sin coincidencias."
+                              }
+                            />
+                          );
+                        }
                         return (
                           <Select value={String(val ?? "")} onChange={(e) => setField(f.name, e.target.value)}>
                             <option value="">— Selecciona —</option>
@@ -531,6 +582,16 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                           </Select>
                         );
                       })()
+                    ) : f.type === "multisearch" ? (
+                      <MultiSearchSelect
+                        options={opts}
+                        values={String(val ?? "").split(",").filter(Boolean)}
+                        onChange={(vs) => setField(f.name, vs.join(","))}
+                        placeholder={f.placeholder ?? "Escribe para buscar…"}
+                        allowCustom={f.allowCustom}
+                        normalize={f.normalize}
+                        emptyText={lookupFallo.has(f.name) ? "No se pudo cargar la lista." : "Sin coincidencias."}
+                      />
                     ) : f.type === "multiselect" ? (
                       (() => {
                         const filtro = f.filterBy ? String(form[f.filterBy] ?? "") : "";
