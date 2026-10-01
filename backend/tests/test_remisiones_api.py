@@ -817,7 +817,9 @@ def test_editar_pedido_exportado_lo_vuelve_nueva_version(client, env, auth_as):
     r = client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json=cuerpo)
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["export_pedido_at"] is None and out["export_pedido_folio"] is None
+    assert out["export_pedido_at"] is None
+    # El folio de aquel pedido sigue ocupado: existe en SAE aunque se edite.
+    assert out["export_pedido_folio"] == "02:1234"
     assert float(out["subtotal"]) == 35
     assert out["notas"].startswith("nota de siempre\n")
     assert "Nueva versión del pedido 02:1234" in out["notas"]
