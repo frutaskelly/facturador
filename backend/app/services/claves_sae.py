@@ -57,7 +57,8 @@ def _campos(item: Any) -> tuple[str, Optional[str], bool]:
 
 
 def reemplazar_catalogo(db: Session, tenant_id, empresa: str, items: Iterable[Any],
-                        forzar: bool = False) -> ClavesSaeResult:
+                        forzar: bool = False,
+                        leido_at: Optional[datetime] = None) -> ClavesSaeResult:
     """Deja el catálogo de esa empresa IGUAL a lo que llegó.
 
     REEMPLAZA (es un espejo, no un acumulado): lo que ya no está en SAE deja de
@@ -70,6 +71,17 @@ def reemplazar_catalogo(db: Session, tenant_id, empresa: str, items: Iterable[An
         lectura cortada, no un inventario vaciado, y reemplazarlo convertiría
         cientos de claves buenas en «no existe en SAE» y trabaría exports
         legítimos. Forzar lo decide una persona, nunca la pasada automática.
+
+    Y convive con `reflejar_escritura`, que escribe en la misma tabla mientras
+    la lectura de INVE corre (1-oct-2026: una tanda de altas desde la UI tumbó
+    la pasada de la 02 y luego la de la 04 con UniqueViolation). Dos carreras:
+
+      · La clave llegó en INVE y el alta la reflejó DESPUÉS de cargar
+        `actuales`: el INSERT choca. Por eso las nuevas entran con ON CONFLICT
+        y SAE (lo recién leído) gana.
+      · El alta se reflejó DESPUÉS de leer INVE: la clave no vino en la lectura
+        pero sí existe. Con `leido_at` (cuándo empezó la lectura) no se borra
+        nada que se haya sincronizado después; la siguiente pasada lo confirma.
     """
     empresa = str(empresa or "").strip()
     recibidas: dict[str, tuple[Optional[str], bool]] = {}
@@ -109,7 +121,9 @@ def reemplazar_catalogo(db: Session, tenant_id, empresa: str, items: Iterable[An
             fila.descripcion = desc
             actualizadas += 1
 
-    sobrantes = [c for c in actuales if c not in recibidas]
+    sobrantes = [c for c, fila in actuales.items() if c not in recibidas
+                 and not (leido_at and fila.sincronizado_at
+                          and fila.sincronizado_at >= leido_at)]
     if sobrantes:
         db.query(ClaveSae).filter(
             ClaveSae.tenant_id == tenant_id,
@@ -117,7 +131,11 @@ def reemplazar_catalogo(db: Session, tenant_id, empresa: str, items: Iterable[An
             ClaveSae.clave.in_(sobrantes),
         ).delete(synchronize_session=False)
     if nuevas:
-        db.bulk_insert_mappings(ClaveSae, nuevas)
+        stmt = pg_insert(ClaveSae.__table__).values(nuevas)
+        db.execute(stmt.on_conflict_do_update(
+            constraint="uq_clave_sae_tenant_empresa",
+            set_={"descripcion": stmt.excluded.descripcion, "activa": stmt.excluded.activa},
+        ))
     # El sello de sincronización, en UN solo UPDATE. Ponerlo fila por fila
     # ensuciaba las ~2,000 de la empresa y el depósito tardaba más que el
     # timeout del conector (30 s): el espejo se quedaba días sin actualizar y
@@ -145,8 +163,9 @@ def sincronizar_catalogo(db: Session, tenant_id, empresa: str) -> ClavesSaeResul
     """
     from . import sae_lectura   # perezoso: la lectura trae la configuración de SAE
 
+    leido_at = datetime.now(timezone.utc)
     filas = sae_lectura.catalogo_inve(empresa)
-    return reemplazar_catalogo(db, tenant_id, empresa, filas, forzar=False)
+    return reemplazar_catalogo(db, tenant_id, empresa, filas, forzar=False, leido_at=leido_at)
 
 
 def reflejar_escritura(db: Session, tenant_id, empresa: str, clave: str,

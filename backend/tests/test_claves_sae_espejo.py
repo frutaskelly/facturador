@@ -112,6 +112,79 @@ def test_sae_caido_no_vacia_el_catalogo_y_las_demas_empresas_siguen(env, monkeyp
     assert len(_catalogo(env, "02")) == 2
 
 
+def test_un_alta_reflejada_a_media_pasada_no_tumba_la_sincronizacion(env, monkeypatch):
+    """1-oct-2026: una tanda de altas desde la UI reflejaba cada clave en las 4
+    empresas mientras el reloj leía INVE. La pasada cargaba el catálogo, el
+    alta metía la clave y el INSERT de la pasada chocaba con
+    uq_clave_sae_tenant_empresa: la 02 (y luego la 04) se quedaban en ERROR."""
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    from app.services import claves_sae
+
+    _sembrar(env, [("02", "AJOKG", "AJO", True)])
+    monkeypatch.setattr(sae_lectura, "catalogo_inve", lambda e: [
+        {"clave": "AJOKG", "descripcion": "AJO", "activa": True},
+        {"clave": "SALREFI1KGPZ", "descripcion": "SAL REFINADA", "activa": True},
+    ])
+
+    def _alta_concurrente():
+        with SessionLocal() as otra:
+            claves_sae.reflejar_escritura(otra, env["tenant_id"], "02", "SALREFI1KGPZ",
+                                          "SAL (ALTA)", True)
+            otra.commit()
+
+    hecho = []
+
+    def _tras_cargar_actuales(estado):
+        # El alta entra JUSTO después de que la pasada lee lo que ya había.
+        if hecho or not estado.is_select:
+            return None
+        hecho.append(1)
+        resultado = estado.invoke_statement()
+        _alta_concurrente()
+        return resultado
+
+    event.listen(Session, "do_orm_execute", _tras_cargar_actuales)
+    try:
+        errores = []
+        r = espejo_sae.sincronizar_claves(env["tenant_id"], ["02"], errores)
+    finally:
+        event.remove(Session, "do_orm_execute", _tras_cargar_actuales)
+
+    assert hecho and errores == [], errores
+    assert r["02"]["recibidas"] == 2
+    # lo recién leído de SAE gana sobre lo reflejado
+    assert _catalogo(env, "02") == {"AJOKG": ("AJO", True),
+                                    "SALREFI1KGPZ": ("SAL REFINADA", True)}
+
+
+def test_un_alta_reflejada_despues_de_leer_inve_no_se_borra(env, monkeypatch):
+    """La otra cara: INVE se leyó ANTES del alta, así que la clave no viene en
+    la lectura pero ya está en el espejo. No es un sobrante: se queda, y la
+    siguiente pasada la confirma."""
+    from app.services import claves_sae
+
+    _sembrar(env, [("02", "AJOKG", "AJO", True), ("02", "PAPAKG", "PAPA", True),
+                   ("02", "VIEJAKG", "VIEJA", True)])
+
+    def _lee(e):
+        with SessionLocal() as otra:
+            claves_sae.reflejar_escritura(otra, env["tenant_id"], e, "PANBLAN615GRPQ",
+                                          "PAN BLANCO", True)
+            otra.commit()
+        return [{"clave": "AJOKG", "descripcion": "AJO", "activa": True},
+                {"clave": "PAPAKG", "descripcion": "PAPA", "activa": True}]
+
+    monkeypatch.setattr(sae_lectura, "catalogo_inve", _lee)
+    errores = []
+    r = espejo_sae.sincronizar_claves(env["tenant_id"], ["02"], errores)
+    assert errores == []
+    assert r["02"]["eliminadas"] == 1
+    assert _catalogo(env, "02") == {"AJOKG": ("AJO", True), "PAPAKG": ("PAPA", True),
+                                    "PANBLAN615GRPQ": ("PAN BLANCO", True)}
+
+
 def test_el_reloj_no_fuerza_el_candado_de_la_mitad(env, monkeypatch):
     """Un catálogo que se parte a la mitad es casi siempre una lectura cortada.
     Forzarlo lo decide una persona, nunca la pasada automática."""
