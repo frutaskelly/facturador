@@ -35,7 +35,7 @@ const KIND_LABEL: Record<Kind, string> = {
   REMISION: "Remisión (no fiscal)",
   NOTA_CREDITO: "Nota de crédito (fiscal)",
   PAGO: "Complemento de pago (fiscal)",
-  COMBO: "Combo: factura + remisión",
+  COMBO: "Factura + remisión (las dos)",
 };
 
 // GET /series/{id}/folio-sugerido: en qué folio dejar la serie al cortar un
@@ -161,6 +161,19 @@ export default function SeriesPage() {
         codigo = SUGGEST[kind];
       }
       return { ...f, kind, codigo };
+    });
+  }
+
+  // Factura ↔ factura + remisión: el código escrito pasa de un formulario al
+  // otro para no perderlo, y la remisión se sugiere como R + código.
+  function toggleRemision(on: boolean) {
+    setForm((f) => {
+      if (!f) return f;
+      if (on) {
+        const code = f.codigo.trim();
+        return { ...f, kind: "COMBO", codigo_factura: code, codigo_remision: code ? `R${code}` : "", remTouched: false, folio_factura: f.folio_actual };
+      }
+      return { ...f, kind: "FACTURA", codigo: f.codigo_factura || SUGGEST.FACTURA, folio_actual: f.folio_factura };
     });
   }
 
@@ -317,11 +330,18 @@ export default function SeriesPage() {
               >
                 <option value="FACTURA">{KIND_LABEL.FACTURA}</option>
                 <option value="REMISION">{KIND_LABEL.REMISION}</option>
+                {!isEdit && <option value="COMBO">{KIND_LABEL.COMBO}</option>}
                 <option value="NOTA_CREDITO">{KIND_LABEL.NOTA_CREDITO}</option>
                 <option value="PAGO">{KIND_LABEL.PAGO}</option>
-                <option value="COMBO">{KIND_LABEL.COMBO}</option>
               </Select>
             </Field>
+
+            {!isEdit && (form.kind === "FACTURA" || isCombo) && (
+              <div className="flex items-center gap-3 rounded-md border border-border bg-surface-2 px-3 py-2">
+                <Switch checked={isCombo} onChange={toggleRemision} />
+                <span className="text-sm">También crear su serie de remisión</span>
+              </div>
+            )}
 
             {isCombo ? (
               <>
