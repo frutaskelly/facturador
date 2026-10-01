@@ -978,6 +978,42 @@ def test_reporte_compras_pivotea_por_fecha_y_presentacion(client, env, auth_as):
     assert r2.status_code == 200 and r2.json()["filas"] == []
 
 
+def test_reportes_mandan_la_clave_de_la_presentacion(client, env, auth_as):
+    """SAE da de alta un artículo por unidad: la línea en PIEZA viaja con la clave
+    de la pieza y la del KILO con la del producto. El bot cruza el inventario de
+    bodega por esa clave — con la del producto, LECHUGA ROMANA en KILO salía como
+    LECHUGAROMANAPZ y la lista compraba lo que ya había (1-oct-2026)."""
+    from app.models import Producto
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    with SessionLocal() as s:
+        s.query(Producto).filter(Producto.id == uuid.UUID(env["prod_a"])).update(
+            {"clave_sae": "LECHUGAKG",
+             "presentaciones": {"KILO": 1, "PIEZA": {"factor": 1, "clave_sae": "lechugapz"}}})
+        s.commit()
+    for pres, qty in (("KILO", "6"), ("PIEZA", "4")):
+        r = client.post("/api/v1/remisiones", headers=h, json={
+            "cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+            "fecha_entrega": "2031-04-07", "su_pedido": f"77{qty}",
+            "lineas": [{"producto_id": env["prod_a"], "presentacion": pres,
+                        "cantidad_solicitada": qty, "precio_unitario": "5"}]})
+        assert r.status_code == 201, r.text
+
+    filas = client.get("/api/v1/remisiones/reporte-compras?fechas=2031-04-07",
+                       headers=h).json()["filas"]
+    por_uni = {f["unidad"]: f for f in filas}
+    assert por_uni["KILO"]["clave"] == "LECHUGAKG", filas
+    assert por_uni["PIEZA"]["clave"] == "LECHUGAPZ", filas
+    assert por_uni["PIEZA"]["clave_producto"] == "LECHUGAKG"
+    assert por_uni["PIEZA"]["producto_id"] == env["prod_a"]
+
+    rems = client.get("/api/v1/remisiones/reporte-armado?fechas=2031-04-07",
+                      headers=h).json()["remisiones"]
+    lineas = {ln["unidad"]: ln for x in rems for ln in x["lineas"]}
+    assert lineas["PIEZA"]["clave"] == "LECHUGAPZ" and lineas["KILO"]["clave"] == "LECHUGAKG"
+    assert lineas["PIEZA"]["producto_id"] == env["prod_a"]
+
+
 def test_reporte_compras_usa_el_documento_nuevo_si_hay_incidencia(client, env, auth_as):
     """Cuando la OC recibió una versión posterior sin aplicar, la lista de
     compras usa las líneas del DOCUMENTO nuevo y excluye las capturadas: comprar

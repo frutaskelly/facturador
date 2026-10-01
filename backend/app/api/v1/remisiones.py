@@ -92,7 +92,9 @@ from ...schemas.remision import (
     RemisionOut,
     RemisionUpdate,
 )
-from ...services.inventario import build_movimiento, lotes_for_update, presentacion_factor, resolve_lote
+from ...services.inventario import (
+    build_movimiento, claves_sae_por_presentacion, lotes_for_update, presentacion_factor, resolve_lote,
+)
 from ...services.remision_pdf import build_remision_pdf, build_remisiones_pdf
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
@@ -643,6 +645,14 @@ def _decorar_detalle(db: Session, ctx: AuthContext, rem: Remision) -> Remision:
     return rem
 
 
+def _clave_de_presentacion(clave_producto, presentaciones, presentacion) -> Optional[str]:
+    """La clave de SAE con la que sale ESA presentación: la suya si la tiene, si no
+    la del producto. Es la llave de los reportes que el bot cruza con el inventario
+    y la historia de SAE, que conocen un artículo por unidad (SANDIAKG/SANDIAPZ)."""
+    propia = claves_sae_por_presentacion(presentaciones).get(str(presentacion or "").strip().upper())
+    return propia or clave_producto
+
+
 # OJO con el orden: esta ruta va ANTES de GET /{rem_id} — FastAPI casa en
 # orden de declaración y "reporte-compras" parsearía como UUID (422).
 @router.get("/reporte-compras")
@@ -677,7 +687,9 @@ def reporte_compras(
 
     q = (
         db.query(
+            Producto.id.label("producto_id"),
             Producto.clave_sae,
+            Producto.presentaciones,
             Producto.nombre,
             LineaRemision.presentacion,
             Remision.fecha_entrega,
@@ -728,12 +740,18 @@ def reporte_compras(
         q = q.join(OCRecibida, OCRecibida.remision_id == Remision.id).filter(
             OCRecibida.origen_externo.like(f"EHMO:{perfil}:%")
         )
-    q = q.group_by(Producto.clave_sae, Producto.nombre,
+    q = q.group_by(Producto.id, Producto.clave_sae, Producto.presentaciones, Producto.nombre,
                    LineaRemision.presentacion, Remision.fecha_entrega)
 
     filas = [
         {
-            "clave": r.clave_sae,
+            # LA CLAVE DE LA PRESENTACIÓN (1-oct-2026): SAE da de alta un artículo
+            # por unidad y el inventario de bodega se cruza a ESA clave. Con la del
+            # producto, LECHUGA ROMANA en KILO viajaba como LECHUGAROMANAPZ, no casaba
+            # con los 30 kg de bodega y la lista mandaba comprar lo que ya había.
+            "clave": _clave_de_presentacion(r.clave_sae, r.presentaciones, r.presentacion),
+            "clave_producto": r.clave_sae,
+            "producto_id": str(r.producto_id),
             "descripcion": r.nombre,
             "unidad": r.presentacion,
             "fecha": r.fecha_entrega.isoformat(),
@@ -907,6 +925,7 @@ def reporte_armado(
             LineaRemision.producto_id,
             LineaRemision.numero_linea,
             Producto.clave_sae,
+            Producto.presentaciones,
             Producto.nombre,
             CategoriaProducto.nombre.label("categoria"),
             LineaRemision.presentacion,
@@ -999,7 +1018,11 @@ def reporte_armado(
             del_doc = _renglon_del_documento(docs_de[r.id], claves, r.cantidad_solicitada)
             texto = " ".join(((del_doc or {}).get("descripcion") or "").split())
         rem["lineas"].append({
-            "clave": r.clave_sae,
+            # la de la presentación, como en reporte-compras: el pronóstico suma lo
+            # real y lo estimado por esta llave
+            "clave": _clave_de_presentacion(r.clave_sae, r.presentaciones, r.presentacion),
+            "clave_producto": r.clave_sae,
+            "producto_id": str(r.producto_id),
             "descripcion": r.nombre,
             "descripcion_pedido": (texto
                                    or ((pc.nombre_cliente or "").strip() if pc else "")
