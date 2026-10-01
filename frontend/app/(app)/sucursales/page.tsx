@@ -20,6 +20,7 @@ import type {
   Almacen,
   Cliente,
   ClienteSucursal,
+  ListaPrecios,
   PrecioOverride,
   Producto,
   Serie,
@@ -44,6 +45,8 @@ type FormVinculo = {
   serie_factura_id: string;
   serie_remision_id: string;
   es_default: boolean;
+  /** La lista del cliente EN esta plaza ("" = sin lista propia aquí). */
+  lista_id: string;
 };
 
 export default function SucursalesPage() {
@@ -68,6 +71,7 @@ export default function SucursalesPage() {
   const almacenesRes = useResource<Page<Almacen>>("/api/v1/almacenes?limit=200");
   const seriesFacRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
   const seriesRemRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=REMISION&activa=true&limit=200");
+  const listasRes = useResource<Page<ListaPrecios>>("/api/v1/listas-precios?limit=200");
   const overridesRes = useResource<Page<PrecioOverride>>(
     // El endpoint topa `limit` en 200. Con ?cliente= la vista es de ESE cliente,
     // así que sus precios especiales también.
@@ -180,6 +184,7 @@ export default function SucursalesPage() {
     serie_factura_id: "",
     serie_remision_id: "",
     es_default: false,
+    lista_id: "",
   };
   const [vincModal, setVincModal] = useState<{ sucursalId: string; existente: boolean } | null>(null);
   const [vinc, setVinc] = useState<FormVinculo>(emptyVinc);
@@ -201,6 +206,7 @@ export default function SucursalesPage() {
       serie_factura_id: v.serie_factura_id ?? "",
       serie_remision_id: v.serie_remision_id ?? "",
       es_default: v.es_default ?? false,
+      lista_id: v.lista_id ?? "",
     });
     setVincModal({ sucursalId, existente: true });
   }
@@ -220,6 +226,8 @@ export default function SucursalesPage() {
         series_factura_ids: vinc.series_factura_ids,
         series_remision_ids: vinc.series_remision_ids,
         es_default: vinc.es_default,
+        // Si no cambió, el backend no toca nada (ni pide el permiso de listas).
+        lista_id: vinc.lista_id || null,
       });
       toast.success(vincModal.existente ? "Vínculo actualizado" : "Cliente vinculado");
       reloadDetalle(vincModal.sucursalId);
@@ -346,6 +354,12 @@ export default function SucursalesPage() {
           : <span className="text-muted">(la del cliente / default)</span>),
       },
       {
+        header: "Lista de precios",
+        cell: (v) => (v.lista_nombre
+          ? <span>{v.lista_nombre}</span>
+          : <span className="text-muted">(la del cliente / proyecto)</span>),
+      },
+      {
         header: "Abanico",
         cell: (v) => {
           const n = (v.series_factura_ids?.length ?? 0) + (v.series_remision_ids?.length ?? 0);
@@ -357,7 +371,7 @@ export default function SucursalesPage() {
             header: "", className: "text-right w-1 whitespace-nowrap",
             cell: (v: ClienteSucursal) => (
               <>
-                <button onClick={() => openEditarVinculo(plaza.id, v)} className="rounded-md p-1.5 text-muted hover:bg-surface-2" aria-label="Editar series del vínculo"><Pencil size={16} /></button>
+                <button onClick={() => openEditarVinculo(plaza.id, v)} className="rounded-md p-1.5 text-muted hover:bg-surface-2" aria-label="Editar series y lista del vínculo"><Pencil size={16} /></button>
                 <button onClick={() => setVincABorrar({ sucursalId: plaza.id, vinculo: v })} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Desvincular cliente"><Trash2 size={16} /></button>
               </>
             ),
@@ -381,7 +395,7 @@ export default function SucursalesPage() {
         />
         <p className="text-xs text-muted">
           La serie es del vínculo cliente×sucursal (cada cliente folia distinto en la misma plaza).
-          La lista de precios se asigna en <b>Listas de precios › Asignación de precios</b>.
+          La lista de precios del cliente en esta plaza se escoge con el lápiz; la de un proyecto, en su ficha.
         </p>
       </div>
     );
@@ -575,6 +589,14 @@ export default function SucursalesPage() {
               </div>
             </Field>
           </div>
+          <Field label="Lista de precios en esta plaza">
+            <Select value={vinc.lista_id} onChange={(e) => setVinc({ ...vinc, lista_id: e.target.value })}>
+              <option value="">— La del cliente (cualquier plaza) —</option>
+              {(listasRes.data?.items ?? []).map((l) => (
+                <option key={l.id} value={l.id}>{l.nombre}</option>
+              ))}
+            </Select>
+          </Field>
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"

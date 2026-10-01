@@ -1,7 +1,7 @@
 "use client";
 
 
-import { BookOpen, Link2, Receipt, Store, Tag } from "lucide-react";
+import { BookOpen, Link2, Receipt, Store } from "lucide-react";
 
 import { CrudPage, type CrudConfig } from "@/components/crud/CrudPage";
 import { Badge } from "@/components/ui/Badge";
@@ -188,16 +188,26 @@ const config: CrudConfig<Cliente> = {
       type: "select",
       hint: "De dónde sale su mercancía. La sucursal puede sobreescribirlo; en blanco usa el predeterminado",
     },
+    {
+      name: "lista_id",
+      label: "Lista de precios",
+      type: "select",
+      hint: "Con la que se le cobra en cualquier plaza. La del cliente en una plaza (Sucursales y precios) y la de un proyecto le ganan.",
+    },
   ],
   // Accesos rápidos por fila, como iconos junto a editar/eliminar.
   rowLinks: (c) => [
     { href: `/sucursales?cliente=${c.id}`, title: "Sucursales", icon: <Store size={16} /> },
-    { href: `/asignaciones-precios?cliente=${c.id}`, title: "Precios asignados", icon: <Tag size={16} /> },
     { href: `/clientes/${c.id}/catalogo`, title: "Catálogo", icon: <BookOpen size={16} /> },
     { href: `/clientes/${c.id}/estado-cuenta`, title: "Estado de cuenta", icon: <Receipt size={16} /> },
     { href: `/clientes/${c.id}/equivalencias`, title: "Equivalencias", icon: <Link2 size={16} /> },
   ],
   lookups: {
+    lista_id: {
+      path: "/api/v1/listas-precios?limit=200",
+      value: (r) => String(r.id),
+      label: (r) => String(r.nombre),
+    },
     serie_factura_id: {
       path: "/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200",
       value: (r) => String(r.id),
@@ -238,6 +248,7 @@ const config: CrudConfig<Cliente> = {
     espejo_sae: false,
     serie_factura_id: "",
     serie_remision_id: "",
+    lista_id: "",
   }),
   toForm: (c) => {
     const dom = (c.domicilio_fiscal ?? {}) as Record<string, unknown>;
@@ -266,6 +277,7 @@ const config: CrudConfig<Cliente> = {
       espejo_sae: c.espejo_sae,
       serie_factura_id: c.serie_factura_id ?? "",
       serie_remision_id: c.serie_remision_id ?? "",
+      lista_id: c.lista_id ?? "",
     };
   },
   toPayload: (v) => {
@@ -297,6 +309,8 @@ const config: CrudConfig<Cliente> = {
       espejo_sae: v.espejo_sae,
       serie_factura_id: (v.serie_factura_id as string) || null,
       serie_remision_id: (v.serie_remision_id as string) || null,
+      // Si no cambió, el backend no toca nada (ni pide el permiso de listas).
+      lista_id: (v.lista_id as string) || null,
     };
   },
   rowLabel: (c) => c.legal_name,

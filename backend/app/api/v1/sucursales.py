@@ -33,6 +33,7 @@ from ...schemas.sucursal import (
     SucursalOut,
     SucursalUpdate,
 )
+from ...services.lista_asignada import fijar_lista, listas_de_vinculos
 from ._helpers import ensure_fk, get_or_404, paginate
 
 router = APIRouter(prefix="/sucursales", tags=["sucursales"])
@@ -150,9 +151,13 @@ def _vinculo_out(db, vincs) -> list[ClienteSucursalOut]:
         .all()
     )
     abanicos = _abanicos(db, [v.id for v in vincs])
+    listas = listas_de_vinculos(
+        db, vincs[0].tenant_id if vincs else None, {(v.cliente_id, v.sucursal_id) for v in vincs},
+    )
     out = []
     for v in vincs:
         fact, rem = abanicos.get(v.id, ([], []))
+        lista_id, lista_nombre = listas.get((v.cliente_id, v.sucursal_id), (None, None))
         out.append(
             ClienteSucursalOut(
                 id=v.id,
@@ -164,6 +169,8 @@ def _vinculo_out(db, vincs) -> list[ClienteSucursalOut]:
                 series_factura_ids=fact,
                 series_remision_ids=rem,
                 es_default=bool(v.es_default),
+                lista_id=lista_id,
+                lista_nombre=lista_nombre,
             )
         )
     return out
@@ -364,6 +371,10 @@ def upsert_vinculo(
         db.add(vinc)
         db.flush()
     data = payload.model_dump(exclude_unset=True)
+    # La lista con la que se le cobra al cliente EN esta plaza: su renglón de
+    # asignación (antes se ponía en «Asignación de precios», ya retirada).
+    if "lista_id" in data:
+        fijar_lista(db, ctx, data.pop("lista_id"), cliente_id=cliente_id, sucursal_id=sucursal_id)
     series_f = data.pop("series_factura_ids", None)
     series_r = data.pop("series_remision_ids", None)
     # El default es a lo más UNO por cliente (índice parcial): marcar este

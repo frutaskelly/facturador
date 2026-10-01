@@ -81,6 +81,8 @@ class ClienteSucursalUpsert(BaseModel):
     # True = esta plaza se preselecciona al capturar para el cliente (y se
     # desmarca la que fuera default antes). None = no tocar.
     es_default: Optional[bool] = None
+    # Lista de precios del cliente EN esta plaza. Omitido = no tocar; null = quitarla.
+    lista_id: Optional[uuid.UUID] = None
 
 
 class ClienteSucursalOut(BaseModel):
@@ -93,6 +95,8 @@ class ClienteSucursalOut(BaseModel):
     series_factura_ids: list[uuid.UUID] = Field(default_factory=list)
     series_remision_ids: list[uuid.UUID] = Field(default_factory=list)
     es_default: bool = False
+    lista_id: Optional[uuid.UUID] = None
+    lista_nombre: Optional[str] = None
 
 
 # ── Override de precio ──

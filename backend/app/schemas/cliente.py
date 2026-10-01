@@ -37,7 +37,9 @@ class ClienteBase(BaseModel):
 
 
 class ClienteCreate(ClienteBase):
-    pass
+    # La lista con la que se le cobra en cualquier plaza (su renglón de
+    # asignación; el vínculo con una plaza y el proyecto le ganan).
+    lista_id: Optional[uuid.UUID] = None
 
 
 class ClienteUpdate(BaseModel):
@@ -64,6 +66,8 @@ class ClienteUpdate(BaseModel):
     # SAE (aquí solo se refleja) y crear facturas nativas para él devuelve 409.
     # Se apaga cliente por cliente en el corte (Etapa 4 del plan).
     espejo_sae: Optional[bool] = None
+    # Omitido = no tocar; null = quitarla.
+    lista_id: Optional[uuid.UUID] = None
 
 
 class ClienteOut(ORMModel, ClienteBase):
@@ -74,5 +78,8 @@ class ClienteOut(ORMModel, ClienteBase):
     ventas_ytd: Decimal
     ultima_venta_at: Optional[datetime] = None
     ultimo_pago_at: Optional[datetime] = None
+    # La lista «en cualquier plaza» (la llenan los endpoints de clientes).
+    lista_id: Optional[uuid.UUID] = None
+    lista_nombre: Optional[str] = None
     created_at: datetime
     updated_at: datetime

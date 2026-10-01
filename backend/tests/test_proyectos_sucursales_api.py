@@ -305,3 +305,62 @@ def test_se_reporta_en_un_solo_nivel(client, env, auth_as):
     r = client.patch(f"/api/v1/proyectos/{ceresos['id']}", headers=h,
                      json={"reporta_en_id": otro["id"]})
     assert r.status_code == 422
+
+
+# ─── La lista se escoge donde vive la negociación (fase 3, 1-oct-2026) ──────
+
+def _renglones_de(cliente_id):
+    db = SessionLocal()
+    try:
+        return db.execute(text(
+            "SELECT sucursal_id, proyecto_id, lista_id FROM lista_asignaciones "
+            "WHERE cliente_id = :c ORDER BY sucursal_id NULLS FIRST"), {"c": cliente_id}).all()
+    finally:
+        db.close()
+
+
+def test_lista_del_cliente_en_una_plaza(client, env, auth_as):
+    """Sucursales y precios: la lista del cliente EN esa plaza vive en su
+    vínculo, sin pasar por «Asignación de precios»."""
+    auth_as(env["admin"])
+    h = _hdr(env["admin"])
+    url = f"/api/v1/sucursales/{env['s1a']}/clientes/{env['cli1']}"
+    r = client.put(url, headers=h, json={"lista_id": env["lista_a"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["lista_nombre"] == "Lista A"
+
+    # Editar sólo las series no toca la lista.
+    r = client.put(url, headers=h, json={"es_default": True})
+    assert r.json()["lista_nombre"] == "Lista A"
+    r = client.put(url, headers=h, json={"lista_id": env["lista_b"]})
+    assert r.json()["lista_nombre"] == "Lista B"
+    assert len(_renglones_de(env["cli1"])) == 1          # se cambió, no se duplicó
+
+    vincs = client.get(f"/api/v1/sucursales/{env['s1a']}/clientes", headers=h).json()
+    assert next(v for v in vincs if v["cliente_id"] == env["cli1"])["lista_nombre"] == "Lista B"
+
+    r = client.put(url, headers=h, json={"lista_id": None})
+    assert r.json()["lista_id"] is None
+    assert _renglones_de(env["cli1"]) == []
+
+
+def test_lista_del_cliente_en_cualquier_plaza(client, env, auth_as):
+    """La ficha del cliente: su lista en cualquier plaza. No se confunde con
+    la de un vínculo (otro renglón)."""
+    auth_as(env["admin"])
+    h = _hdr(env["admin"])
+    client.put(f"/api/v1/sucursales/{env['s1a']}/clientes/{env['cli1']}", headers=h,
+               json={"lista_id": env["lista_b"]})
+    r = client.patch(f"/api/v1/clientes/{env['cli1']}", headers=h, json={"lista_id": env["lista_a"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["lista_nombre"] == "Lista A"
+    assert len(_renglones_de(env["cli1"])) == 2
+
+    fila = next(c for c in client.get("/api/v1/clientes", headers=h).json()["items"]
+                if c["id"] == env["cli1"])
+    assert fila["lista_nombre"] == "Lista A"
+
+    # Mandar la misma lista (la ficha la manda siempre) no cambia nada.
+    r = client.patch(f"/api/v1/clientes/{env['cli1']}", headers=h,
+                     json={"lista_id": env["lista_a"], "dias_credito": 15})
+    assert r.status_code == 200 and r.json()["lista_nombre"] == "Lista A"

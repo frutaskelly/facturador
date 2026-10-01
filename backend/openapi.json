@@ -2610,6 +2610,18 @@
       "default": "0",
       "title": "Limite Credito"
      },
+     "lista_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Id"
+     },
      "metodo_pago_default": {
       "anyOf": [
        {
@@ -3170,6 +3182,29 @@
       "title": "Limite Credito",
       "type": "string"
      },
+     "lista_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Id"
+     },
+     "lista_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Nombre"
+     },
      "metodo_pago_default": {
       "anyOf": [
        {
@@ -3374,6 +3409,29 @@
       "title": "Id",
       "type": "string"
      },
+     "lista_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Id"
+     },
+     "lista_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Nombre"
+     },
      "serie_factura_id": {
       "anyOf": [
        {
@@ -3440,6 +3498,18 @@
        }
       ],
       "title": "Es Default"
+     },
+     "lista_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Id"
      },
      "serie_factura_id": {
       "anyOf": [
@@ -3649,6 +3719,18 @@
        }
       ],
       "title": "Limite Credito"
+     },
+     "lista_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lista Id"
      },
      "metodo_pago_default": {
       "anyOf": [

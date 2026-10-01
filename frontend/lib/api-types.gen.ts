@@ -6654,6 +6654,8 @@ export interface components {
              * @default 0
              */
             limite_credito: number | string;
+            /** Lista Id */
+            lista_id?: string | null;
             /** Metodo Pago Default */
             metodo_pago_default?: string | null;
             /** Regimen Fiscal */
@@ -6841,6 +6843,10 @@ export interface components {
              * @default 0
              */
             limite_credito: string;
+            /** Lista Id */
+            lista_id?: string | null;
+            /** Lista Nombre */
+            lista_nombre?: string | null;
             /** Metodo Pago Default */
             metodo_pago_default?: string | null;
             /** Regimen Fiscal */
@@ -6916,6 +6922,10 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Lista Id */
+            lista_id?: string | null;
+            /** Lista Nombre */
+            lista_nombre?: string | null;
             /** Serie Factura Id */
             serie_factura_id?: string | null;
             /** Serie Remision Id */
@@ -6934,6 +6944,8 @@ export interface components {
         ClienteSucursalUpsert: {
             /** Es Default */
             es_default?: boolean | null;
+            /** Lista Id */
+            lista_id?: string | null;
             /** Serie Factura Id */
             serie_factura_id?: string | null;
             /** Serie Remision Id */
@@ -6969,6 +6981,8 @@ export interface components {
             legal_name?: string | null;
             /** Limite Credito */
             limite_credito?: number | string | null;
+            /** Lista Id */
+            lista_id?: string | null;
             /** Metodo Pago Default */
             metodo_pago_default?: string | null;
             /** Regimen Fiscal */

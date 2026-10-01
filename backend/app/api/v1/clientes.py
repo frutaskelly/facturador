@@ -41,6 +41,7 @@ from ...services.sucursales import es_sucursal_de
 from ...services.producto_match import aprender_alias
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.rfc import validar_rfc_local
+from ...services.lista_asignada import fijar_lista, listas_de_clientes
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 log = logging.getLogger(__name__)
@@ -50,6 +51,13 @@ router = APIRouter(prefix="/clientes", tags=["clientes"])
 _READ = "menu:clientes"
 _WRITE = "cliente:gestionar"
 _DUP = "Ya existe un cliente con ese código"
+
+
+def _con_lista(db: Session, tenant_id, clientes) -> None:
+    """Cuelga a cada cliente su lista «en cualquier plaza» (una consulta)."""
+    listas = listas_de_clientes(db, tenant_id, {c.id for c in clientes})
+    for c in clientes:
+        c.lista_id, c.lista_nombre = listas.get(c.id, (None, None))
 
 
 @router.get("", response_model=Page[ClienteOut])
@@ -78,7 +86,8 @@ def list_clientes(
     if status_:
         query = query.filter(Cliente.status == status_)
     query = query.order_by(Cliente.legal_name.asc())
-    return paginate(query, ClienteOut, limit, offset)
+    return paginate(query, ClienteOut, limit, offset,
+                    preparar=lambda rows: _con_lista(db, ctx.tenant_id, rows))
 
 
 @router.get("/validar-rfc")
@@ -219,11 +228,16 @@ def create_cliente(
     )
     # El código se genera SIEMPRE en el servidor; se ignora cualquier valor enviado.
     data.pop("codigo", None)
+    lista_id = data.pop("lista_id", None)
     codigo = generate_cliente_codigo(db, ctx.tenant_id)
     obj = Cliente(**data, codigo=codigo, tenant_id=ctx.tenant_id)
     db.add(obj)
     flush_or_conflict(db, detail=_DUP)
+    if lista_id is not None:
+        fijar_lista(db, ctx, lista_id, cliente_id=obj.id)
+        db.flush()
     db.refresh(obj)
+    _con_lista(db, ctx.tenant_id, [obj])
     # El candado por cliente ata también a quien CREA: sin esto, el cliente
     # nuevo no entraba al alcance de su creador y desaparecía de su lista al
     # guardar — se ve idéntico a "no funcionó" y produce recapturas (los 4
@@ -393,7 +407,9 @@ def get_cliente(
 ):
     if not ctx.cliente_permitido(cliente_id):
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
-    return get_or_404(db, Cliente, cliente_id)
+    obj = get_or_404(db, Cliente, cliente_id)
+    _con_lista(db, ctx.tenant_id, [obj])
+    return obj
 
 
 @router.patch("/{cliente_id}", response_model=ClienteOut)
@@ -418,10 +434,13 @@ def update_cliente(
         )
     # El código no se regenera ni se acepta en update: queda fijo desde la creación.
     data.pop("codigo", None)
+    if "lista_id" in data:
+        fijar_lista(db, ctx, data.pop("lista_id"), cliente_id=obj.id)
     for key, value in data.items():
         setattr(obj, key, value)
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)
+    _con_lista(db, ctx.tenant_id, [obj])
     return obj
 
 
