@@ -1218,14 +1218,14 @@ export function DataTable<T>({
     (actionsMenu ? 34 : 0) + Math.max(inlineCount, 1) * 32 + (anyOverflow ? 32 : 0) + 16;
   // Clases de la columna pegada al borde derecho. El fondo tiene que ser opaco
   // (si no, las columnas de abajo se transparentan al hacer scroll) y seguir el
-  // hover de la fila, por eso el `<tr>` lleva `group`.
+  // hover de la fila, por eso el `<tr>` lleva `group`. La sombra sólo sale
+  // cuando hay columnas escondidas debajo (MarcoScrollH marca el contenedor
+  // con `data-mas-a-la-derecha`): sin desborde, o ya al final, no hay nada
+  // que tapar y la columna se ve como una más.
   const stickyOn = stickyActions && hasActions;
-  const stickyHeadCls = stickyOn
-    ? "sticky right-0 z-20 bg-surface-2 shadow-[-8px_0_8px_-6px_rgb(0_0_0/0.12)]"
-    : "";
-  const stickyCellCls = stickyOn
-    ? "sticky right-0 z-10 shadow-[-8px_0_8px_-6px_rgb(0_0_0/0.12)]"
-    : "";
+  const sombraFija = "group-data-[mas-a-la-derecha]/tabla:shadow-[-8px_0_8px_-6px_rgb(0_0_0/0.12)]";
+  const stickyHeadCls = stickyOn ? `sticky right-0 z-20 bg-surface-2 ${sombraFija}` : "";
+  const stickyCellCls = stickyOn ? `sticky right-0 z-10 ${sombraFija}` : "";
   // Ancho total de la tabla en modo Excel = suma de las columnas (las que aún no
   // tienen ancho explícito cuentan con el mínimo) + las columnas fijas (chevron y
   // acciones). La tabla se ensancha y el contenedor hace scroll; agrandar una
@@ -1261,7 +1261,7 @@ export function DataTable<T>({
     const tabla = (
       <div
         ref={scrollerRef}
-        className={`overflow-x-auto rounded-xl border border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${loading ? "pointer-events-none opacity-60" : ""}`}
+        className={`group/tabla overflow-x-auto rounded-xl border border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${loading ? "pointer-events-none opacity-60" : ""}`}
         aria-busy={loading || undefined}
       >
         {/* Con anchos definidos (modo Excel): table-fixed + ancho explícito = la
@@ -1846,6 +1846,7 @@ function MarcoScrollH({
       const izq = desborda && cont.scrollLeft > 1;
       const der = desborda && cont.scrollLeft < max - 1;
       setOrillas((o) => (o.desborda === desborda && o.izq === izq && o.der === der ? o : { desborda, izq, der }));
+      cont.toggleAttribute("data-mas-a-la-derecha", der);
       const pulgar = pulgarRef.current;
       if (!desborda || !pulgar || riel.clientWidth === 0) return;
       const ancho = Math.max(32, (riel.clientWidth * cont.clientWidth) / cont.scrollWidth);
@@ -1922,7 +1923,7 @@ function MarcoScrollH({
   };
 
   const sombra = "pointer-events-none absolute inset-y-px z-10 w-6 from-black/10 to-transparent transition-opacity";
-  const flecha = "rounded p-0.5 text-muted transition hover:bg-surface-2 hover:text-foreground";
+  const flecha = "flex h-full items-center rounded-full px-0.5 text-muted transition hover:bg-surface-2 hover:text-foreground";
   return (
     <div>
       <div className="relative">
@@ -1931,14 +1932,16 @@ function MarcoScrollH({
           aria-hidden
           className={`${sombra} left-px rounded-l-xl bg-linear-to-r ${orillas.izq ? "opacity-100" : "opacity-0"}`}
         />
-        <div
-          aria-hidden
-          style={{ right: insetDerecho + 1 }}
-          className={`${sombra} bg-linear-to-l ${insetDerecho ? "" : "rounded-r-xl"} ${orillas.der ? "opacity-100" : "opacity-0"}`}
-        />
+        {/* Con columna de acciones fija, su propia sombra hace de aviso. */}
+        {!insetDerecho && (
+          <div
+            aria-hidden
+            className={`${sombra} right-px rounded-r-xl bg-linear-to-l ${orillas.der ? "opacity-100" : "opacity-0"}`}
+          />
+        )}
       </div>
       <div
-        className={`sticky bottom-0 z-[15] mt-1 items-center gap-1 rounded-lg border border-border bg-background/95 p-0.5 shadow-sm backdrop-blur ${orillas.desborda ? "flex" : "hidden"}`}
+        className={`sticky bottom-0 z-[15] mt-1 h-3.5 items-center gap-0.5 rounded-full border border-border bg-background/95 shadow-sm backdrop-blur ${orillas.desborda ? "flex" : "hidden"}`}
       >
         <button
           type="button"
@@ -1947,20 +1950,22 @@ function MarcoScrollH({
           title="Columnas a la izquierda"
           className={`${flecha} ${orillas.izq ? "" : "invisible"}`}
         >
-          <ChevronLeft size={16} />
+          <ChevronLeft size={12} />
         </button>
         <div
           ref={rielRef}
           title="Arrastra, o gira la rueda del mouse aquí para moverte a los lados"
-          className="relative h-3 flex-1 cursor-pointer rounded-full bg-surface-2"
+          className="relative flex h-full flex-1 cursor-pointer items-center"
           onPointerDown={(e) => {
             const p = pulgarRef.current?.getBoundingClientRect();
             if (p) saltar(e.clientX < p.left ? -1 : 1);
           }}
         >
+          {/* La vía se ve de 6 px, pero el área de clic es todo el alto del riel. */}
+          <div className="h-1.5 w-full rounded-full bg-surface-2" />
           <div
             ref={pulgarRef}
-            className="absolute inset-y-0 left-0 cursor-grab touch-none rounded-full bg-accent/40 transition-colors hover:bg-accent/70 active:cursor-grabbing active:bg-accent/80"
+            className="group/pulgar absolute inset-y-0 left-0 flex cursor-grab touch-none items-center active:cursor-grabbing"
             onPointerDown={(e) => {
               const cont = contRef.current;
               if (!cont) return;
@@ -1984,7 +1989,9 @@ function MarcoScrollH({
             onPointerCancel={() => {
               arrastre.current = null;
             }}
-          />
+          >
+            <div className="h-1.5 w-full rounded-full bg-accent/40 transition-colors group-hover/pulgar:bg-accent/70 group-active/pulgar:bg-accent/80" />
+          </div>
         </div>
         <button
           type="button"
@@ -1993,7 +2000,7 @@ function MarcoScrollH({
           title="Columnas a la derecha"
           className={`${flecha} ${orillas.der ? "" : "invisible"}`}
         >
-          <ChevronRight size={16} />
+          <ChevronRight size={12} />
         </button>
       </div>
     </div>
