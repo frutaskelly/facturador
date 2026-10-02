@@ -42,7 +42,6 @@ from ...models import (
     LoteInventario,
     Merma,
     Producto,
-    ProductoCliente,
     Proyecto,
     ReciboPago,
     ReciboPagoFactura,
@@ -74,6 +73,12 @@ from ...schemas.factura import (
 from ...services import email as email_service
 from ...services.cfdi import _RFC_PUBLICO, build_payload, emisor_rfc_esperado
 from ...services.espejo_cruce import extraer_oc as _extraer_oc, norm_oc as _norm_oc
+from ...services.espejo_productos import (
+    FuentesBD as _FuentesEspejo,
+    campos_de_linea as _campos_espejo,
+    norm_clave_sae as _norm_clave_sae,
+    resolver_claves as _resolver_claves_espejo,
+)
 from ...services.factura_pdf import build_factura_pdf, build_facturas_pdf
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea_producto, totales
@@ -885,13 +890,6 @@ def _rechazar_venta_en_espejo(cliente: Cliente | None, serie_obj: Serie | None):
     )
 
 
-def _norm_clave_sae(v: str) -> str:
-    """Misma tolerancia que el cruce por clave de la bandeja (PR #32)."""
-    import unicodedata
-    s = unicodedata.normalize("NFKD", v or "").encode("ascii", "ignore").decode("ascii")
-    return "".join(ch for ch in s.upper() if ch.isalnum() or ch == "-")
-
-
 @router.get("/espejo/resumen")
 def espejo_resumen(
     empresa: str = Query(..., max_length=4),
@@ -1297,6 +1295,12 @@ def factura_espejo(
     ligadas a la factura y en FACTURADA; si SAE la cancela, se liberan para
     re-exportarse.
 
+    Cada partida se liga a su producto por la CLAVE SAE (la del producto o la
+    de una presentación) y lleva la unidad SAT de esa presentación; el código
+    del cliente queda de respaldo. Un reenvío no le cambia el producto a una
+    partida ya ligada, salvo que lo diga la remisión ligada. La regla vive en
+    services/espejo_productos.
+
     Un timbrado FALLIDO en SAE (documento emitido, CFDI02.UUID vacío) llega
     como BORRADOR: se refleja para que el folio no desaparezca, pero sin
     efectos — ni estado de cuenta ni remisiones. TIMBRADA exige uuid_fiscal.
@@ -1406,24 +1410,6 @@ def factura_espejo(
                    "y SAE la reporta sin timbrar — revísalo a mano",
         )
 
-    # Cruce de líneas: la CVE_ART de SAE contra los códigos de ESTE cliente.
-    # Ambigua (dos productos con el mismo código) no decide — igual que la bandeja.
-    codigos: dict[str, object] = {}
-    for pc in db.query(ProductoCliente).filter(
-        ProductoCliente.tenant_id == ctx.tenant_id,
-        ProductoCliente.cliente_id == cliente.id,
-        ProductoCliente.codigo_cliente.isnot(None),
-    ):
-        cod = _norm_clave_sae(pc.codigo_cliente)
-        if cod in codigos and codigos[cod] != pc.producto_id:
-            codigos[cod] = None
-        else:
-            codigos.setdefault(cod, pc.producto_id)
-    prod_ids = {v for v in codigos.values() if v}
-    productos = {
-        p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids or [None]))
-    } if prod_ids else {}
-
     subtotal = payload.subtotal
     if subtotal is None:
         subtotal = sum(
@@ -1498,36 +1484,6 @@ def factura_espejo(
         # backfill tardío no debe pisar los abonos ya sincronizados.
         factura.saldo_insoluto = total if metodo == "PPD" else Decimal("0")
 
-    if payload.lineas:
-        nuevas = []
-        for i, ln in enumerate(payload.lineas, start=1):
-            pid = codigos.get(_norm_clave_sae(ln.clave or "")) if ln.clave else None
-            prod = productos.get(pid) if pid else None
-            nuevas.append(LineaFactura(
-                tenant_id=ctx.tenant_id, numero_linea=i,
-                producto_id=pid if prod else None,
-                clave_prod_serv=(prod.clave_sat if prod else "01010101"),
-                clave_unidad=(prod.unidad_sat if prod else "H87"),
-                # la clave de SAE se guarda SIEMPRE, cruce o no: es la única
-                # forma de saber de qué artículo habla una partida que no cruzó
-                clave_sae=(ln.clave or "").strip()[:30] or None,
-                descripcion=(ln.descripcion or (prod.nombre if prod else "PARTIDA SAE"))[:1000],
-                cantidad=ln.cantidad,
-                valor_unitario=ln.precio_unitario,
-                importe=(ln.importe if ln.importe is not None else ln.cantidad * ln.precio_unitario),
-            ))
-        # Borrar ANTES de insertar: el UNIQUE (factura, numero_linea) choca si
-        # SQLAlchemy mete las líneas nuevas en el mismo flush que borra las viejas.
-        # En bloque, no vía factura.lineas.clear(): el cascade delete-orphan
-        # emite un DELETE por línea (1.2M en tres semanas de espejo, el tercer
-        # consumidor de la BD) y además carga las líneas viejas solo para tirarlas.
-        db.query(LineaFactura).filter(
-            LineaFactura.factura_id == factura.id
-        ).delete(synchronize_session=False)
-        for ln in nuevas:
-            ln.factura_id = factura.id
-        db.add_all(nuevas)
-        db.expire(factura, ["lineas"])
     db.flush()
 
     # Ciclo del espejo con las remisiones estampadas. La marca también se
@@ -1622,6 +1578,59 @@ def factura_espejo(
                     rem.estado = "BORRADOR"
             elif rem.estado == "RESERVADO":
                 rem.estado = "BORRADOR"
+
+    # Las partidas van DESPUÉS del ciclo con las remisiones: la remisión que
+    # esta misma llamada acaba de ligar es la mejor evidencia para desempatar
+    # una clave compartida por gemelos, y antes de ligarla no se ve.
+    db.flush()
+    if payload.lineas:
+        # Producto por CLAVE SAE (regla del dueño, 2-oct-2026: «todo producto
+        # tiene clave SAE, se puede unificar así»). Hasta hoy solo se cruzaba
+        # contra producto_clientes.codigo_cliente y el 61% del espejo quedaba
+        # sin producto. Una sola regla para el endpoint y el backfill:
+        # services/espejo_productos.py. Se resuelve ANTES de borrar las
+        # partidas viejas: un reenvío (abono, cancelación, cuadre) conserva el
+        # producto que ya tenían; solo una remisión ligada lo mueve. Una
+        # factura nueva no tiene partidas que leer.
+        res = _resolver_claves_espejo(
+            _FuentesEspejo(db, ctx.tenant_id), factura_id=factura.id,
+            cliente_id=cliente.id, empresa=factura.espejo_empresa or payload.empresa,
+            serie=serie, claves=[ln.clave for ln in payload.lineas],
+            con_previa=not es_nueva,
+        )
+        pids = {r.producto_id for r in res.values() if r.producto_id}
+        productos = {
+            p.id: p for p in db.query(Producto).filter(Producto.id.in_(pids))
+        } if pids else {}
+        nuevas = []
+        for i, ln in enumerate(payload.lineas, start=1):
+            r = res.get(_norm_clave_sae(ln.clave)) if ln.clave else None
+            prod = productos.get(r.producto_id) if r and r.producto_id else None
+            nuevas.append(LineaFactura(
+                tenant_id=ctx.tenant_id, numero_linea=i,
+                # producto, presentación, unidad SAT (Mini Conta lee kilo o
+                # pieza de aquí) y clave SAT: los decide la regla
+                **_campos_espejo(r, prod),
+                # la clave de SAE se guarda SIEMPRE, cruce o no: es la única
+                # forma de saber de qué artículo habla una partida que no cruzó
+                clave_sae=(ln.clave or "").strip()[:30] or None,
+                descripcion=(ln.descripcion or (prod.nombre if prod else "PARTIDA SAE"))[:1000],
+                cantidad=ln.cantidad,
+                valor_unitario=ln.precio_unitario,
+                importe=(ln.importe if ln.importe is not None else ln.cantidad * ln.precio_unitario),
+            ))
+        # Borrar ANTES de insertar: el UNIQUE (factura, numero_linea) choca si
+        # SQLAlchemy mete las líneas nuevas en el mismo flush que borra las viejas.
+        # En bloque, no vía factura.lineas.clear(): el cascade delete-orphan
+        # emite un DELETE por línea (1.2M en tres semanas de espejo, el tercer
+        # consumidor de la BD) y además carga las líneas viejas solo para tirarlas.
+        db.query(LineaFactura).filter(
+            LineaFactura.factura_id == factura.id
+        ).delete(synchronize_session=False)
+        for ln in nuevas:
+            ln.factura_id = factura.id
+        db.add_all(nuevas)
+        db.expire(factura, ["lineas"])
 
     db.flush()
     db.refresh(factura)

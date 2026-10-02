@@ -99,9 +99,11 @@ class FacturaUpdate(BaseModel):
 
 
 class LineaFacturaEspejoIn(BaseModel):
-    """Una partida tal como SAE la facturó. `clave` es la CVE_ART de SAE: si
-    cruza con producto_clientes se liga al producto; si no, la línea se guarda
-    igual con su descripción — el espejo no pierde renglones."""
+    """Una partida tal como SAE la facturó. `clave` es la CVE_ART de SAE: se
+    liga al producto que trae esa clave (en el producto o en una presentación;
+    desde el 2-oct-2026, services/espejo_productos) y, si ninguno la trae, al
+    del código del cliente. Si no cruza, la línea se guarda igual con su
+    descripción — el espejo no pierde renglones."""
     clave: Optional[str] = Field(default=None, max_length=30)
     descripcion: str = Field(max_length=1000)
     cantidad: Decimal = Field(gt=0)
