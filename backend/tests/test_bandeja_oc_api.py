@@ -2066,6 +2066,7 @@ def test_folio_con_almacen_se_interpreta():
     assert parse_nuevo("HGHO-PACHU-20261009").proyecto == "HO"
 
     assert like_con_fecha("HO") == ["__HO-%", "HG__-HOSPI-%", "HG__-HOS-%"]
+    assert like_con_fecha("DI") == ["__DI-%", "HG__-DIFHI-%", "HG__-DIF-%"]
     assert like_con_fecha("BIENE") == ["__BIENE-%"]
     assert extraer_oc("SEMANA 40 PACHUCA HGPA-HOS-PACHU-20261009") == "HGPA-HOS-PACHU-20261009"
     m = _RE_SUFIJO_APARTE.match("HGPA-HOS-PACHU-20261009-2")
@@ -2147,7 +2148,7 @@ def test_folio_con_fecha_corta_se_interpreta():
 
 
 def test_folio_con_proyecto_de_cinco_letras():
-    """2-oct-2026: el proyecto va con cinco letras (HOS → HOSPI); DIF se queda.
+    """2-oct-2026: el proyecto va con cinco letras (HOS → HOSPI, DIF → DIFHI).
     Los de tres se siguen leyendo con el mismo prefijo."""
     from datetime import date
     from app.api.v1.oc_recibidas import _RE_SUFIJO_APARTE, _misma_entrega_otro_folio
@@ -2159,7 +2160,9 @@ def test_folio_con_proyecto_de_cinco_letras():
         "HOSPI", "HO", "PACHU", date(2026, 10, 9))
     assert f.prefijo == "HGPA-HOSPI"
     assert parse_nuevo("TBVH-HOSPI-ROVIR-261007").proyecto == "VH"
-    assert parse_nuevo("HGPA-CEREZ-CERES-261006").proyecto == "CE"
+    assert parse_nuevo("HGPA-CERES-CERES-261006").proyecto == "CE"
+    assert parse_nuevo("HGPA-CEREZ-CERES-261006").proyecto == "CE"     # el de antes
+    assert parse_nuevo("HGPA-DIFHI-COSTA-261006").proyecto == "DI"
     assert parse_nuevo("HGPA-SEGUR-SECRE-261006").proyecto == "SP"
     assert parse_nuevo("HGPA-SNERI-NERIX-261006").proyecto == "SN"
     assert parse_nuevo("HGPA-DIF-COSTA-261006").proyecto == "DI"
