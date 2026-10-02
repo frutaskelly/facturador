@@ -20,6 +20,7 @@ const config: CrudConfig<EsquemaImpuesto> = {
   columns: [
     { header: "Código", cell: (e) => <span className="font-medium">{e.codigo}</span> },
     { header: "Nombre", cell: (e) => e.nombre },
+    { header: "Descripción", cell: (e) => <span className="text-muted">{e.descripcion || "—"}</span> },
     { header: "IVA", cell: (e) => `${pct(e.iva_tasa)}%`, className: "text-right" },
     { header: "IEPS", cell: (e) => `${pct(e.ieps_tasa)}%`, className: "text-right" },
     { header: "Exento", cell: (e) => (e.iva_exento ? "Sí" : "No") },
