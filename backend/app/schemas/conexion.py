@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from .common import ORMModel
 
-TipoConexion = Literal["SMART_SUPPLY", "MINI_CONTA"]
+TipoConexion = Literal["SMART_SUPPLY", "MINI_CONTA", "SMART_SUPPLY_PANEL"]
 EstadoConexion = Literal["PENDIENTE", "ACTIVA", "REVOCADA"]
 
 
@@ -25,6 +25,21 @@ class AlcanceMiniConta(BaseModel):
         return self.model_dump(exclude={"series", "clientes"})
 
 
+class AlcancePanel(BaseModel):
+    """Qué comparte una clave del panel de Smart Supply: una cuenta = una plaza
+    (ver services/smart_supply.py)."""
+    plaza: Optional[str] = Field(default=None, max_length=120)   # acota los perfiles a su plaza
+    series: list[str] = Field(default_factory=list)              # de FACTURA: el facturado
+    series_remision: list[str] = Field(default_factory=list)     # el remisionado y sus OC
+    perfiles: list[str] = Field(default_factory=list)            # «EHMO:villahermosa»: sus OC (exige plaza)
+    remisiones: bool = False
+    oc: bool = False
+    catalogo: bool = False
+
+    def datos(self) -> dict:
+        return self.model_dump(include={"remisiones", "oc", "catalogo"})
+
+
 class ConexionOut(ORMModel):
     id: uuid.UUID
     tipo: str
@@ -35,18 +50,23 @@ class ConexionOut(ORMModel):
     activada_at: Optional[datetime] = None
     ultimo_uso_at: Optional[datetime] = None
     # Solo Mini Conta. None en una de Mini Conta = clave de antes, sin límite.
-    alcance: Optional[AlcanceMiniConta] = None
+    alcance: Optional[AlcanceMiniConta] = Field(default=None, validation_alias="alcance_mini_conta")
+    # Solo el panel de Smart Supply (otra forma: plaza, series de remisión, perfiles).
+    alcance_panel: Optional[AlcancePanel] = None
 
 
 class NuevaConexionIn(BaseModel):
-    """Mini Conta: una clave por cuenta, con nombre y alcance desde el inicio."""
+    """Una clave por cuenta, con nombre y alcance desde el inicio: `alcance`
+    para Mini Conta, `alcance_panel` para el panel de Smart Supply."""
     nombre: str = Field(min_length=1, max_length=80)
-    alcance: AlcanceMiniConta
+    alcance: Optional[AlcanceMiniConta] = None
+    alcance_panel: Optional[AlcancePanel] = None
 
 
 class ConexionUpdate(BaseModel):
     nombre: Optional[str] = Field(default=None, min_length=1, max_length=80)
     alcance: Optional[AlcanceMiniConta] = None
+    alcance_panel: Optional[AlcancePanel] = None
 
 
 class SucursalSeriesMC(BaseModel):
@@ -66,6 +86,21 @@ class OpcionesMiniContaOut(BaseModel):
     sucursales: list[SucursalSeriesMC]
     series: list[str]
     clientes: list[ClienteSeriesMC]
+
+
+class PlazaPanelOut(BaseModel):
+    nombre: str
+    series: list[str]
+    series_remision: list[str]
+    perfiles: list[str]
+
+
+class OpcionesPanelOut(BaseModel):
+    """Todo lo que se puede compartir con una cuenta del panel de Smart Supply."""
+    plazas: list[PlazaPanelOut]
+    series: list[str]
+    series_remision: list[str]
+    perfiles: list[str]
 
 
 class ConexionEstadoOut(BaseModel):

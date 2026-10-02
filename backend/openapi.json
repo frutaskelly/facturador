@@ -312,6 +312,161 @@
     "title": "AlcanceOut",
     "type": "object"
    },
+   "AlcancePanel": {
+    "description": "Qué comparte una clave del panel de Smart Supply: una cuenta = una plaza\n(ver services/smart_supply.py).",
+    "properties": {
+     "catalogo": {
+      "default": false,
+      "title": "Catalogo",
+      "type": "boolean"
+     },
+     "oc": {
+      "default": false,
+      "title": "Oc",
+      "type": "boolean"
+     },
+     "perfiles": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Perfiles",
+      "type": "array"
+     },
+     "plaza": {
+      "anyOf": [
+       {
+        "maxLength": 120,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Plaza"
+     },
+     "remisiones": {
+      "default": false,
+      "title": "Remisiones",
+      "type": "boolean"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     },
+     "series_remision": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series Remision",
+      "type": "array"
+     }
+    },
+    "title": "AlcancePanel",
+    "type": "object"
+   },
+   "AlcancePanelOut": {
+    "description": "Lo que comparte esta clave. Smart Supply lo pide al guardar la clave y\nantes de cada sincronización: si el dueño le quita algo, se entera aquí.",
+    "properties": {
+     "catalogo": {
+      "title": "Catalogo",
+      "type": "boolean"
+     },
+     "conexion": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/ConexionPanelBreveOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "empresa": {
+      "$ref": "#/components/schemas/EmpresaPanelOut"
+     },
+     "max_dias": {
+      "title": "Max Dias",
+      "type": "integer"
+     },
+     "max_limit": {
+      "title": "Max Limit",
+      "type": "integer"
+     },
+     "oc": {
+      "title": "Oc",
+      "type": "boolean"
+     },
+     "perfiles": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Perfiles",
+      "type": "array"
+     },
+     "plaza": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Plaza"
+     },
+     "plazas": {
+      "items": {
+       "$ref": "#/components/schemas/PlazaAlcanceOut"
+      },
+      "title": "Plazas",
+      "type": "array"
+     },
+     "remisiones": {
+      "title": "Remisiones",
+      "type": "boolean"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     },
+     "series_remision": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series Remision",
+      "type": "array"
+     },
+     "sin_limite": {
+      "default": false,
+      "title": "Sin Limite",
+      "type": "boolean"
+     },
+     "zona_horaria": {
+      "default": "America/Mexico_City",
+      "title": "Zona Horaria",
+      "type": "string"
+     }
+    },
+    "required": [
+     "empresa",
+     "series",
+     "series_remision",
+     "perfiles",
+     "remisiones",
+     "oc",
+     "catalogo",
+     "max_dias",
+     "max_limit"
+    ],
+    "title": "AlcancePanelOut",
+    "type": "object"
+   },
    "AliasIn": {
     "properties": {
      "cliente_id": {
@@ -4572,6 +4727,16 @@
        }
       ]
      },
+     "alcance_panel": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AlcancePanel"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
      "clave_pista": {
       "title": "Clave Pista",
       "type": "string"
@@ -4622,12 +4787,46 @@
     "title": "ConexionOut",
     "type": "object"
    },
+   "ConexionPanelBreveOut": {
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "pista": {
+      "title": "Pista",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "nombre",
+     "pista"
+    ],
+    "title": "ConexionPanelBreveOut",
+    "type": "object"
+   },
    "ConexionUpdate": {
     "properties": {
      "alcance": {
       "anyOf": [
        {
         "$ref": "#/components/schemas/AlcanceMiniConta"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "alcance_panel": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AlcancePanel"
        },
        {
         "type": "null"
@@ -6335,6 +6534,25 @@
     "title": "EmpresaOut",
     "type": "object"
    },
+   "EmpresaPanelOut": {
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "nombre"
+    ],
+    "title": "EmpresaPanelOut",
+    "type": "object"
+   },
    "EmpresaUpdate": {
     "properties": {
      "domicilio_fiscal": {
@@ -7548,6 +7766,51 @@
     "title": "ExportSaeIn",
     "type": "object"
    },
+   "FacturaDeOCOut": {
+    "properties": {
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "folio": {
+      "title": "Folio",
+      "type": "integer"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "serie": {
+      "title": "Serie",
+      "type": "string"
+     },
+     "uuid": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uuid"
+     }
+    },
+    "required": [
+     "id",
+     "serie",
+     "folio",
+     "estado",
+     "origen"
+    ],
+    "title": "FacturaDeOCOut",
+    "type": "object"
+   },
    "FacturaDesdeRemisionesIn": {
     "properties": {
      "agrupar_productos": {
@@ -8668,6 +8931,240 @@
      }
     },
     "title": "FacturaUpdate",
+    "type": "object"
+   },
+   "FacturadoOut": {
+    "properties": {
+     "cantidad": {
+      "title": "Cantidad",
+      "type": "string"
+     },
+     "clave_sae": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sae"
+     },
+     "clave_unidad": {
+      "title": "Clave Unidad",
+      "type": "string"
+     },
+     "cliente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "descripcion": {
+      "title": "Descripcion",
+      "type": "string"
+     },
+     "espejo_empresa": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Espejo Empresa"
+     },
+     "factor_kg": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Factor Kg"
+     },
+     "factura_id": {
+      "format": "uuid",
+      "title": "Factura Id",
+      "type": "string"
+     },
+     "fecha_entrega": {
+      "format": "date",
+      "title": "Fecha Entrega",
+      "type": "string"
+     },
+     "fecha_entrega_origen": {
+      "enum": [
+       "remision",
+       "notas",
+       "factura"
+      ],
+      "title": "Fecha Entrega Origen",
+      "type": "string"
+     },
+     "fecha_factura": {
+      "format": "date",
+      "title": "Fecha Factura",
+      "type": "string"
+     },
+     "folio": {
+      "title": "Folio",
+      "type": "integer"
+     },
+     "importe": {
+      "title": "Importe",
+      "type": "string"
+     },
+     "kg": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kg"
+     },
+     "kg_estimado": {
+      "default": false,
+      "title": "Kg Estimado",
+      "type": "boolean"
+     },
+     "numero_linea": {
+      "title": "Numero Linea",
+      "type": "integer"
+     },
+     "origen": {
+      "title": "Origen",
+      "type": "string"
+     },
+     "presentacion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Presentacion"
+     },
+     "producto": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto"
+     },
+     "producto_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Producto Id"
+     },
+     "remision_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Remision Ids",
+      "type": "array"
+     },
+     "serie": {
+      "title": "Serie",
+      "type": "string"
+     },
+     "sku": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sku"
+     },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
+     },
+     "unidad": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad"
+     },
+     "uuid": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Uuid"
+     }
+    },
+    "required": [
+     "factura_id",
+     "numero_linea",
+     "origen",
+     "serie",
+     "folio",
+     "fecha_factura",
+     "fecha_entrega",
+     "fecha_entrega_origen",
+     "descripcion",
+     "clave_unidad",
+     "cantidad",
+     "importe"
+    ],
+    "title": "FacturadoOut",
     "type": "object"
    },
    "GrupoAplicado": {
@@ -13159,10 +13656,27 @@
     "type": "object"
    },
    "NuevaConexionIn": {
-    "description": "Mini Conta: una clave por cuenta, con nombre y alcance desde el inicio.",
+    "description": "Una clave por cuenta, con nombre y alcance desde el inicio: `alcance`\npara Mini Conta, `alcance_panel` para el panel de Smart Supply.",
     "properties": {
      "alcance": {
-      "$ref": "#/components/schemas/AlcanceMiniConta"
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AlcanceMiniConta"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "alcance_panel": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AlcancePanel"
+       },
+       {
+        "type": "null"
+       }
+      ]
      },
      "nombre": {
       "maxLength": 80,
@@ -13172,10 +13686,403 @@
      }
     },
     "required": [
-     "nombre",
-     "alcance"
+     "nombre"
     ],
     "title": "NuevaConexionIn",
+    "type": "object"
+   },
+   "OCLineaOut": {
+    "description": "Una partida del documento VIGENTE de la OC, tal como la pidió el cliente\n(sin cruzar a producto: el cruce es la remisión).",
+    "properties": {
+     "cambio_abierto": {
+      "title": "Cambio Abierto",
+      "type": "boolean"
+     },
+     "cantidad": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cantidad"
+     },
+     "clave": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave"
+     },
+     "clave_doc": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Doc"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "descripcion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Descripcion"
+     },
+     "documento": {
+      "enum": [
+       "payload",
+       "payload_nuevo"
+      ],
+      "title": "Documento",
+      "type": "string"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "fecha_entrega": {
+      "format": "date",
+      "title": "Fecha Entrega",
+      "type": "string"
+     },
+     "folio_externo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Folio Externo"
+     },
+     "numero": {
+      "title": "Numero",
+      "type": "integer"
+     },
+     "oc_id": {
+      "format": "uuid",
+      "title": "Oc Id",
+      "type": "string"
+     },
+     "perfil": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Perfil"
+     },
+     "plaza": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Plaza"
+     },
+     "remision_estado": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remision Estado"
+     },
+     "remision_folio": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remision Folio"
+     },
+     "remision_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remision Id"
+     },
+     "unidad_doc": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Doc"
+     }
+    },
+    "required": [
+     "oc_id",
+     "numero",
+     "documento",
+     "cambio_abierto",
+     "fecha_entrega",
+     "estado"
+    ],
+    "title": "OCLineaOut",
+    "type": "object"
+   },
+   "OCPanelOut": {
+    "description": "Una orden de compra con su cadena: OC → remisión → factura.",
+    "properties": {
+     "actualizado_at": {
+      "format": "date-time",
+      "title": "Actualizado At",
+      "type": "string"
+     },
+     "archivo_nombre": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Archivo Nombre"
+     },
+     "cambio_abierto": {
+      "title": "Cambio Abierto",
+      "type": "boolean"
+     },
+     "cambio_resumen": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cambio Resumen"
+     },
+     "canal": {
+      "title": "Canal",
+      "type": "string"
+     },
+     "cliente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente"
+     },
+     "cliente_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente Id"
+     },
+     "documento": {
+      "enum": [
+       "payload",
+       "payload_nuevo"
+      ],
+      "title": "Documento",
+      "type": "string"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "factura": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/FacturaDeOCOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "fecha_entrega": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha Entrega"
+     },
+     "folio_externo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Folio Externo"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     },
+     "origen_externo": {
+      "title": "Origen Externo",
+      "type": "string"
+     },
+     "partidas": {
+      "title": "Partidas",
+      "type": "integer"
+     },
+     "perfil": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Perfil"
+     },
+     "plaza": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Plaza"
+     },
+     "proyecto": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Proyecto"
+     },
+     "punto_entrega": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Punto Entrega"
+     },
+     "recibida_at": {
+      "format": "date-time",
+      "title": "Recibida At",
+      "type": "string"
+     },
+     "remision": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/RemisionDeOCOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "remitente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remitente"
+     }
+    },
+    "required": [
+     "id",
+     "canal",
+     "origen_externo",
+     "recibida_at",
+     "estado",
+     "partidas",
+     "documento",
+     "cambio_abierto",
+     "actualizado_at"
+    ],
+    "title": "OCPanelOut",
     "type": "object"
    },
    "OCRecibidaDetailOut": {
@@ -14285,6 +15192,47 @@
     "title": "OpcionesMiniContaOut",
     "type": "object"
    },
+   "OpcionesPanelOut": {
+    "description": "Todo lo que se puede compartir con una cuenta del panel de Smart Supply.",
+    "properties": {
+     "perfiles": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Perfiles",
+      "type": "array"
+     },
+     "plazas": {
+      "items": {
+       "$ref": "#/components/schemas/PlazaPanelOut"
+      },
+      "title": "Plazas",
+      "type": "array"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     },
+     "series_remision": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series Remision",
+      "type": "array"
+     }
+    },
+    "required": [
+     "plazas",
+     "series",
+     "series_remision",
+     "perfiles"
+    ],
+    "title": "OpcionesPanelOut",
+    "type": "object"
+   },
    "OrdenCompraCreate": {
     "properties": {
      "almacen_destino_id": {
@@ -15371,6 +16319,166 @@
     "title": "Page[VocabularioOut]",
     "type": "object"
    },
+   "Pagina_FacturadoOut_": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/FacturadoOut"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "siguiente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Siguiente"
+     }
+    },
+    "required": [
+     "items",
+     "limit"
+    ],
+    "title": "Pagina[FacturadoOut]",
+    "type": "object"
+   },
+   "Pagina_OCLineaOut_": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/OCLineaOut"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "siguiente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Siguiente"
+     }
+    },
+    "required": [
+     "items",
+     "limit"
+    ],
+    "title": "Pagina[OCLineaOut]",
+    "type": "object"
+   },
+   "Pagina_OCPanelOut_": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/OCPanelOut"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "siguiente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Siguiente"
+     }
+    },
+    "required": [
+     "items",
+     "limit"
+    ],
+    "title": "Pagina[OCPanelOut]",
+    "type": "object"
+   },
+   "Pagina_ProductoPanelOut_": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/ProductoPanelOut"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "siguiente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Siguiente"
+     }
+    },
+    "required": [
+     "items",
+     "limit"
+    ],
+    "title": "Pagina[ProductoPanelOut]",
+    "type": "object"
+   },
+   "Pagina_RemisionadoOut_": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/RemisionadoOut"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "limit": {
+      "title": "Limit",
+      "type": "integer"
+     },
+     "siguiente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Siguiente"
+     }
+    },
+    "required": [
+     "items",
+     "limit"
+    ],
+    "title": "Pagina[RemisionadoOut]",
+    "type": "object"
+   },
    "PagoIn": {
     "properties": {
      "forma": {
@@ -15629,6 +16737,80 @@
      "clave"
     ],
     "title": "PistaIn",
+    "type": "object"
+   },
+   "PlazaAlcanceOut": {
+    "properties": {
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "perfiles": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Perfiles",
+      "type": "array"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     },
+     "series_remision": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series Remision",
+      "type": "array"
+     }
+    },
+    "required": [
+     "nombre",
+     "series",
+     "series_remision",
+     "perfiles"
+    ],
+    "title": "PlazaAlcanceOut",
+    "type": "object"
+   },
+   "PlazaPanelOut": {
+    "properties": {
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "perfiles": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Perfiles",
+      "type": "array"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series",
+      "type": "array"
+     },
+     "series_remision": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series Remision",
+      "type": "array"
+     }
+    },
+    "required": [
+     "nombre",
+     "series",
+     "series_remision",
+     "perfiles"
+    ],
+    "title": "PlazaPanelOut",
     "type": "object"
    },
    "PosConfigIn": {
@@ -16249,6 +17431,50 @@
      "factor"
     ],
     "title": "PresentacionCreate",
+    "type": "object"
+   },
+   "PresentacionOut": {
+    "properties": {
+     "clave_sae": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sae"
+     },
+     "estimado": {
+      "default": false,
+      "title": "Estimado",
+      "type": "boolean"
+     },
+     "factor": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Factor"
+     },
+     "sat": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sat"
+     }
+    },
+    "title": "PresentacionOut",
     "type": "object"
    },
    "PreviewLineaIn": {
@@ -17066,6 +18292,80 @@
      "updated_at"
     ],
     "title": "ProductoOut",
+    "type": "object"
+   },
+   "ProductoPanelOut": {
+    "properties": {
+     "activo": {
+      "title": "Activo",
+      "type": "boolean"
+     },
+     "categoria": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Categoria"
+     },
+     "clave_sae": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Sae"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "peso_variable": {
+      "title": "Peso Variable",
+      "type": "boolean"
+     },
+     "presentaciones": {
+      "additionalProperties": {
+       "$ref": "#/components/schemas/PresentacionOut"
+      },
+      "title": "Presentaciones",
+      "type": "object"
+     },
+     "sku": {
+      "title": "Sku",
+      "type": "string"
+     },
+     "unidad_base": {
+      "title": "Unidad Base",
+      "type": "string"
+     },
+     "unidad_sat": {
+      "title": "Unidad Sat",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "sku",
+     "nombre",
+     "unidad_base",
+     "unidad_sat",
+     "peso_variable",
+     "activo",
+     "presentaciones"
+    ],
+    "title": "ProductoPanelOut",
     "type": "object"
    },
    "ProductoUpdate": {
@@ -19019,6 +20319,58 @@
     "title": "RemisionCreate",
     "type": "object"
    },
+   "RemisionDeOCOut": {
+    "properties": {
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "fecha_entrega": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fecha Entrega"
+     },
+     "folio": {
+      "title": "Folio",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "serie": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie"
+     },
+     "total": {
+      "title": "Total",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "folio",
+     "estado",
+     "total"
+    ],
+    "title": "RemisionDeOCOut",
+    "type": "object"
+   },
    "RemisionDetailOut": {
     "properties": {
      "almacen_id": {
@@ -20033,6 +21385,225 @@
      }
     },
     "title": "RemisionUpdate",
+    "type": "object"
+   },
+   "RemisionadoOut": {
+    "properties": {
+     "cantidad": {
+      "title": "Cantidad",
+      "type": "string"
+     },
+     "cantidad_solicitada": {
+      "title": "Cantidad Solicitada",
+      "type": "string"
+     },
+     "cantidad_surtida": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cantidad Surtida"
+     },
+     "clave": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave"
+     },
+     "clave_producto": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Producto"
+     },
+     "cliente": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cliente"
+     },
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "factor_kg": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Factor Kg"
+     },
+     "factura_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Factura Id"
+     },
+     "facturada": {
+      "title": "Facturada",
+      "type": "boolean"
+     },
+     "fecha_entrega": {
+      "format": "date",
+      "title": "Fecha Entrega",
+      "type": "string"
+     },
+     "folio": {
+      "title": "Folio",
+      "type": "string"
+     },
+     "importe": {
+      "title": "Importe",
+      "type": "string"
+     },
+     "kg": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kg"
+     },
+     "kg_estimado": {
+      "default": false,
+      "title": "Kg Estimado",
+      "type": "boolean"
+     },
+     "numero_linea": {
+      "title": "Numero Linea",
+      "type": "integer"
+     },
+     "plaza": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Plaza"
+     },
+     "precio_unitario": {
+      "title": "Precio Unitario",
+      "type": "string"
+     },
+     "presentacion": {
+      "title": "Presentacion",
+      "type": "string"
+     },
+     "producto": {
+      "title": "Producto",
+      "type": "string"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     },
+     "punto_entrega": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Punto Entrega"
+     },
+     "remision_id": {
+      "format": "uuid",
+      "title": "Remision Id",
+      "type": "string"
+     },
+     "serie": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Serie"
+     },
+     "sku": {
+      "title": "Sku",
+      "type": "string"
+     },
+     "su_pedido": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido"
+     },
+     "unidad": {
+      "title": "Unidad",
+      "type": "string"
+     }
+    },
+    "required": [
+     "remision_id",
+     "numero_linea",
+     "folio",
+     "estado",
+     "fecha_entrega",
+     "facturada",
+     "cliente_id",
+     "producto_id",
+     "sku",
+     "producto",
+     "presentacion",
+     "cantidad_solicitada",
+     "cantidad",
+     "unidad",
+     "precio_unitario",
+     "importe"
+    ],
+    "title": "RemisionadoOut",
     "type": "object"
    },
    "ResolucionOut": {
@@ -28017,6 +29588,61 @@
     ]
    }
   },
+  "/api/v1/conexiones/SMART_SUPPLY_PANEL/opciones": {
+   "get": {
+    "description": "Lo que se le puede compartir a una cuenta del panel de Smart Supply: cada\nplaza con sus series de factura y de remisión y los perfiles por los que\nentran sus órdenes.",
+    "operationId": "opciones_panel_api_v1_conexiones_SMART_SUPPLY_PANEL_opciones_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OpcionesPanelOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Opciones Panel",
+    "tags": [
+     "conexiones"
+    ]
+   }
+  },
   "/api/v1/conexiones/grupos": {
    "get": {
     "description": "El mapa de qué grupo alimenta a qué: cliente, sucursales, series y qué ha\nentrado por ahí. Es la pregunta que la pantalla de Conexiones existe para\nresponder una vez que el bot ya está conectado.",
@@ -28271,7 +29897,7 @@
   },
   "/api/v1/conexiones/{conexion_id}": {
    "patch": {
-    "description": "Cambia el nombre o lo que comparte una conexión de Mini Conta, sin tocar\nsu clave: Mini Conta ve el cambio la próxima vez que lea.",
+    "description": "Cambia el nombre o lo que comparte una conexión por cuenta (Mini Conta o\nel panel de Smart Supply), sin tocar su clave: el otro sistema ve el cambio\nla próxima vez que lea.",
     "operationId": "editar_api_v1_conexiones__conexion_id__patch",
     "parameters": [
      {
@@ -28543,7 +30169,7 @@
   },
   "/api/v1/conexiones/{tipo}/clave": {
    "post": {
-    "description": "Genera la clave. Se devuelve en claro UNA vez y ya no se puede volver a leer.\n\nSmart Supply: si ya había una viva se revoca en el acto —«generar otra» y «la\nanterior deja de servir» tienen que ser el mismo gesto, o quedarían dos claves\nbuenas y nadie sabría cuál está usando el bot—.\n\nMini Conta: cada llamada es una cuenta NUEVA (nombre + alcance) y no toca a\nlas demás. Para cambiar la clave de una cuenta existente: `/{id}/regenerar`.",
+    "description": "Genera la clave. Se devuelve en claro UNA vez y ya no se puede volver a leer.\n\nSmart Supply: si ya había una viva se revoca en el acto —«generar otra» y «la\nanterior deja de servir» tienen que ser el mismo gesto, o quedarían dos claves\nbuenas y nadie sabría cuál está usando el bot—.\n\nMini Conta y el panel de Smart Supply: cada llamada es una cuenta NUEVA\n(nombre + alcance) y no toca a las demás. Para cambiar la clave de una\ncuenta existente: `/{id}/regenerar`.",
     "operationId": "generar_api_v1_conexiones__tipo__clave_post",
     "parameters": [
      {
@@ -47431,6 +49057,708 @@
     "summary": "Folio Sugerido",
     "tags": [
      "series"
+    ]
+   }
+  },
+  "/api/v1/smart-supply/alcance": {
+   "get": {
+    "description": "Qué comparte esta clave. Smart Supply lo pide al guardar la clave (sirve\nde prueba) y antes de sincronizar.",
+    "operationId": "alcance_api_v1_smart_supply_alcance_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AlcancePanelOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Alcance",
+    "tags": [
+     "smart-supply"
+    ]
+   }
+  },
+  "/api/v1/smart-supply/catalogo": {
+   "get": {
+    "description": "Los productos (activos y desactivados; los borrados no) con su clave de\nSAE y la de cada presentación, y el factor de cada una. Es con lo que Smart\nSupply junta un conteo de bodega (por clave) con lo remisionado y lo\nfacturado. Sin precios ni costos. Llave: `id`.",
+    "operationId": "catalogo_api_v1_smart_supply_catalogo_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 1000,
+       "maximum": 5000,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "description": "El «siguiente» de la página anterior",
+      "in": "query",
+      "name": "despues",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "El «siguiente» de la página anterior",
+       "title": "Despues"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Pagina_ProductoPanelOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Catalogo",
+    "tags": [
+     "smart-supply"
+    ]
+   }
+  },
+  "/api/v1/smart-supply/facturado": {
+   "get": {
+    "description": "Las líneas de las facturas timbradas de ingreso (nativas y espejo de SAE)\nde sus series, por fecha de ENTREGA (por omisión) o de factura.\n\nLa fecha de entrega sale de la remisión ligada, de las notas o de la factura\n(`fecha_entrega_origen`), la misma regla que Mini Conta. El producto es el\nque guardó la línea; una partida que no cruzó sale con `producto_id` null y\nsu `clave_sae`. Llave: (`factura_id`, `numero_linea`), que sobrevive a que el\nespejo recree las líneas (el `id` de línea no).",
+    "operationId": "facturado_api_v1_smart_supply_facturado_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "desde",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Desde",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "hasta",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Hasta",
+       "type": "string"
+      }
+     },
+     {
+      "description": "entrega = el día que salió la mercancía; factura = el del timbre",
+      "in": "query",
+      "name": "fecha",
+      "required": false,
+      "schema": {
+       "default": "entrega",
+       "description": "entrega = el día que salió la mercancía; factura = el del timbre",
+       "enum": [
+        "entrega",
+        "factura"
+       ],
+       "title": "Fecha",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Series de FACTURA separadas por coma; por omisión las de la clave",
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Series de FACTURA separadas por coma; por omisión las de la clave",
+       "title": "Series"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 1000,
+       "maximum": 5000,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "description": "El «siguiente» de la página anterior",
+      "in": "query",
+      "name": "despues",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "El «siguiente» de la página anterior",
+       "title": "Despues"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Pagina_FacturadoOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Facturado",
+    "tags": [
+     "smart-supply"
+    ]
+   }
+  },
+  "/api/v1/smart-supply/oc": {
+   "get": {
+    "description": "La bitácora de órdenes de compra de la plaza, con su cadena OC →\nremisión → factura y el canal por el que entraron (incluye DESCARTADA).\n\nSe pide por rango (`desde`/`hasta` sobre `campo`) o por sondeo\n(`actualizado_desde`, a lo mucho 93 días atrás), o las dos. Orden y llave:\n(`actualizado_at`, `id`). Una OC que cambia mientras se pagina vuelve a\nsalir más adelante; nunca se salta.",
+    "operationId": "oc_api_v1_smart_supply_oc_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "desde",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Desde"
+      }
+     },
+     {
+      "in": "query",
+      "name": "hasta",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Hasta"
+      }
+     },
+     {
+      "description": "Sobre qué fecha aplica desde/hasta",
+      "in": "query",
+      "name": "campo",
+      "required": false,
+      "schema": {
+       "default": "actualizado",
+       "description": "Sobre qué fecha aplica desde/hasta",
+       "enum": [
+        "actualizado",
+        "recibida",
+        "entrega"
+       ],
+       "title": "Campo",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Sondeo incremental: solo lo que cambió desde aquí (ISO; sin zona = UTC)",
+      "in": "query",
+      "name": "actualizado_desde",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "date-time",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Sondeo incremental: solo lo que cambió desde aquí (ISO; sin zona = UTC)",
+       "title": "Actualizado Desde"
+      }
+     },
+     {
+      "description": "PENDIENTE,ASIGNADA,DESCARTADA",
+      "in": "query",
+      "name": "estado",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "PENDIENTE,ASIGNADA,DESCARTADA",
+       "title": "Estado"
+      }
+     },
+     {
+      "description": "WHATSAPP,EMAIL,MANUAL,API",
+      "in": "query",
+      "name": "canal",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "WHATSAPP,EMAIL,MANUAL,API",
+       "title": "Canal"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 1000,
+       "maximum": 5000,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "description": "El «siguiente» de la página anterior",
+      "in": "query",
+      "name": "despues",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "El «siguiente» de la página anterior",
+       "title": "Despues"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Pagina_OCPanelOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Oc",
+    "tags": [
+     "smart-supply"
+    ]
+   }
+  },
+  "/api/v1/smart-supply/oc-lineas": {
+   "get": {
+    "description": "El volumen PEDIDO: cada partida del documento vigente de las OC vivas\n(PENDIENTE y ASIGNADA; las descartadas no se pidieron) con entrega en el\nrango. Es lo que el cliente escribió, sin cruzar: el cruce a producto es la\nremisión (`/remisionado`). Llave: (`oc_id`, `numero`).",
+    "operationId": "oc_lineas_api_v1_smart_supply_oc_lineas_get",
+    "parameters": [
+     {
+      "description": "Fecha de ENTREGA",
+      "in": "query",
+      "name": "desde",
+      "required": true,
+      "schema": {
+       "description": "Fecha de ENTREGA",
+       "format": "date",
+       "title": "Desde",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "hasta",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Hasta",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 1000,
+       "maximum": 5000,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "description": "El «siguiente» de la página anterior",
+      "in": "query",
+      "name": "despues",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "El «siguiente» de la página anterior",
+       "title": "Despues"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Pagina_OCLineaOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Oc Lineas",
+    "tags": [
+     "smart-supply"
+    ]
+   }
+  },
+  "/api/v1/smart-supply/remisionado": {
+   "get": {
+    "description": "Lo ENTREGADO: cada línea de las remisiones no canceladas de sus series de\nremisión con `fecha_entrega` en el rango, por producto y presentación.\nFacturadas o no (`facturada` lo dice): para los días que todavía no se\nfacturan, esto es la vista previa. Llave: (`remision_id`, `numero_linea`).",
+    "operationId": "remisionado_api_v1_smart_supply_remisionado_get",
+    "parameters": [
+     {
+      "description": "Fecha de ENTREGA",
+      "in": "query",
+      "name": "desde",
+      "required": true,
+      "schema": {
+       "description": "Fecha de ENTREGA",
+       "format": "date",
+       "title": "Desde",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "hasta",
+      "required": true,
+      "schema": {
+       "format": "date",
+       "title": "Hasta",
+       "type": "string"
+      }
+     },
+     {
+      "description": "Series de REMISIÓN separadas por coma; por omisión las de la clave",
+      "in": "query",
+      "name": "series",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Series de REMISIÓN separadas por coma; por omisión las de la clave",
+       "title": "Series"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 1000,
+       "maximum": 5000,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "description": "El «siguiente» de la página anterior",
+      "in": "query",
+      "name": "despues",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "El «siguiente» de la página anterior",
+       "title": "Despues"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Pagina_RemisionadoOut_"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Remisionado",
+    "tags": [
+     "smart-supply"
     ]
    }
   },

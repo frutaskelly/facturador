@@ -92,11 +92,19 @@ PERMISOS_CONEXION = frozenset({
 # todas las pantallas de facturas, PDFs y XML de clientes.
 PERMISOS_MINI_CONTA = frozenset({"venta:leer_lineas"})
 
+# El panel de Smart Supply (app.smartsupply.mx, 2-oct-2026) mide la merma de
+# cada bodega: LEE las OC, lo remisionado y lo facturado de UNA plaza, con una
+# clave por cuenta. Un permiso propio (`abasto:leer`) en vez de reusar el del
+# bot, que escribe y es de toda la empresa, o el de Mini Conta, que abre sus
+# pantallas. El recorte por plaza vive en services/smart_supply.py.
+PERMISOS_PANEL = frozenset({"abasto:leer"})
+
 # El alcance depende del TIPO de conexión. Un tipo que no esté aquí no recibe
 # nada: agregar un sistema nuevo obliga a escribir su alcance a propósito.
 PERMISOS_POR_TIPO: dict[str, frozenset[str]] = {
     "SMART_SUPPLY": PERMISOS_CONEXION,
     "MINI_CONTA": PERMISOS_MINI_CONTA,
+    "SMART_SUPPLY_PANEL": PERMISOS_PANEL,
 }
 
 

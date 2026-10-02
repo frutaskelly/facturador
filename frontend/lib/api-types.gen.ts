@@ -950,6 +950,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conexiones/SMART_SUPPLY_PANEL/opciones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Opciones Panel
+         * @description Lo que se le puede compartir a una cuenta del panel de Smart Supply: cada
+         *     plaza con sus series de factura y de remisión y los perfiles por los que
+         *     entran sus órdenes.
+         */
+        get: operations["opciones_panel_api_v1_conexiones_SMART_SUPPLY_PANEL_opciones_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conexiones/grupos": {
         parameters: {
             query?: never;
@@ -1043,8 +1065,9 @@ export interface paths {
         head?: never;
         /**
          * Editar
-         * @description Cambia el nombre o lo que comparte una conexión de Mini Conta, sin tocar
-         *     su clave: Mini Conta ve el cambio la próxima vez que lea.
+         * @description Cambia el nombre o lo que comparte una conexión por cuenta (Mini Conta o
+         *     el panel de Smart Supply), sin tocar su clave: el otro sistema ve el cambio
+         *     la próxima vez que lea.
          */
         patch: operations["editar_api_v1_conexiones__conexion_id__patch"];
         trace?: never;
@@ -1124,8 +1147,9 @@ export interface paths {
          *     anterior deja de servir» tienen que ser el mismo gesto, o quedarían dos claves
          *     buenas y nadie sabría cuál está usando el bot—.
          *
-         *     Mini Conta: cada llamada es una cuenta NUEVA (nombre + alcance) y no toca a
-         *     las demás. Para cambiar la clave de una cuenta existente: `/{id}/regenerar`.
+         *     Mini Conta y el panel de Smart Supply: cada llamada es una cuenta NUEVA
+         *     (nombre + alcance) y no toca a las demás. Para cambiar la clave de una
+         *     cuenta existente: `/{id}/regenerar`.
          */
         post: operations["generar_api_v1_conexiones__tipo__clave_post"];
         delete?: never;
@@ -5654,6 +5678,149 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/smart-supply/alcance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alcance
+         * @description Qué comparte esta clave. Smart Supply lo pide al guardar la clave (sirve
+         *     de prueba) y antes de sincronizar.
+         */
+        get: operations["alcance_api_v1_smart_supply_alcance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/smart-supply/catalogo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Catalogo
+         * @description Los productos (activos y desactivados; los borrados no) con su clave de
+         *     SAE y la de cada presentación, y el factor de cada una. Es con lo que Smart
+         *     Supply junta un conteo de bodega (por clave) con lo remisionado y lo
+         *     facturado. Sin precios ni costos. Llave: `id`.
+         */
+        get: operations["catalogo_api_v1_smart_supply_catalogo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/smart-supply/facturado": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Facturado
+         * @description Las líneas de las facturas timbradas de ingreso (nativas y espejo de SAE)
+         *     de sus series, por fecha de ENTREGA (por omisión) o de factura.
+         *
+         *     La fecha de entrega sale de la remisión ligada, de las notas o de la factura
+         *     (`fecha_entrega_origen`), la misma regla que Mini Conta. El producto es el
+         *     que guardó la línea; una partida que no cruzó sale con `producto_id` null y
+         *     su `clave_sae`. Llave: (`factura_id`, `numero_linea`), que sobrevive a que el
+         *     espejo recree las líneas (el `id` de línea no).
+         */
+        get: operations["facturado_api_v1_smart_supply_facturado_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/smart-supply/oc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Oc
+         * @description La bitácora de órdenes de compra de la plaza, con su cadena OC →
+         *     remisión → factura y el canal por el que entraron (incluye DESCARTADA).
+         *
+         *     Se pide por rango (`desde`/`hasta` sobre `campo`) o por sondeo
+         *     (`actualizado_desde`, a lo mucho 93 días atrás), o las dos. Orden y llave:
+         *     (`actualizado_at`, `id`). Una OC que cambia mientras se pagina vuelve a
+         *     salir más adelante; nunca se salta.
+         */
+        get: operations["oc_api_v1_smart_supply_oc_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/smart-supply/oc-lineas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Oc Lineas
+         * @description El volumen PEDIDO: cada partida del documento vigente de las OC vivas
+         *     (PENDIENTE y ASIGNADA; las descartadas no se pidieron) con entrega en el
+         *     rango. Es lo que el cliente escribió, sin cruzar: el cruce a producto es la
+         *     remisión (`/remisionado`). Llave: (`oc_id`, `numero`).
+         */
+        get: operations["oc_lineas_api_v1_smart_supply_oc_lineas_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/smart-supply/remisionado": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Remisionado
+         * @description Lo ENTREGADO: cada línea de las remisiones no canceladas de sus series de
+         *     remisión con `fecha_entrega` en el rango, por producto y presentación.
+         *     Facturadas o no (`facturada` lo dice): para los días que todavía no se
+         *     facturan, esto es la vista previa. Llave: (`remision_id`, `numero_linea`).
+         */
+        get: operations["remisionado_api_v1_smart_supply_remisionado_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sucursales": {
         parameters: {
             query?: never;
@@ -6051,6 +6218,75 @@ export interface components {
             sin_limite: boolean;
             /** Sucursales */
             sucursales: components["schemas"]["SucursalSeriesOut"][];
+        };
+        /**
+         * AlcancePanel
+         * @description Qué comparte una clave del panel de Smart Supply: una cuenta = una plaza
+         *     (ver services/smart_supply.py).
+         */
+        AlcancePanel: {
+            /**
+             * Catalogo
+             * @default false
+             */
+            catalogo: boolean;
+            /**
+             * Oc
+             * @default false
+             */
+            oc: boolean;
+            /** Perfiles */
+            perfiles?: string[];
+            /** Plaza */
+            plaza?: string | null;
+            /**
+             * Remisiones
+             * @default false
+             */
+            remisiones: boolean;
+            /** Series */
+            series?: string[];
+            /** Series Remision */
+            series_remision?: string[];
+        };
+        /**
+         * AlcancePanelOut
+         * @description Lo que comparte esta clave. Smart Supply lo pide al guardar la clave y
+         *     antes de cada sincronización: si el dueño le quita algo, se entera aquí.
+         */
+        AlcancePanelOut: {
+            /** Catalogo */
+            catalogo: boolean;
+            conexion?: components["schemas"]["ConexionPanelBreveOut"] | null;
+            empresa: components["schemas"]["EmpresaPanelOut"];
+            /** Max Dias */
+            max_dias: number;
+            /** Max Limit */
+            max_limit: number;
+            /** Oc */
+            oc: boolean;
+            /** Perfiles */
+            perfiles: string[];
+            /** Plaza */
+            plaza?: string | null;
+            /** Plazas */
+            plazas?: components["schemas"]["PlazaAlcanceOut"][];
+            /** Remisiones */
+            remisiones: boolean;
+            /** Series */
+            series: string[];
+            /** Series Remision */
+            series_remision: string[];
+            /**
+             * Sin Limite
+             * @default false
+             */
+            sin_limite: boolean;
+            /**
+             * Zona Horaria
+             * @default America/Mexico_City
+             */
+            zona_horaria: string;
         };
         /** AliasIn */
         AliasIn: {
@@ -7553,6 +7789,7 @@ export interface components {
             /** Activada At */
             activada_at?: string | null;
             alcance?: components["schemas"]["AlcanceMiniConta"] | null;
+            alcance_panel?: components["schemas"]["AlcancePanel"] | null;
             /** Clave Pista */
             clave_pista: string;
             /**
@@ -7574,9 +7811,22 @@ export interface components {
             /** Ultimo Uso At */
             ultimo_uso_at?: string | null;
         };
+        /** ConexionPanelBreveOut */
+        ConexionPanelBreveOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+            /** Pista */
+            pista: string;
+        };
         /** ConexionUpdate */
         ConexionUpdate: {
             alcance?: components["schemas"]["AlcanceMiniConta"] | null;
+            alcance_panel?: components["schemas"]["AlcancePanel"] | null;
             /** Nombre */
             nombre?: string | null;
         };
@@ -8284,6 +8534,16 @@ export interface components {
              */
             rfc: string;
         };
+        /** EmpresaPanelOut */
+        EmpresaPanelOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+        };
         /** EmpresaUpdate */
         EmpresaUpdate: {
             /** Domicilio Fiscal */
@@ -8723,6 +8983,24 @@ export interface components {
              */
             tipo: string;
         };
+        /** FacturaDeOCOut */
+        FacturaDeOCOut: {
+            /** Estado */
+            estado: string;
+            /** Folio */
+            folio: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Origen */
+            origen: string;
+            /** Serie */
+            serie: string;
+            /** Uuid */
+            uuid?: string | null;
+        };
         /** FacturaDesdeRemisionesIn */
         FacturaDesdeRemisionesIn: {
             /**
@@ -9074,6 +9352,78 @@ export interface components {
             su_pedido?: string | null;
             /** Uso Cfdi */
             uso_cfdi?: string | null;
+        };
+        /** FacturadoOut */
+        FacturadoOut: {
+            /** Cantidad */
+            cantidad: string;
+            /** Clave Sae */
+            clave_sae?: string | null;
+            /** Clave Unidad */
+            clave_unidad: string;
+            /** Cliente */
+            cliente?: string | null;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Descripcion */
+            descripcion: string;
+            /** Espejo Empresa */
+            espejo_empresa?: string | null;
+            /** Factor Kg */
+            factor_kg?: string | null;
+            /**
+             * Factura Id
+             * Format: uuid
+             */
+            factura_id: string;
+            /**
+             * Fecha Entrega
+             * Format: date
+             */
+            fecha_entrega: string;
+            /**
+             * Fecha Entrega Origen
+             * @enum {string}
+             */
+            fecha_entrega_origen: "remision" | "notas" | "factura";
+            /**
+             * Fecha Factura
+             * Format: date
+             */
+            fecha_factura: string;
+            /** Folio */
+            folio: number;
+            /** Importe */
+            importe: string;
+            /** Kg */
+            kg?: string | null;
+            /**
+             * Kg Estimado
+             * @default false
+             */
+            kg_estimado: boolean;
+            /** Numero Linea */
+            numero_linea: number;
+            /** Origen */
+            origen: string;
+            /** Presentacion */
+            presentacion?: string | null;
+            /** Producto */
+            producto?: string | null;
+            /** Producto Id */
+            producto_id?: string | null;
+            /** Remision Ids */
+            remision_ids?: string[];
+            /** Serie */
+            serie: string;
+            /** Sku */
+            sku?: string | null;
+            /** Su Pedido */
+            su_pedido?: string | null;
+            /** Unidad */
+            unidad?: string | null;
+            /** Uuid */
+            uuid?: string | null;
         };
         /** GrupoAplicado */
         GrupoAplicado: {
@@ -10749,12 +11099,128 @@ export interface components {
         };
         /**
          * NuevaConexionIn
-         * @description Mini Conta: una clave por cuenta, con nombre y alcance desde el inicio.
+         * @description Una clave por cuenta, con nombre y alcance desde el inicio: `alcance`
+         *     para Mini Conta, `alcance_panel` para el panel de Smart Supply.
          */
         NuevaConexionIn: {
-            alcance: components["schemas"]["AlcanceMiniConta"];
+            alcance?: components["schemas"]["AlcanceMiniConta"] | null;
+            alcance_panel?: components["schemas"]["AlcancePanel"] | null;
             /** Nombre */
             nombre: string;
+        };
+        /**
+         * OCLineaOut
+         * @description Una partida del documento VIGENTE de la OC, tal como la pidió el cliente
+         *     (sin cruzar a producto: el cruce es la remisión).
+         */
+        OCLineaOut: {
+            /** Cambio Abierto */
+            cambio_abierto: boolean;
+            /** Cantidad */
+            cantidad?: string | null;
+            /** Clave */
+            clave?: string | null;
+            /** Clave Doc */
+            clave_doc?: string | null;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /** Descripcion */
+            descripcion?: string | null;
+            /**
+             * Documento
+             * @enum {string}
+             */
+            documento: "payload" | "payload_nuevo";
+            /** Estado */
+            estado: string;
+            /**
+             * Fecha Entrega
+             * Format: date
+             */
+            fecha_entrega: string;
+            /** Folio Externo */
+            folio_externo?: string | null;
+            /** Numero */
+            numero: number;
+            /**
+             * Oc Id
+             * Format: uuid
+             */
+            oc_id: string;
+            /** Perfil */
+            perfil?: string | null;
+            /** Plaza */
+            plaza?: string | null;
+            /** Remision Estado */
+            remision_estado?: string | null;
+            /** Remision Folio */
+            remision_folio?: string | null;
+            /** Remision Id */
+            remision_id?: string | null;
+            /** Unidad Doc */
+            unidad_doc?: string | null;
+        };
+        /**
+         * OCPanelOut
+         * @description Una orden de compra con su cadena: OC → remisión → factura.
+         */
+        OCPanelOut: {
+            /**
+             * Actualizado At
+             * Format: date-time
+             */
+            actualizado_at: string;
+            /** Archivo Nombre */
+            archivo_nombre?: string | null;
+            /** Cambio Abierto */
+            cambio_abierto: boolean;
+            /** Cambio Resumen */
+            cambio_resumen?: string | null;
+            /** Canal */
+            canal: string;
+            /** Cliente */
+            cliente?: string | null;
+            /** Cliente Id */
+            cliente_id?: string | null;
+            /**
+             * Documento
+             * @enum {string}
+             */
+            documento: "payload" | "payload_nuevo";
+            /** Estado */
+            estado: string;
+            factura?: components["schemas"]["FacturaDeOCOut"] | null;
+            /** Fecha Entrega */
+            fecha_entrega?: string | null;
+            /** Folio Externo */
+            folio_externo?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Motivo */
+            motivo?: string | null;
+            /** Origen Externo */
+            origen_externo: string;
+            /** Partidas */
+            partidas: number;
+            /** Perfil */
+            perfil?: string | null;
+            /** Plaza */
+            plaza?: string | null;
+            /** Proyecto */
+            proyecto?: string | null;
+            /** Punto Entrega */
+            punto_entrega?: string | null;
+            /**
+             * Recibida At
+             * Format: date-time
+             */
+            recibida_at: string;
+            remision?: components["schemas"]["RemisionDeOCOut"] | null;
+            /** Remitente */
+            remitente?: string | null;
         };
         /** OCRecibidaDetailOut */
         OCRecibidaDetailOut: {
@@ -11047,6 +11513,20 @@ export interface components {
             series: string[];
             /** Sucursales */
             sucursales: components["schemas"]["SucursalSeriesMC"][];
+        };
+        /**
+         * OpcionesPanelOut
+         * @description Todo lo que se puede compartir con una cuenta del panel de Smart Supply.
+         */
+        OpcionesPanelOut: {
+            /** Perfiles */
+            perfiles: string[];
+            /** Plazas */
+            plazas: components["schemas"]["PlazaPanelOut"][];
+            /** Series */
+            series: string[];
+            /** Series Remision */
+            series_remision: string[];
         };
         /** OrdenCompraCreate */
         OrdenCompraCreate: {
@@ -11439,6 +11919,51 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** Pagina[FacturadoOut] */
+        Pagina_FacturadoOut_: {
+            /** Items */
+            items: components["schemas"]["FacturadoOut"][];
+            /** Limit */
+            limit: number;
+            /** Siguiente */
+            siguiente?: string | null;
+        };
+        /** Pagina[OCLineaOut] */
+        Pagina_OCLineaOut_: {
+            /** Items */
+            items: components["schemas"]["OCLineaOut"][];
+            /** Limit */
+            limit: number;
+            /** Siguiente */
+            siguiente?: string | null;
+        };
+        /** Pagina[OCPanelOut] */
+        Pagina_OCPanelOut_: {
+            /** Items */
+            items: components["schemas"]["OCPanelOut"][];
+            /** Limit */
+            limit: number;
+            /** Siguiente */
+            siguiente?: string | null;
+        };
+        /** Pagina[ProductoPanelOut] */
+        Pagina_ProductoPanelOut_: {
+            /** Items */
+            items: components["schemas"]["ProductoPanelOut"][];
+            /** Limit */
+            limit: number;
+            /** Siguiente */
+            siguiente?: string | null;
+        };
+        /** Pagina[RemisionadoOut] */
+        Pagina_RemisionadoOut_: {
+            /** Items */
+            items: components["schemas"]["RemisionadoOut"][];
+            /** Limit */
+            limit: number;
+            /** Siguiente */
+            siguiente?: string | null;
+        };
         /** PagoIn */
         PagoIn: {
             /** Forma */
@@ -11523,6 +12048,28 @@ export interface components {
              * @enum {string}
              */
             sistema: "RFC" | "SAE" | "PROYECTO" | "NOMBRE" | "UBICACION" | "WHATSAPP";
+        };
+        /** PlazaAlcanceOut */
+        PlazaAlcanceOut: {
+            /** Nombre */
+            nombre: string;
+            /** Perfiles */
+            perfiles: string[];
+            /** Series */
+            series: string[];
+            /** Series Remision */
+            series_remision: string[];
+        };
+        /** PlazaPanelOut */
+        PlazaPanelOut: {
+            /** Nombre */
+            nombre: string;
+            /** Perfiles */
+            perfiles: string[];
+            /** Series */
+            series: string[];
+            /** Series Remision */
+            series_remision: string[];
         };
         /** PosConfigIn */
         PosConfigIn: {
@@ -11781,6 +12328,20 @@ export interface components {
             nombre: string;
             /** Unidad Sat */
             unidad_sat?: string | null;
+        };
+        /** PresentacionOut */
+        PresentacionOut: {
+            /** Clave Sae */
+            clave_sae?: string | null;
+            /**
+             * Estimado
+             * @default false
+             */
+            estimado: boolean;
+            /** Factor */
+            factor?: string | null;
+            /** Sat */
+            sat?: string | null;
         };
         /** PreviewLineaIn */
         PreviewLineaIn: {
@@ -12080,6 +12641,34 @@ export interface components {
             updated_at: string;
             /** Vida Util Dias */
             vida_util_dias?: number | null;
+        };
+        /** ProductoPanelOut */
+        ProductoPanelOut: {
+            /** Activo */
+            activo: boolean;
+            /** Categoria */
+            categoria?: string | null;
+            /** Clave Sae */
+            clave_sae?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+            /** Peso Variable */
+            peso_variable: boolean;
+            /** Presentaciones */
+            presentaciones: {
+                [key: string]: components["schemas"]["PresentacionOut"];
+            };
+            /** Sku */
+            sku: string;
+            /** Unidad Base */
+            unidad_base: string;
+            /** Unidad Sat */
+            unidad_sat: string;
         };
         /** ProductoUpdate */
         ProductoUpdate: {
@@ -12597,6 +13186,24 @@ export interface components {
             /** Sucursal Id */
             sucursal_id?: string | null;
         };
+        /** RemisionDeOCOut */
+        RemisionDeOCOut: {
+            /** Estado */
+            estado: string;
+            /** Fecha Entrega */
+            fecha_entrega?: string | null;
+            /** Folio */
+            folio: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Serie */
+            serie?: string | null;
+            /** Total */
+            total: string;
+        };
         /** RemisionDetailOut */
         RemisionDetailOut: {
             /** Almacen Id */
@@ -12886,6 +13493,80 @@ export interface components {
             su_pedido?: string | null;
             /** Sucursal Id */
             sucursal_id?: string | null;
+        };
+        /** RemisionadoOut */
+        RemisionadoOut: {
+            /** Cantidad */
+            cantidad: string;
+            /** Cantidad Solicitada */
+            cantidad_solicitada: string;
+            /** Cantidad Surtida */
+            cantidad_surtida?: string | null;
+            /** Clave */
+            clave?: string | null;
+            /** Clave Producto */
+            clave_producto?: string | null;
+            /** Cliente */
+            cliente?: string | null;
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /** Estado */
+            estado: string;
+            /** Factor Kg */
+            factor_kg?: string | null;
+            /** Factura Id */
+            factura_id?: string | null;
+            /** Facturada */
+            facturada: boolean;
+            /**
+             * Fecha Entrega
+             * Format: date
+             */
+            fecha_entrega: string;
+            /** Folio */
+            folio: string;
+            /** Importe */
+            importe: string;
+            /** Kg */
+            kg?: string | null;
+            /**
+             * Kg Estimado
+             * @default false
+             */
+            kg_estimado: boolean;
+            /** Numero Linea */
+            numero_linea: number;
+            /** Plaza */
+            plaza?: string | null;
+            /** Precio Unitario */
+            precio_unitario: string;
+            /** Presentacion */
+            presentacion: string;
+            /** Producto */
+            producto: string;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Punto Entrega */
+            punto_entrega?: string | null;
+            /**
+             * Remision Id
+             * Format: uuid
+             */
+            remision_id: string;
+            /** Serie */
+            serie?: string | null;
+            /** Sku */
+            sku: string;
+            /** Su Pedido */
+            su_pedido?: string | null;
+            /** Unidad */
+            unidad: string;
         };
         /** ResolucionOut */
         ResolucionOut: {
@@ -16204,6 +16885,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConexionEstadoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    opciones_panel_api_v1_conexiones_SMART_SUPPLY_PANEL_opciones_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpcionesPanelOut"];
                 };
             };
             /** @description Validation Error */
@@ -25056,6 +25768,236 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SerieFolioSugerido"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    alcance_api_v1_smart_supply_alcance_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlcancePanelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    catalogo_api_v1_smart_supply_catalogo_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description El «siguiente» de la página anterior */
+                despues?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pagina_ProductoPanelOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    facturado_api_v1_smart_supply_facturado_get: {
+        parameters: {
+            query: {
+                desde: string;
+                hasta: string;
+                /** @description entrega = el día que salió la mercancía; factura = el del timbre */
+                fecha?: "entrega" | "factura";
+                /** @description Series de FACTURA separadas por coma; por omisión las de la clave */
+                series?: string | null;
+                limit?: number;
+                /** @description El «siguiente» de la página anterior */
+                despues?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pagina_FacturadoOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    oc_api_v1_smart_supply_oc_get: {
+        parameters: {
+            query?: {
+                desde?: string | null;
+                hasta?: string | null;
+                /** @description Sobre qué fecha aplica desde/hasta */
+                campo?: "actualizado" | "recibida" | "entrega";
+                /** @description Sondeo incremental: solo lo que cambió desde aquí (ISO; sin zona = UTC) */
+                actualizado_desde?: string | null;
+                /** @description PENDIENTE,ASIGNADA,DESCARTADA */
+                estado?: string | null;
+                /** @description WHATSAPP,EMAIL,MANUAL,API */
+                canal?: string | null;
+                limit?: number;
+                /** @description El «siguiente» de la página anterior */
+                despues?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pagina_OCPanelOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    oc_lineas_api_v1_smart_supply_oc_lineas_get: {
+        parameters: {
+            query: {
+                /** @description Fecha de ENTREGA */
+                desde: string;
+                hasta: string;
+                limit?: number;
+                /** @description El «siguiente» de la página anterior */
+                despues?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pagina_OCLineaOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remisionado_api_v1_smart_supply_remisionado_get: {
+        parameters: {
+            query: {
+                /** @description Fecha de ENTREGA */
+                desde: string;
+                hasta: string;
+                /** @description Series de REMISIÓN separadas por coma; por omisión las de la clave */
+                series?: string | null;
+                limit?: number;
+                /** @description El «siguiente» de la página anterior */
+                despues?: string | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pagina_RemisionadoOut_"];
                 };
             };
             /** @description Validation Error */

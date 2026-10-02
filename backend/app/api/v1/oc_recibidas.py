@@ -733,7 +733,7 @@ def _detectar_cambio(db: Session, oc: OCRecibida, data: dict, ctx: AuthContext) 
         # abierto entrena al equipo a ignorar la bandera.
         if oc.cambio_detectado_at is not None and oc.cambio_resuelto_at is None:
             oc.cambio_resuelto_at = datetime.now(timezone.utc)
-            oc.cambio_resuelto_nota = "El documento volvió a coincidir con la remisión"
+            oc.cambio_resuelto_nota = oc_cambios.NOTA_DOCUMENTO_REVERTIDO
             oc.updated_by = ctx.user_id
             db.flush()
         return

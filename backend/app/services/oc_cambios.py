@@ -29,6 +29,13 @@ from typing import Optional
 # del cliente) puede cambiar sin que cambie lo que hay que entregar.
 CAMPOS_CABECERA = ("fecha_entrega", "observaciones")
 
+# La nota con la que se cierra solo un cambio cuando el documento vuelve a
+# coincidir con la remisión (api/v1/oc_recibidas.py::_detectar_cambio). En ese
+# cierre `payload_nuevo` se queda con la versión que el cliente DESHIZO: quien
+# lea "el documento vigente" tiene que reconocer esta nota y quedarse con
+# `payload` (api/v1/smart_supply.py::_doc_vigente).
+NOTA_DOCUMENTO_REVERTIDO = "El documento volvió a coincidir con la remisión"
+
 
 def _texto(v) -> str:
     return " ".join(str(v or "").split())
