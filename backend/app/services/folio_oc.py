@@ -10,8 +10,18 @@ la fecha no se interpreta.
     TBVH-ROVIR-20260930   Tabasco · hospitales VH · Rovirosa · 30-sep
     HGHO-IMSSB-20261005   Hidalgo · Hospitales · IMSS Bienestar · 5-oct
 
-Los dos llevan el sufijo de entrega aparte al final: …-2. Cualquier otro folio
+Con almacén (decisión del dueño 2-oct-2026, desde la misma semana 40): sucursal +
+ALMACÉN, el proyecto con TRES letras, el punto y la fecha. Las 29 remisiones que la
+semana 40 alcanzó a generar con el formato de arriba se renombraron a éste.
+    HGPA-HOS-PACHU-20261009   Hidalgo · almacén Pachuca · Hospitales · Pachuca · 9-oct
+    TBVH-HOS-ROVIR-20261007   Tabasco · almacén Villahermosa · Hospitales · Rovirosa
+
+Todos llevan el sufijo de entrega aparte al final: …-2. Cualquier otro folio
 (Río Libre, los numéricos de Balles/Jubran) es libre y no se interpreta.
+
+`proyecto` es SIEMPRE el prefijo de siempre (HO, VH, DI…): es el que el bot traduce
+a proyecto y el que se compara contra los folios viejos. El código de tres letras
+se traduce con PROYECTO_3.
 
 La semana ya no viaja en el folio: sale de la fecha con `semana_equipo`, que
 cuenta desde el PRIMER LUNES DE ENERO (no ISO; ver el corte 38-B).
@@ -25,34 +35,77 @@ from typing import Optional
 
 # Sucursal (2 letras) pegada al proyecto (2-3, el prefijo del formato viejo).
 _RE_NUEVO = re.compile(r"^([A-Z]{2})([A-Z]{2,3})-([A-Z]{3,5})-(\d{8})(?:-(\d{1,2}))?$")
-# El mismo, para buscarlo dentro de un texto (la observación de SAE).
-RE_NUEVO_EN_TEXTO = re.compile(r"\b([A-Z]{4,5}-[A-Z]{3,5}-\d{8}(?:-\d{1,2})?)\b")
+# Sucursal + almacén (2 y 2) · proyecto (3) · punto · fecha.
+_RE_ALMACEN = re.compile(r"^([A-Z]{2})([A-Z]{2})-([A-Z]{3})-([A-Z]{3,5})-(\d{8})(?:-(\d{1,2}))?$")
+# Los dos, para buscarlos dentro de un texto (la observación de SAE).
+RE_NUEVO_EN_TEXTO = re.compile(r"\b([A-Z]{4,5}(?:-[A-Z]{3})?-[A-Z]{3,5}-\d{8}(?:-\d{1,2})?)\b")
+
+# (sucursal, proyecto de 3 letras) → el prefijo de siempre. Lo que no está aquí
+# (BIC) no tuvo prefijo viejo y se queda con sus tres letras.
+PROYECTO_3 = {
+    ("HG", "HOS"): "HO", ("HG", "DIF"): "DI", ("HG", "CER"): "CE",
+    ("HG", "SEG"): "SP", ("HG", "NER"): "SN",
+    ("TB", "HOS"): "VH",
+}
+_DE_PREFIJO = {v: k for k, v in PROYECTO_3.items()}
 
 
 @dataclass(frozen=True)
 class FolioNuevo:
     sucursal: str
-    proyecto: str
+    proyecto: str            # el prefijo de siempre: HO, VH, DI…
     punto: str
     fecha: date
     aparte: Optional[int]
+    almacen: Optional[str] = None      # sólo el formato con almacén
+    proyecto3: Optional[str] = None    # HOS, DIF… (ídem)
 
     @property
     def prefijo(self) -> str:
+        """La cabeza literal del folio, para buscar por LIKE: HGHO o HGPA-HOS."""
+        if self.almacen:
+            return f"{self.sucursal}{self.almacen}-{self.proyecto3}"
         return f"{self.sucursal}{self.proyecto}"
 
 
+def _fecha8(s: str) -> Optional[date]:
+    try:
+        return date(int(s[:4]), int(s[4:6]), int(s[6:]))
+    except ValueError:
+        return None
+
+
 def parse_nuevo(folio: Optional[str]) -> Optional[FolioNuevo]:
-    """«TBVH-ROVIR-20260930-2» → sus partes; None si no es del formato nuevo."""
-    m = _RE_NUEVO.match((folio or "").strip().upper())
+    """«TBVH-ROVIR-20260930-2» o «HGPA-HOS-PACHU-20261009» → sus partes;
+    None si no es de ninguno de los formatos con fecha."""
+    f = (folio or "").strip().upper()
+    m = _RE_ALMACEN.match(f)
+    if m:
+        fecha = _fecha8(m.group(5))
+        if fecha is None:
+            return None
+        suc, p3 = m.group(1), m.group(3)
+        return FolioNuevo(suc, PROYECTO_3.get((suc, p3), p3), m.group(4), fecha,
+                          int(m.group(6)) if m.group(6) else None,
+                          almacen=m.group(2), proyecto3=p3)
+    m = _RE_NUEVO.match(f)
     if not m:
         return None
-    try:
-        fecha = date(int(m.group(4)[:4]), int(m.group(4)[4:6]), int(m.group(4)[6:]))
-    except ValueError:
+    fecha = _fecha8(m.group(4))
+    if fecha is None:
         return None
     return FolioNuevo(m.group(1), m.group(2), m.group(3), fecha,
                       int(m.group(5)) if m.group(5) else None)
+
+
+def like_con_fecha(prefijo_viejo: str) -> list[str]:
+    """Patrones LIKE de los folios con fecha de un proyecto dado por su prefijo
+    de siempre (HO → «__HO-%» y «HG__-HOS-%»)."""
+    pats = [f"__{prefijo_viejo}-%"]
+    suc_p3 = _DE_PREFIJO.get(prefijo_viejo)
+    if suc_p3:
+        pats.append(f"{suc_p3[0]}__-{suc_p3[1]}-%")
+    return pats
 
 
 def _primer_lunes(anio: int) -> date:

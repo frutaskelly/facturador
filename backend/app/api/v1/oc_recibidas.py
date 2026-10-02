@@ -339,7 +339,8 @@ def _candado_folio_repetido(db: Session, ctx: AuthContext, payload) -> None:
 
 
 # La base termina en el día (HO-39ACT-LUN-2, VH-38PAL-MIE-B-2) o, desde la
-# semana 40, en la fecha (TBVH-ROVIR-20261007-2). Ver services/folio_oc.
+# semana 40, en la fecha (TBVH-ROVIR-20261007-2, HGPA-HOS-PACHU-20261009-2).
+# Ver services/folio_oc.
 _RE_SUFIJO_APARTE = re.compile(r"^(.*-(?:[A-Z]{2,3}(?:-B)?|\d{8}))-(\d{1,2})$")
 
 
@@ -498,7 +499,15 @@ def _misma_entrega_otro_folio(a: str, b: str) -> bool:
     viejo_a, viejo_b = _folio_sin_semana(a), _folio_sin_semana(b)
     if viejo_a and viejo_b:
         return viejo_a == viejo_b
-    if (folio_oc.parse_nuevo(a) is None) == (folio_oc.parse_nuevo(b) is None):
+    na, nb = folio_oc.parse_nuevo(a), folio_oc.parse_nuevo(b)
+    if na is not None and nb is not None:
+        # Con fecha los dos, pero uno con almacén (HGPA-HOS-ROVIR-…) y otro sin
+        # él (HGHO-ROVIR-…, la semana 40 antes del 2-oct): mismo proyecto,
+        # punto y fecha es la misma entrega renombrada.
+        if (na.almacen is None) == (nb.almacen is None):
+            return False
+        return (na.proyecto, na.punto, na.fecha) == (nb.proyecto, nb.punto, nb.fecha)
+    if (na is None) == (nb is None):
         return False
     pa, pb = _proyecto_y_punto(a), _proyecto_y_punto(b)
     return pa is not None and pb is not None and pa[0] == pb[0]
@@ -621,12 +630,13 @@ def _candado_antigemela(db: Session, ctx: AuthContext, payload) -> None:
     # historia y una gemela puede haber llegado con el viejo).
     if nuevo is not None:
         prefijo, semana, fecha = nuevo.proyecto, f"{folio_oc.semana_equipo(nuevo.fecha):02d}", nuevo.fecha
-        del_formato_nuevo = OCRecibida.folio_externo.like(f"{nuevo.prefijo}-%")
     elif m is not None:
         prefijo, semana, fecha = m.group(1), m.group(2), _fecha_entrega(payload)
-        del_formato_nuevo = OCRecibida.folio_externo.like(f"__{prefijo}-%")
     else:
         return
+    # TBVH-ROVIR-… y, desde el 2-oct, HGPA-HOS-… (con almacén): los dos con fecha.
+    del_formato_nuevo = or_(*(OCRecibida.folio_externo.like(p)
+                              for p in folio_oc.like_con_fecha(prefijo)))
     mismo_folio = OCRecibida.folio_externo.like(f"{prefijo}-{semana}%")
     if fecha is not None:
         lunes = folio_oc.lunes_de(fecha)
