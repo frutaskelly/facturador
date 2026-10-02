@@ -40,6 +40,7 @@ from .api.v1 import (
     registro,
     remisiones,
     reportes,
+    revision_catalogo,
     roles,
     sat,
     tickets,
@@ -139,6 +140,7 @@ app.include_router(contacto.router, prefix="/api/v1")  # PÚBLICO (formulario de
 app.include_router(categorias.router, prefix="/api/v1")
 app.include_router(esquemas_impuesto.router, prefix="/api/v1")
 app.include_router(productos.router, prefix="/api/v1")
+app.include_router(revision_catalogo.router, prefix="/api/v1")  # grupos de productos que son el mismo
 app.include_router(listas_precios.router, prefix="/api/v1")
 # a qué cliente/sucursal/serie/proyecto aplica cada lista
 app.include_router(listas_precios.router_asignaciones, prefix="/api/v1")

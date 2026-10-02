@@ -31,6 +31,7 @@ from .proyecto import Proyecto
 from .sat_catalogo import SatClaveProdServ, SatClaveUnidad
 from .proveedor import Proveedor
 from .remision import LineaRemision, Remision
+from .revision_catalogo import RevisionCatalogo
 from .role import Role
 from .role_permission import RolePermission
 from .serie import Serie
@@ -58,6 +59,7 @@ __all__ = [
     "Producto",
     "ProductoAlias",
     "ProductoCliente",
+    "RevisionCatalogo",
     "ImportProductosLog",
     "SatClaveProdServ",
     "SatClaveUnidad",

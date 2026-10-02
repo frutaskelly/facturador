@@ -77,6 +77,74 @@
     "title": "ActividadConexionOut",
     "type": "object"
    },
+   "AjusteIn": {
+    "description": "Lo que la persona cambió de la propuesta automática. Todo opcional.",
+    "properties": {
+     "claves": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Claves"
+     },
+     "grupo": {
+      "maxLength": 300,
+      "minLength": 3,
+      "title": "Grupo",
+      "type": "string"
+     },
+     "nombre_final": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre Final"
+     },
+     "queda_sku": {
+      "anyOf": [
+       {
+        "maxLength": 50,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Queda Sku"
+     },
+     "quitar": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Quitar"
+     }
+    },
+    "required": [
+     "grupo"
+    ],
+    "title": "AjusteIn",
+    "type": "object"
+   },
    "AlcanceMiniConta": {
     "description": "Qué comparte una clave de Mini Conta (ver services/mini_conta.py).",
     "properties": {
@@ -2037,6 +2105,48 @@
      "paso"
     ],
     "title": "ChecklistMarcaIn",
+    "type": "object"
+   },
+   "ClaveInfo": {
+    "properties": {
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "de_sku": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "De Sku"
+     },
+     "en_sae": {
+      "items": {
+       "type": "string"
+      },
+      "title": "En Sae",
+      "type": "array"
+     },
+     "facturas": {
+      "title": "Facturas",
+      "type": "integer"
+     },
+     "formato_viejo": {
+      "title": "Formato Viejo",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "clave",
+     "en_sae",
+     "facturas",
+     "formato_viejo"
+    ],
+    "title": "ClaveInfo",
     "type": "object"
    },
    "ClaveNuevaOut": {
@@ -5127,6 +5237,152 @@
     "title": "CruzarLineaIn",
     "type": "object"
    },
+   "DecisionIn": {
+    "properties": {
+     "claves": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Claves"
+     },
+     "estado": {
+      "enum": [
+       "APROBADO",
+       "RECHAZADO",
+       "PENDIENTE"
+      ],
+      "title": "Estado",
+      "type": "string"
+     },
+     "grupo": {
+      "maxLength": 300,
+      "minLength": 3,
+      "title": "Grupo",
+      "type": "string"
+     },
+     "nombre_final": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre Final"
+     },
+     "nota": {
+      "anyOf": [
+       {
+        "maxLength": 2000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nota"
+     },
+     "queda_sku": {
+      "anyOf": [
+       {
+        "maxLength": 50,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Queda Sku"
+     },
+     "quitar": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Quitar"
+     }
+    },
+    "required": [
+     "grupo",
+     "estado"
+    ],
+    "title": "DecisionIn",
+    "type": "object"
+   },
+   "DecisionOut": {
+    "properties": {
+     "at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "At"
+     },
+     "desactualizada": {
+      "default": false,
+      "title": "Desactualizada",
+      "type": "boolean"
+     },
+     "estado": {
+      "enum": [
+       "APROBADO",
+       "RECHAZADO",
+       "APLICADO"
+      ],
+      "title": "Estado",
+      "type": "string"
+     },
+     "nota": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nota"
+     },
+     "por": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Por"
+     }
+    },
+    "required": [
+     "estado"
+    ],
+    "title": "DecisionOut",
+    "type": "object"
+   },
    "DevolucionIn": {
     "properties": {
      "lineas": {
@@ -8158,6 +8414,72 @@
      "jid"
     ],
     "title": "GrupoOut",
+    "type": "object"
+   },
+   "GrupoRevision": {
+    "properties": {
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "decision": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/DecisionOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "estado": {
+      "enum": [
+       "PENDIENTE",
+       "APROBADO",
+       "RECHAZADO",
+       "APLICADO"
+      ],
+      "title": "Estado",
+      "type": "string"
+     },
+     "miembros": {
+      "items": {
+       "$ref": "#/components/schemas/MiembroRevision"
+      },
+      "title": "Miembros",
+      "type": "array"
+     },
+     "propuesta": {
+      "$ref": "#/components/schemas/Propuesta"
+     },
+     "raiz": {
+      "title": "Raiz",
+      "type": "string"
+     },
+     "tipo": {
+      "enum": [
+       "GEMELOS",
+       "UNIDADES",
+       "EMPAQUE"
+      ],
+      "title": "Tipo",
+      "type": "string"
+     },
+     "ventas": {
+      "title": "Ventas",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "clave",
+     "tipo",
+     "raiz",
+     "estado",
+     "propuesta",
+     "miembros",
+     "ventas"
+    ],
+    "title": "GrupoRevision",
     "type": "object"
    },
    "GrupoUpdate": {
@@ -11970,6 +12292,89 @@
      }
     },
     "title": "MembershipUpdate",
+    "type": "object"
+   },
+   "MiembroRevision": {
+    "properties": {
+     "alias": {
+      "title": "Alias",
+      "type": "integer"
+     },
+     "alta": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Alta"
+     },
+     "catalogo": {
+      "title": "Catalogo",
+      "type": "integer"
+     },
+     "categoria": {
+      "title": "Categoria",
+      "type": "string"
+     },
+     "clave_sat": {
+      "title": "Clave Sat",
+      "type": "string"
+     },
+     "esquema": {
+      "title": "Esquema",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "precios": {
+      "title": "Precios",
+      "type": "integer"
+     },
+     "sku": {
+      "title": "Sku",
+      "type": "string"
+     },
+     "unidad_base": {
+      "title": "Unidad Base",
+      "type": "string"
+     },
+     "unidades": {
+      "items": {
+       "$ref": "#/components/schemas/UnidadMiembro"
+      },
+      "title": "Unidades",
+      "type": "array"
+     },
+     "ventas": {
+      "title": "Ventas",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "id",
+     "sku",
+     "nombre",
+     "unidad_base",
+     "unidades",
+     "categoria",
+     "esquema",
+     "clave_sat",
+     "ventas",
+     "precios",
+     "alias",
+     "catalogo"
+    ],
+    "title": "MiembroRevision",
     "type": "object"
    },
    "MovimientoCreate": {
@@ -16655,6 +17060,69 @@
     "title": "ProductosOut",
     "type": "object"
    },
+   "Propuesta": {
+    "properties": {
+     "alertas": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Alertas",
+      "type": "array"
+     },
+     "bloqueos": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Bloqueos",
+      "type": "array"
+     },
+     "nombre_final": {
+      "title": "Nombre Final",
+      "type": "string"
+     },
+     "queda_sku": {
+      "title": "Queda Sku",
+      "type": "string"
+     },
+     "quitar": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Quitar",
+      "type": "array"
+     },
+     "se_unen": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Se Unen",
+      "type": "array"
+     },
+     "unidad_base": {
+      "title": "Unidad Base",
+      "type": "string"
+     },
+     "unidades": {
+      "items": {
+       "$ref": "#/components/schemas/UnidadPropuesta"
+      },
+      "title": "Unidades",
+      "type": "array"
+     }
+    },
+    "required": [
+     "queda_sku",
+     "nombre_final",
+     "unidad_base",
+     "unidades",
+     "quitar",
+     "se_unen",
+     "alertas",
+     "bloqueos"
+    ],
+    "title": "Propuesta",
+    "type": "object"
+   },
    "ProveedorCreate": {
     "properties": {
      "activo": {
@@ -19270,6 +19738,65 @@
     "title": "ResumenProductoOut",
     "type": "object"
    },
+   "ResumenRevision": {
+    "properties": {
+     "aplicados": {
+      "title": "Aplicados",
+      "type": "integer"
+     },
+     "grupos": {
+      "title": "Grupos",
+      "type": "integer"
+     },
+     "por_estado": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "title": "Por Estado",
+      "type": "object"
+     },
+     "por_tipo": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "title": "Por Tipo",
+      "type": "object"
+     },
+     "productos": {
+      "title": "Productos",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "grupos",
+     "productos",
+     "por_estado",
+     "por_tipo",
+     "aplicados"
+    ],
+    "title": "ResumenRevision",
+    "type": "object"
+   },
+   "RevisionOut": {
+    "properties": {
+     "grupos": {
+      "items": {
+       "$ref": "#/components/schemas/GrupoRevision"
+      },
+      "title": "Grupos",
+      "type": "array"
+     },
+     "resumen": {
+      "$ref": "#/components/schemas/ResumenRevision"
+     }
+    },
+    "required": [
+     "grupos",
+     "resumen"
+    ],
+    "title": "RevisionOut",
+    "type": "object"
+   },
    "RoleCreate": {
     "properties": {
      "descripcion": {
@@ -21562,6 +22089,89 @@
      "nuevo_estado"
     ],
     "title": "TransitionIn",
+    "type": "object"
+   },
+   "UnidadMiembro": {
+    "properties": {
+     "borradores": {
+      "title": "Borradores",
+      "type": "integer"
+     },
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "en_sae": {
+      "title": "En Sae",
+      "type": "boolean"
+     },
+     "unidad": {
+      "title": "Unidad",
+      "type": "string"
+     }
+    },
+    "required": [
+     "unidad",
+     "clave",
+     "en_sae",
+     "borradores"
+    ],
+    "title": "UnidadMiembro",
+    "type": "object"
+   },
+   "UnidadPropuesta": {
+    "properties": {
+     "alternativas": {
+      "items": {
+       "$ref": "#/components/schemas/ClaveInfo"
+      },
+      "title": "Alternativas",
+      "type": "array"
+     },
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "de_sku": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "De Sku"
+     },
+     "en_sae": {
+      "items": {
+       "type": "string"
+      },
+      "title": "En Sae",
+      "type": "array"
+     },
+     "facturas": {
+      "title": "Facturas",
+      "type": "integer"
+     },
+     "formato_viejo": {
+      "title": "Formato Viejo",
+      "type": "boolean"
+     },
+     "unidad": {
+      "title": "Unidad",
+      "type": "string"
+     }
+    },
+    "required": [
+     "clave",
+     "en_sae",
+     "facturas",
+     "formato_viejo",
+     "unidad",
+     "alternativas"
+    ],
+    "title": "UnidadPropuesta",
     "type": "object"
    },
    "ValidationError": {
@@ -43256,6 +43866,189 @@
     "summary": "Ventas Sumario",
     "tags": [
      "reportes"
+    ]
+   }
+  },
+  "/api/v1/revision-catalogo": {
+   "get": {
+    "operationId": "listar_api_v1_revision_catalogo_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RevisionOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/revision-catalogo/decision": {
+   "post": {
+    "operationId": "decidir_api_v1_revision_catalogo_decision_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DecisionIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GrupoRevision"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Decidir",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/revision-catalogo/propuesta": {
+   "post": {
+    "description": "Cómo quedaría el grupo con lo que la persona cambió. No guarda nada.",
+    "operationId": "recalcular_api_v1_revision_catalogo_propuesta_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AjusteIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GrupoRevision"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Recalcular",
+    "tags": [
+     "productos"
     ]
    }
   },
