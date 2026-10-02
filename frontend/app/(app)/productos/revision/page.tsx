@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Ban, Check, RefreshCw, RotateCcw } from "lucide-react";
+import { AlertTriangle, Ban, Check, GitMerge, RefreshCw, RotateCcw } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input, Select, Textarea } from "@/components/ui/Field";
+import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SearchBox } from "@/components/ui/SearchBox";
 import { Spinner } from "@/components/ui/Spinner";
@@ -19,6 +21,7 @@ import { useMutation, useResource } from "@/lib/hooks";
 type S = components["schemas"];
 type Grupo = S["GrupoRevision"];
 type Revision = S["RevisionOut"];
+type Aplicado = S["AplicarOut"];
 type Ajustes = { queda_sku?: string; nombre_final?: string; claves?: Record<string, string>; quitar?: string[] };
 
 const WRITE = "producto:gestionar";
@@ -58,7 +61,11 @@ function ajustesDe(g: Grupo, aj: Ajustes): Ajustes {
 export default function RevisionCatalogoPage() {
   const { me } = useAuth();
   const puede = can(me, WRITE);
+  const toast = useToast();
+  const { post, loading: aplicando } = useMutation();
   const { data, loading, error, reload, setData } = useResource<Revision>(URL);
+  const [confirmar, setConfirmar] = useState(false);
+  const [resultado, setResultado] = useState<Aplicado | null>(null);
   const [filtro, setFiltro] = useState<(typeof FILTROS)[number]["k"]>("PENDIENTE");
   const [tipo, setTipo] = useState<"" | Grupo["tipo"]>("");
   const [q, setQ] = useState("");
@@ -82,6 +89,20 @@ export default function RevisionCatalogoPage() {
 
   useEffect(() => setMostrar(PAGINA), [filtro, tipo, q]);
 
+  const aprobados = (data?.grupos ?? []).filter((g) => g.estado === "APROBADO");
+  const productosQueSeUnen = aprobados.reduce((n, g) => n + g.propuesta.se_unen.length, 0);
+
+  async function aplicar() {
+    try {
+      const r = await post<Aplicado>(`${URL}/aplicar`, {});
+      setConfirmar(false);
+      setResultado(r);
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo aplicar");
+    }
+  }
+
   const cuenta = (k: string) =>
     k === "TODOS" ? data?.resumen.grupos ?? 0 : (data?.grupos ?? []).filter((g) => g.estado === k).length;
 
@@ -89,11 +110,23 @@ export default function RevisionCatalogoPage() {
     <div>
       <PageHeader
         title="Revisión del catálogo"
-        subtitle="Productos que son el mismo, calculados con los datos de este momento. Aprueba cómo queda cada grupo; unirlos es un paso aparte."
+        subtitle="Productos que son el mismo, calculados con los datos de este momento. Aprueba cómo queda cada grupo y luego «Aplicar aprobados» los une."
         actions={
-          <Button variant="secondary" onClick={reload} disabled={loading}>
-            <RefreshCw size={16} /> Recalcular
-          </Button>
+          <>
+            <Button variant="secondary" onClick={reload} disabled={loading}>
+              <RefreshCw size={16} /> Recalcular
+            </Button>
+            {puede && (
+              <Button
+                variant="success"
+                onClick={() => setConfirmar(true)}
+                disabled={loading || aprobados.length === 0}
+                title={aprobados.length === 0 ? "Aprueba primero algún grupo" : undefined}
+              >
+                <GitMerge size={16} /> Aplicar aprobados ({aprobados.length})
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -105,6 +138,10 @@ export default function RevisionCatalogoPage() {
           <li>Si el nombre trae gramaje o empaque (PAQ 454 GR, BOLSA) se vende por pieza, no por kilo.</li>
           <li>Otra variedad u otro gramaje es otro producto. Se queda el de nombre limpio; si no hay, el que más vende.</li>
           <li>Las remisiones en borrador de los que se unen no cambian; sólo las nuevas.</li>
+          <li>
+            Los productos con clave de formato viejo (CEBO-FRUT-109) son de Balles y Jubran: no entran a la
+            revisión{data ? ` (${data.resumen.exclusivos} productos)` : ""}.
+          </li>
         </ul>
       </div>
 
@@ -133,6 +170,56 @@ export default function RevisionCatalogoPage() {
         </div>
         <SearchBox value={q} onChange={setQ} placeholder="Buscar producto o SKU…" className="min-w-[220px] flex-1" />
       </div>
+
+      <ConfirmDialog
+        open={confirmar}
+        title={`Unir ${aprobados.length} grupos aprobados`}
+        message={`Se desactivan ${productosQueSeUnen} productos: sus precios, su catálogo de cliente y sus sinónimos pasan al que se queda, que toma el nombre y las claves aprobadas. Sus remisiones en borrador no cambian. Cada grupo se vuelve a revisar antes de unirse; el que haya cambiado se omite.`}
+        confirmLabel="Aplicar"
+        confirmVariant="success"
+        loading={aplicando}
+        onConfirm={aplicar}
+        onClose={() => setConfirmar(false)}
+      />
+      <Modal
+        open={resultado !== null}
+        onClose={() => setResultado(null)}
+        title="Resultado"
+        footer={<Button onClick={() => setResultado(null)}>Cerrar</Button>}
+      >
+        {resultado && (
+          <div className="space-y-3 text-sm">
+            <p>
+              <span className="font-medium">{resultado.aplicados.length}</span> grupos unidos
+              {resultado.omitidos.length > 0 && (
+                <>
+                  , <span className="font-medium text-amber-700">{resultado.omitidos.length}</span> omitidos
+                </>
+              )}
+              .
+            </p>
+            {resultado.aplicados.length > 0 && (
+              <ul className="list-disc space-y-0.5 pl-5">
+                {resultado.aplicados.map((a) => (
+                  <li key={a.grupo}>{a.nombre}</li>
+                ))}
+              </ul>
+            )}
+            {resultado.omitidos.length > 0 && (
+              <ul className="space-y-1">
+                {resultado.omitidos.map((o) => (
+                  <li key={o.grupo} className="flex gap-2 text-amber-700">
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                    <span>
+                      <span className="font-medium">{o.nombre}</span>: {o.motivo}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </Modal>
 
       {error && <p className="mb-4 text-sm text-danger">{error}</p>}
       {loading && !data ? (

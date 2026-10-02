@@ -78,6 +78,8 @@ class ResumenRevision(BaseModel):
     por_estado: dict[str, int]
     por_tipo: dict[str, int]
     aplicados: int
+    # Productos con clave de formato viejo (Balles y Jubran): fuera de la revisión.
+    exclusivos: int = 0
 
 
 class RevisionOut(BaseModel):
@@ -97,3 +99,25 @@ class AjusteIn(BaseModel):
 class DecisionIn(AjusteIn):
     estado: Literal["APROBADO", "RECHAZADO", "PENDIENTE"]
     nota: Optional[str] = Field(default=None, max_length=2000)
+
+
+class AplicarIn(BaseModel):
+    """Qué grupos aprobados unir. Sin lista = todos los aprobados vigentes."""
+    grupos: Optional[list[str]] = Field(default=None, max_length=500)
+
+
+class GrupoAplicado(BaseModel):
+    grupo: str
+    nombre: str
+    resumen: dict
+
+
+class GrupoOmitido(BaseModel):
+    grupo: str
+    nombre: str
+    motivo: str
+
+
+class AplicarOut(BaseModel):
+    aplicados: list[GrupoAplicado]
+    omitidos: list[GrupoOmitido]

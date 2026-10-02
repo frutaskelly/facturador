@@ -4976,6 +4976,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/revision-catalogo/aplicar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Aplicar
+         * @description Une los grupos aprobados. Cada uno se vuelve a calcular con los datos de
+         *     ahora: si cambió desde que se aprobó, o hoy tiene un bloqueo, se omite y se
+         *     dice por qué. Cada grupo va en su propio savepoint: uno que falla no tumba a
+         *     los demás.
+         */
+        post: operations["aplicar_api_v1_revision_catalogo_aplicar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/revision-catalogo/decision": {
         parameters: {
             query?: never;
@@ -6178,6 +6201,21 @@ export interface components {
             motivo?: string | null;
             /** Por Empresa */
             por_empresa?: Record<string, never>;
+        };
+        /**
+         * AplicarIn
+         * @description Qué grupos aprobados unir. Sin lista = todos los aprobados vigentes.
+         */
+        AplicarIn: {
+            /** Grupos */
+            grupos?: string[] | null;
+        };
+        /** AplicarOut */
+        AplicarOut: {
+            /** Aplicados */
+            aplicados: components["schemas"]["GrupoAplicado"][];
+            /** Omitidos */
+            omitidos: components["schemas"]["GrupoOmitido"][];
         };
         /**
          * ArticuloSaeEmpresaOut
@@ -8868,6 +8906,15 @@ export interface components {
             /** Uso Cfdi */
             uso_cfdi?: string | null;
         };
+        /** GrupoAplicado */
+        GrupoAplicado: {
+            /** Grupo */
+            grupo: string;
+            /** Nombre */
+            nombre: string;
+            /** Resumen */
+            resumen: Record<string, never>;
+        };
         /**
          * GrupoIn
          * @description Un grupo tal como lo reporta el bot desde su config.
@@ -8888,6 +8935,15 @@ export interface components {
             perfil?: string | null;
             /** Rol */
             rol?: string | null;
+        };
+        /** GrupoOmitido */
+        GrupoOmitido: {
+            /** Grupo */
+            grupo: string;
+            /** Motivo */
+            motivo: string;
+            /** Nombre */
+            nombre: string;
         };
         /** GrupoOut */
         GrupoOut: {
@@ -12739,6 +12795,11 @@ export interface components {
         ResumenRevision: {
             /** Aplicados */
             aplicados: number;
+            /**
+             * Exclusivos
+             * @default 0
+             */
+            exclusivos: number;
             /** Grupos */
             grupos: number;
             /** Por Estado */
@@ -23460,6 +23521,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RevisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    aplicar_api_v1_revision_catalogo_aplicar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AplicarIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AplicarOut"];
                 };
             };
             /** @description Validation Error */

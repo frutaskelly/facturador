@@ -2,8 +2,8 @@
 
 Reemplaza la hoja de Excel del 30-sep-2026, que se quedaba vieja en cuanto se
 unía algo. Los grupos se calculan en cada consulta (`services/revision_catalogo`)
-y aquí sólo se guarda lo que una persona decidió de cada uno. Unir lo aprobado
-es un paso aparte.
+y aquí se guarda lo que una persona decidió de cada uno. «Aplicar aprobados»
+une los grupos aprobados (`services/aplicar_revision`).
 
 Prefijo propio (`/revision-catalogo`) y no `/productos/...`: bajo `/productos`
 la ruta caería en `/{producto_id}` y respondería 422 por no ser UUID.
@@ -23,6 +23,10 @@ from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import RevisionCatalogo
 from ...schemas.revision_catalogo import (
     AjusteIn,
+    AplicarIn,
+    AplicarOut,
+    GrupoAplicado,
+    GrupoOmitido,
     DecisionIn,
     DecisionOut,
     GrupoRevision,
@@ -31,7 +35,8 @@ from ...schemas.revision_catalogo import (
     RevisionOut,
     UnidadMiembro,
 )
-from ...services.revision_catalogo import Catalogo, ProductoRev, armar_grupos, firma, proponer
+from ...services.aplicar_revision import aplicar_grupo
+from ...services.revision_catalogo import Catalogo, ProductoRev, armar_grupos, es_exclusivo, firma, proponer
 
 router = APIRouter(prefix="/revision-catalogo", tags=["productos"])
 
@@ -134,6 +139,16 @@ def _grupo(db: Session, ctx: AuthContext, clave: str):
     return g, cat
 
 
+def _problemas(prop: dict) -> list[str]:
+    """Lo que impide aprobar o aplicar una propuesta."""
+    problemas = list(prop["bloqueos"])
+    problemas += [f"{u['unidad']}: falta una clave que exista en SAE"
+                  for u in prop["unidades"] if not u["clave"] or not u["en_sae"]]
+    if not prop["unidades"]:
+        problemas.append("No puede quedar sin ninguna unidad")
+    return problemas
+
+
 def _validar_ajustes(g: dict, cat: Catalogo, body: AjusteIn) -> dict:
     skus = {p.sku for p in g["miembros"]}
     if body.queda_sku and body.queda_sku not in skus:
@@ -166,6 +181,7 @@ def listar(
         grupos=len(grupos), productos=sum(len(g.miembros) for g in grupos),
         por_estado=dict(por_estado), por_tipo=dict(por_tipo),
         aplicados=sum(1 for r in filas.values() if r.estado == "APLICADO"),
+        exclusivos=sum(1 for p in prods if es_exclusivo(p)),
     ))
 
 
@@ -201,11 +217,7 @@ def decidir(
     aj = _validar_ajustes(g, cat, body)
     prop = proponer(g["miembros"], cat, tipo=g["tipo"], raiz=g["raiz"], **aj)
     if body.estado == "APROBADO":
-        problemas = list(prop["bloqueos"])
-        problemas += [f"{u['unidad']}: falta una clave que exista en SAE"
-                      for u in prop["unidades"] if not u["clave"] or not u["en_sae"]]
-        if not prop["unidades"]:
-            problemas.append("No puede quedar sin ninguna unidad")
+        problemas = _problemas(prop)
         if problemas:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, " · ".join(problemas))
     if row is None:
@@ -221,3 +233,48 @@ def decidir(
     db.commit()
     db.refresh(row)
     return _armar(g, cat, row)
+
+
+@router.post("/aplicar", response_model=AplicarOut)
+def aplicar(
+    body: AplicarIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Une los grupos aprobados. Cada uno se vuelve a calcular con los datos de
+    ahora: si cambió desde que se aprobó, o hoy tiene un bloqueo, se omite y se
+    dice por qué. Cada grupo va en su propio savepoint: uno que falla no tumba a
+    los demás."""
+    prods, cat = _cargar(db, ctx.tenant_id)
+    actuales = {g["clave"]: g for g in armar_grupos(prods, cat)}
+    filas = [r for r in _decisiones(db, ctx.tenant_id).values() if r.estado == "APROBADO"
+             and (body.grupos is None or r.grupo in body.grupos)]
+    aplicados, omitidos = [], []
+    for row in sorted(filas, key=lambda r: r.grupo):
+        nombre = (row.propuesta or {}).get("nombre_final") or row.grupo
+        g = actuales.get(row.grupo)
+        if g is None:
+            omitidos.append(GrupoOmitido(grupo=row.grupo, nombre=nombre, motivo="El grupo ya no existe"))
+            continue
+        if firma(g["miembros"]) != row.firma:
+            omitidos.append(GrupoOmitido(grupo=row.grupo, nombre=nombre,
+                                         motivo="El grupo cambió desde que se aprobó: revísalo otra vez"))
+            continue
+        prop = proponer(g["miembros"], cat, tipo=g["tipo"], raiz=g["raiz"], **_ajustes(row))
+        problemas = _problemas(prop)
+        if problemas:
+            omitidos.append(GrupoOmitido(grupo=row.grupo, nombre=nombre, motivo=" · ".join(problemas)))
+            continue
+        try:
+            with db.begin_nested():
+                resumen = aplicar_grupo(db, ctx.tenant_id, g["miembros"], prop, ctx.user_id)
+                row.estado = "APLICADO"
+                row.aplicado_at = datetime.now(timezone.utc)
+                row.aplicado_resumen = {**resumen, "por": ctx.email}
+                db.flush()
+        except Exception as exc:  # noqa: BLE001 — se reporta y sigue con los demás
+            omitidos.append(GrupoOmitido(grupo=row.grupo, nombre=nombre, motivo=f"No se pudo unir: {exc}"[:500]))
+            continue
+        aplicados.append(GrupoAplicado(grupo=row.grupo, nombre=prop["nombre_final"], resumen=resumen))
+    db.commit()
+    return AplicarOut(aplicados=aplicados, omitidos=omitidos)

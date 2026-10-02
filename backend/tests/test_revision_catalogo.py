@@ -13,7 +13,7 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
-from app.models import ClaveSae, Membership, Producto, Role, Tenant, User
+from app.models import ClaveSae, ListaPrecios, Membership, Precio, Producto, ProductoAlias, Role, Tenant, User
 from app.services.revision_catalogo import (Catalogo, ProductoRev, armar_grupos, es_empaque, proponer,
                                             raiz_y_unidad)
 
@@ -75,21 +75,20 @@ def _grupo(grupos, clave):
 
 def test_la_espinaca_queda_en_un_producto_con_dos_unidades():
     g = _grupo(armar_grupos(_espinacas(), CAT), "R:ESPINACA")
-    assert g["tipo"] == "UNIDADES" and len(g["miembros"]) == 4
+    # 00010963 (ESPI-FRUT-193) es de Balles y Jubran: se queda fuera
+    assert g["tipo"] == "UNIDADES" and len(g["miembros"]) == 3
     pr = proponer(g["miembros"], CAT, tipo=g["tipo"], raiz=g["raiz"])
     assert pr["queda_sku"] == "00000323"          # el que más vende
     assert pr["nombre_final"] == "ESPINACA"       # sin «MANOJO DE 1 KG»
     assert {u["unidad"]: u["clave"] for u in pr["unidades"]} == {"KILO": "ESPINACASKG", "PIEZA": "ESPINACAPZA"}
-    # KILO: gana la de formato nuevo y más facturada; la vieja queda como alternativa
-    kilo = pr["unidades"][0]
-    assert kilo["unidad"] == "KILO" and [a["clave"] for a in kilo["alternativas"]] == ["ESPI-FRUT-193"]
-    assert sorted(pr["se_unen"]) == ["00010761", "00010963", "00010965"]
+    assert sorted(pr["se_unen"]) == ["00010761", "00010965"]
     assert not pr["bloqueos"]
     assert any("00010761" in a for a in pr["alertas"])   # sus borradores no se mueven
 
 
 def test_la_espinaca_baby_es_otro_producto_y_deja_de_venderse_por_kilo():
-    g = _grupo(armar_grupos(_espinacas(), CAT), "R:ESPINACA BABY ORG PAQ 454GR")
+    # su gemelo 00010964 (ESPI-FRUT-2608) es exclusivo: queda sola, como empaque por kilo
+    g = _grupo(armar_grupos(_espinacas(), CAT), "E:00000106")
     pr = proponer(g["miembros"], CAT, tipo=g["tipo"], raiz=g["raiz"])
     assert pr["quitar"] == ["KILO"] and pr["unidad_base"] == "PIEZA"
     assert [u["unidad"] for u in pr["unidades"]] == ["PIEZA"]
@@ -98,12 +97,20 @@ def test_la_espinaca_baby_es_otro_producto_y_deja_de_venderse_por_kilo():
 
 
 def test_gemelos_identicos_se_queda_el_que_vende():
-    ms = [_p("00010916", "CHAYOTE", "KILO", "CHAY-FRUT-119", alta=date(2026, 9, 22)),
+    ms = [_p("00010916", "CHAYOTE", "KILO", "CHAYOTEKG", alta=date(2026, 9, 22)),
           _p("00000300", "CHAYOTE", "KILO", "CHAYOTESINESPIKG", ventas=401)]
     g = armar_grupos(ms, CAT)[0]
     assert g["tipo"] == "GEMELOS"
     pr = proponer(g["miembros"], CAT, tipo=g["tipo"], raiz=g["raiz"])
     assert pr["queda_sku"] == "00000300" and pr["unidades"][0]["clave"] == "CHAYOTESINESPIKG"
+
+
+def test_los_exclusivos_de_balles_y_jubran_no_se_unen():
+    ms = [_p("00000300", "CEBOLLA BLANCA", "KILO", "CEBOLLABLANCAKG", ventas=605),
+          _p("00010900", "CEBOLLA BLANCA", "KILO", "CEBO-FRUT-109"),
+          _p("00010901", "ZANAHORIA", "KILO", "ZANAHORIAKG",
+             {"KILO": 1, "CAJA": {"factor": 20, "clave_sae": "ZANA-FRUT-508"}})]
+    assert armar_grupos(ms, CAT) == []
 
 
 def test_gramaje_distinto_no_se_agrupa():
@@ -162,20 +169,34 @@ def env(db_engine):
 
         admin = _user("ADMIN", "admin")
         tomador = _user("TOMADOR", "tomador")      # ve productos pero no gestiona el catálogo
+        prods = {}
         for sku, nombre, base, clave, pres in (
             ("00000323", "ESPINACA MANOJO DE 1 KG", "KILO", "ESPINACASKG",
              {"KILO": 1, "PIEZA": {"factor": 1, "clave_sae": "ESPINACAPZA"}}),
             ("00010963", "ESPINACA MANOJO DE 1 KG", "KILO", "ESPI-FRUT-193", {"KILO": 1}),
             ("00010965", "ESPINACA PZA", "PIEZA", "ESPINACAPZA", {"PIEZA": 1}),
+            ("00010091", "GRANOLA BOLSA 500 GR", "KILO", "GRANOLAKG", {"KILO": 1}),
         ):
-            db.add(Producto(tenant_id=t.id, sku=sku, nombre=nombre, unidad_base=base, presentaciones=pres,
-                            clave_sae=clave, clave_sat="50406200", unidad_sat="KGM"))
-        for clave in ("ESPINACASKG", "ESPINACAPZA", "ESPI-FRUT-193"):
+            prods[sku] = Producto(tenant_id=t.id, sku=sku, nombre=nombre, unidad_base=base, presentaciones=pres,
+                                  clave_sae=clave, clave_sat="50406200", unidad_sat="KGM",
+                                  presentacion_default=base)
+            db.add(prods[sku])
+        for clave in ("ESPINACASKG", "ESPINACAPZA", "ESPI-FRUT-193", "GRANOLAKG"):
             db.add(ClaveSae(tenant_id=t.id, empresa="02", clave=clave, descripcion=clave, activa=True))
+        l1 = ListaPrecios(tenant_id=t.id, codigo="L1", nombre="Hospitales")
+        l2 = ListaPrecios(tenant_id=t.id, codigo="L2", nombre="Bienestar")
+        db.add_all([l1, l2]); db.flush()
+        for lista, sku, pres, precio in ((l1, "00000323", "KILO", 40), (l2, "00010963", "KILO", 38),
+                                         (l1, "00010963", "KILO", 99), (l1, "00010965", "PIEZA", 5),
+                                         (l1, "00010091", "KILO", 90)):
+            db.add(Precio(tenant_id=t.id, lista_id=lista.id, producto_id=prods[sku].id, presentacion=pres,
+                          precio_unitario=precio))
+        db.add(ProductoAlias(tenant_id=t.id, producto_id=prods["00010965"].id, alias="espinaca en pieza",
+                             alias_normalizado="espinaca en pieza", origen="MANUAL"))
         db.commit()
-        yield {"admin": admin, "tomador": tomador, "tenant_id": t.id}
+        yield {"admin": admin, "tomador": tomador, "tenant_id": t.id, "l1": l1.id, "l2": l2.id}
     finally:
-        for table in ("revision_catalogo", "claves_sae", "productos"):
+        for table in ("revision_catalogo", "precios", "listas_precios", "producto_alias", "claves_sae", "productos"):
             for tid in created["tenants"]:
                 db.execute(text(f"DELETE FROM {table} WHERE tenant_id = :tid"), {"tid": tid})
         for mid in created["memberships"]:
@@ -273,3 +294,88 @@ def test_grupo_que_ya_no_existe_es_404(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
     r = client.post(f"{URL}/decision", headers=h, json={"grupo": "R:NO EXISTE", "estado": "RECHAZADO"})
     assert r.status_code == 404
+
+
+
+# ── aplicar lo aprobado ──
+
+def _prod(sku, tenant_id):
+    with SessionLocal() as s:
+        p = s.query(Producto).filter(Producto.tenant_id == tenant_id, Producto.sku == sku).one()
+        precios = {(str(x.lista_id), x.presentacion): float(x.precio_unitario)
+                   for x in s.query(Precio).filter(Precio.producto_id == p.id)}
+        alias = {(a.alias_normalizado, a.presentacion) for a in s.query(ProductoAlias).filter(ProductoAlias.producto_id == p.id)}
+        return p, precios, alias
+
+
+def test_aplicar_une_la_espinaca(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    assert client.post(f"{URL}/decision", headers=h,
+                       json={"grupo": "R:ESPINACA", "estado": "APROBADO"}).status_code == 200
+    r = client.post(f"{URL}/aplicar", headers=h, json={})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert [a["grupo"] for a in out["aplicados"]] == ["R:ESPINACA"] and not out["omitidos"]
+
+    t, l1, l2 = env["tenant_id"], str(env["l1"]), str(env["l2"])
+    queda, precios, alias = _prod("00000323", t)
+    assert queda.nombre == "ESPINACA" and queda.activo and queda.unidad_base == "KILO"
+    assert queda.clave_sae == "ESPINACASKG"
+    assert queda.presentaciones["PIEZA"]["clave_sae"] == "ESPINACAPZA"
+    # se copian los precios que faltaban (el PIEZA de 00010965); los de 00010963,
+    # exclusivo de Balles y Jubran, no se tocan
+    assert precios == {(l1, "KILO"): 40.0, (l1, "PIEZA"): 5.0}
+    # los sinónimos se mudan y los nombres viejos se quedan como sinónimos
+    assert ("espinaca en pieza", None) in alias
+    assert ("espinaca pza", "PIEZA") in alias and ("espinaca manojo de 1 kg", None) in alias
+    assert client.get(URL, headers=h).json()["resumen"]["exclusivos"] == 1
+    p, _, _ = _prod("00010965", t)
+    assert not p.activo and p.clave_sae              # desactivado con su clave
+    p, _, _ = _prod("00010963", t)
+    assert p.activo and p.clave_sae == "ESPI-FRUT-193"
+    # ya no aparece como pendiente y no se aplica dos veces
+    assert not [g for g in client.get(URL, headers=h).json()["grupos"] if g["clave"] == "R:ESPINACA"]
+    assert client.post(f"{URL}/aplicar", headers=h, json={}).json() == {"aplicados": [], "omitidos": []}
+
+
+def test_aplicar_empaque_pasa_a_pieza_con_su_precio(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    grupo = "E:00010091"
+    assert client.post(f"{URL}/decision", headers=h, json={"grupo": grupo, "estado": "APROBADO"}).status_code == 200
+    out = client.post(f"{URL}/aplicar", headers=h, json={"grupos": [grupo]}).json()
+    assert out["aplicados"][0]["resumen"]["precios_movidos"] == 1
+    p, precios, _ = _prod("00010091", env["tenant_id"])
+    assert p.unidad_base == "PIEZA" and p.presentaciones == {"PIEZA": 1} and p.clave_sae == "GRANOLAKG"
+    assert p.unidad_sat == "H87" and p.presentacion_default == "PIEZA"
+    assert precios == {(str(env["l1"]), "PIEZA"): 90.0}
+
+
+def test_quitar_una_unidad_borra_sus_precios_y_lo_deja_en_el_resumen(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    assert client.post(f"{URL}/decision", headers=h, json={
+        "grupo": "R:ESPINACA", "estado": "APROBADO", "quitar": ["PIEZA"]}).status_code == 200
+    out = client.post(f"{URL}/aplicar", headers=h, json={}).json()
+    res = out["aplicados"][0]["resumen"]
+    p, precios, _ = _prod("00000323", env["tenant_id"])
+    assert p.presentaciones == {"KILO": 1}
+    assert all(u == "KILO" for _, u in precios)          # el PIEZA de 00010965 no se copió
+    assert res["antes"]["presentaciones"]["PIEZA"]["clave_sae"] == "ESPINACAPZA"
+
+
+def test_aplicar_omite_lo_que_cambio_desde_la_aprobacion(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    assert client.post(f"{URL}/decision", headers=h,
+                       json={"grupo": "R:ESPINACA", "estado": "APROBADO"}).status_code == 200
+    with SessionLocal() as s:
+        s.add(Producto(tenant_id=env["tenant_id"], sku="00011999", nombre="ESPINACA", unidad_base="KILO",
+                       presentaciones={"KILO": 1}, clave_sae="ESPINACASKG", clave_sat="50406200", unidad_sat="KGM"))
+        s.commit()
+    out = client.post(f"{URL}/aplicar", headers=h, json={}).json()
+    assert not out["aplicados"] and "cambió" in out["omitidos"][0]["motivo"]
+    p, _, _ = _prod("00010965", env["tenant_id"])
+    assert p.activo                                       # no se tocó nada
+
+
+def test_aplicar_exige_gestionar_el_catalogo(client, env, auth_as):
+    auth_as(env["tomador"]); h = _hdr(env["tomador"])
+    assert client.post(f"{URL}/aplicar", headers=h, json={}).status_code == 403
