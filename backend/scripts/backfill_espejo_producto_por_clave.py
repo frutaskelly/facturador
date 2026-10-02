@@ -28,9 +28,11 @@ lotes):
      cuando la clave es de 00010472 AJO KG, ~4.9k; o el catálogo cambió
      después). El endpoint NO las cambia: una partida ligada conserva su
      producto en cada reenvío, salvo que una remisión ligada diga otra cosa o
-     que el SAE la llame como otro gemelo de la clave («gana el SAE», nivel
-     0_nombre_sae): esas salen marcadas «solo» y el siguiente reenvío las
-     mueve. Siempre se listan; solo con --recalcular-ligadas se re-apuntan, y solo
+     que el SAE nombre a gemelos activos de la clave y la partida no esté en
+     uno de ellos («gana el SAE», nivel 0_nombre_sae; también si está en un
+     desactivado o en uno de otra clave que se llama igual): esas salen
+     marcadas «solo» y el siguiente reenvío las mueve. Siempre se listan;
+     solo con --recalcular-ligadas se re-apuntan, y solo
      las de decisión fuerte (con producto y no débiles). Es la vía a propósito
      para que una corrección del dueño (dar de alta el gemelo correcto en el
      catálogo del cliente, una fila nueva en la tabla de claves) llegue a lo

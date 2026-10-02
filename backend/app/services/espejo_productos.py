@@ -20,18 +20,21 @@ clave quedan con el mismo producto). Gana el primer nivel que decida:
      factura es la verdad final). Solo en claves gemelas —dos o más productos
      ACTIVOS la traen—: si la descripción de la partida del SAE se llama como
      uno o más de ellos (`norm_nombre`: sin acentos ni palabras de unidad),
-     todo lo que NO se llama así queda fuera —los otros gemelos, el producto
-     de la remisión ligada, la decisión previa— y el resto de la regla decide
-     entre lo que queda. Si queda un solo gemelo, gana: TOMATEVERDELIMKG
-     dice «TOMATE VERDE LIMPIO KG» y es el 00010049 TOMATE VERDE LIMPIO,
-     aunque el uso dijera 00010048 TOMATE VERDE GRANDE Y LIMPIO. Si quedan
-     varios (ESPINACAPZA: «ESPINACA PZA» son el 00010761 y el 00010965), se
-     desempata entre ellos y el MANOJO DE 1 KG ya no compite. Lo que el SAE
-     también nombra no se toca: una decisión previa o una remisión con un
-     producto que se llama igual (un gemelo desactivado) se respeta. Una
-     clave de un solo producto activo no cambia (AJOKG sigue siendo el AJO de
-     la remisión ligada), ni la que manda la tabla de claves distintas por
-     empresa, y un nombre que no casa con ningún gemelo no cambia nada.
+     los candidatos se RESTRINGEN a esos gemelos activos nombrados. Si queda
+     uno, gana sin más: TOMATEVERDELIMKG dice «TOMATE VERDE LIMPIO KG» y es
+     el 00010049 TOMATE VERDE LIMPIO, aunque el uso dijera 00010048 TOMATE
+     VERDE GRANDE Y LIMPIO, y aunque la remisión ligada o la decisión previa
+     traigan otro producto — también uno que se llame igual pero no sea
+     gemelo activo de la clave: un gemelo desactivado (00011014 HIERBABUENA)
+     o el que trae OTRA clave (00010058 CALABAZA DE CASTILLA, de
+     CALABAZACASTIKG, en partidas CALABAZACASTILKG; revisión del 2-oct). Si
+     quedan varios (ESPINACAPZA: «ESPINACA PZA» son el 00010761 y el
+     00010965), el resto de la regla —remisión ligada, decisión previa,
+     catálogo, uso, sku— desempata SOLO entre ellos y el MANOJO DE 1 KG ya no
+     compite. Una clave de un solo producto activo no cambia (AJOKG sigue
+     siendo el AJO de la remisión ligada), ni la que manda la tabla de claves
+     distintas por empresa, y un nombre que no casa con ningún gemelo activo
+     no cambia nada.
   1. REMISIÓN LIGADA. La remisión ligada a ESTA factura (`remisiones.factura_id`)
      trae uno de los productos que la clave puede ser: los que la traen (en
      `clave_sae` o en una presentación, activos o no) y el que el catálogo del
@@ -40,9 +43,11 @@ clave quedan con el mismo producto). Gana el primer nivel que decida:
      cuando lo hay (`codigo_cliente_de`), así que la partida AJOKG de una
      remisión con el 00000284 AJO es ese AJO aunque AJOKG sea la clave del
      00010472 AJO KG (revisión del 2-oct: con la clave única primero, lo
-     remisionado y lo facturado quedaban con productos distintos).
+     remisionado y lo facturado quedaban con productos distintos). Si el
+     nivel 0 dejó varios nombrados, solo cuenta si trae a uno de ellos.
   2. LA DECISIÓN PREVIA: el producto que la partida ya tenía en esa clave.
-     Ver «una partida ligada no cambia sola» abajo.
+     Ver «una partida ligada no cambia sola» abajo. Igual que el 1: con
+     varios nombrados, solo si es uno de ellos.
   3. La clave significa OTRA cosa en esa empresa de SAE: manda la tabla
      `CLAVES_DISTINTAS_POR_EMPRESA` (CALABAZACASTILKG en la 03). Solo en el
      inquilino dueño del SAE (`ESPEJO_SAE_TENANT_ID`): los skus son de cada
@@ -76,9 +81,10 @@ entera. Por eso el nivel 2 conserva el producto que la factura ya tenía en esa
 clave, sea o no de los que hoy traen la clave y aunque hoy esté desactivado o
 borrado (el espejo viejo ligaba borrados por código; eso tampoco se corrige
 con un abono). Solo lo mueven dos cosas de ESA factura: una remisión ligada y,
-desde «gana el SAE», el nombre del artículo cuando nombra a OTRO gemelo de la
-clave (nivel 0) — el reenvío la pasa al gemelo que el SAE nombra, y de ahí no
-se vuelve a mover mientras el SAE lo siga llamando igual. Las facturas NUEVAS
+desde «gana el SAE», el nombre del artículo cuando nombra a gemelos activos de
+la clave y la partida no está en uno de ellos (nivel 0) — el reenvío la pasa
+al gemelo que el SAE nombra, y de ahí no se vuelve a mover mientras el SAE lo
+siga llamando igual. Las facturas NUEVAS
 sí van por la clave (SANDIAPZ al sobreviviente de la fusión, que «únicamente
 impacta a nuevas remisiones»). Re-decidir lo ya
 ligado (un cambio en el catálogo, una fila nueva en la tabla de claves) es a
@@ -147,15 +153,28 @@ _UNIDADES_EN_NOMBRE = {"KG", "KGS", "KILO", "KILOS", "PZ", "PZA", "PZAS", "PIEZA
                        "MJ", "MANOJO", "MAZO", "LT", "LTS", "LITRO", "GR", "GRS", "G"}
 
 
+def _sin_unidad(t: str) -> str:
+    """Una palabra sin su unidad: «KG» → «», «25KG» → «25» (la unidad pegada
+    al número; revisión del 2-oct: «FRIJOL NEGRO 25KG» del SAE y «FRIJOL NEGRO
+    25 KG» del catálogo no casaban). El número se queda: 25 KG no es KILO."""
+    if t in _UNIDADES_EN_NOMBRE:
+        return ""
+    num = t.rstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    if num and num.isdigit() and t[len(num):] in _UNIDADES_EN_NOMBRE:
+        return num
+    return t
+
+
 def norm_nombre(v: Optional[str]) -> str:
     """El nombre de un artículo para compararlo con el de otro: sin acentos
-    (PIÑA → PINA), mayúsculas, solo palabras y sin las de unidad. «TOMATE
-    VERDE LIMPIO KG» del SAE y «TOMATE VERDE LIMPIO» del catálogo son lo
-    mismo. Lo usan el nivel 0 de la regla y el ⚠ del backfill: una sola copia
-    para que el reporte marque exactamente lo que la regla no resuelve."""
+    (PIÑA → PINA), mayúsculas, solo palabras y sin las de unidad, sueltas o
+    pegadas a un número. «TOMATE VERDE LIMPIO KG» del SAE y «TOMATE VERDE
+    LIMPIO» del catálogo son lo mismo. Lo usan el nivel 0 de la regla y el ⚠
+    del backfill: una sola copia para que el reporte marque exactamente lo que
+    la regla no resuelve."""
     s = unicodedata.normalize("NFKD", str(v or "")).encode("ascii", "ignore").decode("ascii")
     s = "".join(ch if ch.isalnum() else " " for ch in s.upper())
-    return " ".join(t for t in s.split() if t not in _UNIDADES_EN_NOMBRE)
+    return " ".join(t for t in map(_sin_unidad, s.split()) if t)
 
 
 def norm_empresa(v: Optional[str]) -> str:
@@ -373,9 +392,10 @@ class IndiceClaves:
 
     def nombrados(self, clave: str, nombres) -> dict:
         """El nivel 0: de los gemelos ACTIVOS de la clave, los que se llaman
-        como el SAE llama a la partida. Vacío si la clave no es gemela (uno o
-        ningún activo la trae) o si el nombre no casa con ninguno: entonces la
-        regla sigue como si no hubiera nombre."""
+        como el SAE llama a la partida — los únicos candidatos desde ahí.
+        Vacío si la clave no es gemela (uno o ningún activo la trae) o si el
+        nombre no casa con ninguno: entonces la regla sigue como si no hubiera
+        nombre."""
         if not nombres:
             return {}
         cands = self.candidatos(clave)
@@ -700,18 +720,26 @@ def resolver_claves(fuentes: FuentesBD, *, factura_id, cliente_id, empresa, seri
             posibles = ({pid_d: distinta.presentacion or indice.todos(k).get(pid_d)
                          or indice.base(pid_d)} if pid_d else {})
         else:
-            posibles = dict(indice.todos(k))
-            if rem:
-                cod = catalogo().codigos.get(k)
-                if cod is not None and indice.vivo(cod):
-                    posibles.setdefault(cod, None)
-            # 0. El nombre del SAE: entre gemelos, lo que no se llama como
-            # dice la factura queda fuera de todo lo que sigue.
+            # 0. El nombre del SAE: entre gemelos ACTIVOS, los candidatos se
+            # restringen a los que se llaman como dice la factura. Uno solo
+            # gana sin más; con varios, lo que sigue desempata entre ellos.
+            # Un producto que se llama igual pero no es gemelo activo (uno
+            # desactivado, el que trae otra clave) ya no entra ni por la
+            # remisión ligada ni por la decisión previa (revisión del 2-oct).
             nombrados = indice.nombrados(k, nombres)
             if nombrados:
-                posibles = {pid: pres for pid, pres in posibles.items()
-                            if indice.se_llama(pid, nombres)}
                 fuera = _por_sku(indice, set(indice.candidatos(k)) - set(nombrados))
+                if len(nombrados) == 1:
+                    ((pid, pres),) = nombrados.items()
+                    out[k] = Resolucion(pid, pres, NOMBRE_SAE, competidores=(pid,) + fuera)
+                    continue
+                posibles = dict(nombrados)
+            else:
+                posibles = dict(indice.todos(k))
+                if rem:
+                    cod = catalogo().codigos.get(k)
+                    if cod is not None and indice.vivo(cod):
+                        posibles.setdefault(cod, None)
 
         # 1. La remisión ligada a esta factura.
         en_rem = {pid: pres for pid, pres in posibles.items() if pid in rem}
@@ -725,9 +753,10 @@ def resolver_claves(fuentes: FuentesBD, *, factura_id, cliente_id, empresa, seri
 
         # 2. Lo que la partida ya tenía, sea o no de los posibles y aunque hoy
         # esté desactivado o borrado: un reenvío no corrige la historia —
-        # salvo que el SAE la llame como otro gemelo (nivel 0).
+        # salvo que el SAE nombre a gemelos activos y no sea uno de ellos
+        # (nivel 0).
         pid_p = prev.get(k)
-        if pid_p is not None and (not nombrados or indice.se_llama(pid_p, nombres)):
+        if pid_p is not None and (not nombrados or pid_p in nombrados):
             pres_p = posibles[pid_p] if pid_p in posibles else indice.todos(k).get(pid_p)
             out[k] = Resolucion(pid_p, pres_p, PREVIA)
             continue
@@ -738,12 +767,8 @@ def resolver_claves(fuentes: FuentesBD, *, factura_id, cliente_id, empresa, seri
                       else Resolucion(None, None, OVERRIDE_SIN_PRODUCTO))
             continue
 
-        # 0. (sin remisión ni decisión previa que lo diga) el único gemelo que
-        # el SAE nombra, o el desempate entre los que nombra.
-        if len(nombrados) == 1:
-            ((pid, pres),) = nombrados.items()
-            out[k] = Resolucion(pid, pres, NOMBRE_SAE, competidores=(pid,) + fuera)
-            continue
+        # 0. (sin remisión ni decisión previa entre los nombrados) el
+        # desempate entre los gemelos que el SAE nombra.
         if nombrados:
             pendientes[k] = (nombrados, None, fuera)
             continue

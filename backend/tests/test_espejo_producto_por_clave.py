@@ -858,6 +858,13 @@ def test_norm_nombre_quita_acentos_signos_y_unidades():
     assert ep.norm_nombre("ESPINACA MANOJO DE 1 KG") == "ESPINACA DE 1"
     assert ep.norm_nombre("CHILE  JALAPEÑO (1/2)") == "CHILE JALAPENO 1 2"
     assert ep.norm_nombre(None) == ep.norm_nombre("KG") == ""
+    # la unidad pegada al número también se va; el número se queda (revisión
+    # del 2-oct: «25KG» y «25 KG» no casaban)
+    assert ep.norm_nombre("FRIJOL NEGRO 25KG") == ep.norm_nombre("FRIJOL NEGRO 25 KG") \
+        == "FRIJOL NEGRO 25"
+    assert ep.norm_nombre("FRIJOL NEGRO 25KG") != ep.norm_nombre("FRIJOL NEGRO KG")
+    assert ep.norm_nombre("AGUA 1LT") == ep.norm_nombre("AGUA 1 LT") == "AGUA 1"
+    assert ep.norm_nombre("V8 4X4") == "V8 4X4"           # sin unidad, no se toca
 
 
 def test_gana_el_sae_los_cinco_casos(client, env, auth_as):
@@ -978,9 +985,11 @@ def test_gana_el_sae_mueve_lo_ligado_en_el_reenvio_y_luego_ya_no(client, env, au
     for _ in range(2):
         _espejo(hk, client, folio=730, claves=claves, uuid_f=u, desc=_SAE, saldo="5.00")
         assert _lineas_bd(f["id"]) == movida
-    # y con la decisión previa ya en el gemelo nombrado, decide la previa
+    # y de ahí: el único nombrado gana por el nombre, y entre los dos
+    # «ESPINACA PZA» la decisión previa (que ya es uno de ellos)
     res = _resolver(env, claves, desc=_SAE, factura_id=f["id"])
-    assert {r.regla for r in res.values()} == {ep.PREVIA}
+    assert {k: r.regla for k, r in res.items()} == {
+        k: (ep.PREVIA if k == "ESPINACAPZA" else ep.NOMBRE_SAE) for k in claves}
 
 
 def test_gana_el_sae_tambien_contra_la_remision_ligada(client, env, auth_as):
@@ -1004,22 +1013,160 @@ def test_gana_el_sae_tambien_contra_la_remision_ligada(client, env, auth_as):
     assert (sin_nombre.producto_id, sin_nombre.regla) == (grande, ep.REMISION)
 
 
-def test_gana_el_sae_respeta_lo_que_el_sae_tambien_nombra(client, env, auth_as):
-    """El nombre solo saca lo que la factura contradice. Una partida ligada a
-    un gemelo DESACTIVADO que se llama igual que el artículo del SAE se queda
-    como está en el reenvío (un abono no corrige la historia); una factura
-    nueva va al gemelo activo que el SAE nombra."""
-    _prod(env, "00000353", "LIMON", "LIMONSINSEMILLKG")
-    sin_semilla = _prod(env, "00000352", "LIMON SIN SEMILLA", "LIMONSINSEMILLKG")
-    viejo = _prod(env, "00011352", "LIMON SIN SEMILLA KG", "LIMONSINSEMILLKG", activo=False)
+def _remision_ligada_bd(env, factura_id, pid):
+    """Una remisión ligada a la factura (`remisiones.factura_id`), directo en
+    la base: la API no remisiona un producto desactivado."""
+    db = SessionLocal()
+    try:
+        rem = Remision(tenant_id=env["tenant"], folio_interno=f"RL-{uuid.uuid4().hex[:6]}",
+                       cliente_facturacion_id=env["cli"], factura_id=factura_id)
+        db.add(rem); db.flush()
+        db.add(LineaRemision(tenant_id=env["tenant"], remision_id=rem.id, numero_linea=1,
+                             producto_id=pid, cantidad_solicitada=1, precio_unitario=10))
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_gana_el_sae_si_queda_un_gemelo_activo_gana_sin_mas(client, env, auth_as):
+    """Revisión del 2-oct: «si queda uno, gana», al pie de la letra. Un
+    producto que se llama igual que el artículo del SAE pero NO es gemelo
+    activo de la clave —aquí el 00011014 HIERBABUENA desactivado— ya no gana
+    por la remisión ligada ni por la decisión previa: la partida va al único
+    gemelo activo que el SAE nombra. Antes el «lo que el SAE también nombra
+    se respeta» lo dejaba ganar."""
+    _prod(env, "00010026", "TE DE YERBABUENA NATURAL (1000 G)", "HIERBABUENAKG")
+    hierbabuena = _prod(env, "00010724", "HIERBABUENA", "HIERBABUENAKG")
+    apagada = _prod(env, "00011014", "HIERBABUENA", "HIERBABUENAKG", activo=False)
     hk = _bot(client, env, auth_as)
-    desc = {"LIMONSINSEMILLKG": "LIMON SIN SEMILLA KG"}
+    desc = {"HIERBABUENAKG": "HIERBABUENA"}
     u = str(uuid.uuid4())
-    f = _espejo(hk, client, folio=750, claves=["LIMONSINSEMILLKG"], desc=desc, uuid_f=u)
-    assert _lineas_bd(f["id"])[0]["producto_id"] == sin_semilla
-    _ligar(f["id"], viejo)
-    _espejo(hk, client, folio=750, claves=["LIMONSINSEMILLKG"], desc=desc, uuid_f=u, saldo="1.00")
-    assert _lineas_bd(f["id"])[0]["producto_id"] == viejo
+    f = _espejo(hk, client, folio=750, claves=["HIERBABUENAKG"], desc=desc, uuid_f=u)
+    assert _lineas_bd(f["id"])[0]["producto_id"] == hierbabuena
+
+    # la remisión ligada trae el desactivado que se llama igual
+    _remision_ligada_bd(env, f["id"], apagada)
+    r = _resolver(env, ["HIERBABUENAKG"], desc=desc, factura_id=f["id"], con_previa=False)
+    assert (r["HIERBABUENAKG"].producto_id, r["HIERBABUENAKG"].regla) == (hierbabuena, ep.NOMBRE_SAE)
+    # sin el nombre del SAE la remisión sí manda, como antes
+    r = _resolver(env, ["HIERBABUENAKG"], factura_id=f["id"], con_previa=False)
+    assert (r["HIERBABUENAKG"].producto_id, r["HIERBABUENAKG"].regla) == (apagada, ep.REMISION)
+
+    # ligada al desactivado (como la dejaba el espejo viejo): el reenvío la
+    # mueve al activo, y de ahí cada reenvío deja lo mismo
+    _ligar(f["id"], apagada)
+    _espejo(hk, client, folio=750, claves=["HIERBABUENAKG"], desc=desc, uuid_f=u, saldo="1.00")
+    movida = _lineas_bd(f["id"])
+    assert movida[0]["producto_id"] == hierbabuena
+    _espejo(hk, client, folio=750, claves=["HIERBABUENAKG"], desc=desc, uuid_f=u, saldo="0.50")
+    assert _lineas_bd(f["id"]) == movida
+
+
+def test_gana_el_sae_con_varios_nombrados_desempata_solo_entre_ellos(client, env, auth_as):
+    """Revisión del 2-oct, el caso de producción: CALABAZACASTILKG la traen dos
+    activos que se llaman «CALABAZA DE CASTILLA KG» (00010738 y 00010902), y
+    6 partidas de ZMAFAN estaban en el 00010058 CALABAZA DE CASTILLA, que se
+    llama igual pero trae OTRA clave (CALABAZACASTIKG; el espejo viejo lo
+    ligó por el código del cliente). Ni su decisión previa ni una remisión
+    ligada con él entran al desempate: decide el resto de la regla, pero solo
+    entre los dos nombrados. Una remisión ligada con uno de ELLOS sí decide."""
+    castilla = _prod(env, "00010058", "CALABAZA DE CASTILLA", "CALABAZACASTIKG",
+                     codigo_cliente="CALABAZACASTILKG")
+    kg_a = _prod(env, "00010738", "CALABAZA DE CASTILLA KG", "CALABAZACASTILKG")
+    kg_b = _prod(env, "00010902", "CALABAZA DE CASTILLA KG", "CALABAZACASTILKG")
+    _remision_bd(env, kg_b, serie="RZHGO", n=3)        # el uso en la serie da el 902
+    hk = _bot(client, env, auth_as)
+    clave = "CALABAZACASTILKG"
+    desc = {clave: "CALABAZA DE CASTILLA KG"}
+    u = str(uuid.uuid4())
+    f = _espejo(hk, client, folio=760, claves=[clave], desc=desc, uuid_f=u)
+    assert _lineas_bd(f["id"])[0]["producto_id"] == kg_b
+
+    # ligada al 00010058: el reenvío la pasa a un gemelo nombrado
+    _ligar(f["id"], castilla)
+    r = _resolver(env, [clave], desc=desc, factura_id=f["id"])[clave]
+    assert (r.producto_id, r.regla) == (kg_b, ep.USO_SERIE)
+    _espejo(hk, client, folio=760, claves=[clave], desc=desc, uuid_f=u, saldo="1.00")
+    assert _lineas_bd(f["id"])[0]["producto_id"] == kg_b
+
+    # una remisión ligada con el 00010058 (por el código del cliente) no cuenta
+    _remision_ligada_bd(env, f["id"], castilla)
+    r = _resolver(env, [clave], desc=desc, factura_id=f["id"], con_previa=False)[clave]
+    assert (r.producto_id, r.regla) == (kg_b, ep.USO_SERIE)
+    # una con el 00010738, que sí es de los nombrados, decide entre ellos
+    _remision_ligada_bd(env, f["id"], kg_a)
+    r = _resolver(env, [clave], desc=desc, factura_id=f["id"], con_previa=False)[clave]
+    assert (r.producto_id, r.regla) == (kg_a, ep.REMISION)
+
+
+def test_gana_el_sae_la_unidad_pegada_al_numero(client, env, auth_as):
+    """Revisión del 2-oct: el SAE de la 02 escribe «FRIJOL NEGRO 25KG» y el
+    catálogo tiene el 00000115 «FRIJOL NEGRO 25 KG» (la clave en su KILO) y el
+    00010982 «FRIJOL NEGRO 25KG». `norm_nombre` quitaba el KG suelto y no el
+    pegado, así que solo el 982 contaba como nombrado. Ahora los dos 25 KG
+    compiten (y el resto de la regla desempata) y el FRIJOL NEGRO KG a secas,
+    que es otro artículo, queda fuera."""
+    f25 = _prod(env, "00000115", "FRIJOL NEGRO 25 KG", "FRIJ-CERE-556",
+                presentaciones={"KILO": {"factor": 1, "clave_sae": "FRIJOLNEGROKG"}})
+    fkg = _prod(env, "00010763", "FRIJOL NEGRO KG", "FRIJOLNEGROKG")
+    f25kg = _prod(env, "00010982", "FRIJOL NEGRO 25KG", "FRIJOLNEGROKG")
+    _remision_bd(env, f25kg, serie="RZHGO", n=2)
+    clave = "FRIJOLNEGROKG"
+    r = _resolver(env, [clave], desc={clave: "FRIJOL NEGRO 25KG"})[clave]
+    assert (r.producto_id, r.regla) == (f25kg, ep.USO_SERIE)
+    assert r.competidores == (f25kg, f25, fkg)          # el 115 compite; el KG a secas, fuera
+    r = _resolver(env, [clave], desc={clave: "FRIJOL NEGRO KG"})[clave]
+    assert (r.producto_id, r.regla) == (fkg, ep.NOMBRE_SAE)
+
+
+def test_gana_el_sae_backfill_y_endpoint_mueven_igual_lo_que_no_es_gemelo_activo(
+        client, env, auth_as):
+    """Lo de las dos pruebas de arriba, por el backfill: las partidas ligadas
+    al desactivado y al de otra clave salen en el paso 3 como «solo» (el
+    siguiente reenvío las mueve), sin ⚠, hacia lo mismo que deja el
+    endpoint; --recalcular-ligadas escribe eso y una segunda corrida no hace
+    nada."""
+    from scripts.backfill_espejo_producto_por_clave import correr
+
+    _prod(env, "00010026", "TE DE YERBABUENA NATURAL (1000 G)", "HIERBABUENAKG")
+    hierbabuena = _prod(env, "00010724", "HIERBABUENA", "HIERBABUENAKG")
+    apagada = _prod(env, "00011014", "HIERBABUENA", "HIERBABUENAKG", activo=False)
+    castilla = _prod(env, "00010058", "CALABAZA DE CASTILLA", "CALABAZACASTIKG")
+    _prod(env, "00010738", "CALABAZA DE CASTILLA KG", "CALABAZACASTILKG")
+    kg_b = _prod(env, "00010902", "CALABAZA DE CASTILLA KG", "CALABAZACASTILKG")
+    _remision_bd(env, kg_b, serie="RZHGO", n=6)        # fuerte: --recalcular la escribe
+    claves = ["HIERBABUENAKG", "CALABAZACASTILKG"]
+    desc = {"HIERBABUENAKG": "HIERBABUENA", "CALABAZACASTILKG": "CALABAZA DE CASTILLA KG"}
+    hk = _bot(client, env, auth_as)
+    u = str(uuid.uuid4())
+    f = _espejo(hk, client, folio=770, claves=claves, desc=desc, uuid_f=u)
+    esperado = _lineas_bd(f["id"])
+    assert [l["producto_id"] for l in esperado] == [hierbabuena, kg_b]
+    db = SessionLocal()
+    try:
+        for clave, pid in (("HIERBABUENAKG", apagada), ("CALABAZACASTILKG", castilla)):
+            db.execute(text("UPDATE lineas_factura SET producto_id = :p, presentacion = NULL "
+                            "WHERE factura_id = :f AND clave_sae = :k"),
+                       {"p": pid, "f": f["id"], "k": clave})
+        db.commit()
+
+        seco = correr(db, env["tenant"], salida=lambda *_: None)
+        filas = {f_["clave"]: f_ for f_ in seco["tabla_paso3"]}
+        assert {k: (v["de_sku"], v["a_sku"], v["regla"], v["solo"], v["marca"])
+                for k, v in filas.items()} == {
+            "HIERBABUENAKG": ("00011014", "00010724", ep.NOMBRE_SAE, True, ""),
+            "CALABAZACASTILKG": ("00010058", "00010902", ep.USO_SERIE, True, "")}
+
+        hecho = correr(db, env["tenant"], aplicar=True, recalcular=True, salida=lambda *_: None)
+        assert hecho["paso3_escritas"] == 2
+        assert _lineas_bd(f["id"]) == esperado
+        otra = correr(db, env["tenant"], aplicar=True, recalcular=True, salida=lambda *_: None)
+        assert otra["paso1_escritas"] == otra["paso2_escritas"] == otra["paso3_escritas"] == 0
+    finally:
+        db.close()
+    # el reenvío por el endpoint deja exactamente lo mismo
+    _espejo(hk, client, folio=770, claves=claves, desc=desc, uuid_f=u, saldo="1.00")
+    assert _lineas_bd(f["id"]) == esperado
 
 
 def test_gana_el_sae_backfill_y_endpoint_deciden_igual(client, env, auth_as):
