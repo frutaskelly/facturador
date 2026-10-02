@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, ChevronRight, ChevronsUpDown, Columns3, Download, Eye, EyeOff, GripVertical, Loader2, MoreVertical, Filter } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsUpDown, Columns3, Download, Eye, EyeOff, GripVertical, Loader2, MoreVertical, Filter } from "lucide-react";
 
 import { Alert } from "./Alert";
 import { EmptyState } from "./EmptyState";
@@ -1229,11 +1229,6 @@ export function DataTable<T>({
   // Ancho total de la tabla en modo Excel = suma de las columnas (las que aún no
   // tienen ancho explícito cuentan con el mínimo) + las columnas fijas (chevron y
   // acciones). La tabla se ensancha y el contenedor hace scroll; agrandar una
-  // El contenedor con scroll horizontal: la barra flotante (abajo) se
-  // sincroniza contra él para que moverse a los lados no exija bajar al
-  // fondo de una tabla larga (ticket 86bbyvxqw).
-  const scrollerRef = useRef<HTMLDivElement>(null);
-
   // columna NO comprime a las demás.
   const totalWidth = hasWidths
     ? renderCols.reduce((sum, { id }) => sum + (widths[id] ?? MIN_W), 0) +
@@ -1241,6 +1236,10 @@ export function DataTable<T>({
       (expandable ? EXPAND_W : 0) +
       (hasActions ? actionsWidth : 0)
     : undefined;
+  // El contenedor con scroll horizontal: el riel de {@link MarcoScrollH} se
+  // sincroniza contra él para que moverse a los lados no exija bajar al
+  // fondo de una tabla larga (ticket 86bbyvxqw).
+  const scrollerRef = useRef<HTMLDivElement>(null);
 
   let body: ReactNode;
   if (loading && rows.length === 0) {
@@ -1258,10 +1257,11 @@ export function DataTable<T>({
         empty
       );
   } else {
-    body = (
+    // La barra nativa va escondida: la sustituye el riel de MarcoScrollH.
+    const tabla = (
       <div
         ref={scrollerRef}
-        className={`overflow-x-auto rounded-xl border border-border ${loading ? "pointer-events-none opacity-60" : ""}`}
+        className={`overflow-x-auto rounded-xl border border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${loading ? "pointer-events-none opacity-60" : ""}`}
         aria-busy={loading || undefined}
       >
         {/* Con anchos definidos (modo Excel): table-fixed + ancho explícito = la
@@ -1532,6 +1532,11 @@ export function DataTable<T>({
         </table>
       </div>
     );
+    body = (
+      <MarcoScrollH contRef={scrollerRef} insetDerecho={stickyOn ? actionsWidth : 0}>
+        {tabla}
+      </MarcoScrollH>
+    );
   }
 
   const from = filteredRows.length === 0 ? 0 : safePage * pageSize + 1;
@@ -1586,7 +1591,6 @@ export function DataTable<T>({
       {toolbar}
       {chipsFiltros}
       {body}
-      {!loading && !error && rows.length > 0 && <FloatingHScroll contRef={scrollerRef} />}
       {footer}
     </div>
   );
@@ -1800,72 +1804,198 @@ function HeaderFilterPopup<T>({
   );
 }
 
-/** Barra de scroll horizontal SIEMPRE a la vista (ticket 86bbyvxqw).
+/** Scroll horizontal de la tabla, cómodo con cualquier mouse (ticket 86bbyvxqw).
  *
- *  La barra real vive en el borde inferior del contenedor: con una tabla
- *  larga hay que bajar hasta el fondo para poder moverse a los lados. Esta
- *  flota pegada al borde inferior de la VENTANA mientras (a) la tabla sí
- *  desborda a lo ancho y (b) su final queda fuera de pantalla; en cuanto la
- *  barra real entra a la vista, esta se esconde. Sincronizada en ambos
- *  sentidos (arrastrarla mueve la tabla y viceversa). */
-function FloatingHScroll({ contRef }: { contRef: React.RefObject<HTMLDivElement | null> }) {
-  const barRef = useRef<HTMLDivElement>(null);
-  const [geo, setGeo] = useState<{ visible: boolean; left: number; width: number; inner: number }>(
-    { visible: false, left: 0, width: 0, inner: 0 },
-  );
+ *  La barra nativa vive en el borde inferior del contenedor: con una tabla
+ *  larga hay que bajar al fondo para moverse a los lados, y en Mac (barras
+ *  superpuestas) ni siquiera se ve. Este marco la esconde y dibuja un riel
+ *  propio, igual en Mac y en Windows:
+ *  - Va `sticky bottom-0`: flota al pie de la pantalla mientras el final de la
+ *    tabla está fuera de vista y se acomoda debajo de ella cuando entra. Sin
+ *    medir posiciones, y también funciona dentro de un modal con scroll.
+ *  - Se arrastra; un clic en el riel o en las flechas ‹ › salta una pantalla
+ *    de columnas. Las flechas y la sombra de la orilla sólo salen cuando hay
+ *    columnas escondidas de ese lado.
+ *  - La rueda del mouse sobre el riel o sobre los títulos de columna mueve a
+ *    los lados: un mouse sencillo de Windows no tiene gesto horizontal.
+ *  `insetDerecho` = ancho de la columna de acciones pegada a la derecha, que
+ *  no cuenta como área visible de columnas. */
+function MarcoScrollH({
+  contRef,
+  insetDerecho,
+  children,
+}: {
+  contRef: React.RefObject<HTMLDivElement | null>;
+  insetDerecho: number;
+  children: ReactNode;
+}) {
+  const rielRef = useRef<HTMLDivElement>(null);
+  const pulgarRef = useRef<HTMLDivElement>(null);
+  const arrastre = useRef<{ x: number; scroll: number } | null>(null);
+  const [orillas, setOrillas] = useState({ desborda: false, izq: false, der: false });
 
   useEffect(() => {
     const cont = contRef.current;
-    if (!cont) return;
-    const medir = () => {
-      const r = cont.getBoundingClientRect();
-      const desborda = cont.scrollWidth > cont.clientWidth + 1;
-      // La barra real (el fondo del contenedor) está fuera de pantalla y la
-      // tabla sigue a la vista: es exactamente cuando la flotante ayuda.
-      const visible = desborda && r.bottom > window.innerHeight && r.top < window.innerHeight - 60;
-      setGeo({ visible, left: r.left, width: cont.clientWidth, inner: cont.scrollWidth });
-      if (visible && barRef.current && Math.abs(barRef.current.scrollLeft - cont.scrollLeft) > 1) {
-        barRef.current.scrollLeft = cont.scrollLeft;
-      }
+    const riel = rielRef.current;
+    if (!cont || !riel) return;
+    // El pulgar se mueve escribiendo su estilo directo (sin re-render en cada
+    // pixel); sólo las orillas pasan por estado, y cambian pocas veces.
+    const pintar = () => {
+      const max = cont.scrollWidth - cont.clientWidth;
+      const desborda = max > 1;
+      const izq = desborda && cont.scrollLeft > 1;
+      const der = desborda && cont.scrollLeft < max - 1;
+      setOrillas((o) => (o.desborda === desborda && o.izq === izq && o.der === der ? o : { desborda, izq, der }));
+      const pulgar = pulgarRef.current;
+      if (!desborda || !pulgar || riel.clientWidth === 0) return;
+      const ancho = Math.max(32, (riel.clientWidth * cont.clientWidth) / cont.scrollWidth);
+      pulgar.style.width = `${ancho}px`;
+      pulgar.style.transform = `translateX(${((riel.clientWidth - ancho) * cont.scrollLeft) / max}px)`;
     };
-    medir();
-    // La igualdad corta el eco: asignar el mismo scrollLeft no dispara evento.
-    const desdeCont = () => {
-      if (barRef.current && Math.abs(barRef.current.scrollLeft - cont.scrollLeft) > 1) {
-        barRef.current.scrollLeft = cont.scrollLeft;
-      }
+    // Rueda → a los lados. En la orilla deja pasar el evento para que la
+    // página siga bajando en vez de quedarse trabada.
+    const ruedaLateral = (e: WheelEvent) => {
+      const d0 = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      const d = e.deltaMode === 1 ? d0 * 40 : e.deltaMode === 2 ? d0 * cont.clientWidth : d0;
+      const max = cont.scrollWidth - cont.clientWidth;
+      if (max <= 1 || d === 0) return;
+      if ((d < 0 && cont.scrollLeft <= 0) || (d > 0 && cont.scrollLeft >= max - 1)) return;
+      e.preventDefault();
+      cont.scrollLeft += d;
     };
-    cont.addEventListener("scroll", desdeCont, { passive: true });
-    window.addEventListener("scroll", medir, { passive: true, capture: true });
-    window.addEventListener("resize", medir);
-    const ro = new ResizeObserver(medir);
+    const enRiel = (e: WheelEvent) => {
+      if (!e.ctrlKey) ruedaLateral(e);
+    };
+    const enTitulos = (e: WheelEvent) => {
+      // Ctrl/⌘ = zoom; Shift+rueda y el gesto lateral del trackpad ya son nativos.
+      if (e.ctrlKey || e.metaKey || e.shiftKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+      // Los desplegables que viven dentro del <th> (filtro, menú de acciones y
+      // su telón) son fixed/absolute y tienen su propio scroll: ahí no.
+      for (let el = e.target instanceof Element ? e.target : null; el && el.tagName !== "TH"; el = el.parentElement) {
+        const pos = getComputedStyle(el).position;
+        if (pos === "fixed" || pos === "absolute") return;
+      }
+      ruedaLateral(e);
+    };
+    pintar();
+    const thead = cont.querySelector<HTMLElement>(":scope > table > thead");
+    cont.addEventListener("scroll", pintar, { passive: true });
+    riel.addEventListener("wheel", enRiel, { passive: false });
+    thead?.addEventListener("wheel", enTitulos, { passive: false });
+    // El riel también se observa: al pasar de oculto a visible mide 0 → ancho real.
+    const ro = new ResizeObserver(pintar);
     ro.observe(cont);
+    ro.observe(riel);
     if (cont.firstElementChild) ro.observe(cont.firstElementChild);
     return () => {
-      cont.removeEventListener("scroll", desdeCont);
-      window.removeEventListener("scroll", medir, { capture: true } as EventListenerOptions);
-      window.removeEventListener("resize", medir);
+      cont.removeEventListener("scroll", pintar);
+      riel.removeEventListener("wheel", enRiel);
+      thead?.removeEventListener("wheel", enTitulos);
       ro.disconnect();
     };
   }, [contRef]);
 
-  if (!geo.visible) return null;
+  // «Una pantalla de columnas»: hacia la derecha, la primera columna cortada
+  // pasa a ser la primera visible; hacia la izquierda, la cortada queda como la
+  // última. Si una sola columna no cabe en la vista, avanza el 80 %.
+  const saltar = (dir: -1 | 1) => {
+    const cont = contRef.current;
+    if (!cont) return;
+    const vista = cont.clientWidth - insetDerecho;
+    const scroll = cont.scrollLeft;
+    const origen = cont.getBoundingClientRect().left + cont.clientLeft - scroll;
+    const cols = Array.from(cont.querySelectorAll<HTMLElement>(":scope > table > thead > tr > th"))
+      .filter((th) => getComputedStyle(th).position !== "sticky")
+      .map((th) => {
+        const r = th.getBoundingClientRect();
+        return { izq: r.left - origen, der: r.right - origen };
+      });
+    let destino: number | undefined;
+    if (dir > 0) {
+      const c = cols.find((c) => c.der > scroll + vista + 1);
+      if (c && c.izq > scroll + 1) destino = c.izq;
+    } else {
+      const c = cols.findLast((c) => c.izq < scroll - 1);
+      if (c && c.der < scroll + vista - 1) destino = c.der - vista;
+    }
+    cont.scrollTo({ left: destino ?? scroll + dir * vista * 0.8, behavior: "smooth" });
+  };
+
+  const sombra = "pointer-events-none absolute inset-y-px z-10 w-6 from-black/10 to-transparent transition-opacity";
+  const flecha = "rounded p-0.5 text-muted transition hover:bg-surface-2 hover:text-foreground";
   return (
-    <div
-      ref={barRef}
-      aria-hidden
-      className="fixed bottom-0 z-40 overflow-x-auto overflow-y-hidden"
-      style={{ left: geo.left, width: geo.width }}
-      onScroll={() => {
-        const cont = contRef.current;
-        if (cont && barRef.current && Math.abs(cont.scrollLeft - barRef.current.scrollLeft) > 1) {
-          cont.scrollLeft = barRef.current.scrollLeft;
-        }
-      }}
-    >
-      {/* El «contenido» es un espaciador del ancho real de la tabla: es lo que
-          da a la barra su proporción correcta. */}
-      <div style={{ width: geo.inner, height: 1 }} />
+    <div>
+      <div className="relative">
+        {children}
+        <div
+          aria-hidden
+          className={`${sombra} left-px rounded-l-xl bg-linear-to-r ${orillas.izq ? "opacity-100" : "opacity-0"}`}
+        />
+        <div
+          aria-hidden
+          style={{ right: insetDerecho + 1 }}
+          className={`${sombra} bg-linear-to-l ${insetDerecho ? "" : "rounded-r-xl"} ${orillas.der ? "opacity-100" : "opacity-0"}`}
+        />
+      </div>
+      <div
+        className={`sticky bottom-0 z-[15] mt-1 items-center gap-1 rounded-lg border border-border bg-background/95 p-0.5 shadow-sm backdrop-blur ${orillas.desborda ? "flex" : "hidden"}`}
+      >
+        <button
+          type="button"
+          onClick={() => saltar(-1)}
+          aria-label="Columnas a la izquierda"
+          title="Columnas a la izquierda"
+          className={`${flecha} ${orillas.izq ? "" : "invisible"}`}
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <div
+          ref={rielRef}
+          title="Arrastra, o gira la rueda del mouse aquí para moverte a los lados"
+          className="relative h-3 flex-1 cursor-pointer rounded-full bg-surface-2"
+          onPointerDown={(e) => {
+            const p = pulgarRef.current?.getBoundingClientRect();
+            if (p) saltar(e.clientX < p.left ? -1 : 1);
+          }}
+        >
+          <div
+            ref={pulgarRef}
+            className="absolute inset-y-0 left-0 cursor-grab touch-none rounded-full bg-accent/40 transition-colors hover:bg-accent/70 active:cursor-grabbing active:bg-accent/80"
+            onPointerDown={(e) => {
+              const cont = contRef.current;
+              if (!cont) return;
+              e.preventDefault();
+              e.stopPropagation();
+              e.currentTarget.setPointerCapture(e.pointerId);
+              arrastre.current = { x: e.clientX, scroll: cont.scrollLeft };
+            }}
+            onPointerMove={(e) => {
+              const cont = contRef.current;
+              const riel = rielRef.current;
+              const a = arrastre.current;
+              if (!cont || !riel || !a) return;
+              const libre = riel.clientWidth - e.currentTarget.offsetWidth;
+              if (libre <= 0) return;
+              cont.scrollLeft = a.scroll + ((e.clientX - a.x) * (cont.scrollWidth - cont.clientWidth)) / libre;
+            }}
+            onPointerUp={() => {
+              arrastre.current = null;
+            }}
+            onPointerCancel={() => {
+              arrastre.current = null;
+            }}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => saltar(1)}
+          aria-label="Columnas a la derecha"
+          title="Columnas a la derecha"
+          className={`${flecha} ${orillas.der ? "" : "invisible"}`}
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
     </div>
   );
 }
