@@ -18,8 +18,8 @@ semana 40 alcanzó a generar con el formato de arriba se renombraron a éste.
 La fecha va AAMMDD (dueño, 2-oct-2026); la de 8 dígitos (20261009) se sigue leyendo.
 
 Proyecto con CINCO letras (dueño, 2-oct-2026, mismo día): las primeras cinco del
-nombre en el catálogo, como el punto (DIF HIDALGO → DIFHI, CERESOS → CERES). Las de
-tres letras se renombraron y se siguen leyendo.
+nombre, como el punto (DIF HIDALGO → DIFHI). Las de tres letras se renombraron y se
+siguen leyendo.
     HGPA-HOSPI-PACHU-261009   (antes HGPA-HOS-PACHU-261009)
 
 Todos llevan el sufijo de entrega aparte al final: …-2. Cualquier otro folio
@@ -49,14 +49,14 @@ RE_NUEVO_EN_TEXTO = re.compile(r"\b([A-Z]{4,5}(?:-[A-Z]{3,5})?-[A-Z]{3,5}-\d{6}(
 # (sucursal, código del proyecto) → el prefijo de siempre. Lo que no está aquí
 # (BIENE, Bienestar Coor; antes BIC) no tuvo prefijo viejo y se queda con su código.
 PROYECTO_5 = {
-    ("HG", "HOSPI"): "HO", ("HG", "DIFHI"): "DI", ("HG", "CERES"): "CE",
+    ("HG", "HOSPI"): "HO", ("HG", "DIFHI"): "DI", ("HG", "CEREZ"): "CE",
     ("HG", "SEGUR"): "SP", ("HG", "SNERI"): "SN",
     ("TB", "HOSPI"): "VH",
 }
-# Los de antes (2-oct-2026: los de tres letras y CEREZ) se siguen leyendo.
+# Los de tres letras (2-oct-2026, antes del cambio a cinco) se siguen leyendo.
 _PROYECTO_3_VIEJO = {
     ("HG", "HOS"): "HO", ("HG", "DIF"): "DI", ("HG", "CER"): "CE",
-    ("HG", "CEREZ"): "CE", ("HG", "SEG"): "SP",
+    ("HG", "SEG"): "SP",
     ("HG", "NER"): "SN", ("TB", "HOS"): "VH",
 }
 PROYECTO_3 = {**_PROYECTO_3_VIEJO, **PROYECTO_5}

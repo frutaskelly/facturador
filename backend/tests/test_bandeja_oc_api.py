@@ -2160,8 +2160,7 @@ def test_folio_con_proyecto_de_cinco_letras():
         "HOSPI", "HO", "PACHU", date(2026, 10, 9))
     assert f.prefijo == "HGPA-HOSPI"
     assert parse_nuevo("TBVH-HOSPI-ROVIR-261007").proyecto == "VH"
-    assert parse_nuevo("HGPA-CERES-CERES-261006").proyecto == "CE"
-    assert parse_nuevo("HGPA-CEREZ-CERES-261006").proyecto == "CE"     # el de antes
+    assert parse_nuevo("HGPA-CEREZ-CERES-261006").proyecto == "CE"
     assert parse_nuevo("HGPA-DIFHI-COSTA-261006").proyecto == "DI"
     assert parse_nuevo("HGPA-SEGUR-SECRE-261006").proyecto == "SP"
     assert parse_nuevo("HGPA-SNERI-NERIX-261006").proyecto == "SN"
