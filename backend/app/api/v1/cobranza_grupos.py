@@ -68,6 +68,8 @@ class GrupoIn(BaseModel):
     asunto: Optional[str] = Field(default=None, max_length=200)
     mensaje: Optional[str] = Field(default=None, max_length=4000)
     nota: Optional[str] = Field(default=None, max_length=254)
+    # Vacío = el prellenado (`svc.titulo_sugerido`), que sigue a las razones sociales.
+    titulo_tabla: Optional[str] = Field(default=None, max_length=120)
 
 
 def _correos(lista: list[str]) -> list[str]:
@@ -115,6 +117,7 @@ def _definicion(db: Session, ctx: AuthContext, p: GrupoIn) -> svc.Definicion:
         saldo_minimo=p.saldo_minimo, escalar_dias=p.escalar_dias, escalar_cc=_correos(p.escalar_cc),
         adjuntar_pdf=p.adjuntar_pdf, adjuntar_excel=p.adjuntar_excel,
         asunto=texto(p.asunto), mensaje=texto(p.mensaje), nota=texto(p.nota),
+        titulo_tabla=" ".join((p.titulo_tabla or "").split()) or None,
     )
 
 

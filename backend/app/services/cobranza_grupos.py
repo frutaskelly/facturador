@@ -23,6 +23,11 @@ Reglas:
    sale «Sin sucursal» y se avisa.
 4. **Lo que ves es lo que se manda.** El previo y el envío usan las mismas
    funciones de este módulo.
+5. **El cliente lee el nombre de la tabla, no el del envío.** El nombre del
+   envío es para encontrarlo en la lista; el comodín {nombre} del asunto y el
+   mensaje, el cuerpo, el total, el Excel, el PDF y sus archivos dicen
+   `titulo_tabla` o, vacío, el prellenado de `titulo_sugerido`
+   (EHMO-MAFAN-SUREÑA).
 """
 from __future__ import annotations
 
@@ -101,13 +106,14 @@ class Definicion:
     asunto: Optional[str] = None
     mensaje: Optional[str] = None
     nota: Optional[str] = None
+    titulo_tabla: Optional[str] = None
     id: Optional[UUID] = None
 
 
 # Los campos de configuración que el modelo y la definición comparten tal cual.
 CAMPOS = ("nombre", "agrupar_por", "mostrar_antiguedad", "modo", "dia_semana", "hora",
           "incluir_por_vencer", "saldo_minimo", "escalar_dias", "adjuntar_pdf", "adjuntar_excel",
-          "asunto", "mensaje", "nota")
+          "asunto", "mensaje", "nota", "titulo_tabla")
 
 
 def definicion_de(db: Session, grupo: CobranzaGrupo,
@@ -210,6 +216,19 @@ def nombre_corto(c: Cliente) -> str:
     return (c.nombre_corto or "").strip() or c.legal_name
 
 
+# Más largo que esto, el prellenado deja de leerse como nombre (un envío con
+# diez razones sociales) y toma el nombre del envío.
+_TITULO_MAX = 80
+
+
+def titulo_sugerido(nombre_envio: str, cortos: list[str]) -> str:
+    """El prellenado del nombre de la tabla: los nombres cortos de las razones
+    sociales en orden alfabético y unidos con guion (EHMO-MAFAN-SUREÑA). El
+    editor arma el mismo (`tituloSugerido` en EditarEnvio.tsx)."""
+    titulo = "-".join(sorted({c.strip() for c in cortos if c.strip()}))
+    return titulo if titulo and len(titulo) <= _TITULO_MAX else nombre_envio
+
+
 # ─── El estado de cuenta del grupo ──────────────────────────────────────────
 
 def _cubeta(dias_vencida: int) -> str:
@@ -297,6 +316,8 @@ def armar(cx: Contexto, d: Definicion, *, solo_vencidas: bool = False) -> dict:
         avisos.append(f"Sin sucursal en Catálogo → Proyectos: {nombres}. Sus facturas salen en «{SIN_SUCURSAL}».")
     return {
         "nombre": d.nombre,
+        "titulo": (d.titulo_tabla or "").strip() or titulo_sugerido(
+            d.nombre, [nombre_corto(cx.cliente(a.cliente_id)) for a in alcance]),
         "agrupar_por": d.agrupar_por,
         "mostrar_antiguedad": d.mostrar_antiguedad,
         "corte": cx.corte,
@@ -353,7 +374,8 @@ _ROJO = "#C00000"
 
 
 # Lo que trae un envío nuevo (el editor los muestra ya escritos) y lo que se
-# usa si el envío los deja vacíos. {nombre} y {fecha} se rellenan al mandar.
+# usa si el envío los deja vacíos. {nombre} (el nombre de la tabla, que es lo
+# que lee el cliente) y {fecha} se rellenan al mandar.
 ASUNTO = "Estado de cuenta {nombre} al {fecha}"
 MENSAJE = ("Buen día, les compartimos su estado de cuenta.\n\n"
            "Quedamos atentos a cualquier aclaración o comprobante de pago.")
@@ -362,7 +384,7 @@ MENSAJE = ("Buen día, les compartimos su estado de cuenta.\n\n"
 def rellena(texto: str, datos: dict) -> str:
     """Los comodines del asunto y el mensaje. Reemplazo literal (no .format):
     unas llaves sueltas que alguien escriba no truenan el envío."""
-    return (texto.replace("{nombre}", datos["nombre"])
+    return (texto.replace("{nombre}", datos["titulo"])
             .replace("{fecha}", f"{datos['corte']:%d/%m/%Y}"))
 
 
@@ -402,7 +424,7 @@ def html_correo(d: Definicion, datos: dict, *, encabezado: str = "") -> str:
     partes = [encabezado] if encabezado else []
     # Línea en blanco = otro párrafo; un salto suelto se respeta dentro del párrafo.
     partes += [f"<p>{e(p.strip()).replace(chr(10), '<br>')}</p>" for p in mensaje.split("\n\n") if p.strip()]
-    partes.append(f"<p>Estado de cuenta de <strong>{e(datos['nombre'])}</strong> al {datos['corte']:%d/%m/%Y}.</p>")
+    partes.append(f"<p>Estado de cuenta de <strong>{e(datos['titulo'])}</strong> al {datos['corte']:%d/%m/%Y}.</p>")
     n = datos["facturas"]
     if n == 0:
         partes.append("<p>No hay facturas por cobrar.</p>")
@@ -445,7 +467,7 @@ def _tabla_html(datos: dict) -> str:
         cuerpo.append(f"<tr>{celdas}</tr>")
     tt = f"style=\"padding:6px 10px;background:{_TOTAL};font-weight:bold;border-top:2px solid {_AZUL}\""
     tt_num = tt.replace("font-weight:bold", "font-weight:bold;text-align:right;white-space:nowrap")
-    total = f"<td {tt} colspan=\"{len(cols)}\">Total {e(datos['nombre'])}</td>"
+    total = f"<td {tt} colspan=\"{len(cols)}\">Total {e(datos['titulo'])}</td>"
     total += f"<td {tt_num}>{_pesos(datos['saldo_total'])}</td><td {tt_num}>{_pesos(datos['vencido_total'])}</td>"
     total += "".join(f"<td {tt_num}>{_pesos(datos['antiguedad'][k])}</td>" for k, _ in cubetas)
     return ("<table cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;font-size:13px;"
@@ -459,7 +481,7 @@ def nombre_archivo(datos: dict) -> str:
     """ASCII a propósito: el nombre viaja en Content-Disposition y un acento lo
     rompe en el navegador (mismo motivo que `_nombre_estado_cuenta`)."""
     import unicodedata
-    base = unicodedata.normalize("NFKD", datos["nombre"]).encode("ascii", "ignore").decode()
+    base = unicodedata.normalize("NFKD", datos["titulo"]).encode("ascii", "ignore").decode()
     base = re.sub(r"[^A-Za-z0-9]+", "-", base).strip("-") or "grupo"
     return f"estado-cuenta-{base}-{datos['corte']:%Y%m%d}"
 
@@ -506,7 +528,7 @@ def xlsx(tenant, datos: dict) -> bytes:
 
     corte = f"{datos['corte']:%d/%m/%Y}"
     _fila(ws, [tenant.legal_name], FUENTES["titulo"])
-    _fila(ws, [f"ESTADO DE CUENTA AL {corte} · {datos['nombre'].upper()}"], FUENTES["negrita"])
+    _fila(ws, [f"ESTADO DE CUENTA AL {corte} · {datos['titulo'].upper()}"], FUENTES["negrita"])
     for c in datos["clientes"]:
         _fila(ws, [f"{c['codigo'] or ''} {c['legal_name']} · {c['dias_credito']} días de crédito".strip()])
     _fila(ws, [])
@@ -525,7 +547,7 @@ def xlsx(tenant, datos: dict) -> bytes:
         for i in range(len(cubetas)):
             ws.cell(row=r, column=len(cols) + 4 + i).number_format = MONEDA
     ultima = ws.max_row
-    total = [f"TOTAL {datos['nombre'].upper()}"] + [None] * (len(cols) - 1)
+    total = [f"TOTAL {datos['titulo'].upper()}"] + [None] * (len(cols) - 1)
     num_cols = list(range(len(cols) + 1, len(cols) + 4 + len(cubetas)))
     for col in num_cols:
         letra = get_column_letter(col)
@@ -542,7 +564,7 @@ def xlsx(tenant, datos: dict) -> bytes:
         h = wb.create_sheet(nombre)
         _fila(h, [tenant.legal_name], FUENTES["titulo"])
         _fila(h, [f"ESTADO DE CUENTA AL {corte} · {f['hoja'].upper()}"], FUENTES["negrita"])
-        _fila(h, [f"GRUPO {datos['nombre'].upper()}"], FUENTES["negrita"])
+        _fila(h, [f"GRUPO {datos['titulo'].upper()}"], FUENTES["negrita"])
         _fila(h, [])
         escribir_tabla(h, f["docs"], cliente_de=lambda d: d["cliente"], etiqueta_total=f"TOTAL {f['hoja']}")
 
@@ -565,12 +587,12 @@ def pdf(tenant, datos: dict) -> bytes:
 
     h4 = getSampleStyleSheet()["Heading4"]
     partes = membrete(tenant, "Estado de cuenta",
-                      f"{datos['nombre']} · al {datos['corte']:%d/%m/%Y}")
+                      f"{datos['titulo']} · al {datos['corte']:%d/%m/%Y}")
     cols = columnas(datos["agrupar_por"])
     ancho_texto = 184 - 2 * 30
     anchos_texto = {3: [30, 34, ancho_texto - 64]}.get(len(cols), [ancho_texto / len(cols)] * len(cols))
     filas = [[p(fn(f)) for _, fn in cols] + [_pesos(f["saldo"]), _pesos(f["vencido"])] for f in datos["filas"]]
-    filas.append([p(f"Total {datos['nombre']}")] + [""] * (len(cols) - 1)
+    filas.append([p(f"Total {datos['titulo']}")] + [""] * (len(cols) - 1)
                  + [_pesos(datos["saldo_total"]), _pesos(datos["vencido_total"])])
     partes.append(tabla_reporte(
         [h for h, _ in cols] + ["Saldo", "Saldo vencido"], filas,

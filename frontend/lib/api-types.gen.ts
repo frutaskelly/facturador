@@ -14636,6 +14636,8 @@ export interface components {
              * @default 100
              */
             saldo_minimo: number | string;
+            /** Titulo Tabla */
+            titulo_tabla?: string | null;
         };
         /**
          * GrupoIn

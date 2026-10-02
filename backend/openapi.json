@@ -24644,6 +24644,18 @@
       ],
       "default": "100",
       "title": "Saldo Minimo"
+     },
+     "titulo_tabla": {
+      "anyOf": [
+       {
+        "maxLength": 120,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Titulo Tabla"
      }
     },
     "required": [
