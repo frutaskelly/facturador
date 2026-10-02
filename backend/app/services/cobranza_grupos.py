@@ -1,17 +1,19 @@
-"""Grupos de cobranza: varias razones sociales en un solo estado de cuenta.
+"""Envíos de cobranza: cómo se arma el estado de cuenta de cada envío.
 
 Dueño (2-oct-2026): EHMO quiere ver juntas sus razones sociales (EHMO, SUREÑA
 y MAFAN) con la tabla por proyecto; otro cliente la querrá por serie, por
-sucursal (estado) o por razón social. Un grupo dice qué entra, cómo se acomoda
-la tabla y a quién se manda; aquí se arma el estado de cuenta, el correo, el
-Excel (hoja Resumen + una hoja por fila) y el PDF.
+sucursal (estado) o por razón social. Y cada cobranza se configura sola. Un
+envío (`cobranza_grupos`) dice qué entra, cómo se acomoda la tabla, a quién se
+manda, el asunto, el mensaje y los adjuntos; aquí se arma el estado de cuenta,
+el correo, el Excel (hoja Resumen + una hoja por fila) y el PDF. Cómo y
+cuándo sale (botón o automático) vive en `cobranza_auto.py`.
 
 Reglas:
 
 1. **Un solo cálculo de saldos.** El estado de cuenta de cada razón social
    sale de `_armar_estado_cuenta`, el mismo del JSON, el PDF y el correo de
    hoy (saldo PPD, cancelaciones pedidas fuera, vencimiento con los días de
-   crédito de SU razón social). El grupo solo filtra y junta.
+   crédito de SU razón social). El envío solo filtra y junta.
 2. **El proyecto es la fila de los reportes** (`ProyectoDeFactura.proyecto`,
    con «se reporta en»): IMSS BIENESTAR cae en HOSPITALES HIDALGO aquí igual
    que en Reportes.
@@ -80,14 +82,32 @@ class Alcance:
 
 @dataclass
 class Definicion:
+    """Un envío tal como se arma y se manda: lo guardado o lo que trae el editor."""
     nombre: str
     agrupar_por: str = "PROYECTO"
     mostrar_antiguedad: bool = False
     correos: list[str] = field(default_factory=list)
     cc: list[str] = field(default_factory=list)
-    pausado: bool = False
     alcance: list[Alcance] = field(default_factory=list)
+    modo: str = "MANUAL"
+    dia_semana: int = 0
+    hora: int = 8
+    incluir_por_vencer: bool = True
+    saldo_minimo: Decimal = Decimal("100")
+    escalar_dias: int = 30
+    escalar_cc: list[str] = field(default_factory=list)
+    adjuntar_pdf: bool = True
+    adjuntar_excel: bool = True
+    asunto: Optional[str] = None
+    mensaje: Optional[str] = None
+    nota: Optional[str] = None
     id: Optional[UUID] = None
+
+
+# Los campos de configuración que el modelo y la definición comparten tal cual.
+CAMPOS = ("nombre", "agrupar_por", "mostrar_antiguedad", "modo", "dia_semana", "hora",
+          "incluir_por_vencer", "saldo_minimo", "escalar_dias", "adjuntar_pdf", "adjuntar_excel",
+          "asunto", "mensaje", "nota")
 
 
 def definicion_de(db: Session, grupo: CobranzaGrupo,
@@ -111,9 +131,9 @@ def definicion_de(db: Session, grupo: CobranzaGrupo,
             a.proyectos.clear()
             a.series.clear()
     return Definicion(
-        id=grupo.id, nombre=grupo.nombre, agrupar_por=grupo.agrupar_por,
-        mostrar_antiguedad=grupo.mostrar_antiguedad, correos=list(grupo.correos or []),
-        cc=list(grupo.cc or []), pausado=grupo.pausado, alcance=list(por_cliente.values()),
+        id=grupo.id, correos=list(grupo.correos or []), cc=list(grupo.cc or []),
+        escalar_cc=list(grupo.escalar_cc or []), alcance=list(por_cliente.values()),
+        **{c: getattr(grupo, c) for c in CAMPOS},
     )
 
 
@@ -332,17 +352,39 @@ _REJILLA = "#BFBFBF"
 _ROJO = "#C00000"
 
 
-def asunto(cfg: CobranzaConfig, datos: dict) -> str:
-    if (cfg.asunto or "").strip():
-        return f"{cfg.asunto.strip()} · {datos['nombre']}"
-    return f"Estado de cuenta {datos['nombre']} al {datos['corte']:%d/%m/%Y}"
+def asunto(d: Definicion, datos: dict) -> str:
+    """El asunto del envío; vacío = «Estado de cuenta <nombre> al dd/mm/aaaa»."""
+    return (d.asunto or "").strip() or f"Estado de cuenta {datos['nombre']} al {datos['corte']:%d/%m/%Y}"
 
 
-def html_correo(cfg: CobranzaConfig, datos: dict, *, adjunta_excel: bool, encabezado: str = "") -> str:
+def _lista(v) -> list[str]:
+    return [str(x).strip() for x in (v or []) if str(x).strip()]
+
+
+def destinatarios(cfg: CobranzaConfig, d: Definicion, dias_max: int) -> tuple[list[str], list[str], bool]:
+    """(para, cc, escalado). La copia: la del envío, la fija de Ajustes
+    generales y, si la factura más vieja pasó los días de escalar, la de
+    escalamiento del envío. Sin repetidos ni copias a quien ya va en «para»."""
+    para = _lista(d.correos)
+    cc = _lista(d.cc) + _lista(cfg.cc_siempre)
+    escalado = bool(d.escalar_dias) and dias_max >= d.escalar_dias and bool(_lista(d.escalar_cc))
+    if escalado:
+        cc += _lista(d.escalar_cc)
+    vistos = {p.lower() for p in para}
+    limpio = []
+    for c in cc:
+        if c.lower() not in vistos:
+            vistos.add(c.lower())
+            limpio.append(c)
+    return para, limpio, escalado
+
+
+def html_correo(d: Definicion, datos: dict, *, encabezado: str = "") -> str:
     """El cuerpo del correo, con estilos en línea (los clientes de correo
     ignoran las hojas de estilo). Todo dato dinámico va con html.escape."""
     e = html_mod.escape
-    mensaje = (cfg.mensaje or "").strip()
+    adjunta_excel = d.adjuntar_excel
+    mensaje = (d.mensaje or "").strip()
     partes = [encabezado] if encabezado else []
     partes += [f"<p>{e(p)}</p>" for p in mensaje.split("\n\n") if p.strip()]
     partes.append(f"<p>Estado de cuenta de <strong>{e(datos['nombre'])}</strong> al {datos['corte']:%d/%m/%Y}.</p>")
@@ -544,59 +586,63 @@ def pdf(tenant, datos: dict) -> bytes:
 
 # ─── El previo y los adjuntos (lo mismo que saldría en el correo) ───────────
 
-def adjuntos(tenant, cfg: CobranzaConfig, datos: dict) -> list[tuple[str, bytes, str]]:
-    """Los archivos del correo, según lo que diga Ajustes (PDF y/o Excel)."""
+def datos_de_envio(cx: Contexto, d: Definicion) -> dict:
+    """El estado de cuenta tal como lo lleva el correo: solo vencidas si el
+    envío no incluye las por vencer."""
+    return armar(cx, d, solo_vencidas=not d.incluir_por_vencer)
+
+
+def adjuntos(tenant, d: Definicion, datos: dict) -> list[tuple[str, bytes, str]]:
+    """Los archivos del correo, según lo que diga el envío (PDF y/o Excel)."""
     nombre = nombre_archivo(datos)
     out = []
-    if cfg.adjuntar_pdf:
+    if d.adjuntar_pdf:
         out.append((f"{nombre}.pdf", pdf(tenant, datos), "application/pdf"))
-    if cfg.adjuntar_excel:
+    if d.adjuntar_excel:
         out.append((f"{nombre}.xlsx", xlsx(tenant, datos),
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
     return out
 
 
 def previo(cx: Contexto, cfg: CobranzaConfig, d: Definicion) -> dict:
-    """El correo tal como saldría hoy: destinatarios (con la copia de Ajustes y
-    el escalamiento), asunto, cuerpo, los adjuntos que lleva y los avisos de
-    por qué la cola semanal no lo mandaría."""
-    from .cobranza_auto import _destinatarios, espejo_al_dia
+    """El correo tal como saldría hoy: destinatarios (con la copia fija y el
+    escalamiento), asunto, cuerpo, los adjuntos que lleva y los avisos de por
+    qué no saldría."""
+    from .cobranza_auto import espejo_al_dia
 
-    datos = armar(cx, d, solo_vencidas=not cfg.incluir_por_vencer)
-    para, cc, escalado = _destinatarios(cfg, d, datos["dias_max_vencida"])
+    datos = datos_de_envio(cx, d)
+    para, cc, escalado = destinatarios(cfg, d, datos["dias_max_vencida"])
     avisos = list(datos["avisos"])
     if not para:
         avisos.insert(0, "Falta el correo: captura a quién se le manda (Para).")
-    if d.pausado:
-        avisos.append("El grupo está en pausa: la cobranza automática no lo manda.")
     if datos["facturas"] == 0:
-        avisos.append("No hay facturas por cobrar con lo que tiene marcado el grupo.")
-    elif datos["saldo_total"] < Decimal(cfg.saldo_minimo or 0):
-        avisos.append(f"El saldo queda bajo el mínimo de Ajustes ({_pesos(cfg.saldo_minimo)}): "
-                      "la cobranza automática no lo mandaría.")
-    if not cfg.incluir_por_vencer:
-        avisos.append("Solo van las facturas vencidas: en Ajustes está apagado «Incluir facturas por vencer».")
+        avisos.append("No hay facturas por cobrar con lo que tiene marcado el envío.")
+    elif d.modo == "AUTOMATICO" and datos["saldo_total"] < Decimal(d.saldo_minimo or 0):
+        avisos.append(f"El saldo queda bajo el mínimo del envío ({_pesos(d.saldo_minimo)}): "
+                      "el automático no lo mandaría (con el botón Enviar sí sale).")
+    if not d.incluir_por_vencer:
+        avisos.append("Solo van las facturas vencidas: el envío tiene apagado «Incluir facturas por vencer».")
     ok, ultima = espejo_al_dia(cx.db, cx.ctx.tenant_id, cfg)
     if not ok:
         cuando = f"{ultima:%d/%m %H:%M} UTC" if ultima else "nunca"
         avisos.append(f"El espejo de SAE no está al día (última pasada buena: {cuando}): "
-                      "los saldos pueden no traer los últimos pagos.")
+                      "no se manda hasta que sincronice.")
     nombre = nombre_archivo(datos)
     hojas = nombres_hojas(datos)
     archivos = []
-    if cfg.adjuntar_excel:
+    if d.adjuntar_excel:
         n = len(hojas) - 1
         archivos.append({"tipo": "xlsx", "nombre": f"{nombre}.xlsx",
                          "detalle": f"Resumen + {n} {'hoja' if n == 1 else 'hojas'} por {POR_TEXTO[d.agrupar_por]}"})
-    if cfg.adjuntar_pdf:
+    if d.adjuntar_pdf:
         archivos.append({"tipo": "pdf", "nombre": f"{nombre}.pdf",
                          "detalle": f"Resumen y detalle por {POR_TEXTO[d.agrupar_por]}"})
     return {
         "para": para, "cc": cc, "escalado": escalado,
-        "asunto": asunto(cfg, datos),
-        "html": html_correo(cfg, datos, adjunta_excel=cfg.adjuntar_excel),
+        "asunto": asunto(d, datos),
+        "html": html_correo(d, datos),
         "adjuntos": archivos,
-        "hojas": hojas if cfg.adjuntar_excel else [],
+        "hojas": hojas if d.adjuntar_excel else [],
         "resumen": resumen_sin_docs(datos),
         "avisos": avisos,
     }

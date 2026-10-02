@@ -1,6 +1,6 @@
-"""Grupos de cobranza: varias razones sociales en un estado de cuenta, la
-tabla por proyecto/serie/sucursal/razón social, el previo, los archivos y la
-prueba que solo llega a quien la pide."""
+"""Envíos de cobranza: varias razones sociales en un estado de cuenta, la
+tabla por proyecto/serie/sucursal/razón social, el previo, los archivos, la
+prueba que solo llega a quien la pide y las razones sociales sin envío."""
 import io
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -102,7 +102,7 @@ def _previo(client, env, cuerpo):
 
 
 def test_por_proyecto_junta_las_razones_sociales(client, env, auth, ehmo):
-    _config(client, env, escalar_dias=0, cc_siempre=["cobranza@negocio.example.com"])
+    _config(client, env, cc_siempre=["cobranza@negocio.example.com"])
     d = _previo(client, env, _grupo(env))
     r = d["resumen"]
     assert float(r["saldo_total"]) == 4500.0
@@ -172,14 +172,15 @@ def test_alcance_parcial_solo_lo_marcado(client, env, auth, ehmo):
 
 
 def test_antiguedad_y_solo_vencidas(client, env, auth, ehmo):
-    _config(client, env, incluir_por_vencer=False)
-    d = _previo(client, env, _grupo(env, mostrar_antiguedad=True))
+    _config(client, env)
+    d = _previo(client, env, _grupo(env, mostrar_antiguedad=True, incluir_por_vencer=False))
     assert float(d["resumen"]["saldo_total"]) == 3200.0      # sin las por vencer
     assert "Más de 90" in d["html"] and "1 a 30" in d["html"]
     assert any("Solo van las facturas vencidas" in a for a in d["avisos"])
 
 
 def test_crud_y_tambien_en(client, env, auth, ehmo):
+    _config(client, env)
     r = client.post(_BASE, json=_grupo(env), headers=_h(env))
     assert r.status_code == 201, r.text
     g = r.json()
@@ -195,23 +196,25 @@ def test_crud_y_tambien_en(client, env, auth, ehmo):
                  alcance=[{"cliente_id": env["cli"], "completo": False, "proyectos": [ehmo["tg"]]}])
     r = client.post(_BASE, json=tux, headers=_h(env))
     assert r.status_code == 201, r.text
-    lista = {x["nombre"]: x for x in client.get(_BASE, headers=_h(env)).json()}
+    lista = {x["nombre"]: x for x in client.get(_BASE, headers=_h(env)).json()["envios"]}
     assert [t["nombre"] for t in lista["EHMO"]["tambien_en"]] == ["EHMO Tuxtla"]
     assert float(lista["EHMO Tuxtla"]["saldo"]) == 500.0
     # El previo también lo avisa.
     d = _previo(client, env, {**_grupo(env), "id": g["id"]})
     assert any("EHMO Tuxtla" in a for a in d["avisos"])
 
-    # Cambiar: solo SUR, por razón social, en pausa.
+    # Cambiar: solo SUR, por razón social, automático los viernes, con nota.
     r = client.put(f"{_BASE}/{g['id']}", headers=_h(env), json=_grupo(
-        env, agrupar_por="CLIENTE", pausado=True, motivo_pausa="convenio",
+        env, agrupar_por="CLIENTE", modo="AUTOMATICO", dia_semana=4, hora=10, nota="convenio",
         alcance=[{"cliente_id": env["otro"]}]))
     assert r.status_code == 200, r.text
-    assert r.json()["agrupar_por"] == "CLIENTE" and r.json()["pausado"] is True
-    assert float(r.json()["saldo"]) == 700.0 and r.json()["tambien_en"] == []
+    out = r.json()
+    assert (out["agrupar_por"], out["modo"], out["dia_semana"], out["hora"], out["nota"]) == (
+        "CLIENTE", "AUTOMATICO", 4, 10, "convenio")
+    assert float(out["saldo"]) == 700.0 and out["tambien_en"] == []
 
     assert client.delete(f"{_BASE}/{g['id']}", headers=_h(env)).status_code == 200
-    assert [x["nombre"] for x in client.get(_BASE, headers=_h(env)).json()] == ["EHMO Tuxtla"]
+    assert [x["nombre"] for x in client.get(_BASE, headers=_h(env)).json()["envios"]] == ["EHMO Tuxtla"]
 
 
 def test_validaciones(client, env, auth, ehmo):
@@ -269,6 +272,18 @@ def test_prueba_solo_a_quien_la_pide(client, env, auth, ehmo, correo):
     assert correo[0]["to"] == [env["email"]] and correo[0]["cc"] is None
     assert correo[0]["subject"].startswith("[Prueba] Estado de cuenta EHMO al ")
     assert sorted(a.rsplit(".", 1)[1] for a in correo[0]["adjuntos"]) == ["pdf", "xlsx"]
+
+
+def test_razones_sociales_sin_envio(client, env, auth, ehmo):
+    _config(client, env)
+    sin = {x["nombre"]: x for x in client.get(_BASE, headers=_h(env)).json()["sin_envio"]}
+    assert float(sin["EHMO"]["saldo"]) == 3800.0 and float(sin["SUR"]["saldo"]) == 700.0
+    # Un envío con solo Tuxtla deja a EHMO cubierta en parte.
+    client.post(_BASE, headers=_h(env), json=_grupo(
+        env, alcance=[{"cliente_id": env["cli"], "completo": False, "proyectos": [ehmo["tg"]]}]))
+    sin = {x["nombre"]: x for x in client.get(_BASE, headers=_h(env)).json()["sin_envio"]}
+    assert float(sin["EHMO"]["saldo"]) == 3300.0 and sin["EHMO"]["parcial"] is True
+    assert "SUR" in sin
 
 
 def test_nombre_corto_en_la_ficha(client, env, auth):

@@ -1,50 +1,57 @@
 "use client";
 
-// Cobranza → Grupos: varias razones sociales en un solo estado de cuenta.
-// EHMO quiere ver juntas EHMO, SUREÑA y MAFAN con la tabla por proyecto; otro
-// cliente la querrá por serie, por sucursal o por razón social. Cada grupo dice
-// qué entra (razón social completa o solo algunos proyectos), cómo se acomoda
-// la tabla del correo y a quién se manda. «Vista previa» enseña el correo, el
-// Excel y el PDF exactos antes de guardar o mandar nada
-// (backend: services/cobranza_grupos.py).
-//
-// Entrega 1: los grupos se arman y se previsualizan; la cola semanal todavía
-// sale de Contactos.
-import { useEffect, useMemo, useRef, useState } from "react";
-import { FileSpreadsheet, FileText, Mail, Pause, Pencil, Play, Plus, Send, Trash2, X } from "lucide-react";
+// Cobranza → el editor de un envío y su vista previa. Un envío junta una razón
+// social o varias (EHMO + SUREÑA + MAFAN) y trae TODA su configuración: qué
+// incluye, cuándo sale (automático o con el botón), a quién, cómo se acomoda la
+// tabla del correo, adjuntos, asunto y mensaje. «Vista previa» enseña el correo,
+// el Excel y el PDF exactos antes de guardar o mandar nada
+// (backend: services/cobranza_grupos.py y cobranza_auto.py).
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { FileSpreadsheet, FileText, Mail, Send, X } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
-import { DataTableSmart, type Column, type RowAction } from "@/components/ui/DataTableSmart";
-import { Checkbox, Field, Input, Select, Switch } from "@/components/ui/Field";
+import { Checkbox, Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiDownloadPost } from "@/lib/api";
 import { fmtMoney } from "@/lib/format";
-import { useMutation, useResource } from "@/lib/hooks";
+import { useMutation } from "@/lib/hooks";
 
-type AgruparPor = "PROYECTO" | "SERIE" | "SUCURSAL" | "CLIENTE";
-const AGRUPAR: { key: AgruparPor; label: string }[] = [
+export type AgruparPor = "PROYECTO" | "SERIE" | "SUCURSAL" | "CLIENTE";
+export type Modo = "AUTOMATICO" | "MANUAL";
+export const AGRUPAR: { key: AgruparPor; label: string }[] = [
   { key: "PROYECTO", label: "Proyecto" },
   { key: "SERIE", label: "Serie" },
   { key: "SUCURSAL", label: "Sucursal" },
   { key: "CLIENTE", label: "Razón social" },
 ];
-const AGRUPAR_LABEL = Object.fromEntries(AGRUPAR.map((a) => [a.key, a.label])) as Record<AgruparPor, string>;
+export const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
-type Nodo = {
+export type Nodo = {
   proyecto_id: string | null; proyecto: string | null; serie: string | null; series: string[];
   sucursal: string | null; saldo: string; facturas: number;
 };
-type Opcion = { cliente_id: string; nombre: string; legal_name: string; codigo: string | null; saldo: string; nodos: Nodo[] };
-type AlcanceOut = { cliente_id: string; cliente: string; completo: boolean; proyectos: string[]; series: string[] };
-type Grupo = {
+export type Opcion = {
+  cliente_id: string; nombre: string; legal_name: string; codigo: string | null; correos: string[];
+  saldo: string; nodos: Nodo[];
+};
+export type AlcanceOut = { cliente_id: string; cliente: string; completo: boolean; proyectos: string[]; series: string[] };
+export type Bitacora = {
+  id: string; grupo_id: string | null; envio: string; corte: string;
+  estado: "PENDIENTE" | "ENVIANDO" | "ENVIADO" | "ERROR" | "DESCARTADO"; origen: "MANUAL" | "PROGRAMADO";
+  para: string[]; cc: string[]; saldo: string; vencido: string; facturas: number;
+  dias_max_vencida: number; escalado: boolean; error: string | null; enviado_at: string | null; created_at: string;
+};
+export type Envio = {
   id: string; nombre: string; agrupar_por: AgruparPor; mostrar_antiguedad: boolean;
-  correos: string[]; cc: string[]; pausado: boolean; motivo_pausa: string | null;
+  correos: string[]; cc: string[]; modo: Modo; dia_semana: number; hora: number;
+  incluir_por_vencer: boolean; saldo_minimo: string | number; escalar_dias: number; escalar_cc: string[];
+  adjuntar_pdf: boolean; adjuntar_excel: boolean; asunto: string | null; mensaje: string | null; nota: string | null;
   alcance: AlcanceOut[]; saldo: string; vencido: string; facturas: number;
+  cuando: string; proximo: string | null; ultimo: Bitacora | null;
   tambien_en: { grupo_id: string; nombre: string; clientes: string[] }[];
 };
 type Previo = {
@@ -53,38 +60,56 @@ type Previo = {
   hojas: string[]; avisos: string[];
 };
 
-// Lo que se edita: por razón social, completa o con sus proyectos/series.
+// Lo que se edita. Por razón social: completa o con sus proyectos/series.
 type Sel = { completo: boolean; proyectos: string[]; series: string[] };
-type Borrador = {
+export type Borrador = {
   id?: string; nombre: string; agrupar_por: AgruparPor; mostrar_antiguedad: boolean;
-  correos: string; cc: string; pausado: boolean; motivo: string;
+  correos: string; cc: string; modo: Modo; dia_semana: number; hora: number;
+  incluir_por_vencer: boolean; saldo_minimo: string; escalar_dias: string; escalar_cc: string;
+  adjuntar_pdf: boolean; adjuntar_excel: boolean; asunto: string; mensaje: string; nota: string;
   orden: string[]; alcance: Record<string, Sel>;
 };
 
-const BASE = "/api/v1/cobranza/automatica/grupos";
+export const BASE = "/api/v1/cobranza/automatica/grupos";
 const aLista = (s: string) => s.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
-const errorDe = (e: unknown, def: string) => (e instanceof ApiError ? e.message : def);
+export const errorDe = (e: unknown, def: string) => (e instanceof ApiError ? e.message : def);
 const claveNodo = (n: Nodo) => n.proyecto_id ?? `serie:${n.serie ?? ""}`;
 
-function borradorDe(g: Grupo | null): Borrador {
-  if (!g) {
-    return { nombre: "", agrupar_por: "PROYECTO", mostrar_antiguedad: false, correos: "", cc: "",
-             pausado: false, motivo: "", orden: [], alcance: {} };
+const VACIO: Borrador = {
+  nombre: "", agrupar_por: "PROYECTO", mostrar_antiguedad: false, correos: "", cc: "",
+  modo: "MANUAL", dia_semana: 0, hora: 8, incluir_por_vencer: true, saldo_minimo: "100",
+  escalar_dias: "30", escalar_cc: "", adjuntar_pdf: true, adjuntar_excel: true,
+  asunto: "", mensaje: "", nota: "", orden: [], alcance: {},
+};
+
+/** El borrador de un envío guardado, o uno nuevo (vacío o para una razón social). */
+export function borradorDe(e: Envio | null, para?: Pick<Opcion, "cliente_id" | "nombre" | "correos">): Borrador {
+  if (!e) {
+    if (!para) return { ...VACIO };
+    return { ...VACIO, nombre: para.nombre, correos: para.correos.join(", "), orden: [para.cliente_id],
+             alcance: { [para.cliente_id]: { completo: true, proyectos: [], series: [] } } };
   }
   return {
-    id: g.id, nombre: g.nombre, agrupar_por: g.agrupar_por, mostrar_antiguedad: g.mostrar_antiguedad,
-    correos: g.correos.join(", "), cc: g.cc.join(", "), pausado: g.pausado, motivo: g.motivo_pausa ?? "",
-    orden: g.alcance.map((a) => a.cliente_id),
-    alcance: Object.fromEntries(g.alcance.map((a) => [a.cliente_id,
+    id: e.id, nombre: e.nombre, agrupar_por: e.agrupar_por, mostrar_antiguedad: e.mostrar_antiguedad,
+    correos: e.correos.join(", "), cc: e.cc.join(", "), modo: e.modo, dia_semana: e.dia_semana, hora: e.hora,
+    incluir_por_vencer: e.incluir_por_vencer, saldo_minimo: String(e.saldo_minimo),
+    escalar_dias: String(e.escalar_dias), escalar_cc: e.escalar_cc.join(", "),
+    adjuntar_pdf: e.adjuntar_pdf, adjuntar_excel: e.adjuntar_excel,
+    asunto: e.asunto ?? "", mensaje: e.mensaje ?? "", nota: e.nota ?? "",
+    orden: e.alcance.map((a) => a.cliente_id),
+    alcance: Object.fromEntries(e.alcance.map((a) => [a.cliente_id,
       { completo: a.completo, proyectos: a.proyectos, series: a.series }])),
   };
 }
 
-function payloadDe(b: Borrador) {
+export function payloadDe(b: Borrador) {
   return {
     id: b.id ?? null, nombre: b.nombre.trim(), agrupar_por: b.agrupar_por,
     mostrar_antiguedad: b.mostrar_antiguedad, correos: aLista(b.correos), cc: aLista(b.cc),
-    pausado: b.pausado, motivo_pausa: b.pausado ? b.motivo.trim() || null : null,
+    modo: b.modo, dia_semana: b.dia_semana, hora: b.hora, incluir_por_vencer: b.incluir_por_vencer,
+    saldo_minimo: Number(b.saldo_minimo || 0), escalar_dias: Number(b.escalar_dias || 0),
+    escalar_cc: aLista(b.escalar_cc), adjuntar_pdf: b.adjuntar_pdf, adjuntar_excel: b.adjuntar_excel,
+    asunto: b.asunto.trim() || null, mensaje: b.mensaje.trim() || null, nota: b.nota.trim() || null,
     alcance: b.orden.map((id) => ({ cliente_id: id, ...b.alcance[id] })),
   };
 }
@@ -95,136 +120,40 @@ function chocan(a: Sel, b: Sel) {
   return a.proyectos.some((p) => b.proyectos.includes(p)) || a.series.some((s) => b.series.includes(s));
 }
 
-export function Grupos({ canWrite }: { canWrite: boolean }) {
-  const toast = useToast();
-  const { del, loading } = useMutation();
-  const res = useResource<Grupo[]>(BASE);
-  const opcRes = useResource<Opcion[]>(`${BASE}/opciones`);
-  const [editar, setEditar] = useState<Borrador | null>(null);
-  const [ver, setVer] = useState<Borrador | null>(null);
-  const [borrar, setBorrar] = useState<Grupo | null>(null);
-
-  const cols = useMemo<Column<Grupo>[]>(() => [
-    { header: "Grupo", truncate: true, sortValue: (g) => g.nombre, exportValue: (g) => g.nombre,
-      cell: (g) => (
-        <span className="inline-flex items-center gap-1.5">
-          <span className="font-medium" title={g.nombre}>{g.nombre}</span>
-          {g.pausado && <Badge tone="warning">en pausa</Badge>}
-          {g.tambien_en.length > 0 && (
-            <span title={`También va en: ${g.tambien_en.map((t) => t.nombre).join(", ")}`}>
-              <Badge tone="accent">en {g.tambien_en.length + 1} grupos</Badge>
-            </span>
-          )}
-        </span>
-      ) },
-    { header: "Incluye", truncate: true,
-      exportValue: (g) => g.alcance.map((a) => a.cliente).join(", "),
-      cell: (g) => {
-        const parciales = g.alcance.filter((a) => !a.completo).length;
-        return (
-          <span title={g.alcance.map((a) => `${a.cliente}${a.completo ? "" : " (parcial)"}`).join("\n")}>
-            {g.alcance.map((a) => a.cliente).join(", ")}
-            {parciales > 0 && <span className="text-muted"> · {parciales} parcial{parciales === 1 ? "" : "es"}</span>}
-          </span>
-        );
-      } },
-    { header: "Tabla por", sortValue: (g) => AGRUPAR_LABEL[g.agrupar_por], exportValue: (g) => AGRUPAR_LABEL[g.agrupar_por],
-      cell: (g) => AGRUPAR_LABEL[g.agrupar_por] },
-    { header: "Para", truncate: true, exportValue: (g) => g.correos.join(", "),
-      cell: (g) => g.correos.length
-        ? <span title={[...g.correos, ...g.cc.map((c) => `cc: ${c}`)].join("\n")}>
-            {g.correos.join(", ")}{g.cc.length ? <span className="text-muted"> +{g.cc.length} cc</span> : null}
-          </span>
-        : <span className="text-danger">falta correo</span> },
-    { header: "Saldo", className: "text-right tabular-nums", sortValue: (g) => Number(g.saldo),
-      exportValue: (g) => Number(g.saldo), cell: (g) => fmtMoney(g.saldo) },
-    { header: "Vencido", className: "text-right tabular-nums", sortValue: (g) => Number(g.vencido),
-      exportValue: (g) => Number(g.vencido),
-      cell: (g) => Number(g.vencido) > 0 ? <span className="text-danger">{fmtMoney(g.vencido)}</span> : "—" },
-  ], []);
-
-  const acciones = useMemo<RowAction<Grupo>[]>(() => [
-    { id: "ver", icon: <Mail size={15} />, label: "Ver el correo", onClick: (g) => setVer(borradorDe(g)) },
-    ...(canWrite ? [
-      { id: "editar", icon: <Pencil size={15} />, label: "Editar", onClick: (g: Grupo) => setEditar(borradorDe(g)) },
-      { id: "borrar", icon: <Trash2 size={15} />, label: "Borrar", tone: "danger" as const, onClick: setBorrar },
-    ] : []),
-  ], [canWrite]);
-
-  const confirmarBorrar = async () => {
-    if (!borrar) return;
-    try {
-      await del(`${BASE}/${borrar.id}`);
-      toast.success(`Grupo «${borrar.nombre}» borrado.`);
-      setBorrar(null);
-      res.reload();
-    } catch (e) {
-      toast.error(errorDe(e, "No se pudo borrar el grupo."));
-    }
-  };
-
+/** Botones de opción (Automático/Manual, Proyecto/Serie…). */
+export function Opciones<T extends string>({ valor, opciones, onChange, disabled, chico }: {
+  valor: T; opciones: { key: T; label: string }[]; onChange: (v: T) => void; disabled?: boolean; chico?: boolean;
+}) {
   return (
-    <Card>
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-3xl text-sm text-muted">
-          Un grupo junta varias razones sociales en un solo estado de cuenta, con la tabla del correo por
-          proyecto, serie, sucursal o razón social. <b>Vista previa</b> enseña el correo y sus adjuntos tal como
-          saldrían. Por ahora la cola semanal de <b>Envíos automáticos</b> sigue saliendo de Contactos; los grupos
-          entran a la cola en la siguiente entrega.
-        </p>
-        {canWrite && (
-          <Button onClick={() => setEditar(borradorDe(null))}><Plus size={16} /> Nuevo grupo</Button>
-        )}
-      </div>
-      {res.error ? <Alert tone="danger">No se pudieron cargar los grupos.</Alert> : (
-        <DataTableSmart
-          rows={res.data ?? []}
-          loading={!res.data}
-          rowKey={(g) => g.id}
-          columns={cols}
-          actions={acciones}
-          onRowClick={canWrite ? (g) => setEditar(borradorDe(g)) : (g) => setVer(borradorDe(g))}
-          storageKey="cobranza-grupos"
-          exportFilename="grupos-cobranza"
-          empty="Todavía no hay grupos. Crea uno para juntar varias razones sociales en un solo estado de cuenta."
-        />
-      )}
+    <div role="group" className={`inline-grid gap-1 rounded-lg bg-surface-2 p-1 ${chico ? "" : "w-full"}`}
+         style={{ gridTemplateColumns: `repeat(${opciones.length}, minmax(0, 1fr))` }}>
+      {opciones.map((o) => (
+        <button key={o.key} type="button" aria-pressed={valor === o.key} disabled={disabled}
+                onClick={(e) => { e.stopPropagation(); if (valor !== o.key) onChange(o.key); }}
+                className={`whitespace-nowrap rounded-md ${chico ? "px-2 py-0.5 text-xs" : "px-3 py-1.5 text-sm"} ${
+                  valor === o.key ? "bg-background font-medium text-accent shadow-sm" : "text-muted hover:text-foreground"
+                } disabled:cursor-not-allowed disabled:opacity-60`}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
-      {editar && (
-        <EditarGrupo
-          inicial={editar} opciones={opcRes.data ?? []} cargando={!opcRes.data}
-          grupos={res.data ?? []} canWrite={canWrite}
-          onClose={() => setEditar(null)}
-          onGuardado={() => { setEditar(null); res.reload(); }}
-          onPrevio={setVer}
-        />
-      )}
-      {ver && <VistaPrevia borrador={ver} canWrite={canWrite} onClose={() => setVer(null)} />}
-      {borrar && (
-        <Modal open size="sm" title="Borrar grupo" onClose={() => setBorrar(null)}
-               footer={
-                 <div className="flex justify-end gap-2">
-                   <Button variant="secondary" onClick={() => setBorrar(null)}>Cancelar</Button>
-                   <Button variant="danger" onClick={confirmarBorrar} disabled={loading}>
-                     {loading ? "Borrando…" : "Borrar"}
-                   </Button>
-                 </div>
-               }>
-          <p className="text-sm">
-            ¿Borrar el grupo <b>{borrar.nombre}</b>? Sus razones sociales vuelven a cobrarse sueltas. Las facturas no
-            cambian.
-          </p>
-        </Modal>
-      )}
-    </Card>
+function Seccion({ titulo, children }: { titulo: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3 border-t border-border pt-4 first:border-t-0 first:pt-0">
+      <h3 className="text-sm font-semibold">{titulo}</h3>
+      {children}
+    </section>
   );
 }
 
 // ─── Editor ──────────────────────────────────────────────────────────────────
 
-function EditarGrupo({ inicial, opciones, cargando, grupos, canWrite, onClose, onGuardado, onPrevio }: {
-  inicial: Borrador; opciones: Opcion[]; cargando: boolean; grupos: Grupo[]; canWrite: boolean;
-  onClose: () => void; onGuardado: () => void; onPrevio: (b: Borrador) => void;
+export function EditarEnvio({ inicial, opciones, cargando, envios, automaticosEncendidos, canWrite, onClose, onGuardado, onPrevio }: {
+  inicial: Borrador; opciones: Opcion[]; cargando: boolean; envios: Envio[]; automaticosEncendidos: boolean;
+  canWrite: boolean; onClose: () => void; onGuardado: () => void; onPrevio: (b: Borrador) => void;
 }) {
   const toast = useToast();
   const { post, put, loading } = useMutation();
@@ -235,7 +164,6 @@ function EditarGrupo({ inicial, opciones, cargando, grupos, canWrite, onClose, o
 
   const cambiarSel = (clienteId: string, sel: Sel) =>
     setB((x) => ({ ...x, alcance: { ...x.alcance, [clienteId]: sel } }));
-
   const agregar = (clienteId: string) => {
     if (!clienteId || b.orden.includes(clienteId)) return;
     setB((x) => ({ ...x, orden: [...x.orden, clienteId],
@@ -268,12 +196,12 @@ function EditarGrupo({ inicial, opciones, cargando, grupos, canWrite, onClose, o
     });
   };
 
-  // Otros grupos que ya cubren algo de lo marcado (aviso, no error).
-  const choques = useMemo(() => grupos.filter((g) => g.id !== b.id).flatMap((g) => {
+  // Otros envíos que ya cubren algo de lo marcado (aviso, no error).
+  const choques = useMemo(() => envios.filter((g) => g.id !== b.id).flatMap((g) => {
     const nombres = g.alcance.filter((a) => b.alcance[a.cliente_id] && chocan(b.alcance[a.cliente_id], a))
       .map((a) => a.cliente);
     return nombres.length ? [`${nombres.join(", ")} también va en «${g.nombre}»`] : [];
-  }), [grupos, b.alcance, b.id]);
+  }), [envios, b.alcance, b.id]);
 
   const incompletos = b.orden.filter((id) => {
     const s = b.alcance[id];
@@ -285,19 +213,19 @@ function EditarGrupo({ inicial, opciones, cargando, grupos, canWrite, onClose, o
     try {
       if (b.id) await put(`${BASE}/${b.id}`, payloadDe(b));
       else await post(BASE, payloadDe(b));
-      toast.success(`Grupo «${b.nombre.trim()}» guardado.`);
+      toast.success(`Envío «${b.nombre.trim()}» guardado.`);
       onGuardado();
     } catch (e) {
-      toast.error(errorDe(e, "No se pudo guardar el grupo."));
+      toast.error(errorDe(e, "No se pudo guardar el envío."));
     }
   };
 
   return (
     <Modal open onClose={onClose} size="lg"
-           title={b.id ? `Editar grupo — ${inicial.nombre}` : "Nuevo grupo de cobranza"}
+           title={b.id ? `Editar envío — ${inicial.nombre}` : "Nuevo envío de cobranza"}
            footerStart={!listo && (
              <span className="text-xs text-muted">
-               {!b.nombre.trim() ? "Ponle nombre al grupo." : b.orden.length === 0 ? "Agrega al menos una razón social."
+               {!b.nombre.trim() ? "Ponle nombre al envío." : b.orden.length === 0 ? "Agrega al menos una razón social."
                  : "Marca al menos un proyecto en cada razón social, o quítala."}
              </span>
            )}
@@ -315,13 +243,12 @@ function EditarGrupo({ inicial, opciones, cargando, grupos, canWrite, onClose, o
              </div>
            }>
       <div className="space-y-5">
-        <Field label="Nombre del grupo" required>
+        <Field label="Nombre del envío" required>
           <Input value={b.nombre} maxLength={80} onChange={(e) => set("nombre", e.target.value)} placeholder="EHMO" />
         </Field>
 
-        <div>
-          <div className="mb-1 text-sm font-medium">Qué incluye</div>
-          <div className="mb-2 text-xs text-muted">
+        <Seccion titulo="Qué incluye">
+          <div className="text-xs text-muted">
             Marcar la razón social completa trae también sus proyectos nuevos. Si desmarcas un proyecto, ese se queda
             fuera hasta que lo vuelvas a marcar.
           </div>
@@ -353,52 +280,103 @@ function EditarGrupo({ inicial, opciones, cargando, grupos, canWrite, onClose, o
             </div>
           )}
           {choques.length > 0 && (
-            <div className="mt-2">
-              <Alert tone="warning">
-                {choques.map((c) => <div key={c}>{c}: esas facturas se cobrarían en los dos correos.</div>)}
-              </Alert>
-            </div>
+            <Alert tone="warning">
+              {choques.map((c) => <div key={c}>{c}: esas facturas se cobrarían en los dos correos.</div>)}
+            </Alert>
           )}
-        </div>
-
-        <div>
-          <div className="mb-1 text-sm font-medium">Tabla del correo por</div>
-          <div role="group" aria-label="Tabla del correo por" className="grid grid-cols-2 gap-1 rounded-lg bg-surface-2 p-1 sm:grid-cols-4">
-            {AGRUPAR.map((a) => (
-              <button key={a.key} type="button" aria-pressed={b.agrupar_por === a.key}
-                      onClick={() => set("agrupar_por", a.key)}
-                      className={`rounded-md px-3 py-1.5 text-sm ${b.agrupar_por === a.key
-                        ? "bg-background font-medium text-accent shadow-sm" : "text-muted hover:text-foreground"}`}>
-                {a.label}
-              </button>
-            ))}
-          </div>
-          <div className="mt-1 text-xs text-muted">También define las hojas del Excel de respaldo: una por fila.</div>
-          <label className="mt-3 flex items-center gap-2 text-sm">
-            <Switch checked={b.mostrar_antiguedad} onChange={(v) => set("mostrar_antiguedad", v)} />
-            Columnas de antigüedad (por vencer, 1 a 30, 31 a 60, 61 a 90 y más de 90 días)
-          </label>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Para" hint="Separa varios correos con coma.">
-            <Input value={b.correos} onChange={(e) => set("correos", e.target.value)} placeholder="cuentasporpagar@cliente.com" />
-          </Field>
-          <Field label="Con copia" hint="Además de la copia de Ajustes.">
-            <Input value={b.cc} onChange={(e) => set("cc", e.target.value)} placeholder="opcional" />
-          </Field>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm">
-            <Switch checked={b.pausado} onChange={(v) => set("pausado", v)} />
-            {b.pausado ? <><Pause size={14} /> En pausa</> : <><Play size={14} /> Recibe cobranza</>}
+            <Switch checked={b.incluir_por_vencer} onChange={(v) => set("incluir_por_vencer", v)} />
+            Incluir facturas por vencer
+            <span className="text-xs text-muted">(apagado, solo las vencidas)</span>
           </label>
-          {b.pausado && (
-            <Input className="max-w-sm" value={b.motivo} placeholder="Motivo (p. ej. convenio de pago)"
-                   onChange={(e) => set("motivo", e.target.value)} />
+        </Seccion>
+
+        <Seccion titulo="Cuándo sale">
+          <Opciones valor={b.modo} onChange={(v) => set("modo", v)}
+                    opciones={[{ key: "MANUAL", label: "Manual · con el botón Enviar" },
+                               { key: "AUTOMATICO", label: "Automático · sale solo" }]} />
+          {b.modo === "AUTOMATICO" ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Field label="Día">
+                  <Select value={String(b.dia_semana)} onChange={(e) => set("dia_semana", Number(e.target.value))}>
+                    {DIAS.map((d, i) => <option key={d} value={String(i)}>{d}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Hora" hint="Ciudad de México">
+                  <Select value={String(b.hora)} onChange={(e) => set("hora", Number(e.target.value))}>
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={String(h)}>{String(h).padStart(2, "0")}:00</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Saldo mínimo" hint="Por debajo no sale solo">
+                  <Input type="number" min={0} className="text-right" value={b.saldo_minimo}
+                         onChange={(e) => set("saldo_minimo", e.target.value)} />
+                </Field>
+              </div>
+              {!automaticosEncendidos && (
+                <Alert tone="warning">
+                  Los automáticos están apagados en <b>Ajustes generales</b>: este envío no saldrá solo hasta que los
+                  enciendas. Con el botón Enviar sí sale.
+                </Alert>
+              )}
+            </>
+          ) : (
+            <div className="text-xs text-muted">Sale solo cuando presionas Enviar en la lista de envíos.</div>
           )}
-        </div>
+        </Seccion>
+
+        <Seccion titulo="A quién">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Para" hint="Separa varios correos con coma.">
+              <Input value={b.correos} onChange={(e) => set("correos", e.target.value)} placeholder="cuentasporpagar@cliente.com" />
+            </Field>
+            <Field label="Con copia" hint="Además de la copia fija de Ajustes generales.">
+              <Input value={b.cc} onChange={(e) => set("cc", e.target.value)} placeholder="opcional" />
+            </Field>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[8rem_1fr]">
+            <Field label="Escalar a los" hint="días de vencida">
+              <Input type="number" min={0} max={365} value={b.escalar_dias} onChange={(e) => set("escalar_dias", e.target.value)} />
+            </Field>
+            <Field label="Copiar al escalar" hint="Cuando la factura más vieja pasa esos días. 0 días = nunca.">
+              <Input value={b.escalar_cc} onChange={(e) => set("escalar_cc", e.target.value)} placeholder="direccion@tuempresa.com" />
+            </Field>
+          </div>
+        </Seccion>
+
+        <Seccion titulo="El correo">
+          <div>
+            <div className="mb-1 text-sm font-medium">Tabla por</div>
+            <Opciones valor={b.agrupar_por} onChange={(v) => set("agrupar_por", v)} opciones={AGRUPAR} />
+            <div className="mt-1 text-xs text-muted">También define las hojas del Excel de respaldo: una por fila.</div>
+          </div>
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+            <label className="flex items-center gap-2">
+              <Switch checked={b.mostrar_antiguedad} onChange={(v) => set("mostrar_antiguedad", v)} />
+              Columnas de antigüedad
+            </label>
+            <label className="flex items-center gap-2">
+              <Switch checked={b.adjuntar_excel} onChange={(v) => set("adjuntar_excel", v)} /> Excel (formato SAE)
+            </label>
+            <label className="flex items-center gap-2">
+              <Switch checked={b.adjuntar_pdf} onChange={(v) => set("adjuntar_pdf", v)} /> PDF
+            </label>
+          </div>
+          <Field label="Asunto" hint="Vacío = «Estado de cuenta <nombre> al dd/mm/aaaa».">
+            <Input value={b.asunto} maxLength={200} onChange={(e) => set("asunto", e.target.value)} />
+          </Field>
+          <Field label="Mensaje" hint="Va antes del resumen de saldo y la tabla, que el sistema agrega solos.">
+            <Textarea rows={3} value={b.mensaje} onChange={(e) => set("mensaje", e.target.value)}
+                      placeholder="Buen día, les compartimos su estado de cuenta…" />
+          </Field>
+        </Seccion>
+
+        <Seccion titulo="Nota interna">
+          <Input value={b.nota} maxLength={254} onChange={(e) => set("nota", e.target.value)}
+                 placeholder="Opcional, no va en el correo (p. ej. convenio de pago)" />
+        </Seccion>
       </div>
     </Modal>
   );
@@ -427,7 +405,7 @@ function RazonSocial({ opcion, sel, onCompleta, onNodo, onQuitar }: {
           </div>
         </div>
         <span className="whitespace-nowrap text-xs tabular-nums text-muted">{opcion ? fmtMoney(opcion.saldo) : ""}</span>
-        <button type="button" onClick={onQuitar} title="Quitar del grupo" aria-label="Quitar del grupo"
+        <button type="button" onClick={onQuitar} title="Quitar del envío" aria-label="Quitar del envío"
                 className="rounded p-1 text-muted hover:bg-surface-2 hover:text-danger">
           <X size={14} />
         </button>
@@ -458,13 +436,18 @@ function RazonSocial({ opcion, sel, onCompleta, onNodo, onQuitar }: {
 
 // ─── Vista previa ────────────────────────────────────────────────────────────
 
-function VistaPrevia({ borrador, canWrite, onClose }: { borrador: Borrador; canWrite: boolean; onClose: () => void }) {
+export function VistaPrevia({ borrador, canWrite, onClose, onEnviar }: {
+  borrador: Borrador; canWrite: boolean; onClose: () => void;
+  /** Solo para un envío guardado: «Enviar ahora» desde la vista previa. */
+  onEnviar?: () => Promise<boolean>;
+}) {
   const toast = useToast();
   const { post, loading } = useMutation();
   const payload = useMemo(() => payloadDe(borrador), [borrador]);
   const [previo, setPrevio] = useState<Previo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [bajando, setBajando] = useState<"xlsx" | "pdf" | null>(null);
+  const [enviando, setEnviando] = useState(false);
   const [alto, setAlto] = useState(420);
 
   useEffect(() => {
@@ -495,10 +478,27 @@ function VistaPrevia({ borrador, canWrite, onClose }: { borrador: Borrador; canW
     }
   };
 
+  const enviar = async () => {
+    if (!onEnviar) return;
+    setEnviando(true);
+    const ok = await onEnviar();
+    setEnviando(false);
+    if (ok) onClose();
+  };
+
   return (
-    <Modal open onClose={onClose} size="xl" title={`Vista previa del correo — ${borrador.nombre.trim() || "grupo"}`}
-           description="El correo y los adjuntos tal como saldrían hoy, con los ajustes de la cobranza automática."
-           footer={<div className="flex justify-end"><Button variant="secondary" onClick={onClose}>Cerrar</Button></div>}>
+    <Modal open onClose={onClose} size="xl" title={`Vista previa del correo — ${borrador.nombre.trim() || "envío"}`}
+           description="El correo y los adjuntos tal como saldrían hoy."
+           footer={
+             <div className="flex justify-end gap-2">
+               <Button variant="secondary" onClick={onClose}>Cerrar</Button>
+               {onEnviar && canWrite && (
+                 <Button onClick={enviar} disabled={enviando || !previo || previo.para.length === 0}>
+                   <Send size={15} /> {enviando ? "Enviando…" : "Enviar ahora"}
+                 </Button>
+               )}
+             </div>
+           }>
       {error ? <Alert tone="danger">{error}</Alert> : !previo ? (
         <div className="flex justify-center py-16"><Spinner /></div>
       ) : (

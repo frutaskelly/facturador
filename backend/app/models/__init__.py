@@ -12,7 +12,7 @@ from .import_productos_log import ImportProductosLog
 from .conversion import ConversionProducto
 from .esquema_impuesto import EsquemaImpuesto
 from .cobranza_auto import (
-    CobranzaConfig, CobranzaContacto, CobranzaEnvio, CobranzaGrupo, CobranzaGrupoAlcance,
+    CobranzaConfig, CobranzaEnvio, CobranzaGrupo, CobranzaGrupoAlcance,
 )
 from .espejo_sync import EspejoSync
 from .devolucion import Devolucion, LineaDevolucion
@@ -54,7 +54,6 @@ __all__ = [
     "EsquemaImpuesto",
     "EspejoSync",
     "CobranzaConfig",
-    "CobranzaContacto",
     "CobranzaEnvio",
     "CobranzaGrupo",
     "CobranzaGrupoAlcance",

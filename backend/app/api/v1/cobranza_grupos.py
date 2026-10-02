@@ -1,18 +1,18 @@
-"""Grupos de cobranza — varias razones sociales en un solo estado de cuenta.
+"""Envíos de cobranza — cada estado de cuenta configurado por separado.
 
-Las reglas viven en `services/cobranza_grupos.py`. Aquí: alta, cambio y baja
-de grupos, las opciones del árbol «qué incluye», y el previo (JSON, Excel y
-PDF) más el correo de prueba, que solo llega a quien lo pide.
+Un envío junta una razón social o varias (EHMO + SUREÑA + MAFAN) y dice a
+quién se manda, cómo se acomoda la tabla, qué incluye y cuándo sale:
+AUTOMATICO el día y la hora que diga; MANUAL solo con el botón Enviar. Las
+reglas viven en `services/cobranza_grupos.py` (cómo se arma) y
+`services/cobranza_auto.py` (cómo se manda y la bitácora).
 
-El previo recibe el grupo tal como está en el editor, guardado o no: así se ve
-el correo antes de guardar. Permisos como el resto de la cobranza automática:
-ver pide `menu:facturas`; guardar y mandar la prueba, `factura:gestionar`.
-
-Entrega 1 (2-oct-2026): la cola semanal todavía se arma con los contactos;
-los grupos entran a la cola en la entrega 2.
+El previo recibe el envío tal como está en el editor, guardado o no: así se
+ve el correo antes de guardar. Ver pide `menu:facturas`; guardar, cambiar el
+modo y mandar piden `factura:gestionar`.
 """
 from __future__ import annotations
 
+import datetime as dt
 from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
@@ -24,10 +24,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Cliente, CobranzaGrupo, CobranzaGrupoAlcance, Factura, Proyecto, Tenant
-from ...services import cobranza_auto
+from ...models import (
+    Cliente, CobranzaEnvio, CobranzaGrupo, CobranzaGrupoAlcance, Factura, Proyecto, Tenant,
+)
+from ...services import cobranza_auto as auto
 from ...services import cobranza_grupos as svc
 from .cobranza import _READ, _WRITE
+from .cobranza_auto import envio_out
 from .remisiones import _validar_destinatarios
 
 router = APIRouter(prefix="/cobranza/automatica/grupos", tags=["cobranza"])
@@ -44,17 +47,31 @@ class AlcanceIn(BaseModel):
 
 
 class GrupoIn(BaseModel):
-    # Solo para el previo de un grupo ya guardado: así el aviso «también va
+    # Solo para el previo de un envío ya guardado: así el aviso «también va
     # en…» no lo compara consigo mismo.
     id: Optional[UUID] = None
     nombre: str = Field(min_length=1, max_length=80)
+    alcance: list[AlcanceIn] = Field(min_length=1, max_length=100)
     agrupar_por: Literal["PROYECTO", "SERIE", "SUCURSAL", "CLIENTE"] = "PROYECTO"
     mostrar_antiguedad: bool = False
     correos: list[str] = Field(default_factory=list, max_length=20)
     cc: list[str] = Field(default_factory=list, max_length=20)
-    pausado: bool = False
-    motivo_pausa: Optional[str] = Field(default=None, max_length=254)
-    alcance: list[AlcanceIn] = Field(min_length=1, max_length=100)
+    modo: Literal["AUTOMATICO", "MANUAL"] = "MANUAL"
+    dia_semana: int = Field(default=0, ge=0, le=6)
+    hora: int = Field(default=8, ge=0, le=23)
+    incluir_por_vencer: bool = True
+    saldo_minimo: Decimal = Field(default=Decimal("100"), ge=0, le=10_000_000)
+    escalar_dias: int = Field(default=30, ge=0, le=365)
+    escalar_cc: list[str] = Field(default_factory=list, max_length=20)
+    adjuntar_pdf: bool = True
+    adjuntar_excel: bool = True
+    asunto: Optional[str] = Field(default=None, max_length=200)
+    mensaje: Optional[str] = Field(default=None, max_length=4000)
+    nota: Optional[str] = Field(default=None, max_length=254)
+
+
+def _correos(lista: list[str]) -> list[str]:
+    return _validar_destinatarios([x.strip() for x in lista if x.strip()])
 
 
 def _definicion(db: Session, ctx: AuthContext, p: GrupoIn) -> svc.Definicion:
@@ -62,10 +79,10 @@ def _definicion(db: Session, ctx: AuthContext, p: GrupoIn) -> svc.Definicion:
     y dentro del candado, proyectos del inquilino, correos válidos."""
     nombre = " ".join(p.nombre.split())
     if not nombre:
-        raise HTTPException(status_code=422, detail="Ponle nombre al grupo.")
+        raise HTTPException(status_code=422, detail="Ponle nombre al envío.")
     ids = [a.cliente_id for a in p.alcance]
     if len(set(ids)) != len(ids):
-        raise HTTPException(status_code=422, detail="Una razón social aparece dos veces en el grupo.")
+        raise HTTPException(status_code=422, detail="Una razón social aparece dos veces en el envío.")
     clientes = {c.id: c for c in db.query(Cliente).filter(
         Cliente.tenant_id == ctx.tenant_id, Cliente.id.in_(ids), Cliente.deleted_at.is_(None)).all()}
     if len(clientes) != len(ids) or not all(ctx.cliente_permitido(i) for i in ids):
@@ -90,11 +107,14 @@ def _definicion(db: Session, ctx: AuthContext, p: GrupoIn) -> svc.Definicion:
             cliente_id=a.cliente_id, completo=a.completo,
             proyectos=set() if a.completo else set(a.proyectos),
             series=set() if a.completo else series))
+    texto = lambda v: (v or "").strip() or None  # noqa: E731
     return svc.Definicion(
-        id=p.id, nombre=nombre, agrupar_por=p.agrupar_por, mostrar_antiguedad=p.mostrar_antiguedad,
-        correos=_validar_destinatarios([x.strip() for x in p.correos if x.strip()]),
-        cc=_validar_destinatarios([x.strip() for x in p.cc if x.strip()]),
-        pausado=p.pausado, alcance=alcance,
+        id=p.id, nombre=nombre, alcance=alcance, agrupar_por=p.agrupar_por,
+        mostrar_antiguedad=p.mostrar_antiguedad, correos=_correos(p.correos), cc=_correos(p.cc),
+        modo=p.modo, dia_semana=p.dia_semana, hora=p.hora, incluir_por_vencer=p.incluir_por_vencer,
+        saldo_minimo=p.saldo_minimo, escalar_dias=p.escalar_dias, escalar_cc=_correos(p.escalar_cc),
+        adjuntar_pdf=p.adjuntar_pdf, adjuntar_excel=p.adjuntar_excel,
+        asunto=texto(p.asunto), mensaje=texto(p.mensaje), nota=texto(p.nota),
     )
 
 
@@ -106,14 +126,14 @@ def _guardados(db: Session, ctx: AuthContext) -> list[tuple[CobranzaGrupo, svc.D
     out = []
     for g in grupos:
         d = svc.definicion_de(db, g, filas.get(g.id, []))
-        # Con candado por cliente solo se ve el grupo si se ven TODAS sus razones.
+        # Con candado por cliente solo se ve el envío si se ven TODAS sus razones.
         if d.alcance and all(ctx.cliente_permitido(a.cliente_id) for a in d.alcance):
             out.append((g, d))
     return out
 
 
 def _tambien_en(d: svc.Definicion, otros: list[tuple[CobranzaGrupo, svc.Definicion]]) -> list[dict]:
-    """Los otros grupos que cubren alguna factura de este (aviso, no error)."""
+    """Los otros envíos que cubren alguna factura de este (aviso, no error)."""
     out = []
     for g, o in otros:
         if d.id is not None and g.id == d.id:
@@ -124,30 +144,91 @@ def _tambien_en(d: svc.Definicion, otros: list[tuple[CobranzaGrupo, svc.Definici
     return out
 
 
-def _grupo_out(g: CobranzaGrupo, d: svc.Definicion, cx: svc.Contexto, otros) -> dict:
-    datos = svc.armar(cx, d)
+class _Lista:
+    """Lo que la lista de envíos comparte: catálogo, config, la última fila de
+    la bitácora de cada envío y si su automático de hoy ya se resolvió."""
+
+    def __init__(self, db: Session, ctx: AuthContext):
+        self.cx = svc.Contexto(db, ctx)
+        self.cfg = auto.config_de(db, ctx.tenant_id)
+        self.ahora = dt.datetime.now(dt.timezone.utc)
+        hoy = auto.hoy_local(self.cfg)
+        self.ultimo: dict[UUID, CobranzaEnvio] = {}
+        self.salio_hoy: set[UUID] = set()
+        for e in db.query(CobranzaEnvio).filter(
+                CobranzaEnvio.tenant_id == ctx.tenant_id, CobranzaEnvio.grupo_id.isnot(None),
+                CobranzaEnvio.corte >= hoy - dt.timedelta(days=120)
+        ).order_by(CobranzaEnvio.created_at.desc()).all():
+            self.ultimo.setdefault(e.grupo_id, e)
+            if e.origen == "PROGRAMADO" and e.corte == hoy and e.estado in ("ENVIADO", "DESCARTADO", "ERROR"):
+                self.salio_hoy.add(e.grupo_id)
+
+
+def _grupo_out(g: CobranzaGrupo, d: svc.Definicion, ls: _Lista, otros) -> dict:
+    datos = svc.datos_de_envio(ls.cx, d)
+    ultimo = ls.ultimo.get(g.id)
+    proximo = None
+    if g.modo == "AUTOMATICO" and ls.cfg.activo:
+        proximo = auto.proximo(g, ls.cfg, ls.ahora, g.id in ls.salio_hoy)
     return {
-        "id": str(g.id), "nombre": g.nombre, "agrupar_por": g.agrupar_por,
-        "mostrar_antiguedad": g.mostrar_antiguedad, "correos": g.correos or [], "cc": g.cc or [],
-        "pausado": g.pausado, "motivo_pausa": g.motivo_pausa,
+        "id": str(g.id),
+        **{c: getattr(g, c) for c in svc.CAMPOS},
+        "correos": g.correos or [], "cc": g.cc or [], "escalar_cc": g.escalar_cc or [],
         "alcance": [{
-            "cliente_id": str(a.cliente_id), "cliente": svc.nombre_corto(cx.cliente(a.cliente_id)),
+            "cliente_id": str(a.cliente_id), "cliente": svc.nombre_corto(ls.cx.cliente(a.cliente_id)),
             "completo": a.completo, "proyectos": sorted(str(p) for p in a.proyectos),
             "series": sorted(a.series),
-        } for a in sorted(d.alcance, key=lambda a: cx.cliente(a.cliente_id).legal_name or "")],
+        } for a in sorted(d.alcance, key=lambda a: ls.cx.cliente(a.cliente_id).legal_name or "")],
         "saldo": datos["saldo_total"], "vencido": datos["vencido_total"], "facturas": datos["facturas"],
+        "cuando": auto.cuando_texto(g),
+        "proximo": proximo,
+        "ultimo": envio_out(ultimo) if ultimo else None,
         "tambien_en": _tambien_en(d, otros),
     }
 
 
+def _correos_de_ficha(c: Cliente) -> list[str]:
+    dom = c.domicilio_fiscal or {}
+    if isinstance(dom.get("correos"), list):
+        return [str(x) for x in dom["correos"] if str(x).strip()]
+    return [str(dom["email"])] if dom.get("email") else []
+
+
+def _sin_envio(db: Session, ctx: AuthContext, ls: _Lista, guardados) -> list[dict]:
+    """Razones sociales con saldo que ningún envío cubre (o cubre solo en
+    parte): nadie les está cobrando eso."""
+    con_saldo = [c for (c,) in db.query(Factura.cliente_id).filter(
+        Factura.tenant_id == ctx.tenant_id, Factura.deleted_at.is_(None),
+        Factura.estado == "TIMBRADA", Factura.metodo_pago == "PPD",
+        Factura.saldo_insoluto > 0).distinct().all() if ctx.cliente_permitido(c)]
+    alcances: dict[UUID, list[svc.Alcance]] = {}
+    for _g, d in guardados:
+        for a in d.alcance:
+            alcances.setdefault(a.cliente_id, []).append(a)
+    out = []
+    for cid in con_saldo:
+        docs = [doc for doc in ls.cx.estado(cid)["facturas"]
+                if not any(a.entra(doc) for a in alcances.get(cid, []))]
+        if not docs:
+            continue
+        c = ls.cx.cliente(cid)
+        out.append({
+            "cliente_id": str(cid), "nombre": svc.nombre_corto(c), "legal_name": c.legal_name,
+            "saldo": sum((Decimal(x["saldo_insoluto"]) for x in docs), ZERO), "facturas": len(docs),
+            "parcial": cid in alcances, "correos": _correos_de_ficha(c),
+        })
+    return sorted(out, key=lambda x: x["saldo"], reverse=True)
+
+
 @router.get("")
-def listar_grupos(db: Session = Depends(get_tenant_db),
-                  ctx: AuthContext = Depends(require_permission(_READ))):
-    """Los grupos con su saldo de hoy y con quién comparten razones sociales."""
+def listar(db: Session = Depends(get_tenant_db),
+           ctx: AuthContext = Depends(require_permission(_READ))):
+    """Los envíos con su saldo de hoy, cuándo salen, su último correo y con
+    quién comparten razones sociales; más las razones sin envío."""
     guardados = _guardados(db, ctx)
-    cx = svc.Contexto(db, ctx)
-    out = [_grupo_out(g, d, cx, guardados) for g, d in guardados]
-    return sorted(out, key=lambda x: x["nombre"].lower())
+    ls = _Lista(db, ctx)
+    envios = sorted((_grupo_out(g, d, ls, guardados) for g, d in guardados), key=lambda x: x["nombre"].lower())
+    return {"envios": envios, "sin_envio": _sin_envio(db, ctx, ls, guardados)}
 
 
 @router.get("/opciones")
@@ -201,23 +282,20 @@ def opciones(db: Session = Depends(get_tenant_db),
                 nodos[clave]["facturas"] += 1
         lista = sorted(nodos.values(), key=lambda n: (n["proyecto"] is None, n["proyecto"] or n["serie"] or ""))
         out.append({"cliente_id": str(c.id), "nombre": svc.nombre_corto(c), "legal_name": c.legal_name,
-                    "codigo": c.codigo, "saldo": sum((n["saldo"] for n in lista), ZERO), "nodos": lista})
+                    "codigo": c.codigo, "correos": _correos_de_ficha(c),
+                    "saldo": sum((n["saldo"] for n in lista), ZERO), "nodos": lista})
     return out
 
 
-def _guardar(db: Session, ctx: AuthContext, g: CobranzaGrupo, d: svc.Definicion, p: GrupoIn) -> None:
-    g.nombre = d.nombre
-    g.agrupar_por = d.agrupar_por
-    g.mostrar_antiguedad = d.mostrar_antiguedad
-    g.correos = d.correos
-    g.cc = d.cc
-    g.pausado = d.pausado
-    g.motivo_pausa = ((p.motivo_pausa or "").strip() or None) if d.pausado else None
+def _guardar(db: Session, ctx: AuthContext, g: CobranzaGrupo, d: svc.Definicion) -> None:
+    for c in svc.CAMPOS:
+        setattr(g, c, getattr(d, c))
+    g.correos, g.cc, g.escalar_cc = d.correos, d.cc, d.escalar_cc
     try:
         db.flush()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Ya hay un grupo con ese nombre.")
+        raise HTTPException(status_code=409, detail="Ya hay un envío con ese nombre.")
     db.query(CobranzaGrupoAlcance).filter(CobranzaGrupoAlcance.tenant_id == ctx.tenant_id,
                                           CobranzaGrupoAlcance.grupo_id == g.id).delete()
     db.add_all(svc.filas_alcance(ctx.tenant_id, g.id, d.alcance))
@@ -226,20 +304,20 @@ def _guardar(db: Session, ctx: AuthContext, g: CobranzaGrupo, d: svc.Definicion,
 
 def _respuesta(db: Session, ctx: AuthContext, grupo_id: UUID) -> dict:
     guardados = _guardados(db, ctx)
-    cx = svc.Contexto(db, ctx)
+    ls = _Lista(db, ctx)
     for g, d in guardados:
         if g.id == grupo_id:
-            return _grupo_out(g, d, cx, guardados)
-    raise HTTPException(status_code=404, detail="Grupo no encontrado")
+            return _grupo_out(g, d, ls, guardados)
+    raise HTTPException(status_code=404, detail="Envío no encontrado")
 
 
 @router.post("", status_code=201)
-def crear_grupo(payload: GrupoIn, db: Session = Depends(get_tenant_db),
-                ctx: AuthContext = Depends(require_permission(_WRITE))):
+def crear(payload: GrupoIn, db: Session = Depends(get_tenant_db),
+          ctx: AuthContext = Depends(require_permission(_WRITE))):
     d = _definicion(db, ctx, payload)
     g = CobranzaGrupo(tenant_id=ctx.tenant_id, nombre=d.nombre)
     db.add(g)
-    _guardar(db, ctx, g, d, payload)
+    _guardar(db, ctx, g, d)
     return _respuesta(db, ctx, g.id)
 
 
@@ -247,25 +325,83 @@ def _propio(db: Session, ctx: AuthContext, grupo_id: UUID) -> CobranzaGrupo:
     g = db.query(CobranzaGrupo).filter(CobranzaGrupo.id == grupo_id,
                                        CobranzaGrupo.tenant_id == ctx.tenant_id).one_or_none()
     if g is None or not any(x.id == grupo_id for x, _ in _guardados(db, ctx)):
-        raise HTTPException(status_code=404, detail="Grupo no encontrado")
+        raise HTTPException(status_code=404, detail="Envío no encontrado")
     return g
 
 
 @router.put("/{grupo_id}")
-def cambiar_grupo(grupo_id: UUID, payload: GrupoIn, db: Session = Depends(get_tenant_db),
-                  ctx: AuthContext = Depends(require_permission(_WRITE))):
+def cambiar(grupo_id: UUID, payload: GrupoIn, db: Session = Depends(get_tenant_db),
+            ctx: AuthContext = Depends(require_permission(_WRITE))):
     g = _propio(db, ctx, grupo_id)
     d = _definicion(db, ctx, payload)
-    _guardar(db, ctx, g, d, payload)
+    _guardar(db, ctx, g, d)
+    return _respuesta(db, ctx, g.id)
+
+
+class ModoIn(BaseModel):
+    modo: Literal["AUTOMATICO", "MANUAL"]
+
+
+@router.patch("/{grupo_id}/modo")
+def cambiar_modo(grupo_id: UUID, payload: ModoIn, db: Session = Depends(get_tenant_db),
+                 ctx: AuthContext = Depends(require_permission(_WRITE))):
+    """El interruptor Automático / Manual de la lista, con un clic."""
+    g = _propio(db, ctx, grupo_id)
+    g.modo = payload.modo
+    db.commit()
     return _respuesta(db, ctx, g.id)
 
 
 @router.delete("/{grupo_id}")
-def borrar_grupo(grupo_id: UUID, db: Session = Depends(get_tenant_db),
-                 ctx: AuthContext = Depends(require_permission(_WRITE))):
+def borrar(grupo_id: UUID, db: Session = Depends(get_tenant_db),
+           ctx: AuthContext = Depends(require_permission(_WRITE))):
     db.delete(_propio(db, ctx, grupo_id))
     db.commit()
     return {"ok": True}
+
+
+# ─── Mandar con un clic ──────────────────────────────────────────────────────
+
+@router.post("/{grupo_id}/enviar")
+def enviar(grupo_id: UUID, db: Session = Depends(get_tenant_db),
+           ctx: AuthContext = Depends(require_permission(_WRITE))):
+    """Manda el estado de cuenta ahora mismo. Si algo lo impide (espejo viejo,
+    sin correo, sin saldo) responde 409 con el motivo y no deja rastro; si el
+    SMTP lo rechaza queda en la bitácora como ERROR."""
+    g = _propio(db, ctx, grupo_id)
+    try:
+        e = auto.enviar_grupo(db, ctx.tenant_id, g, origen="MANUAL", usuario=ctx.user_id)
+    except auto.NoSeEnvia as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc))
+    db.commit()
+    return {"envio": envio_out(e), "grupo": _respuesta(db, ctx, g.id)}
+
+
+class IdsIn(BaseModel):
+    ids: list[UUID] = Field(min_length=1, max_length=200)
+
+
+@router.post("/enviar")
+def enviar_varios(payload: IdsIn, db: Session = Depends(get_tenant_db),
+                  ctx: AuthContext = Depends(require_permission(_WRITE))):
+    """Manda varios de una vez. Cada uno se confirma por separado: si el 10
+    falla, los 9 que ya salieron quedan como enviados."""
+    propios = {g.id: g for g, _ in _guardados(db, ctx)}
+    resultado = []
+    for i in payload.ids:
+        g = propios.get(i)
+        if g is None:
+            resultado.append({"grupo_id": str(i), "nombre": "—", "estado": "ERROR", "error": "Envío no encontrado"})
+            continue
+        try:
+            e = auto.enviar_grupo(db, ctx.tenant_id, g, origen="MANUAL", usuario=ctx.user_id)
+            db.commit()
+            resultado.append({"grupo_id": str(i), "nombre": g.nombre, "estado": e.estado, "error": e.error})
+        except auto.NoSeEnvia as exc:
+            db.rollback()
+            resultado.append({"grupo_id": str(i), "nombre": g.nombre, "estado": "NO_SALIO", "error": str(exc)})
+    return resultado
 
 
 # ─── Previo, archivos y prueba ───────────────────────────────────────────────
@@ -275,17 +411,16 @@ def previo(payload: GrupoIn, db: Session = Depends(get_tenant_db),
            ctx: AuthContext = Depends(require_permission(_READ))):
     """El correo tal como saldría hoy, con lo que trae el editor (guardado o no)."""
     d = _definicion(db, ctx, payload)
-    cfg = cobranza_auto.config_de(db, ctx.tenant_id)
+    cfg = auto.config_de(db, ctx.tenant_id)
     out = svc.previo(svc.Contexto(db, ctx), cfg, d)
     for t in _tambien_en(d, _guardados(db, ctx)):
-        out["avisos"].append(f"También va en el grupo «{t['nombre']}»: esas facturas se cobrarían en los dos correos.")
+        out["avisos"].append(f"También va en el envío «{t['nombre']}»: esas facturas se cobrarían en los dos correos.")
     return out
 
 
 def _archivo(db: Session, ctx: AuthContext, payload: GrupoIn, tipo: str) -> Response:
     d = _definicion(db, ctx, payload)
-    cfg = cobranza_auto.config_de(db, ctx.tenant_id)
-    datos = svc.armar(svc.Contexto(db, ctx), d, solo_vencidas=not cfg.incluir_por_vencer)
+    datos = svc.datos_de_envio(svc.Contexto(db, ctx), d)
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
     nombre = svc.nombre_archivo(datos)
     if tipo == "pdf":
@@ -314,7 +449,7 @@ def previo_pdf(payload: GrupoIn, db: Session = Depends(get_tenant_db),
 def prueba(payload: GrupoIn, db: Session = Depends(get_tenant_db),
            ctx: AuthContext = Depends(require_permission(_WRITE))):
     """Manda el correo SOLO a quien lo pide (su correo de usuario), con una
-    franja arriba que dice a quién iría de verdad. Nunca a los del grupo."""
+    franja arriba que dice a quién iría de verdad. Nunca a los del envío."""
     import html as html_mod
 
     from ...services import email as email_service
@@ -325,19 +460,18 @@ def prueba(payload: GrupoIn, db: Session = Depends(get_tenant_db),
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
     if not email_service.configured(tenant):
         raise HTTPException(status_code=503, detail="Configura una cuenta de correo en Ajustes › Correo")
-    cfg = cobranza_auto.config_de(db, ctx.tenant_id)
-    datos = svc.armar(svc.Contexto(db, ctx), d, solo_vencidas=not cfg.incluir_por_vencer)
-    para, cc, _escalado = cobranza_auto._destinatarios(cfg, d, datos["dias_max_vencida"])
+    cfg = auto.config_de(db, ctx.tenant_id)
+    datos = svc.datos_de_envio(svc.Contexto(db, ctx), d)
+    para, cc, _escalado = svc.destinatarios(cfg, d, datos["dias_max_vencida"])
     destino = ", ".join(para) or "(falta capturar el correo)"
     if cc:
         destino += f" · cc {', '.join(cc)}"
     franja = ("<p style=\"background:#fff4dc;color:#8a5a00;padding:8px 12px;border-radius:6px;font-size:12px\">"
               f"Correo de prueba: de verdad iría a {html_mod.escape(destino)}. Solo te llegó a ti.</p>")
-    html = svc.html_correo(cfg, datos, adjunta_excel=cfg.adjuntar_excel, encabezado=franja)
     try:
         email_service.send_email(email_service.smtp_config(tenant), [ctx.email],
-                                 f"[Prueba] {svc.asunto(cfg, datos)}", html,
-                                 attachments=svc.adjuntos(tenant, cfg, datos))
+                                 f"[Prueba] {svc.asunto(d, datos)}", svc.html_correo(d, datos, encabezado=franja),
+                                 attachments=svc.adjuntos(tenant, d, datos))
     except Exception as exc:  # noqa: BLE001 — el motivo del SMTP se muestra tal cual
         raise HTTPException(status_code=502, detail=str(exc))
     return {"ok": True, "to": ctx.email}

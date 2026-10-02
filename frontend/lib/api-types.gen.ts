@@ -384,48 +384,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/cobranza/automatica/contactos": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Listar Contactos
-         * @description Cada cliente con saldo PPD (o con contacto capturado), sus series con
-         *     saldo y sus contactos: la pantalla arma de aquí la tabla por cliente.
-         */
-        get: operations["listar_contactos_api_v1_cobranza_automatica_contactos_get"];
-        /**
-         * Guardar Contacto
-         * @description Alta o cambio del contacto de (cliente, serie). serie vacía = todas.
-         */
-        put: operations["guardar_contacto_api_v1_cobranza_automatica_contactos_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/cobranza/automatica/contactos/{contacto_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Borrar Contacto */
-        delete: operations["borrar_contacto_api_v1_cobranza_automatica_contactos__contacto_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/cobranza/automatica/envios": {
         parameters: {
             query?: never;
@@ -433,68 +391,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Listar Envios */
-        get: operations["listar_envios_api_v1_cobranza_automatica_envios_get"];
+        /**
+         * Historial
+         * @description Cada correo que salió (o no pudo salir), el más nuevo primero.
+         */
+        get: operations["historial_api_v1_cobranza_automatica_envios_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/cobranza/automatica/envios/descartar": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Descartar Envios */
-        post: operations["descartar_envios_api_v1_cobranza_automatica_envios_descartar_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/cobranza/automatica/envios/enviar": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Enviar Envios
-         * @description Aprueba y manda. Cada envío se confirma por separado: si el 10 falla, los
-         *     9 que ya salieron quedan registrados como enviados.
-         */
-        post: operations["enviar_envios_api_v1_cobranza_automatica_envios_enviar_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/cobranza/automatica/generar": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generar Ahora
-         * @description Arma la cola de HOY sin esperar al día programado (no la envía).
-         */
-        post: operations["generar_ahora_api_v1_cobranza_automatica_generar_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -509,13 +412,35 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Listar Grupos
-         * @description Los grupos con su saldo de hoy y con quién comparten razones sociales.
+         * Listar
+         * @description Los envíos con su saldo de hoy, cuándo salen, su último correo y con
+         *     quién comparten razones sociales; más las razones sin envío.
          */
-        get: operations["listar_grupos_api_v1_cobranza_automatica_grupos_get"];
+        get: operations["listar_api_v1_cobranza_automatica_grupos_get"];
         put?: never;
-        /** Crear Grupo */
-        post: operations["crear_grupo_api_v1_cobranza_automatica_grupos_post"];
+        /** Crear */
+        post: operations["crear_api_v1_cobranza_automatica_grupos_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/grupos/enviar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enviar Varios
+         * @description Manda varios de una vez. Cada uno se confirma por separado: si el 10
+         *     falla, los 9 que ya salieron quedan como enviados.
+         */
+        post: operations["enviar_varios_api_v1_cobranza_automatica_grupos_enviar_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -616,7 +541,7 @@ export interface paths {
         /**
          * Prueba
          * @description Manda el correo SOLO a quien lo pide (su correo de usuario), con una
-         *     franja arriba que dice a quién iría de verdad. Nunca a los del grupo.
+         *     franja arriba que dice a quién iría de verdad. Nunca a los del envío.
          */
         post: operations["prueba_api_v1_cobranza_automatica_grupos_prueba_post"];
         delete?: never;
@@ -633,14 +558,56 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Cambiar Grupo */
-        put: operations["cambiar_grupo_api_v1_cobranza_automatica_grupos__grupo_id__put"];
+        /** Cambiar */
+        put: operations["cambiar_api_v1_cobranza_automatica_grupos__grupo_id__put"];
         post?: never;
-        /** Borrar Grupo */
-        delete: operations["borrar_grupo_api_v1_cobranza_automatica_grupos__grupo_id__delete"];
+        /** Borrar */
+        delete: operations["borrar_api_v1_cobranza_automatica_grupos__grupo_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/grupos/{grupo_id}/enviar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enviar
+         * @description Manda el estado de cuenta ahora mismo. Si algo lo impide (espejo viejo,
+         *     sin correo, sin saldo) responde 409 con el motivo y no deja rastro; si el
+         *     SMTP lo rechaza queda en la bitácora como ERROR.
+         */
+        post: operations["enviar_api_v1_cobranza_automatica_grupos__grupo_id__enviar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/grupos/{grupo_id}/modo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Cambiar Modo
+         * @description El interruptor Automático / Manual de la lista, con un clic.
+         */
+        patch: operations["cambiar_modo_api_v1_cobranza_automatica_grupos__grupo_id__modo_patch"];
         trace?: never;
     };
     "/api/v1/cobranza/espejo/nota-credito": {
@@ -7515,35 +7482,10 @@ export interface components {
         CobranzaConfigIn: {
             /** Activo */
             activo: boolean;
-            /** Adjuntar Excel */
-            adjuntar_excel: boolean;
-            /** Adjuntar Pdf */
-            adjuntar_pdf: boolean;
-            /** Asunto */
-            asunto?: string | null;
             /** Cc Siempre */
             cc_siempre?: string[];
-            /** Dia Semana */
-            dia_semana: number;
-            /** Escalar Cc */
-            escalar_cc?: string[];
-            /** Escalar Dias */
-            escalar_dias: number;
             /** Espejo Max Horas */
             espejo_max_horas: number;
-            /** Hora */
-            hora: number;
-            /** Incluir Por Vencer */
-            incluir_por_vencer: boolean;
-            /** Mensaje */
-            mensaje?: string | null;
-            /**
-             * Modo
-             * @enum {string}
-             */
-            modo: "REVISION" | "AUTOMATICO";
-            /** Saldo Minimo */
-            saldo_minimo: number | string;
         };
         /** CobrarIn */
         CobrarIn: {
@@ -7651,6 +7593,23 @@ export interface components {
             permitir_negativos: boolean;
             /** Pesos */
             pesos?: components["schemas"]["PesoLinea"][] | null;
+        };
+        /** ContactoIn */
+        ContactoIn: {
+            /** Correo */
+            correo?: string | null;
+            /** Empresa */
+            empresa?: string | null;
+            /** Mensaje */
+            mensaje: string;
+            /** Nombre */
+            nombre: string;
+            /** Telefono */
+            telefono?: string | null;
+            /** Turnstile Token */
+            turnstile_token?: string | null;
+            /** Website */
+            website?: string | null;
         };
         /** ContactoOut */
         ContactoOut: {
@@ -10668,6 +10627,14 @@ export interface components {
             unidades: components["schemas"]["UnidadMiembro"][];
             /** Ventas */
             ventas: number;
+        };
+        /** ModoIn */
+        ModoIn: {
+            /**
+             * Modo
+             * @enum {string}
+             */
+            modo: "AUTOMATICO" | "MANUAL";
         };
         /** MovimientoCreate */
         MovimientoCreate: {
@@ -13916,29 +13883,18 @@ export interface components {
             /** Unidad Oc */
             unidad_oc?: string | null;
         };
-        /** ContactoIn */
-        app__api__v1__cobranza_auto__ContactoIn: {
-            /** Cc */
-            cc?: string[];
-            /**
-             * Cliente Id
-             * Format: uuid
-             */
-            cliente_id: string;
-            /** Correos */
-            correos?: string[];
-            /** Motivo Pausa */
-            motivo_pausa?: string | null;
-            /**
-             * Pausado
-             * @default false
-             */
-            pausado: boolean;
-            /** Serie */
-            serie?: string | null;
-        };
         /** GrupoIn */
         app__api__v1__cobranza_grupos__GrupoIn: {
+            /**
+             * Adjuntar Excel
+             * @default true
+             */
+            adjuntar_excel: boolean;
+            /**
+             * Adjuntar Pdf
+             * @default true
+             */
+            adjuntar_pdf: boolean;
             /**
              * Agrupar Por
              * @default PROYECTO
@@ -13947,26 +13903,58 @@ export interface components {
             agrupar_por: "PROYECTO" | "SERIE" | "SUCURSAL" | "CLIENTE";
             /** Alcance */
             alcance: components["schemas"]["AlcanceIn"][];
+            /** Asunto */
+            asunto?: string | null;
             /** Cc */
             cc?: string[];
             /** Correos */
             correos?: string[];
+            /**
+             * Dia Semana
+             * @default 0
+             */
+            dia_semana: number;
+            /** Escalar Cc */
+            escalar_cc?: string[];
+            /**
+             * Escalar Dias
+             * @default 30
+             */
+            escalar_dias: number;
+            /**
+             * Hora
+             * @default 8
+             */
+            hora: number;
             /** Id */
             id?: string | null;
+            /**
+             * Incluir Por Vencer
+             * @default true
+             */
+            incluir_por_vencer: boolean;
+            /** Mensaje */
+            mensaje?: string | null;
+            /**
+             * Modo
+             * @default MANUAL
+             * @enum {string}
+             */
+            modo: "AUTOMATICO" | "MANUAL";
             /**
              * Mostrar Antiguedad
              * @default false
              */
             mostrar_antiguedad: boolean;
-            /** Motivo Pausa */
-            motivo_pausa?: string | null;
             /** Nombre */
             nombre: string;
+            /** Nota */
+            nota?: string | null;
             /**
-             * Pausado
-             * @default false
+             * Saldo Minimo
+             * @default 100
              */
-            pausado: boolean;
+            saldo_minimo: number | string;
         };
         /**
          * GrupoIn
@@ -13988,23 +13976,6 @@ export interface components {
             perfil?: string | null;
             /** Rol */
             rol?: string | null;
-        };
-        /** ContactoIn */
-        app__schemas__contacto__ContactoIn: {
-            /** Correo */
-            correo?: string | null;
-            /** Empresa */
-            empresa?: string | null;
-            /** Mensaje */
-            mensaje: string;
-            /** Nombre */
-            nombre: string;
-            /** Telefono */
-            telefono?: string | null;
-            /** Turnstile Token */
-            turnstile_token?: string | null;
-            /** Website */
-            website?: string | null;
         };
     };
     responses: never;
@@ -15141,112 +15112,12 @@ export interface operations {
             };
         };
     };
-    listar_contactos_api_v1_cobranza_automatica_contactos_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    guardar_contacto_api_v1_cobranza_automatica_contactos_put: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["app__api__v1__cobranza_auto__ContactoIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    borrar_contacto_api_v1_cobranza_automatica_contactos__contacto_id__delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path: {
-                contacto_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    listar_envios_api_v1_cobranza_automatica_envios_get: {
+    historial_api_v1_cobranza_automatica_envios_get: {
         parameters: {
             query?: {
-                /** @description PENDIENTE, ENVIADO, ERROR…; vacío = todos */
-                estado?: string | null;
-                cliente_id?: string | null;
-                /** @description Solo cortes de los últimos N días */
+                /** @description Solo los de un envío */
+                grupo_id?: string | null;
+                /** @description Solo de los últimos N días */
                 dias?: number;
             };
             header?: {
@@ -15277,77 +15148,7 @@ export interface operations {
             };
         };
     };
-    descartar_envios_api_v1_cobranza_automatica_envios_descartar_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["IdsIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    enviar_envios_api_v1_cobranza_automatica_envios_enviar_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["IdsIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    generar_ahora_api_v1_cobranza_automatica_generar_post: {
+    listar_api_v1_cobranza_automatica_grupos_get: {
         parameters: {
             query?: never;
             header?: {
@@ -15378,38 +15179,7 @@ export interface operations {
             };
         };
     };
-    listar_grupos_api_v1_cobranza_automatica_grupos_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Tenant-Id"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    crear_grupo_api_v1_cobranza_automatica_grupos_post: {
+    crear_api_v1_cobranza_automatica_grupos_post: {
         parameters: {
             query?: never;
             header?: {
@@ -15426,6 +15196,41 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enviar_varios_api_v1_cobranza_automatica_grupos_enviar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15615,7 +15420,7 @@ export interface operations {
             };
         };
     };
-    cambiar_grupo_api_v1_cobranza_automatica_grupos__grupo_id__put: {
+    cambiar_api_v1_cobranza_automatica_grupos__grupo_id__put: {
         parameters: {
             query?: never;
             header?: {
@@ -15652,7 +15457,7 @@ export interface operations {
             };
         };
     };
-    borrar_grupo_api_v1_cobranza_automatica_grupos__grupo_id__delete: {
+    borrar_api_v1_cobranza_automatica_grupos__grupo_id__delete: {
         parameters: {
             query?: never;
             header?: {
@@ -15664,6 +15469,76 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enviar_api_v1_cobranza_automatica_grupos__grupo_id__enviar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                grupo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cambiar_modo_api_v1_cobranza_automatica_grupos__grupo_id__modo_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                grupo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModoIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -16691,7 +16566,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["app__schemas__contacto__ContactoIn"];
+                "application/json": components["schemas"]["ContactoIn"];
             };
         };
         responses: {
