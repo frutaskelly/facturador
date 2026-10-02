@@ -1608,7 +1608,9 @@ export interface paths {
          *
          *     Cada partida se liga a su producto por la CLAVE SAE (la del producto o la
          *     de una presentación) y lleva la unidad SAT de esa presentación; el código
-         *     del cliente queda de respaldo. La regla vive en services/espejo_productos.
+         *     del cliente queda de respaldo. Un reenvío no le cambia el producto a una
+         *     partida ya ligada, salvo que lo diga la remisión ligada. La regla vive en
+         *     services/espejo_productos.
          *
          *     Un timbrado FALLIDO en SAE (documento emitido, CFDI02.UUID vacío) llega
          *     como BORRADOR: se refleja para que el folio no desaparezca, pero sin

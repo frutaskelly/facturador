@@ -9,6 +9,12 @@ SAT (Mini Conta cuenta kilo o pieza con ella), gemelos desempatados por remisió
 ligada, catálogo del cliente y uso, la clave que en la empresa 03 es otra cosa,
 el respaldo por código del cliente, que un reenvío no voltee nada, y que el
 backfill escriba exactamente lo mismo que el endpoint.
+
+Más los hallazgos de la revisión del 2-oct (cada prueba lo dice): la remisión
+ligada manda aunque la clave sea de otro, un abono no cambia una partida ya
+ligada, el uso se cuenta en remisiones, la unidad de una presentación sin
+`sat`, la tabla de claves distintas solo en el inquilino del SAE, y la lista
+del backfill para que el dueño revise (y re-apunte a propósito) lo ya ligado.
 """
 import uuid
 from decimal import Decimal
@@ -17,6 +23,7 @@ import pytest
 from sqlalchemy import text
 
 from app.core.auth import Principal, get_principal
+from app.core.config import settings
 from app.core.db import SessionLocal
 from app.main import app
 from app.models import (
@@ -24,9 +31,11 @@ from app.models import (
     ClienteExterno,
     Factura,
     LineaFactura,
+    LineaRemision,
     Membership,
     Producto,
     ProductoCliente,
+    Remision,
     Role,
     Serie,
     Tenant,
@@ -140,15 +149,21 @@ def _prod(env, sku, nombre, clave, *, unidad_sat="KGM", unidad_base="KILO",
         db.close()
 
 
-def _espejo(hk, client, *, folio, claves, empresa="02", serie="ZHGO", cliente_sae="6"):
-    lineas = [{"clave": k, "descripcion": f"PARTIDA {k}", "cantidad": "2",
+def _espejo(hk, client, *, folio, claves, empresa="02", serie="ZHGO", cliente_sae="6",
+            saldo=None, uuid_f=None, desc=None):
+    """`saldo` y el mismo `uuid_f` = el reenvío de un abono (pasada o
+    cuadre_saldos); `desc` = la descripción del artículo en SAE por clave."""
+    lineas = [{"clave": k, "descripcion": (desc or {}).get(k, f"PARTIDA {k}"), "cantidad": "2",
                "precio_unitario": "10.00"} for k in claves]
-    r = client.post("/api/v1/facturas/espejo", headers=hk, json={
+    body = {
         "empresa": empresa, "serie": serie, "folio": folio, "cliente_sae": cliente_sae,
-        "fecha": "2026-09-15T12:00:00Z", "uuid_fiscal": str(uuid.uuid4()),
+        "fecha": "2026-09-15T12:00:00Z", "uuid_fiscal": uuid_f or str(uuid.uuid4()),
         "subtotal": str(20 * len(claves)), "total": str(20 * len(claves)),
         "lineas": lineas,
-    })
+    }
+    if saldo is not None:
+        body["saldo_insoluto"] = str(saldo)
+    r = client.post("/api/v1/facturas/espejo", headers=hk, json=body)
     assert r.status_code == 201, r.text
     return r.json()
 
@@ -182,6 +197,44 @@ def _remision(client, env, auth_as, pid, *, marca=None):
     return rem.json()["id"]
 
 
+def _remision_bd(env, pid, *, serie="RZECA", n=1):
+    """Una remisión de OTRA serie, directo en la base (la API la numera con la
+    serie del cliente): `n` partidas del producto."""
+    db = SessionLocal()
+    try:
+        s = db.query(Serie).filter(Serie.tenant_id == env["tenant"], Serie.codigo == serie).first()
+        if s is None:
+            s = Serie(tenant_id=env["tenant"], codigo=serie, tipo="NO_FISCAL",
+                      tipo_documento="REMISION", nombre=serie)
+            db.add(s); db.flush()
+        rem = Remision(tenant_id=env["tenant"], folio_interno=f"{serie}-{uuid.uuid4().hex[:6]}",
+                       cliente_facturacion_id=env["cli"], serie_id=s.id)
+        db.add(rem); db.flush()
+        for i in range(1, n + 1):
+            db.add(LineaRemision(tenant_id=env["tenant"], remision_id=rem.id, numero_linea=i,
+                                 producto_id=pid, cantidad_solicitada=1, precio_unitario=10))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _ligar(factura_id, pid):
+    """Como dejó la partida el espejo de antes (por el código del cliente)."""
+    db = SessionLocal()
+    try:
+        db.execute(text("UPDATE lineas_factura SET producto_id = :p, presentacion = NULL "
+                        "WHERE factura_id = :f"), {"p": pid, "f": factura_id})
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def duenio_sae(env, monkeypatch):
+    """Este inquilino es el del SAE del despliegue (ESPEJO_SAE_TENANT_ID)."""
+    monkeypatch.setattr(settings, "ESPEJO_SAE_TENANT_ID", str(env["tenant"]))
+
+
 # ─── Reglas puras ───────────────────────────────────────────────────────────
 
 def test_normalizacion_y_series_canonicas():
@@ -208,13 +261,37 @@ def test_unidad_sat_la_da_la_presentacion_y_una_caja_sin_unidad_queda_en_pieza()
     assert ep.unidad_sat_de(P, None) == "KGM"
 
 
+def test_presentacion_sin_sat_toma_la_unidad_de_su_nombre():
+    """Revisión del 2-oct: el formulario de Productos y PUT clave-sae guardan
+    `{factor, clave_sae}` sin `sat`. Con la unidad del producto, la PIEZA de
+    un producto de kilo salía KGM y Mini Conta la contaba en kilos."""
+    class Melon:
+        unidad_sat, unidad_base, presentacion_default = "KGM", "KILO", "KILO"
+        presentaciones = {"KILO": 1, "PIEZA": {"factor": 1, "clave_sae": "MELONCHPZ"},
+                          "MAZO": {"factor": 1, "clave_sae": "X"}, "CAJA": {"factor": 1},
+                          "TARIMA": {"factor": 40}, "RARA": {"factor": 1}}
+
+    class Papaya:
+        unidad_sat, unidad_base, presentacion_default = "H87", "PIEZA", "PIEZA"
+        presentaciones = {"PIEZA": 1, "KILO": {"factor": 1, "clave_sae": "PAPAYAMARADOLKG"}}
+
+    assert ep.unidad_sat_de(Melon, "PIEZA") == "H87"
+    assert ep.unidad_sat_de(Melon, "MAZO") == "H87"
+    assert ep.unidad_sat_de(Melon, "CAJA") == "H87"      # envase sin sat: por pieza
+    assert ep.unidad_sat_de(Melon, "TARIMA") == "H87"    # nombre mudo, factor ≠ 1: bulto
+    assert ep.unidad_sat_de(Melon, "RARA") == "KGM"      # nombre mudo, factor 1: la del producto
+    assert ep.unidad_sat_de(Melon, "KILO") == "KGM"
+    assert ep.unidad_sat_de(Papaya, "KILO") == "KGM"
+    assert ep.unidad_sat_de(Papaya, "PIEZA") == "H87"
+
+
 def test_la_regla_dice_por_que_nivel_gano():
-    # (remisión, previa, catálogo, uso serie, uso global)
-    assert ep._regla((1, 0, 0, 0, 0), (0, 0, 1, 9, 9)) == (ep.REMISION, False)
-    assert ep._regla((0, 0, 1, 0, 0), (0, 0, 0, 50, 50)) == (ep.CATALOGO, False)
-    assert ep._regla((0, 0, 0, 40, 40), (0, 0, 0, 3, 3)) == (ep.USO_SERIE, False)
-    assert ep._regla((0, 0, 0, 3, 3), (0, 0, 0, 2, 2)) == (ep.USO_SERIE, True)   # débil
-    assert ep._regla((0, 0, 0, 0, 7), (0, 0, 0, 0, 7)) == (ep.SKU_MENOR, True)
+    # (catálogo, uso serie, uso global)
+    assert ep._regla((1, 0, 0), (0, 50, 50)) == (ep.CATALOGO, False)
+    assert ep._regla((0, 40, 40), (0, 3, 3)) == (ep.USO_SERIE, False)
+    assert ep._regla((0, 3, 3), (0, 2, 2)) == (ep.USO_SERIE, True)   # débil
+    assert ep._regla((0, 0, 9), (0, 0, 2)) == (ep.USO_GLOBAL, False)
+    assert ep._regla((0, 0, 7), (0, 0, 7)) == (ep.SKU_MENOR, True)
 
 
 # ─── El endpoint ────────────────────────────────────────────────────────────
@@ -274,39 +351,39 @@ def test_gemelos_desempata_el_catalogo_del_cliente(client, env, auth_as):
 
 
 def test_gemelos_desempata_el_uso_en_la_serie_y_luego_el_global(client, env, auth_as):
-    _prod(env, "00000310", "CILANTRO CRIOLLO", "CILANTROKG")
+    a = _prod(env, "00000310", "CILANTRO CRIOLLO", "CILANTROKG")
     b = _prod(env, "00000311", "CILANTRO MANOJO", "CILANTROKG")
     _prod(env, "00010026", "TE DE YERBABUENA", "HIERBABUENAKG")
     d = _prod(env, "00010724", "HIERBABUENA", "HIERBABUENAKG")
     # uso en ESTA serie (remisión RZHGO, sin ligar a ninguna factura)
     _remision(client, env, auth_as, b)
-    # uso SOLO en otra serie: cuenta para el global
+    # uso SOLO en otra serie (remisión RZECA): cuenta para el global
+    _remision_bd(env, d, serie="RZECA")
+    # Partidas ESPEJO ya ligadas al otro gemelo, en la misma serie: no son
+    # evidencia (las puso el cruce viejo o esta regla) y no cuentan — con
+    # ellas, LIMONSINSEMILLKG iba al LIMON con 781 partidas espejo contra
+    # 202 remisiones del LIMON SIN SEMILLA (revisión del 2-oct).
+    hk = _bot(client, env, auth_as)
+    vieja = _espejo(hk, client, folio=90, claves=["CILANTROKG"] * 6)
+    _ligar(vieja["id"], a)
+
     db = SessionLocal()
     try:
-        otra = Factura(tenant_id=env["tenant"], serie="ZECA", folio=1, cliente_id=env["cli"],
-                       origen="ESPEJO_SAE", espejo_empresa="02", estado="TIMBRADA")
-        db.add(otra); db.flush()
-        db.add(LineaFactura(tenant_id=env["tenant"], factura_id=otra.id, numero_linea=1,
-                            producto_id=d, clave_prod_serv="50401700", clave_unidad="KGM",
-                            descripcion="HIERBABUENA", cantidad=1, valor_unitario=1))
-        db.commit()
-        # la regla dice por qué (antes de depositar: después, la propia factura
-        # ya sería uso en la serie)
+        # la regla dice por qué
         res = ep.resolver_claves(ep.FuentesBD(db, env["tenant"]), factura_id=None,
                                  cliente_id=env["cli"], empresa="02", serie="ZHGO",
                                  claves=["CILANTROKG", "HIERBABUENAKG"])
     finally:
         db.close()
-    assert res["CILANTROKG"].regla == ep.USO_SERIE
+    assert res["CILANTROKG"].regla == ep.USO_SERIE and res["CILANTROKG"].producto_id == b
     assert res["HIERBABUENAKG"].regla == ep.USO_GLOBAL
     assert res["HIERBABUENAKG"].debil       # 1 contra 0: decidió por poco
 
-    hk = _bot(client, env, auth_as)
     f = _espejo(hk, client, folio=104, claves=["CILANTROKG", "HIERBABUENAKG"])
     assert [l["producto_id"] for l in _lineas_bd(f["id"])] == [b, d]
 
 
-def test_calabaza_castilla_en_tabasco_es_calabaza_criolla(client, env, auth_as):
+def test_calabaza_castilla_en_tabasco_es_calabaza_criolla(client, env, auth_as, duenio_sae):
     castilla = _prod(env, "00010738", "CALABAZA DE CASTILLA KG", "CALABAZACASTILKG")
     criolla = _prod(env, "00010233", "CALABAZA CRIOLLA", "CALABAZCRIOLLAKG", presentaciones={
         "KILO": {}, "PIEZA": {"sat": "H87", "factor": 1, "clave_sae": "CALABAZACRIOPZ"}})
@@ -318,6 +395,29 @@ def test_calabaza_castilla_en_tabasco_es_calabaza_criolla(client, env, auth_as):
     # la misma clave en Pachuca (02) sí es calabaza de castilla
     pac = _espejo(hk, client, folio=105, claves=["CALABAZACASTILKG"])
     assert _lineas_bd(pac["id"])[0]["producto_id"] == castilla
+    # y el reenvío deja lo mismo, presentación incluida
+    otra_vez = _espejo(hk, client, folio=1500, empresa="03", serie="ZEHMOVH", cliente_sae="7",
+                       claves=["CALABAZACASTILKG"])
+    assert _lineas_bd(otra_vez["id"]) == [ln]
+
+
+def test_la_tabla_de_claves_distintas_solo_aplica_en_el_inquilino_del_sae(client, env, auth_as,
+                                                                           monkeypatch):
+    """Revisión del 2-oct: los skus son de cada inquilino. En uno que no es el
+    dueño del SAE, su 00010233 puede ser un aguacate: la fila de la 03 no se
+    le aplica y la clave liga a lo que dice su catálogo."""
+    castilla = _prod(env, "00010738", "CALABAZA DE CASTILLA KG", "CALABAZACASTILKG")
+    aguacate = _prod(env, "00010233", "AGUACATE HASS", "AGUACATEHASSKG")
+    hk = _bot(client, env, auth_as)
+    monkeypatch.setattr(settings, "ESPEJO_SAE_TENANT_ID", str(uuid.uuid4()))   # otro inquilino
+    f = _espejo(hk, client, folio=1501, empresa="03", serie="ZEHMOVH", cliente_sae="7",
+                claves=["CALABAZACASTILKG"])
+    assert _lineas_bd(f["id"])[0]["producto_id"] == castilla
+    monkeypatch.setattr(settings, "ESPEJO_SAE_TENANT_ID", "")                  # sin SAE: nadie
+    g = _espejo(hk, client, folio=1502, empresa="03", serie="ZEHMOVH", cliente_sae="7",
+                claves=["CALABAZACASTILKG"])
+    assert _lineas_bd(g["id"])[0]["producto_id"] == castilla
+    assert castilla != aguacate
 
 
 def test_clave_sin_producto_cae_al_codigo_del_cliente(client, env, auth_as):
@@ -363,6 +463,147 @@ def test_reenvio_no_voltea_la_decision(client, env, auth_as):
     otra_vez = _espejo(hk, client, folio=107, claves=claves)
     assert otra_vez["id"] == f["id"]
     assert _lineas_bd(f["id"]) == primera
+
+
+def test_la_remision_ligada_manda_aunque_la_clave_sea_de_otro_producto(client, env, auth_as):
+    """Revisión del 2-oct (R1): el export manda la remisión con el código del
+    cliente (AJOKG para el 00000284 AJO) y SAE la factura con ese artículo,
+    que en el catálogo es la clave del 00010472 AJO KG. Con la clave única
+    primero, lo remisionado (AJO) y lo facturado (AJO KG) quedaban distintos."""
+    ajo = _prod(env, "00000284", "AJO", "AJOPRIMERAKG", codigo_cliente="AJOKG")
+    ajo_kg = _prod(env, "00010472", "AJO KG", "AJOKG")
+    _remision(client, env, auth_as, ajo, marca="ZHGO 400")
+    hk = _bot(client, env, auth_as)
+    f = _espejo(hk, client, folio=400, claves=["AJOKG"])
+    (ln,) = _lineas_bd(f["id"])
+    # por código del cliente: sin presentación y con la unidad del producto
+    assert (ln["producto_id"], ln["presentacion"], ln["clave_unidad"]) == (ajo, None, "KGM")
+    # sin remisión ligada, la clave sí manda
+    g = _espejo(hk, client, folio=401, claves=["AJOKG"])
+    assert _lineas_bd(g["id"])[0]["producto_id"] == ajo_kg
+
+    # Si ya estaba ligada al otro (como la dejaba la primera versión de este
+    # cambio), el backfill la lista como «solo»: el endpoint la regresa al de
+    # su remisión en el siguiente reenvío, sin esperar a --recalcular.
+    from scripts.backfill_espejo_producto_por_clave import correr
+    _ligar(f["id"], ajo_kg)
+    db = SessionLocal()
+    try:
+        c = correr(db, env["tenant"], salida=lambda *_: None)
+    finally:
+        db.close()
+    (fila,) = c["tabla_paso3"]
+    assert (fila["de_sku"], fila["a_sku"], fila["regla"], fila["solo"]) == \
+        ("00010472", "00000284", ep.REMISION, True)
+    _espejo(hk, client, folio=400, claves=["AJOKG"])
+    assert _lineas_bd(f["id"])[0]["producto_id"] == ajo
+
+
+def test_un_abono_no_le_cambia_el_producto_a_una_partida_ligada(client, env, auth_as):
+    """Revisión del 2-oct (R2/R3): un reenvío por abono, cancelación o cuadre
+    no corrige la historia. La partida que el espejo viejo ligó por código del
+    cliente, y la que tiene el gemelo que apagó la fusión de SANDIA, se quedan
+    como están; las facturas NUEVAS ya van por la clave."""
+    ajo = _prod(env, "00000284", "AJO", "AJOPRIMERAKG", codigo_cliente="AJOKG")
+    ajo_kg = _prod(env, "00010472", "AJO KG", "AJOKG")
+    gemelo = _prod(env, "00011135", "SANDIA PZ", "SANDIAPZ", unidad_sat="H87",
+                   unidad_base="PIEZA", activo=False, codigo_cliente="SANDIAPZ")
+    sandia = _prod(env, "00000391", "SANDIA", "SANDIAKG", presentaciones={
+        "KILO": 1, "PIEZA": {"sat": "H87", "factor": 1, "clave_sae": "SANDIAPZ"}})
+    hk = _bot(client, env, auth_as)
+    u = str(uuid.uuid4())
+    f = _espejo(hk, client, folio=402, claves=["AJOKG", "SANDIAPZ"], uuid_f=u)
+    # nueva: por la clave, al AJO KG y al sobreviviente de la fusión
+    assert [l["producto_id"] for l in _lineas_bd(f["id"])] == [ajo_kg, sandia]
+
+    # Como las dejó el espejo de antes, que cruzaba por código del cliente.
+    db = SessionLocal()
+    try:
+        for clave, pid in (("AJOKG", ajo), ("SANDIAPZ", gemelo)):
+            db.execute(text("UPDATE lineas_factura SET producto_id = :p, presentacion = NULL "
+                            "WHERE factura_id = :f AND clave_sae = :k"),
+                       {"p": pid, "f": f["id"], "k": clave})
+        db.commit()
+    finally:
+        db.close()
+    def _vista(lineas):     # lo que Mini Conta copia: producto y unidad
+        return [(l["producto_id"], l["clave_unidad"], l["clave_prod_serv"]) for l in lineas]
+
+    antes = _lineas_bd(f["id"])
+    _espejo(hk, client, folio=402, claves=["AJOKG", "SANDIAPZ"], uuid_f=u, saldo="5.00")   # abono
+    despues = _lineas_bd(f["id"])
+    assert [l["producto_id"] for l in despues] == [ajo, gemelo]
+    assert _vista(despues) == _vista(antes)
+
+
+def test_una_correccion_del_catalogo_llega_a_lo_ligado_solo_a_proposito(client, env, auth_as):
+    """Revisión del 2-oct: con la decisión previa, dar de alta el gemelo
+    correcto en el catálogo del cliente no movía las partidas ya decididas y
+    el backfill ni las listaba. El endpoint las sigue conservando (un abono no
+    corrige la historia), pero el backfill las lista en el paso 3 y
+    --recalcular-ligadas las re-apunta."""
+    from scripts.backfill_espejo_producto_por_clave import correr
+
+    x = _prod(env, "00000500", "EJOTE A", "EJOTEZZKG")
+    y = _prod(env, "00000501", "EJOTE B", "EJOTEZZKG")
+    hk = _bot(client, env, auth_as)
+    f = _espejo(hk, client, folio=9100, claves=["EJOTEZZKG"])
+    assert _lineas_bd(f["id"])[0]["producto_id"] == x                 # sku menor
+    db = SessionLocal()
+    try:
+        db.add(ProductoCliente(tenant_id=env["tenant"], cliente_id=env["cli"], producto_id=y))
+        db.commit()
+    finally:
+        db.close()
+    n = _espejo(hk, client, folio=9101, claves=["EJOTEZZKG"])
+    assert _lineas_bd(n["id"])[0]["producto_id"] == y                 # catálogo
+    _espejo(hk, client, folio=9100, claves=["EJOTEZZKG"])
+    assert _lineas_bd(f["id"])[0]["producto_id"] == x                 # el reenvío no corrige
+
+    db = SessionLocal()
+    try:
+        seco = correr(db, env["tenant"], salida=lambda *_: None)
+        (fila,) = seco["tabla_paso3"]
+        assert (fila["serie"], fila["clave"], fila["de_sku"], fila["a_sku"], fila["regla"]) == \
+            ("ZHGO", "EJOTEZZKG", "00000500", "00000501", ep.CATALOGO)
+        assert not fila["solo"] and seco["paso3_aplicables"] == 1
+        sin = correr(db, env["tenant"], aplicar=True, salida=lambda *_: None)
+        assert sin["paso3_escritas"] == 0
+        assert _lineas_bd(f["id"])[0]["producto_id"] == x
+        con = correr(db, env["tenant"], aplicar=True, recalcular=True, salida=lambda *_: None)
+        assert con["paso3_escritas"] == 1
+        assert _lineas_bd(f["id"])[0]["producto_id"] == y
+        assert sum(correr(db, env["tenant"], salida=lambda *_: None)["paso3"].values()) == 0
+    finally:
+        db.close()
+    _espejo(hk, client, folio=9100, claves=["EJOTEZZKG"])
+    assert _lineas_bd(f["id"]) == _lineas_bd(n["id"])
+
+
+def test_presentacion_con_clave_puesta_desde_la_app_lleva_su_unidad(client, env, auth_as):
+    """Revisión del 2-oct (R5): PUT /productos/{id}/clave-sae guarda la clave
+    de la presentación sin `sat`. MELONCHPZ (PIEZA de un producto de KILO)
+    salía KGM y PAPAYAMARADOLKG (KILO de uno de PIEZA) H87: Mini Conta contaba
+    el melón en kilos y la papaya en piezas."""
+    melon = _prod(env, "00000360", "MELON CHINO", "MELONCHKG",
+                  presentaciones={"KILO": 1, "PIEZA": 1})
+    papaya = _prod(env, "00010158", "PAPAYA MARADOL", "PAPAYAMARADOLPZ", unidad_sat="H87",
+                   unidad_base="PIEZA", presentaciones={"PIEZA": 1, "KILO": 1})
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    for pid, clave, pres in ((melon, "MELONCHPZ", "PIEZA"), (papaya, "PAPAYAMARADOLKG", "KILO")):
+        r = client.put(f"/api/v1/productos/{pid}/clave-sae", headers=h,
+                       json={"clave": clave, "presentacion": pres})
+        assert r.status_code == 200, r.text
+    app.dependency_overrides.pop(get_principal, None)
+    db = SessionLocal()
+    try:
+        assert "sat" not in db.get(Producto, melon).presentaciones["PIEZA"]   # la forma real
+    finally:
+        db.close()
+    hk = _bot(client, env, auth_as)
+    f = _espejo(hk, client, folio=404, claves=["MELONCHPZ", "PAPAYAMARADOLKG"])
+    got = [(l["producto_id"], l["presentacion"], l["clave_unidad"]) for l in _lineas_bd(f["id"])]
+    assert got == [(melon, "PIEZA", "H87"), (papaya, "KILO", "KGM")]
 
 
 # ─── El backfill ────────────────────────────────────────────────────────────
@@ -416,7 +657,8 @@ def test_backfill_escribe_lo_mismo_que_el_endpoint_y_es_idempotente(client, env,
     assert _lineas_bd(f["id"]) == esperado
 
 
-def test_backfill_informa_las_ligadas_a_otro_producto_sin_tocarlas(client, env, auth_as):
+def test_backfill_lista_las_ligadas_a_otro_producto_y_solo_las_mueve_a_proposito(client, env,
+                                                                                  auth_as):
     from scripts.backfill_espejo_producto_por_clave import correr
 
     ajo_kg = _prod(env, "00010472", "AJO KG", "AJOKG")
@@ -425,17 +667,84 @@ def test_backfill_informa_las_ligadas_a_otro_producto_sin_tocarlas(client, env, 
     f = _espejo(hk, client, folio=310, claves=["AJOKG"])
     assert _lineas_bd(f["id"])[0]["producto_id"] == ajo_kg
     # como la dejó el espejo viejo: por el código del cliente, al otro AJO
+    _ligar(f["id"], ajo)
     db = SessionLocal()
     try:
-        db.execute(text("UPDATE lineas_factura SET producto_id = :p WHERE factura_id = :f"),
-                   {"p": ajo, "f": f["id"]})
-        db.commit()
         c = correr(db, env["tenant"], aplicar=True, salida=lambda *_: None)
-        assert sum(c["info_cambiaria"].values()) == 1
-        assert c["paso1_escritas"] == 0 and c["paso2_escritas"] == 0
+        assert sum(c["paso3"].values()) == 1 and c["paso3_aplicables"] == 1
+        assert not c["tabla_paso3"][0]["solo"]          # sin remisión: el endpoint no la mueve
+        assert c["paso1_escritas"] == 0 and c["paso2_escritas"] == 0 and c["paso3_escritas"] == 0
+        assert _lineas_bd(f["id"])[0]["producto_id"] == ajo
+        # el endpoint tampoco la mueve…
+        _espejo(hk, client, folio=310, claves=["AJOKG"])
+        assert _lineas_bd(f["id"])[0]["producto_id"] == ajo
+        # …solo --recalcular-ligadas, y entonces queda como una nueva
+        c = correr(db, env["tenant"], aplicar=True, recalcular=True, salida=lambda *_: None)
+        assert c["paso3_escritas"] == 1
     finally:
         db.close()
-    assert _lineas_bd(f["id"])[0]["producto_id"] == ajo
+    (ln,) = _lineas_bd(f["id"])
+    assert (ln["producto_id"], ln["presentacion"], ln["clave_unidad"]) == (ajo_kg, "KILO", "KGM")
+
+
+def test_backfill_y_endpoint_deciden_igual_despues_del_backfill(client, env, auth_as):
+    """Revisión del 2-oct: el backfill tomaba la foto del uso ANTES de ligar sus
+    ~80k partidas, y el endpoint contaba después con ellas: la misma clave de
+    la misma serie podía ir a otro gemelo en las facturas nuevas. Con el uso
+    en remisiones, lo que liga el backfill no mueve la foto."""
+    from scripts.backfill_espejo_producto_por_clave import correr
+
+    x = _prod(env, "00000600", "CILANTRO A", "CILANTROQQKG")
+    y = _prod(env, "00000601", "CILANTRO B", "CILANTROQQKG", presentaciones={
+        "KILO": 1, "MANOJO": {"sat": "H87", "factor": 1, "clave_sae": "CILANTROQQMJ"}})
+    _remision(client, env, auth_as, x)            # uso en ZHGO: x=1, y=0
+    hk = _bot(client, env, auth_as)
+    f1 = _espejo(hk, client, folio=9200, claves=["CILANTROQQKG"])
+    f0 = _espejo(hk, client, folio=9201, claves=["CILANTROQQMJ"] * 3)
+    db = SessionLocal()
+    try:
+        db.execute(text("UPDATE lineas_factura SET producto_id = NULL, presentacion = NULL, "
+                        "clave_unidad = 'H87' WHERE factura_id IN (:a, :b)"),
+                   {"a": f1["id"], "b": f0["id"]})
+        db.commit()
+        correr(db, env["tenant"], aplicar=True, salida=lambda *_: None)
+    finally:
+        db.close()
+    assert _lineas_bd(f1["id"])[0]["producto_id"] == x
+    assert {l["producto_id"] for l in _lineas_bd(f0["id"])} == {y}    # 3 partidas espejo de y
+    nueva = _espejo(hk, client, folio=9202, claves=["CILANTROQQKG"])
+    assert _lineas_bd(nueva["id"])[0]["producto_id"] == x
+    _espejo(hk, client, folio=9200, claves=["CILANTROQQKG"])
+    assert _lineas_bd(f1["id"])[0]["producto_id"] == x
+
+
+def test_backfill_lista_quien_gana_cada_clave_gemela(client, env, auth_as):
+    """Revisión del 2-oct: el dry-run solo contaba por regla. El dueño necesita
+    ver qué sku gana cada clave gemela en cada serie, y que se marque cuando el
+    artículo del SAE se llama como el que perdió (TOMATEVERDELIMKG)."""
+    from scripts.backfill_espejo_producto_por_clave import correr
+
+    grande = _prod(env, "00010048", "TOMATE VERDE GRANDE Y LIMPIO", "TOMATEVERDELIMKG")
+    _prod(env, "00010049", "TOMATE VERDE LIMPIO", "TOMATEVERDELIMKG")
+    _remision(client, env, auth_as, grande)       # 1 contra 0 en la serie: débil
+    hk = _bot(client, env, auth_as)
+    f = _espejo(hk, client, folio=330, claves=["TOMATEVERDELIMKG"] * 2,
+                desc={"TOMATEVERDELIMKG": "TOMATE VERDE LIMPIO KG"})
+    db = SessionLocal()
+    try:
+        db.execute(text("UPDATE lineas_factura SET producto_id = NULL WHERE factura_id = :f"),
+                   {"f": f["id"]})
+        db.commit()
+        impreso = []
+        c = correr(db, env["tenant"], salida=impreso.append)
+    finally:
+        db.close()
+    (fila,) = c["tabla_gemelos"]
+    assert (fila["serie"], fila["clave"], fila["sku"], fila["regla"], fila["partidas"]) == \
+        ("ZHGO", "TOMATEVERDELIMKG", "00010048", ep.USO_SERIE, 2)
+    assert fila["debil"] and "00010049" in fila["perdedores"]
+    assert "00010049" in fila["marca"]
+    assert any("TOMATEVERDELIMKG" in linea and "⚠" in linea for linea in impreso)
 
 
 def test_backfill_suelta_el_lote_si_el_espejo_tiene_la_factura(client, env, auth_as):

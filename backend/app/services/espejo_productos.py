@@ -14,43 +14,70 @@ trae, si no la del producto. Una clave puede amparar VARIOS productos (los
 gemelos; la 0085 quitó el índice único), así que hace falta desempate.
 
 EL ORDEN, por clave y una sola vez por factura (todas las partidas con la misma
-clave quedan con el mismo producto):
+clave quedan con el mismo producto). Gana el primer nivel que decida:
 
-  0. La clave significa OTRA cosa en esa empresa de SAE: manda la tabla
-     `CLAVES_DISTINTAS_POR_EMPRESA` de abajo (CALABAZACASTILKG en la 03).
-  1. Un solo producto vivo trae la clave (en `clave_sae` o en una presentación).
-  2. Varios — se ordena por, y gana el primero que se despegue:
-     a. está en la remisión ligada a ESTA factura (`remisiones.factura_id`);
-     p. es el que la factura ya tenía en esa clave (ver «la decisión se
-        guarda» abajo);
-     b. está en el catálogo del cliente (`producto_clientes`);
-     c. es el más usado en la serie (partidas de remisión RZ…/RF… y de factura
-        Z…/F… con producto);
-     d. es el más usado en todo el inquilino;
-     e. el sku menor.
-  3. Ninguna clave casa: lo de antes, el `codigo_cliente` del catálogo del
+  1. REMISIÓN LIGADA. La remisión ligada a ESTA factura (`remisiones.factura_id`)
+     trae uno de los productos que la clave puede ser: los que la traen (en
+     `clave_sae` o en una presentación, activos o no) y el que el catálogo del
+     cliente llama con ese código. Es evidencia de ESA factura y por eso va
+     antes que todo: el export manda la remisión con el código del cliente
+     cuando lo hay (`codigo_cliente_de`), así que la partida AJOKG de una
+     remisión con el 00000284 AJO es ese AJO aunque AJOKG sea la clave del
+     00010472 AJO KG (revisión del 2-oct: con la clave única primero, lo
+     remisionado y lo facturado quedaban con productos distintos).
+  2. LA DECISIÓN PREVIA: el producto que la partida ya tenía en esa clave.
+     Ver «una partida ligada no cambia sola» abajo.
+  3. La clave significa OTRA cosa en esa empresa de SAE: manda la tabla
+     `CLAVES_DISTINTAS_POR_EMPRESA` (CALABAZACASTILKG en la 03). Solo en el
+     inquilino dueño del SAE (`ESPEJO_SAE_TENANT_ID`): los skus son de cada
+     inquilino y el 00010233 de otro puede ser cualquier cosa.
+  4. Un solo producto ACTIVO trae la clave.
+  5. Varios (gemelos) — gana el primero que se despegue:
+     a. está en el catálogo del cliente (`producto_clientes`);
+     b. es el más remisionado en la serie (remisiones RZ…/RF… de esa serie);
+     c. es el más remisionado en todo el inquilino;
+     d. el sku menor.
+  6. Ninguno trae la clave: lo de antes, el `codigo_cliente` del catálogo del
      cliente — pero ya no hacia productos borrados (ligaba al 00010229 NUEZ,
-     borrado). Los desactivados sí cuentan aquí, como antes: los gemelos que
-     apagó la fusión de SANDIA conservan su clave y su historia.
+     borrado). Los desactivados sí cuentan aquí, como antes.
 
-LA DECISIÓN SE GUARDA EN LA PROPIA PARTIDA. Cada reenvío de una factura (el
-cuadre, los abonos, las cancelaciones) borra y recrea sus partidas, y los
-conteos de uso cambian con el tiempo: sin memoria, un reenvío podía voltear el
-producto de una partida vieja (CILANTROKG va a un gemelo en ZEHMO* y al otro en
-ZECA por 4 contra 0). Por eso el paso «p»: si la factura ya tenía en esa clave
-uno de los candidatos, se queda con él. Solo una remisión ligada (evidencia de
-ESA factura) lo puede mover.
+EL USO SE CUENTA EN REMISIONES, no en facturas. Las partidas de factura espejo
+con producto no son evidencia de qué se vendió: las puso el cruce viejo por
+código del cliente o esta misma regla. Contarlas hacía que la regla se
+reforzara sola —LIMONSINSEMILLKG en ZEHMOHOS: las remisiones dan 202 a 00000352
+LIMON SIN SEMILLA contra 48 a 00000353 LIMON, pero 781 partidas espejo ya
+ligadas al 353 volteaban el desempate— y hacía que el backfill decidiera con
+otros números que el endpoint en cuanto terminaba de ligar sus ~80k partidas.
+Las facturas nativas salen de remisiones (ya contadas). De paso, la consulta
+usa `ix_lineas_remision_producto_id`; sobre `lineas_factura` era un seq scan.
+
+UNA PARTIDA LIGADA NO CAMBIA SOLA. Cada reenvío de una factura (el cuadre, los
+abonos, las cancelaciones) borra y recrea sus partidas. Sin memoria, un abono
+le cambiaba el producto a una venta de hace meses: la ligada por código del
+cliente pasaba al de la clave y la que tenía un gemelo que apagó la fusión de
+SANDIA pasaba al sobreviviente — y Mini Conta, que guarda su copia, no se
+entera. Por eso el nivel 2 conserva el producto que la factura ya tenía en esa
+clave, sea o no de los que hoy traen la clave y aunque hoy esté desactivado o
+borrado (el espejo viejo ligaba borrados por código; eso tampoco se corrige
+con un abono). Solo una remisión ligada, evidencia de ESA factura, lo mueve.
+Las facturas NUEVAS sí van por la clave (SANDIAPZ al sobreviviente de la
+fusión, que «únicamente impacta a nuevas remisiones»). Re-decidir lo ya
+ligado (un cambio en el catálogo, una fila nueva en la tabla de claves) es a
+propósito y con lista: `scripts/backfill_espejo_producto_por_clave.py
+--recalcular-ligadas`, que calcula la regla SIN el nivel 2.
 
 LA UNIDAD NO ES UN DETALLE. Mini Conta decide kilo o pieza con la
 `clave_unidad` (`linea_facturada_es_kg`): una partida H87 CON sku cuenta como
 piezas. Poner el producto y dejar H87 volteaba 72,447 partidas de kilo a
-piezas. La unidad sale de la presentación que casó (`sat`), o del producto si
-casó la clave base; una presentación sin unidad SAT y con factor distinto de 1
-(la CAJA de 22 kg de MANZANACAJA) se queda en H87: no se inventa.
+piezas. La unidad sale de la presentación que casó: su `sat`; si no la trae
+(el formulario de Productos y `PUT /productos/{id}/clave-sae` guardan
+`{factor, clave_sae}` sin `sat`), la del NOMBRE de la presentación (PIEZA →
+H87, KILO → KGM); y si el nombre no dice nada, una presentación con factor ≠ 1
+se queda en H87. Las cajas sin unidad SAT (la CAJA de 22 kg de MANZANACAJA)
+quedan en H87: no se inventa.
 
-Este módulo es la ÚNICA copia de la regla: lo usan el endpoint y el backfill
-(`scripts/backfill_espejo_producto_por_clave.py`). Una consulta por cosa y por
-factura, nunca por partida.
+Este módulo es la ÚNICA copia de la regla: lo usan el endpoint y el backfill.
+Una consulta por cosa y por factura, nunca por partida.
 """
 from __future__ import annotations
 
@@ -64,25 +91,27 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ..models import Factura, LineaFactura, LineaRemision, Producto, ProductoCliente, Remision, Serie
+from ..core.rbac import es_duenio_de_sae
+from ..models import LineaFactura, LineaRemision, Producto, ProductoCliente, Remision, Serie
 from .inventario import presentacion_factor
+from .sat_catalogo import UNIDAD_A_SAT
 
 
 # ─── Reglas (los nombres salen en el reporte del backfill) ──────────────────
 
-OVERRIDE = "0_clave_distinta_en_empresa"
-OVERRIDE_SIN_PRODUCTO = "0_clave_distinta_sin_producto"
-UNICA = "1_clave_unica"
-REMISION = "2a_remision_ligada"
-PREVIA = "2p_decision_previa"
-CATALOGO = "2b_catalogo_cliente"
-USO_SERIE = "2c_uso_en_serie"
-USO_GLOBAL = "2d_uso_global"
-SKU_MENOR = "2e_sku_menor"
-CODIGO_CLIENTE = "3_codigo_cliente"
+REMISION = "1_remision_ligada"
+PREVIA = "2_decision_previa"
+OVERRIDE = "3_clave_distinta_en_empresa"
+OVERRIDE_SIN_PRODUCTO = "3_clave_distinta_sin_producto"
+UNICA = "4_clave_unica"
+CATALOGO = "5a_catalogo_cliente"
+USO_SERIE = "5b_uso_en_serie"
+USO_GLOBAL = "5c_uso_global"
+SKU_MENOR = "5d_sku_menor"
+CODIGO_CLIENTE = "6_codigo_cliente"
 SIN_PRODUCTO = "X_sin_producto"
 
-_NIVELES = (REMISION, PREVIA, CATALOGO, USO_SERIE, USO_GLOBAL)
+_NIVELES = (CATALOGO, USO_SERIE, USO_GLOBAL)
 
 
 def norm_clave_sae(v: Optional[str]) -> str:
@@ -111,9 +140,14 @@ class ClaveDistinta:
 
 # Datos, no lógica: para sumar un caso basta otra fila. Solo entra lo que se
 # VERIFICÓ contra la descripción del SAE de esa empresa (INVE.DESCR), nunca una
-# sospecha — una fila mal puesta liga mal TODAS las partidas de esa clave.
-# Si el sku no existe o no está vivo, la partida se queda sin producto: antes
-# eso que el producto equivocado.
+# sospecha — una fila mal puesta liga mal TODAS las partidas nuevas de esa
+# clave. Si el sku no existe o no está vivo, la partida se queda sin producto:
+# antes eso que el producto equivocado.
+#
+# Las empresas y los skus son los del SAE del despliegue y de SU inquilino
+# (`ESPEJO_SAE_TENANT_ID`, hallazgo de la revisión del 2-oct): en cualquier
+# otro inquilino esta tabla no aplica. El SAE 9 deposita con sus propios
+# códigos (91/92/94), así que su empresa no se confunde con la 03 de aquí.
 CLAVES_DISTINTAS_POR_EMPRESA: tuple[ClaveDistinta, ...] = (
     ClaveDistinta(
         empresa="03", clave="CALABAZACASTILKG", sku="00010233",
@@ -129,7 +163,9 @@ _DISTINTAS = {(norm_empresa(c.empresa), norm_clave_sae(c.clave)): c
               for c in CLAVES_DISTINTAS_POR_EMPRESA}
 
 
-def clave_distinta(empresa: Optional[str], clave: str) -> Optional[ClaveDistinta]:
+def clave_distinta(tenant_id, empresa: Optional[str], clave: str) -> Optional[ClaveDistinta]:
+    if not es_duenio_de_sae(tenant_id):
+        return None
     return _DISTINTAS.get((norm_empresa(empresa), norm_clave_sae(clave)))
 
 
@@ -161,21 +197,53 @@ def presentacion_base(prod) -> Optional[str]:
     return getattr(prod, "unidad_base", None) or getattr(prod, "presentacion_default", None) or None
 
 
+# Nombres con los que las presentaciones viven en el catálogo (la foto del
+# 1-oct trae MAZO, MZ, PQ, CAJITA además de los de UNIDAD_A_SAT).
+_ALIAS_PRESENTACION = {
+    "KG": "KILO", "KGS": "KILO", "KILOS": "KILO", "KILOGRAMO": "KILO",
+    "PZ": "PIEZA", "PZA": "PIEZA", "PZAS": "PIEZA", "PIEZAS": "PIEZA",
+    "MAZO": "MANOJO", "MZ": "MANOJO", "MJ": "MANOJO", "MANOJOS": "MANOJO",
+    "CAJITA": "CAJA", "CJ": "CAJA", "CAJAS": "CAJA", "PQ": "PAQUETE",
+    "LT": "LITRO", "LTS": "LITRO", "LITROS": "LITRO",
+}
+# Envases: una caja, bolsa, costal o paquete sin `sat` propio es un bulto que
+# se cuenta por pieza (la regla de MANZANACAJA), no XBX/XSA que nadie lee.
+_ENVASES = {"XBX", "XBG", "XSA", "XPK"}
+
+
+def sat_por_nombre(presentacion: Optional[str]) -> Optional[str]:
+    n = str(presentacion or "").strip().upper()
+    return UNIDAD_A_SAT.get(_ALIAS_PRESENTACION.get(n, n))
+
+
 def unidad_sat_de(prod: Producto, presentacion: Optional[str]) -> str:
     """La clave_unidad de la partida espejo.
 
-    La `sat` de la presentación si la trae (SANDIAPZ → H87 aunque el producto
-    sea de kilo; PAPAYAMARADOLKG → KGM aunque el producto sea de pieza). Una
-    presentación que no es la base, sin `sat` y con factor ≠ 1 es una caja o un
-    bulto: H87 — con la unidad del producto Mini Conta contaría 22 kilos por
-    cada caja de MANZANACAJA. Sin presentación (cruce por código del cliente),
-    lo de siempre: la unidad del producto.
+    1. La `sat` de la presentación si la trae (SANDIAPZ → H87 aunque el
+       producto sea de kilo).
+    2. La presentación base: la unidad del producto.
+    3. Otra presentación sin `sat`: la de su nombre. Es la forma en que la
+       guardan el formulario de Productos y `PUT /productos/{id}/clave-sae`
+       (`{factor, clave_sae}`): con la unidad del producto, MELONCHPZ (PIEZA
+       de un producto de KILO) salía KGM y PAPAYAMARADOLKG (KILO de uno de
+       PIEZA) H87 — Mini Conta contaba al revés (revisión del 2-oct). Un
+       envase sin `sat` (CAJA, COSTAL…) se cuenta por pieza: H87.
+    4. Un nombre que no dice nada: factor ≠ 1 es un bulto (H87); factor 1, la
+       unidad del producto.
+    Sin presentación (cruce por código del cliente): la unidad del producto,
+    lo de siempre.
     """
-    raw = (getattr(prod, "presentaciones", None) or {}).get(presentacion) if presentacion else None
-    if isinstance(raw, dict) and raw.get("sat"):
-        return str(raw["sat"])
-    if presentacion and presentacion != presentacion_base(prod) \
-            and presentacion_factor(prod, presentacion) != Decimal("1"):
+    if not presentacion:
+        return prod.unidad_sat or "H87"
+    raw = (getattr(prod, "presentaciones", None) or {}).get(presentacion)
+    if isinstance(raw, dict) and str(raw.get("sat") or "").strip():
+        return str(raw["sat"]).strip().upper()
+    if presentacion == presentacion_base(prod):
+        return prod.unidad_sat or "H87"
+    sat = sat_por_nombre(presentacion)
+    if sat:
+        return "H87" if sat in _ENVASES else sat
+    if presentacion_factor(prod, presentacion) != Decimal("1"):
         return "H87"
     return prod.unidad_sat or "H87"
 
@@ -191,7 +259,7 @@ def campos_de_linea(res: Optional["Resolucion"], prod: Optional[Producto]) -> di
             "clave_prod_serv": prod.clave_sat}
 
 
-# ─── Índice clave → productos vivos ─────────────────────────────────────────
+# ─── Índice clave → productos ───────────────────────────────────────────────
 
 def _elegir_presentacion(casadas: set, base: Optional[str], default: Optional[str]) -> Optional[str]:
     """Una clave que casa varias veces con el MISMO producto: la clave del
@@ -206,18 +274,26 @@ def _elegir_presentacion(casadas: set, base: Optional[str], default: Optional[st
 
 
 class IndiceClaves:
-    """Clave SAE normalizada → {producto_id: presentación} de los productos que
-    se le pasen (el endpoint pasa los vivos: activos y sin borrar)."""
+    """Clave SAE normalizada → {producto_id: presentación} de los productos
+    sin borrar, activos o no. Los desactivados sirven para reconocer lo que
+    trae la remisión ligada o lo que la partida ya tenía; solo los activos son
+    candidatos para una partida nueva."""
 
     def __init__(self, productos: Iterable):
-        self.sku: dict = {}
-        self.por_sku: dict[str, UUID] = {}
+        self.sku: dict = {}                 # pid → sku, de todos los sin borrar
+        self.nombre: dict = {}
+        self.activos: set = set()
+        self.por_sku: dict[str, UUID] = {}  # sku → pid, solo activos
         self._base: dict = {}
         casan: dict[str, dict] = defaultdict(lambda: defaultdict(set))
         defaults: dict = {}
         for p in productos:
-            self.sku[p.id] = (p.sku or "").strip()
-            self.por_sku[(p.sku or "").strip()] = p.id
+            sku = (p.sku or "").strip()
+            self.sku[p.id] = sku
+            self.nombre[p.id] = getattr(p, "nombre", None) or ""
+            if getattr(p, "activo", True):
+                self.activos.add(p.id)
+                self.por_sku[sku] = p.id
             self._base[p.id] = presentacion_base(p)
             defaults[p.id] = getattr(p, "presentacion_default", None)
             k = norm_clave_sae(p.clave_sae)
@@ -234,12 +310,21 @@ class IndiceClaves:
             for k, por_pid in casan.items()
         }
 
-    def candidatos(self, clave: str) -> dict:
+    def vivo(self, pid) -> bool:
+        """Sin borrar (activo o no)."""
+        return pid in self.sku
+
+    def base(self, pid) -> Optional[str]:
+        return self._base.get(pid)
+
+    def todos(self, clave: str) -> dict:
+        """Los que traen la clave, activos o no."""
         return self._por_clave.get(clave, {})
 
-    def presentacion_de(self, pid, clave: str) -> Optional[str]:
-        """La presentación con la que `pid` trae la clave; la base si no la trae."""
-        return self.candidatos(clave).get(pid, self._base.get(pid))
+    def candidatos(self, clave: str) -> dict:
+        """Los que traen la clave y están activos: los únicos que pueden
+        ganar una partida que no tiene más evidencia."""
+        return {pid: pres for pid, pres in self.todos(clave).items() if pid in self.activos}
 
 
 # ─── Evidencia para el desempate ────────────────────────────────────────────
@@ -268,18 +353,16 @@ class Catalogo:
 
 @dataclass
 class Uso:
-    """Partidas con producto por (serie canónica, producto) y en total."""
+    """Partidas de REMISIÓN con producto por (serie canónica, producto) y en
+    total."""
     por_serie: dict = field(default_factory=dict)
     total: dict = field(default_factory=dict)
 
     @classmethod
-    def de_filas(cls, filas_remision, filas_factura) -> "Uso":
+    def de_filas(cls, filas_remision) -> "Uso":
         uso = cls(defaultdict(int), defaultdict(int))
         for codigo, pid, n in filas_remision:
             uso.por_serie[(serie_canonica_de_remision(codigo), pid)] += int(n)
-            uso.total[pid] += int(n)
-        for serie, pid, n in filas_factura:
-            uso.por_serie[(serie_canonica(serie), pid)] += int(n)
             uso.total[pid] += int(n)
         return uso
 
@@ -314,11 +397,10 @@ class FuentesBD:
     def indice(self) -> IndiceClaves:
         if self._indice is None:
             filas = (
-                self.db.query(Producto.id, Producto.sku, Producto.clave_sae,
+                self.db.query(Producto.id, Producto.sku, Producto.nombre, Producto.clave_sae,
                               Producto.presentaciones, Producto.unidad_base,
-                              Producto.presentacion_default)
+                              Producto.presentacion_default, Producto.activo)
                 .filter(Producto.tenant_id == self.tenant_id,
-                        Producto.activo.is_(True),
                         Producto.deleted_at.is_(None))
                 .all()
             )
@@ -370,42 +452,33 @@ class FuentesBD:
         return self._consultar_uso(pids) if pids else Uso()
 
     def _consultar_uso(self, pids: Optional[set]) -> Uso:
-        """Partidas con producto por serie: las de remisión (borradas fuera,
-        canceladas dentro) y las de factura (nativas y espejo). `pids=None`
-        cuenta todos los productos."""
-        rem = (
+        """Partidas de remisión con producto por serie (borradas fuera,
+        canceladas dentro; sin serie cuentan solo para el total). Nada de
+        `lineas_factura`: ver «el uso se cuenta en remisiones» arriba.
+        `pids=None` cuenta todos los productos."""
+        q = (
             self.db.query(Serie.codigo, LineaRemision.producto_id, func.count())
             .select_from(LineaRemision)
             .join(Remision, Remision.id == LineaRemision.remision_id)
-            .join(Serie, Serie.id == Remision.serie_id)
+            .outerjoin(Serie, Serie.id == Remision.serie_id)
             .filter(Remision.tenant_id == self.tenant_id,
                     Remision.deleted_at.is_(None),
                     LineaRemision.producto_id.isnot(None))
         )
-        fac = (
-            self.db.query(Factura.serie, LineaFactura.producto_id, func.count())
-            .select_from(LineaFactura)
-            .join(Factura, Factura.id == LineaFactura.factura_id)
-            .filter(LineaFactura.tenant_id == self.tenant_id,
-                    Factura.deleted_at.is_(None),
-                    LineaFactura.producto_id.isnot(None))
-        )
         if pids is not None:
-            rem = rem.filter(LineaRemision.producto_id.in_(list(pids)))
-            fac = fac.filter(LineaFactura.producto_id.in_(list(pids)))
-        return Uso.de_filas(
-            rem.group_by(Serie.codigo, LineaRemision.producto_id).all(),
-            fac.group_by(Factura.serie, LineaFactura.producto_id).all(),
-        )
+            q = q.filter(LineaRemision.producto_id.in_(list(pids)))
+        return Uso.de_filas(q.group_by(Serie.codigo, LineaRemision.producto_id).all())
 
 
 class FuentesEnLote(FuentesBD):
     """Las mismas fuentes para recorrer miles de facturas (el backfill).
 
     Misma regla, otra forma de leer: el uso se toma UNA vez al empezar —una
-    foto, como el SQL verificado del 2-oct— en vez de una consulta por factura,
-    y las remisiones ligadas y las partidas previas se cargan por lote. Con la
-    foto, el resultado no depende del orden en que se recorran las facturas.
+    foto— en vez de una consulta por factura, y las remisiones ligadas y las
+    partidas previas se cargan por lote. Como el uso sale solo de remisiones,
+    lo que el backfill liga no lo mueve: la foto es la misma que verá el
+    endpoint al terminar (revisión del 2-oct), y el resultado no depende del
+    orden en que se recorran las facturas.
     """
 
     def __init__(self, db: Session, tenant_id):
@@ -459,6 +532,8 @@ class Resolucion:
     # El uso decidió por poco (ganador < 5 o < 2× el segundo) o decidió el sku:
     # el backfill las cuenta aparte para que alguien las mire.
     debil: bool = False
+    # Los que competían (gemelos o los de la remisión): el backfill los lista.
+    competidores: tuple = ()
 
 
 _NADA = Resolucion(None, None, SIN_PRODUCTO)
@@ -473,20 +548,17 @@ def _regla(ganador: tuple, segundo: tuple) -> tuple[str, bool]:
     return SKU_MENOR, True
 
 
-def _desempatar(fuentes: FuentesBD, *, factura_id, catalogo: Catalogo, serie,
-                empatadas: dict) -> dict:
+def _desempatar(fuentes: FuentesBD, *, catalogo: Catalogo, serie, pendientes: dict) -> dict:
+    """`pendientes`: {clave: (candidatos {pid: presentación}, regla fija o None)}.
+    La regla fija es REMISION cuando la remisión ligada trae a más de uno."""
     indice = fuentes.indice()
-    rem = fuentes.remision(factura_id) if factura_id else set()
-    prev = fuentes.previas(factura_id) if factura_id else {}
-
-    # Primero lo barato (remisión, decisión previa, catálogo). El uso solo se
-    # pregunta para los que siguen empatados arriba: ordenar por niveles es
-    # lexicográfico, así que a los demás nunca les llega a importar.
-    baratos = {k: {pid: (int(pid in rem), int(prev.get(k) == pid), int(pid in catalogo.productos))
-                   for pid in cands}
-               for k, cands in empatadas.items()}
+    # Primero el catálogo (ya está en memoria). El uso solo se pregunta para
+    # los que siguen empatados: ordenar por niveles es lexicográfico, así que
+    # a los demás nunca les llega a importar.
+    en_cat = {k: {pid: int(pid in catalogo.productos) for pid in cands}
+              for k, (cands, _) in pendientes.items()}
     arriba: dict = {}
-    for k, ll in baratos.items():
+    for k, ll in en_cat.items():
         top = max(ll.values())
         empate = {pid for pid, v in ll.items() if v == top}
         if len(empate) > 1:
@@ -495,56 +567,102 @@ def _desempatar(fuentes: FuentesBD, *, factura_id, catalogo: Catalogo, serie,
     canon = serie_canonica(serie)
 
     out = {}
-    for k, cands in empatadas.items():
+    for k, (cands, fija) in pendientes.items():
         filas = []
         for pid in cands:
             en_juego = pid in arriba.get(k, ())
             filas.append((
-                baratos[k][pid] + (uso.por_serie.get((canon, pid), 0) if en_juego else 0,
-                                   uso.total.get(pid, 0) if en_juego else 0),
+                (en_cat[k][pid],
+                 uso.por_serie.get((canon, pid), 0) if en_juego else 0,
+                 uso.total.get(pid, 0) if en_juego else 0),
                 pid,
             ))
         filas.sort(key=lambda f: (tuple(-x for x in f[0]), indice.sku.get(f[1], ""), str(f[1])))
         (llave, pid), (segunda, _) = filas[0], filas[1]
         regla, debil = _regla(llave, segunda)
-        out[k] = Resolucion(pid, cands[pid], regla, debil)
+        out[k] = Resolucion(pid, cands[pid], fija or regla, debil,
+                            tuple(p for _, p in filas))
     return out
 
 
 def resolver_claves(fuentes: FuentesBD, *, factura_id, cliente_id, empresa, serie,
-                    claves: Iterable[Optional[str]]) -> dict[str, Resolucion]:
+                    claves: Iterable[Optional[str]], con_previa: bool = True,
+                    ) -> dict[str, Resolucion]:
     """{clave normalizada: Resolucion} para las claves de UNA factura.
 
     `factura_id` es la factura ya creada (sus remisiones ligadas y sus partidas
     actuales son evidencia); `empresa` y `serie` son las de SAE.
+    `con_previa=False` decide como si la factura no tuviera partidas: lo usa el
+    endpoint con una factura recién creada (se ahorra la consulta) y el
+    backfill para comparar contra lo ya ligado (`--recalcular-ligadas`).
     """
+    ks = sorted({norm_clave_sae(c) for c in claves if c} - {""})
+    if not ks:
+        return {}
     indice = fuentes.indice()
+    rem = fuentes.remision(factura_id) if factura_id else set()
+    prev = fuentes.previas(factura_id) if (factura_id and con_previa) else {}
+    _cat: list = []
+
+    def catalogo() -> Catalogo:
+        if not _cat:
+            _cat.append(fuentes.catalogo(cliente_id))
+        return _cat[0]
+
     out: dict[str, Resolucion] = {}
-    empatadas: dict = {}
-    catalogo: Optional[Catalogo] = None
-    for k in sorted({norm_clave_sae(c) for c in claves if c} - {""}):
-        distinta = clave_distinta(empresa, k)
+    pendientes: dict = {}
+    for k in ks:
+        # Lo que la clave PUEDE ser en esta factura, con la presentación que
+        # le toca a cada uno (None = por código del cliente: la unidad del
+        # producto, como siempre).
+        distinta = clave_distinta(fuentes.tenant_id, empresa, k)
         if distinta is not None:
-            pid = indice.por_sku.get(distinta.sku.strip())
-            if pid is None:
-                out[k] = Resolucion(None, None, OVERRIDE_SIN_PRODUCTO)
-            else:
-                out[k] = Resolucion(pid, distinta.presentacion or indice.presentacion_de(pid, k), OVERRIDE)
+            pid_d = indice.por_sku.get(distinta.sku.strip())
+            posibles = ({pid_d: distinta.presentacion or indice.todos(k).get(pid_d)
+                         or indice.base(pid_d)} if pid_d else {})
+        else:
+            posibles = dict(indice.todos(k))
+            if rem:
+                cod = catalogo().codigos.get(k)
+                if cod is not None and indice.vivo(cod):
+                    posibles.setdefault(cod, None)
+
+        # 1. La remisión ligada a esta factura.
+        en_rem = {pid: pres for pid, pres in posibles.items() if pid in rem}
+        if len(en_rem) == 1:
+            ((pid, pres),) = en_rem.items()
+            out[k] = Resolucion(pid, pres, REMISION)
             continue
+        if en_rem:
+            pendientes[k] = (en_rem, REMISION)
+            continue
+
+        # 2. Lo que la partida ya tenía, sea o no de los posibles y aunque hoy
+        # esté desactivado o borrado: un reenvío no corrige la historia.
+        pid_p = prev.get(k)
+        if pid_p is not None:
+            pres_p = posibles[pid_p] if pid_p in posibles else indice.todos(k).get(pid_p)
+            out[k] = Resolucion(pid_p, pres_p, PREVIA)
+            continue
+
+        # 3. La clave es otra cosa en esta empresa.
+        if distinta is not None:
+            out[k] = (Resolucion(pid_d, posibles[pid_d], OVERRIDE) if pid_d
+                      else Resolucion(None, None, OVERRIDE_SIN_PRODUCTO))
+            continue
+
+        # 4. Un solo activo con la clave; 5. gemelos; 6. código del cliente.
         cands = indice.candidatos(k)
         if len(cands) == 1:
             ((pid, pres),) = cands.items()
             out[k] = Resolucion(pid, pres, UNICA)
         elif cands:
-            empatadas[k] = cands
+            pendientes[k] = (cands, None)
         else:
-            if catalogo is None:
-                catalogo = fuentes.catalogo(cliente_id)
-            pid = catalogo.codigos.get(k)
-            out[k] = Resolucion(pid, None, CODIGO_CLIENTE) if pid else _NADA
-    if empatadas:
-        if catalogo is None:
-            catalogo = fuentes.catalogo(cliente_id)
-        out.update(_desempatar(fuentes, factura_id=factura_id, catalogo=catalogo,
-                               serie=serie, empatadas=empatadas))
+            pid = catalogo().codigos.get(k)
+            out[k] = (Resolucion(pid, None, CODIGO_CLIENTE)
+                      if pid is not None and indice.vivo(pid) else _NADA)
+    if pendientes:
+        out.update(_desempatar(fuentes, catalogo=catalogo(), serie=serie,
+                               pendientes=pendientes))
     return out
