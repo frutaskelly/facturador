@@ -42,6 +42,7 @@ const config: CrudConfig<Cliente> = {
   ],
   fields: [
     { name: "codigo", label: "Código", readonly: true, hint: "Se genera automáticamente" },
+    { name: "nombre_corto", label: "Nombre corto", hint: "Como sale en las tablas de cobranza (p. ej. EHMO). Vacío = la razón social." },
     { name: "legal_name", label: "Razón social", required: true, colSpan: 2 },
     {
       name: "rfc",
@@ -226,6 +227,7 @@ const config: CrudConfig<Cliente> = {
   },
   newValues: () => ({
     codigo: "",
+    nombre_corto: "",
     legal_name: "",
     rfc: "",
     regimen_fiscal: "",
@@ -254,6 +256,7 @@ const config: CrudConfig<Cliente> = {
     const dom = (c.domicilio_fiscal ?? {}) as Record<string, unknown>;
     return {
       codigo: c.codigo ?? "",
+      nombre_corto: c.nombre_corto ?? "",
       legal_name: c.legal_name,
       rfc: c.rfc,
       regimen_fiscal: c.regimen_fiscal ?? "",
@@ -296,6 +299,7 @@ const config: CrudConfig<Cliente> = {
     return {
       // codigo lo genera el servidor; no se envía.
       legal_name: v.legal_name,
+      nombre_corto: ((v.nombre_corto as string) || "").trim() || null,
       rfc: v.rfc,
       regimen_fiscal: (v.regimen_fiscal as string) || null,
       uso_cfdi_default: (v.uso_cfdi_default as string) || null,

@@ -501,6 +501,148 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cobranza/automatica/grupos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Listar Grupos
+         * @description Los grupos con su saldo de hoy y con quién comparten razones sociales.
+         */
+        get: operations["listar_grupos_api_v1_cobranza_automatica_grupos_get"];
+        put?: never;
+        /** Crear Grupo */
+        post: operations["crear_grupo_api_v1_cobranza_automatica_grupos_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/grupos/opciones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Opciones
+         * @description El árbol «qué incluye»: cada razón social con sus proyectos (con saldo,
+         *     o del catálogo aunque hoy no deban nada) y las series que no caen en
+         *     ningún proyecto, con su saldo de hoy.
+         */
+        get: operations["opciones_api_v1_cobranza_automatica_grupos_opciones_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/grupos/previo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Previo
+         * @description El correo tal como saldría hoy, con lo que trae el editor (guardado o no).
+         */
+        post: operations["previo_api_v1_cobranza_automatica_grupos_previo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/grupos/previo/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Previo Pdf
+         * @description El PDF que va adjunto: resumen y detalle de cada fila.
+         */
+        post: operations["previo_pdf_api_v1_cobranza_automatica_grupos_previo_pdf_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/grupos/previo/xlsx": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Previo Xlsx
+         * @description El Excel que va adjunto: hoja Resumen + una hoja por fila.
+         */
+        post: operations["previo_xlsx_api_v1_cobranza_automatica_grupos_previo_xlsx_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/grupos/prueba": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prueba
+         * @description Manda el correo SOLO a quien lo pide (su correo de usuario), con una
+         *     franja arriba que dice a quién iría de verdad. Nunca a los del grupo.
+         */
+        post: operations["prueba_api_v1_cobranza_automatica_grupos_prueba_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cobranza/automatica/grupos/{grupo_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Cambiar Grupo */
+        put: operations["cambiar_grupo_api_v1_cobranza_automatica_grupos__grupo_id__put"];
+        post?: never;
+        /** Borrar Grupo */
+        delete: operations["borrar_grupo_api_v1_cobranza_automatica_grupos__grupo_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cobranza/espejo/nota-credito": {
         parameters: {
             query?: never;
@@ -5850,6 +5992,23 @@ export interface components {
             /** Quitar */
             quitar?: string[] | null;
         };
+        /** AlcanceIn */
+        AlcanceIn: {
+            /**
+             * Cliente Id
+             * Format: uuid
+             */
+            cliente_id: string;
+            /**
+             * Completo
+             * @default true
+             */
+            completo: boolean;
+            /** Proyectos */
+            proyectos?: string[];
+            /** Series */
+            series?: string[];
+        };
         /**
          * AlcanceMiniConta
          * @description Qué comparte una clave de Mini Conta (ver services/mini_conta.py).
@@ -7004,6 +7163,8 @@ export interface components {
             lista_id?: string | null;
             /** Metodo Pago Default */
             metodo_pago_default?: string | null;
+            /** Nombre Corto */
+            nombre_corto?: string | null;
             /** Regimen Fiscal */
             regimen_fiscal?: string | null;
             /** Rfc */
@@ -7195,6 +7356,8 @@ export interface components {
             lista_nombre?: string | null;
             /** Metodo Pago Default */
             metodo_pago_default?: string | null;
+            /** Nombre Corto */
+            nombre_corto?: string | null;
             /** Regimen Fiscal */
             regimen_fiscal?: string | null;
             /** Rfc */
@@ -7331,6 +7494,8 @@ export interface components {
             lista_id?: string | null;
             /** Metodo Pago Default */
             metodo_pago_default?: string | null;
+            /** Nombre Corto */
+            nombre_corto?: string | null;
             /** Regimen Fiscal */
             regimen_fiscal?: string | null;
             /** Rfc */
@@ -8959,27 +9124,6 @@ export interface components {
             nombre: string;
             /** Resumen */
             resumen: Record<string, never>;
-        };
-        /**
-         * GrupoIn
-         * @description Un grupo tal como lo reporta el bot desde su config.
-         */
-        GrupoIn: {
-            /**
-             * Activo
-             * @default true
-             */
-            activo: boolean;
-            /** Config */
-            config?: Record<string, never>;
-            /** Jid */
-            jid: string;
-            /** Nombre */
-            nombre?: string | null;
-            /** Perfil */
-            perfil?: string | null;
-            /** Rol */
-            rol?: string | null;
         };
         /** GrupoOmitido */
         GrupoOmitido: {
@@ -13162,7 +13306,7 @@ export interface components {
         /** SincronizarGruposIn */
         SincronizarGruposIn: {
             /** Grupos */
-            grupos?: components["schemas"]["GrupoIn"][];
+            grupos?: components["schemas"]["app__schemas__conexion__GrupoIn"][];
         };
         /**
          * SolicitudSaeResumenOut
@@ -13792,6 +13936,58 @@ export interface components {
             pausado: boolean;
             /** Serie */
             serie?: string | null;
+        };
+        /** GrupoIn */
+        app__api__v1__cobranza_grupos__GrupoIn: {
+            /**
+             * Agrupar Por
+             * @default PROYECTO
+             * @enum {string}
+             */
+            agrupar_por: "PROYECTO" | "SERIE" | "SUCURSAL" | "CLIENTE";
+            /** Alcance */
+            alcance: components["schemas"]["AlcanceIn"][];
+            /** Cc */
+            cc?: string[];
+            /** Correos */
+            correos?: string[];
+            /** Id */
+            id?: string | null;
+            /**
+             * Mostrar Antiguedad
+             * @default false
+             */
+            mostrar_antiguedad: boolean;
+            /** Motivo Pausa */
+            motivo_pausa?: string | null;
+            /** Nombre */
+            nombre: string;
+            /**
+             * Pausado
+             * @default false
+             */
+            pausado: boolean;
+        };
+        /**
+         * GrupoIn
+         * @description Un grupo tal como lo reporta el bot desde su config.
+         */
+        app__schemas__conexion__GrupoIn: {
+            /**
+             * Activo
+             * @default true
+             */
+            activo: boolean;
+            /** Config */
+            config?: Record<string, never>;
+            /** Jid */
+            jid: string;
+            /** Nombre */
+            nombre?: string | null;
+            /** Perfil */
+            perfil?: string | null;
+            /** Rol */
+            rol?: string | null;
         };
         /** ContactoIn */
         app__schemas__contacto__ContactoIn: {
@@ -15158,6 +15354,313 @@ export interface operations {
                 "X-Tenant-Id"?: string | null;
             };
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listar_grupos_api_v1_cobranza_automatica_grupos_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    crear_grupo_api_v1_cobranza_automatica_grupos_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["app__api__v1__cobranza_grupos__GrupoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    opciones_api_v1_cobranza_automatica_grupos_opciones_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    previo_api_v1_cobranza_automatica_grupos_previo_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["app__api__v1__cobranza_grupos__GrupoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    previo_pdf_api_v1_cobranza_automatica_grupos_previo_pdf_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["app__api__v1__cobranza_grupos__GrupoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    previo_xlsx_api_v1_cobranza_automatica_grupos_previo_xlsx_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["app__api__v1__cobranza_grupos__GrupoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prueba_api_v1_cobranza_automatica_grupos_prueba_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["app__api__v1__cobranza_grupos__GrupoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cambiar_grupo_api_v1_cobranza_automatica_grupos__grupo_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                grupo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["app__api__v1__cobranza_grupos__GrupoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    borrar_grupo_api_v1_cobranza_automatica_grupos__grupo_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                grupo_id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;

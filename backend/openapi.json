@@ -145,6 +145,42 @@
     "title": "AjusteIn",
     "type": "object"
    },
+   "AlcanceIn": {
+    "properties": {
+     "cliente_id": {
+      "format": "uuid",
+      "title": "Cliente Id",
+      "type": "string"
+     },
+     "completo": {
+      "default": true,
+      "title": "Completo",
+      "type": "boolean"
+     },
+     "proyectos": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "maxItems": 200,
+      "title": "Proyectos",
+      "type": "array"
+     },
+     "series": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 50,
+      "title": "Series",
+      "type": "array"
+     }
+    },
+    "required": [
+     "cliente_id"
+    ],
+    "title": "AlcanceIn",
+    "type": "object"
+   },
    "AlcanceMiniConta": {
     "description": "Qué comparte una clave de Mini Conta (ver services/mini_conta.py).",
     "properties": {
@@ -3098,6 +3134,18 @@
       ],
       "title": "Metodo Pago Default"
      },
+     "nombre_corto": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre Corto"
+     },
      "regimen_fiscal": {
       "anyOf": [
        {
@@ -3681,6 +3729,18 @@
       ],
       "title": "Metodo Pago Default"
      },
+     "nombre_corto": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre Corto"
+     },
      "regimen_fiscal": {
       "anyOf": [
        {
@@ -4207,6 +4267,18 @@
        }
       ],
       "title": "Metodo Pago Default"
+     },
+     "nombre_corto": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre Corto"
      },
      "regimen_fiscal": {
       "anyOf": [
@@ -8628,67 +8700,6 @@
      "resumen"
     ],
     "title": "GrupoAplicado",
-    "type": "object"
-   },
-   "GrupoIn": {
-    "description": "Un grupo tal como lo reporta el bot desde su config.",
-    "properties": {
-     "activo": {
-      "default": true,
-      "title": "Activo",
-      "type": "boolean"
-     },
-     "config": {
-      "title": "Config",
-      "type": "object"
-     },
-     "jid": {
-      "maxLength": 120,
-      "minLength": 1,
-      "title": "Jid",
-      "type": "string"
-     },
-     "nombre": {
-      "anyOf": [
-       {
-        "maxLength": 254,
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Nombre"
-     },
-     "perfil": {
-      "anyOf": [
-       {
-        "maxLength": 40,
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Perfil"
-     },
-     "rol": {
-      "anyOf": [
-       {
-        "maxLength": 12,
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Rol"
-     }
-    },
-    "required": [
-     "jid"
-    ],
-    "title": "GrupoIn",
     "type": "object"
    },
    "GrupoOmitido": {
@@ -21036,7 +21047,7 @@
     "properties": {
      "grupos": {
       "items": {
-       "$ref": "#/components/schemas/GrupoIn"
+       "$ref": "#/components/schemas/app__schemas__conexion__GrupoIn"
       },
       "title": "Grupos",
       "type": "array"
@@ -22948,6 +22959,153 @@
      "cliente_id"
     ],
     "title": "ContactoIn",
+    "type": "object"
+   },
+   "app__api__v1__cobranza_grupos__GrupoIn": {
+    "properties": {
+     "agrupar_por": {
+      "default": "PROYECTO",
+      "enum": [
+       "PROYECTO",
+       "SERIE",
+       "SUCURSAL",
+       "CLIENTE"
+      ],
+      "title": "Agrupar Por",
+      "type": "string"
+     },
+     "alcance": {
+      "items": {
+       "$ref": "#/components/schemas/AlcanceIn"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Alcance",
+      "type": "array"
+     },
+     "cc": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Cc",
+      "type": "array"
+     },
+     "correos": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Correos",
+      "type": "array"
+     },
+     "id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Id"
+     },
+     "mostrar_antiguedad": {
+      "default": false,
+      "title": "Mostrar Antiguedad",
+      "type": "boolean"
+     },
+     "motivo_pausa": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo Pausa"
+     },
+     "nombre": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Nombre",
+      "type": "string"
+     },
+     "pausado": {
+      "default": false,
+      "title": "Pausado",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "nombre",
+     "alcance"
+    ],
+    "title": "GrupoIn",
+    "type": "object"
+   },
+   "app__schemas__conexion__GrupoIn": {
+    "description": "Un grupo tal como lo reporta el bot desde su config.",
+    "properties": {
+     "activo": {
+      "default": true,
+      "title": "Activo",
+      "type": "boolean"
+     },
+     "config": {
+      "title": "Config",
+      "type": "object"
+     },
+     "jid": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Jid",
+      "type": "string"
+     },
+     "nombre": {
+      "anyOf": [
+       {
+        "maxLength": 254,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre"
+     },
+     "perfil": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Perfil"
+     },
+     "rol": {
+      "anyOf": [
+       {
+        "maxLength": 12,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rol"
+     }
+    },
+    "required": [
+     "jid"
+    ],
+    "title": "GrupoIn",
     "type": "object"
    },
    "app__schemas__contacto__ContactoIn": {
@@ -25994,6 +26152,556 @@
      }
     ],
     "summary": "Generar Ahora",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/grupos": {
+   "get": {
+    "description": "Los grupos con su saldo de hoy y con quién comparten razones sociales.",
+    "operationId": "listar_grupos_api_v1_cobranza_automatica_grupos_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Listar Grupos",
+    "tags": [
+     "cobranza"
+    ]
+   },
+   "post": {
+    "operationId": "crear_grupo_api_v1_cobranza_automatica_grupos_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/app__api__v1__cobranza_grupos__GrupoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Crear Grupo",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/grupos/opciones": {
+   "get": {
+    "description": "El árbol «qué incluye»: cada razón social con sus proyectos (con saldo,\no del catálogo aunque hoy no deban nada) y las series que no caen en\nningún proyecto, con su saldo de hoy.",
+    "operationId": "opciones_api_v1_cobranza_automatica_grupos_opciones_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Opciones",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/grupos/previo": {
+   "post": {
+    "description": "El correo tal como saldría hoy, con lo que trae el editor (guardado o no).",
+    "operationId": "previo_api_v1_cobranza_automatica_grupos_previo_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/app__api__v1__cobranza_grupos__GrupoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Previo",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/grupos/previo/pdf": {
+   "post": {
+    "description": "El PDF que va adjunto: resumen y detalle de cada fila.",
+    "operationId": "previo_pdf_api_v1_cobranza_automatica_grupos_previo_pdf_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/app__api__v1__cobranza_grupos__GrupoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Previo Pdf",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/grupos/previo/xlsx": {
+   "post": {
+    "description": "El Excel que va adjunto: hoja Resumen + una hoja por fila.",
+    "operationId": "previo_xlsx_api_v1_cobranza_automatica_grupos_previo_xlsx_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/app__api__v1__cobranza_grupos__GrupoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Previo Xlsx",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/grupos/prueba": {
+   "post": {
+    "description": "Manda el correo SOLO a quien lo pide (su correo de usuario), con una\nfranja arriba que dice a quién iría de verdad. Nunca a los del grupo.",
+    "operationId": "prueba_api_v1_cobranza_automatica_grupos_prueba_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/app__api__v1__cobranza_grupos__GrupoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Prueba",
+    "tags": [
+     "cobranza"
+    ]
+   }
+  },
+  "/api/v1/cobranza/automatica/grupos/{grupo_id}": {
+   "delete": {
+    "operationId": "borrar_grupo_api_v1_cobranza_automatica_grupos__grupo_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "grupo_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Grupo Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Borrar Grupo",
+    "tags": [
+     "cobranza"
+    ]
+   },
+   "put": {
+    "operationId": "cambiar_grupo_api_v1_cobranza_automatica_grupos__grupo_id__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "grupo_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Grupo Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/app__api__v1__cobranza_grupos__GrupoIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cambiar Grupo",
     "tags": [
      "cobranza"
     ]

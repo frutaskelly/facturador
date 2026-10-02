@@ -278,6 +278,8 @@ export type Cliente = {
   // las emite SAE y aquí solo se reflejan (el Facturador no le puede timbrar).
   espejo_sae: boolean;
   legal_name: string;
+  // Como sale en las tablas de cobranza (EHMO en vez de la razón social).
+  nombre_corto?: string | null;
   rfc: string;
   regimen_fiscal?: string | null;
   uso_cfdi_default?: string | null;

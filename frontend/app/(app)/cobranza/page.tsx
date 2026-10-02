@@ -5,7 +5,8 @@
 // antigüedad de saldos (la cartera de hoy), los Recibos de pago (REP,
 // Complemento de Pago 2.0: se timbran, descargan, envían y cancelan) y las
 // notas de crédito. Después, tras la raya, la cobranza automática: los envíos
-// del estado de cuenta, sus contactos y sus ajustes.
+// del estado de cuenta, los grupos (varias razones sociales en un estado de
+// cuenta), sus contactos y sus ajustes.
 //
 // Antes esto vivía en tres lados: /cobranza, /cobranza/automatica (redirige
 // aquí, next.config.ts) y las pestañas Comprobantes de pago, Notas de crédito
@@ -32,6 +33,7 @@ const PESTANAS: { key: Pestana; label: string; auto?: boolean }[] = [
   { key: "recibos", label: "Recibos de pago (REP)" },
   { key: "notas", label: "Notas de crédito" },
   { key: "envios", label: "Envíos automáticos", auto: true },
+  { key: "grupos", label: "Grupos", auto: true },
   { key: "contactos", label: "Contactos", auto: true },
   { key: "ajustes", label: "Ajustes", auto: true },
 ];
@@ -76,7 +78,7 @@ export default function Page() {
   const [nuevo, setNuevo] = useState(false);
   const [rev, setRev] = useState(0);
   const conPago = pestana === "por-cobrar" || pestana === "recibos";
-  const automatica = pestana === "envios" || pestana === "contactos" || pestana === "ajustes";
+  const automatica = pestana === "envios" || pestana === "grupos" || pestana === "contactos" || pestana === "ajustes";
 
   return (
     <div>

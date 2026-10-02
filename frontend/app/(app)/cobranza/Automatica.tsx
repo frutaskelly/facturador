@@ -1,10 +1,12 @@
 "use client";
 
 // Cobranza → las pestañas de la cobranza automática: el estado de cuenta que
-// sale solo cada semana. Tres vistas: los ENVÍOS (la cola que se preparó, se
-// aprueba y se manda, y la bitácora de lo que ya salió), los CONTACTOS (a quién
-// se le cobra, por cliente o por serie, y quién está en pausa) y los AJUSTES
-// (cuándo sale, qué incluye, a quién se copia al escalar, adjuntos y el modo).
+// sale solo cada semana. Cuatro vistas: los ENVÍOS (la cola que se preparó, se
+// aprueba y se manda, y la bitácora de lo que ya salió), los GRUPOS (varias
+// razones sociales en un solo estado de cuenta, en Grupos.tsx), los CONTACTOS
+// (a quién se le cobra, por cliente o por serie, y quién está en pausa) y los
+// AJUSTES (cuándo sale, qué incluye, a quién se copia al escalar, adjuntos y
+// el modo).
 // Todo lo decide el negocio aquí; el backend solo lo ejecuta
 // (services/cobranza_auto.py).
 import Link from "next/link";
@@ -24,6 +26,8 @@ import { ApiError, apiOpenInTab } from "@/lib/api";
 import { fmtDate, fmtDateTime, fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page as Pagina } from "@/lib/hooks";
 import type { Cliente } from "@/lib/types";
+
+import { Grupos } from "./Grupos";
 
 type Config = {
   activo: boolean; modo: "REVISION" | "AUTOMATICO"; dia_semana: number; hora: number; zona: string;
@@ -47,7 +51,7 @@ type Envio = {
   dias_max_vencida: number; escalado: boolean; error: string | null; enviado_at: string | null;
 };
 
-export type PestanaAuto = "envios" | "contactos" | "ajustes";
+export type PestanaAuto = "envios" | "grupos" | "contactos" | "ajustes";
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 const TONO: Record<Envio["estado"], "warning" | "accent" | "success" | "danger" | "muted"> = {
   PENDIENTE: "warning", ENVIANDO: "accent", ENVIADO: "success", ERROR: "danger", DESCARTADO: "muted",
@@ -71,9 +75,9 @@ function correosDeFicha(c: Cliente | undefined): string[] {
   return dom.email ? [String(dom.email)] : [];
 }
 
-/** Las tres pestañas automáticas, con la franja de estado arriba. La pestaña la
+/** Las pestañas automáticas, con la franja de estado arriba. La pestaña la
  *  escoge la página de Cobranza; este componente sigue montado al pasar entre
- *  las tres, así la configuración se pide una sola vez. */
+ *  ellas, así la configuración se pide una sola vez. */
 export function Automatica({ pestana, canWrite }: { pestana: PestanaAuto; canWrite: boolean }) {
   const cfgRes = useResource<Config>("/api/v1/cobranza/automatica/config");
   const cfg = cfgRes.data;
@@ -82,6 +86,7 @@ export function Automatica({ pestana, canWrite }: { pestana: PestanaAuto; canWri
     <div className="space-y-4">
       {cfg && <Estado cfg={cfg} />}
       {pestana === "envios" && <Cola canWrite={canWrite} onCambio={cfgRes.reload} />}
+      {pestana === "grupos" && <Grupos canWrite={canWrite} />}
       {pestana === "contactos" && <Contactos canWrite={canWrite} />}
       {pestana === "ajustes" && (cfg
         ? <Ajustes cfg={cfg} canWrite={canWrite} onGuardado={(c) => cfgRes.setData(c)} />

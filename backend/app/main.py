@@ -15,6 +15,7 @@ from .api.v1 import (
     clientes,
     cobranza,
     cobranza_auto,
+    cobranza_grupos,
     contacto,
     conexiones,
     conversiones,
@@ -150,6 +151,7 @@ app.include_router(proyectos.router, prefix="/api/v1")
 app.include_router(espejo_cobranza.router, prefix="/api/v1")
 app.include_router(cobranza.router, prefix="/api/v1")
 app.include_router(cobranza_auto.router, prefix="/api/v1")
+app.include_router(cobranza_grupos.router, prefix="/api/v1")  # varias razones sociales, un estado de cuenta
 app.include_router(reportes.router, prefix="/api/v1")
 # Phase 4 — operaciones
 app.include_router(proveedores.router, prefix="/api/v1")

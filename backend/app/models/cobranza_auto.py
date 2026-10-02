@@ -12,6 +12,9 @@ Tres piezas, todas por tenant y todas editables desde la pantalla:
 - `CobranzaEnvio`: la cola y la bitácora. Cada semana se genera una fila por
   contacto con saldo; en REVISION se queda PENDIENTE hasta que alguien la
   aprueba. Nunca dos filas para el mismo contacto y corte (índice único).
+- `CobranzaGrupo` + `CobranzaGrupoAlcance` (migración 0097): varias razones
+  sociales en un solo estado de cuenta, con la tabla del correo agrupada por
+  proyecto, serie, sucursal o razón social. Ver `services/cobranza_grupos.py`.
 """
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, text,
@@ -25,6 +28,7 @@ COBRANZA_MODOS = ("REVISION", "AUTOMATICO")
 # PENDIENTE = en cola · ENVIANDO = reclamado por quien lo manda · ENVIADO ·
 # ERROR = el SMTP lo rechazó · DESCARTADO = alguien lo quitó, o ya no hay saldo.
 COBRANZA_ENVIO_ESTADOS = ("PENDIENTE", "ENVIANDO", "ENVIADO", "ERROR", "DESCARTADO")
+COBRANZA_AGRUPAR_POR = ("PROYECTO", "SERIE", "SUCURSAL", "CLIENTE")
 
 
 class CobranzaConfig(Base, TimestampMixin):
@@ -94,3 +98,37 @@ class CobranzaEnvio(Base, TimestampMixin):
     error = Column(Text)
     aprobado_por = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     enviado_at = Column(DateTime(timezone=True))
+
+
+class CobranzaGrupo(Base, TimestampMixin):
+    """Un estado de cuenta que junta varias razones sociales (EHMO + SUREÑA +
+    MAFAN). `agrupar_por` decide las filas de la tabla del correo y las hojas
+    del Excel de respaldo; `mostrar_antiguedad` agrega las cubetas de 30 días."""
+    __tablename__ = "cobranza_grupos"
+
+    id = uuid_pk()
+    tenant_id = tenant_fk()
+    nombre = Column(String(80), nullable=False)
+    agrupar_por = Column(String(10), nullable=False, server_default="PROYECTO")
+    mostrar_antiguedad = Column(Boolean, nullable=False, server_default=text("false"))
+    correos = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    cc = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    pausado = Column(Boolean, nullable=False, server_default=text("false"))
+    motivo_pausa = Column(String(254))
+
+
+class CobranzaGrupoAlcance(Base):
+    """Qué entra al grupo, por razón social. Sin proyecto ni serie = la razón
+    social completa (lo nuevo entra solo). Con proyecto = las facturas que se
+    reportan en ese proyecto. Con serie = las de esa serie que no caen en
+    ningún proyecto."""
+    __tablename__ = "cobranza_grupo_alcance"
+
+    id = uuid_pk()
+    tenant_id = tenant_fk()
+    grupo_id = Column(UUID(as_uuid=True), ForeignKey("cobranza_grupos.id", ondelete="CASCADE"),
+                      nullable=False, index=True)
+    cliente_id = Column(UUID(as_uuid=True), ForeignKey("clientes.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    proyecto_id = Column(UUID(as_uuid=True), ForeignKey("proyectos.id", ondelete="CASCADE"), index=True)
+    serie = Column(String(10))
