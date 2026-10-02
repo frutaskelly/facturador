@@ -22648,6 +22648,8 @@ export interface operations {
         parameters: {
             query?: {
                 agrupar?: "proyecto" | "cliente" | "sucursal";
+                /** @description Cada fila trae `hijos` en cascada: cliente → plaza → proyecto → serie, plaza → proyecto → serie, proyecto → serie */
+                desglose?: boolean;
                 incluir_en_cancelacion?: boolean;
                 /** @description Solo facturas emitidas desde esta fecha */
                 desde?: string | null;

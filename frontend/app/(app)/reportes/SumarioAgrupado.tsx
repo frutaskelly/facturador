@@ -4,6 +4,10 @@
 // con el selector de dimensión y el total arriba. La usan la cartera («cuánto
 // nos deben, por quién») y el sumario de venta («cuánto facturamos, a quién»):
 // son la misma lectura con otro monto, y así se ven y se tocan igual.
+//
+// Con `renderExpanded` la fila se despliega (la cascada de la cartera) y el
+// enlace al estado de cuenta se queda en el nombre; sin él, toda la fila enlaza.
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
 
@@ -27,7 +31,7 @@ export type FilaSumario = {
   alerta?: string | number;
 };
 
-export function SumarioAgrupado({
+export function SumarioAgrupado<T extends FilaSumario>({
   opciones,
   agrupar,
   onAgrupar,
@@ -39,6 +43,7 @@ export function SumarioAgrupado({
   pie,
   vacio,
   cargando = false,
+  renderExpanded,
 }: {
   /** En el orden en que se muestran; la primera suele ser la de omisión. */
   opciones: Agrupar[];
@@ -46,7 +51,7 @@ export function SumarioAgrupado({
   onAgrupar: (a: Agrupar) => void;
   /** Lo que va a la derecha del selector ("Total: $…"). */
   total: ReactNode;
-  filas: FilaSumario[];
+  filas: T[];
   columnaMonto: string;
   /** Si viene, se agrega una segunda columna con `fila.alerta`. */
   columnaAlerta?: string;
@@ -55,16 +60,22 @@ export function SumarioAgrupado({
   pie?: ReactNode;
   vacio: string;
   cargando?: boolean;
+  /** Lo que se despliega bajo la fila al hacer clic (slide-down). */
+  renderExpanded?: (f: T) => ReactNode;
 }) {
   const router = useRouter();
   // Lo que queda tras el buscador y los embudos; null = aún sin filtrar.
-  const [visibles, setVisibles] = useState<FilaSumario[] | null>(null);
+  const [visibles, setVisibles] = useState<T[] | null>(null);
 
-  const cols: Column<FilaSumario>[] = useMemo(() => [
+  const cols: Column<T>[] = useMemo(() => [
     // Clave fija: el encabezado cambia con la dimensión, el ancho no.
     { key: "etiqueta", header: ETIQUETA_AGRUPAR[agrupar], truncate: true, sortable: true,
       sortValue: (f) => f.etiqueta, exportValue: (f) => f.etiqueta,
-      cell: (f) => (
+      cell: (f) => renderExpanded && f.href ? (
+        // El clic en la fila despliega; el nombre lleva al estado de cuenta.
+        <Link href={f.href} title={`${f.etiqueta} · ver estado de cuenta`} className="hover:underline"
+              onClick={(e) => e.stopPropagation()}>{f.etiqueta}</Link>
+      ) : (
         <span title={f.etiqueta} className={f.href ? "hover:underline" : undefined}>{f.etiqueta}</span>
       ) },
     { key: "facturas", header: "Facturas", className: "text-right tabular-nums", sortable: true,
@@ -75,13 +86,13 @@ export function SumarioAgrupado({
       cell: (f) => fmtMoney(f.monto) },
     ...(columnaAlerta ? [{
       key: "alerta", header: columnaAlerta, className: "whitespace-nowrap text-right tabular-nums",
-      sortable: true, sortValue: (f: FilaSumario) => Number(f.alerta ?? 0),
-      exportValue: (f: FilaSumario) => Number(f.alerta ?? 0),
-      cell: (f: FilaSumario) => Number(f.alerta ?? 0) > 0
+      sortable: true, sortValue: (f: T) => Number(f.alerta ?? 0),
+      exportValue: (f: T) => Number(f.alerta ?? 0),
+      cell: (f: T) => Number(f.alerta ?? 0) > 0
         ? <span className="font-medium text-danger">{fmtMoney(f.alerta ?? 0)}</span>
         : <span className="text-muted">—</span>,
     }] : []),
-  ], [agrupar, columnaMonto, columnaAlerta]);
+  ], [agrupar, columnaMonto, columnaAlerta, renderExpanded]);
 
   const sumaVisible = useMemo(() => {
     const base = visibles ?? filas;
@@ -130,7 +141,9 @@ export function SumarioAgrupado({
           )}
           <DataTableSmart
             rows={filas}
-            rowKey={(f) => f.etiqueta}
+            // Con la dimensión en la clave, «BALLES» por cliente y «BALLES» por
+            // proyecto son filas distintas: cambiar de vista no hereda lo desplegado.
+            rowKey={(f) => `${agrupar}:${f.etiqueta}`}
             columns={cols}
             empty={vacio}
             storageKey={`reportes-sumario-${columnaMonto.toLowerCase()}`}
@@ -138,6 +151,7 @@ export function SumarioAgrupado({
             exportFilename={`${columnaMonto.toLowerCase()}-por-${agrupar}`}
             defaultPageSize={50}
             onRowClick={(f) => { if (f.href) router.push(f.href); }}
+            renderExpanded={renderExpanded}
             onFilteredRowsChange={setVisibles}
           />
         </div>

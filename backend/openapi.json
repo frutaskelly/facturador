@@ -42370,6 +42370,18 @@
       }
      },
      {
+      "description": "Cada fila trae `hijos` en cascada: cliente → plaza → proyecto → serie, plaza → proyecto → serie, proyecto → serie",
+      "in": "query",
+      "name": "desglose",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Cada fila trae `hijos` en cascada: cliente → plaza → proyecto → serie, plaza → proyecto → serie, proyecto → serie",
+       "title": "Desglose",
+       "type": "boolean"
+      }
+     },
+     {
       "in": "query",
       "name": "incluir_en_cancelacion",
       "required": false,
