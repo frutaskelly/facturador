@@ -40,10 +40,10 @@ import {
 import type { Almacen, Cliente, ContextoPrecios, Factura, LineaPegada, LineaRemision, MatchResult, OCRecibida, Producto, Proyecto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "remision:gestionar";
-// Este año, no este mes: las remisiones son menos (cientos, no miles) y los
-// borradores de meses anteriores siguen siendo trabajo pendiente — con «Este
-// mes» se esconderían el día 1.
-const PERIODO_DEFAULT: Periodo = "anio";
+// Este mes al entrar (pedido del dueño, 2-oct-2026). OJO: los borradores de
+// meses anteriores quedan fuera hasta elegir «Mes pasado», «Este año» o buscar
+// por folio (la búsqueda ignora el periodo).
+const PERIODO_DEFAULT: Periodo = "mes";
 
 // Valor especial del selector de presentación: "no está en el producto, darla de alta".
 const NUEVA_PRESENTACION = "__nueva_pres__";
