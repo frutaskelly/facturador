@@ -47,7 +47,7 @@ _RE_ALMACEN = re.compile(r"^([A-Z]{2})([A-Z]{2})-([A-Z]{3,5})-([A-Z]{3,5})-(\d{6
 RE_NUEVO_EN_TEXTO = re.compile(r"\b([A-Z]{4,5}(?:-[A-Z]{3,5})?-[A-Z]{3,5}-\d{6}(?:\d{2})?(?:-\d{1,2})?)\b")
 
 # (sucursal, código del proyecto) → el prefijo de siempre. Lo que no está aquí
-# (BIC) no tuvo prefijo viejo y se queda con su código.
+# (BIENE, Bienestar Coor; antes BIC) no tuvo prefijo viejo y se queda con su código.
 PROYECTO_5 = {
     ("HG", "HOSPI"): "HO", ("HG", "DIF"): "DI", ("HG", "CEREZ"): "CE",
     ("HG", "SEGUR"): "SP", ("HG", "SNERI"): "SN",
