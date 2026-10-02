@@ -611,9 +611,11 @@ export default function ListasPreciosPage() {
           {activeLista?.lleva_sku_cliente && (
             <p className="rounded-lg border border-border bg-surface-2 px-3 py-2 text-xs text-muted">
               <b>SKU del cliente:</b>{" "}
-              {skus?.clientes.length
-                ? <>se guarda en el catálogo de {skus.clientes.map((c) => c.nombre).join(" y ")} y sale en su factura.</>
-                : "esta lista no tiene clientes asignados todavía: asígnala en la ficha del cliente para poder guardarlo."}
+              {skus === null
+                ? "cargando los clientes de la lista…"
+                : skus.clientes.length
+                  ? <>se guarda en el catálogo de {skus.clientes.map((c) => c.nombre).join(" y ")} y sale en su factura.</>
+                  : "esta lista no tiene clientes asignados todavía: asígnala en la ficha del cliente para poder guardarlo."}
               {" "}En el Excel va en la columna SKU CLIENTE: vacía no cambia nada y «-» lo quita.
             </p>
           )}
