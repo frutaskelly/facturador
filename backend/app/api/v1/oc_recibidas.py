@@ -341,7 +341,7 @@ def _candado_folio_repetido(db: Session, ctx: AuthContext, payload) -> None:
 # La base termina en el día (HO-39ACT-LUN-2, VH-38PAL-MIE-B-2) o, desde la
 # semana 40, en la fecha (TBVH-ROVIR-20261007-2, HGPA-HOS-PACHU-20261009-2).
 # Ver services/folio_oc.
-_RE_SUFIJO_APARTE = re.compile(r"^(.*-(?:[A-Z]{2,3}(?:-B)?|\d{8}))-(\d{1,2})$")
+_RE_SUFIJO_APARTE = re.compile(r"^(.*-(?:[A-Z]{2,3}(?:-B)?|\d{6}(?:\d{2})?))-(\d{1,2})$")
 
 
 @router.get("/sufijos-aparte")

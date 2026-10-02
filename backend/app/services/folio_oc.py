@@ -13,8 +13,9 @@ la fecha no se interpreta.
 Con almacén (decisión del dueño 2-oct-2026, desde la misma semana 40): sucursal +
 ALMACÉN, el proyecto con TRES letras, el punto y la fecha. Las 29 remisiones que la
 semana 40 alcanzó a generar con el formato de arriba se renombraron a éste.
-    HGPA-HOS-PACHU-20261009   Hidalgo · almacén Pachuca · Hospitales · Pachuca · 9-oct
-    TBVH-HOS-ROVIR-20261007   Tabasco · almacén Villahermosa · Hospitales · Rovirosa
+    HGPA-HOS-PACHU-261009     Hidalgo · almacén Pachuca · Hospitales · Pachuca · 9-oct
+    TBVH-HOS-ROVIR-261007     Tabasco · almacén Villahermosa · Hospitales · Rovirosa
+La fecha va AAMMDD (dueño, 2-oct-2026); la de 8 dígitos (20261009) se sigue leyendo.
 
 Todos llevan el sufijo de entrega aparte al final: …-2. Cualquier otro folio
 (Río Libre, los numéricos de Balles/Jubran) es libre y no se interpreta.
@@ -34,11 +35,11 @@ from datetime import date, timedelta
 from typing import Optional
 
 # Sucursal (2 letras) pegada al proyecto (2-3, el prefijo del formato viejo).
-_RE_NUEVO = re.compile(r"^([A-Z]{2})([A-Z]{2,3})-([A-Z]{3,5})-(\d{8})(?:-(\d{1,2}))?$")
+_RE_NUEVO = re.compile(r"^([A-Z]{2})([A-Z]{2,3})-([A-Z]{3,5})-(\d{6}(?:\d{2})?)(?:-(\d{1,2}))?$")
 # Sucursal + almacén (2 y 2) · proyecto (3) · punto · fecha.
-_RE_ALMACEN = re.compile(r"^([A-Z]{2})([A-Z]{2})-([A-Z]{3})-([A-Z]{3,5})-(\d{8})(?:-(\d{1,2}))?$")
+_RE_ALMACEN = re.compile(r"^([A-Z]{2})([A-Z]{2})-([A-Z]{3})-([A-Z]{3,5})-(\d{6}(?:\d{2})?)(?:-(\d{1,2}))?$")
 # Los dos, para buscarlos dentro de un texto (la observación de SAE).
-RE_NUEVO_EN_TEXTO = re.compile(r"\b([A-Z]{4,5}(?:-[A-Z]{3})?-[A-Z]{3,5}-\d{8}(?:-\d{1,2})?)\b")
+RE_NUEVO_EN_TEXTO = re.compile(r"\b([A-Z]{4,5}(?:-[A-Z]{3})?-[A-Z]{3,5}-\d{6}(?:\d{2})?(?:-\d{1,2})?)\b")
 
 # (sucursal, proyecto de 3 letras) → el prefijo de siempre. Lo que no está aquí
 # (BIC) no tuvo prefijo viejo y se queda con sus tres letras.
@@ -69,6 +70,9 @@ class FolioNuevo:
 
 
 def _fecha8(s: str) -> Optional[date]:
+    """AAAAMMDD o, desde el 2-oct-2026, AAMMDD (261009 = 9-oct-2026)."""
+    if len(s) == 6:
+        s = "20" + s
     try:
         return date(int(s[:4]), int(s[4:6]), int(s[6:]))
     except ValueError:
