@@ -3691,6 +3691,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/claves-cliente": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Claves De Cliente
+         * @description Los SKU exclusivos de cliente: códigos del catálogo de cliente que NO son
+         *     la clave del producto en esa unidad (ZANA-FRUT-508 de Balles y Jubran sobre
+         *     la ZANAHORIA de todos, 2-oct-2026). Productos los pinta junto a la clave
+         *     para que se vea que es el mismo producto con el artículo de ese cliente y
+         *     nadie dé de alta otro.
+         *
+         *     La unidad es la de la fila (`presentacion`) o, vacía, la base del producto:
+         *     la misma que usa el export (`codigo_cliente_de`).
+         */
+        get: operations["claves_de_cliente_api_v1_productos_claves_cliente_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/claves-sae": {
         parameters: {
             query?: never;
@@ -6698,6 +6725,24 @@ export interface components {
             completo: boolean;
             /** Paso */
             paso: string;
+        };
+        /**
+         * ClaveClienteOut
+         * @description Un SKU exclusivo de cliente: el artículo de SAE con el que ESOS clientes
+         *     facturan el producto en esa unidad, distinto de la clave de todos.
+         */
+        ClaveClienteOut: {
+            /** Clave */
+            clave: string;
+            /** Clientes */
+            clientes: string[];
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Unidad */
+            unidad: string;
         };
         /** ClaveInfo */
         ClaveInfo: {
@@ -21282,6 +21327,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogoClienteBatchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    claves_de_cliente_api_v1_productos_claves_cliente_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaveClienteOut"][];
                 };
             };
             /** @description Validation Error */

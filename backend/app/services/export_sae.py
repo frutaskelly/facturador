@@ -71,6 +71,8 @@ from .series import resolver_serie
 # Llave de las claves por presentación en el dict de _codigos_cliente: un
 # string, así que no choca con un cliente_id (UUID) ni con la base (None).
 _PRES = "PRES"
+# Y la de la UNIDAD en la que compra el cliente cada fila de su catálogo.
+_UNI = "UNI"
 
 # La marca del espejo ("ZHGO 233") también se captura a mano (PATCH de la
 # remisión), así que el cruce tolera espacios y ceros — el mismo criterio en
@@ -238,16 +240,24 @@ def _codigos_cliente(
         ProductoCliente.producto_id,
         ProductoCliente.sucursal_id,
         ProductoCliente.codigo_cliente,
-    ).filter(
+        ProductoCliente.presentacion,
+        Producto.unidad_base,
+    ).join(Producto, Producto.id == ProductoCliente.producto_id).filter(
         ProductoCliente.tenant_id == tenant_id,
         ProductoCliente.cliente_id.in_(cliente_ids or [None]),
         ProductoCliente.codigo_cliente.isnot(None),
     )
     if producto_ids is not None:
         q = q.filter(ProductoCliente.producto_id.in_(producto_ids or [None]))
-    out = {
-        (f.cliente_id, f.producto_id, f.sucursal_id): f.codigo_cliente for f in q.all()
-    }
+    out: dict = {}
+    for f in q.all():
+        out[(f.cliente_id, f.producto_id, f.sucursal_id)] = f.codigo_cliente
+        # La unidad en la que ESE cliente compra (vacía = la base): su código es
+        # el artículo de SAE en esa unidad (SKU exclusivo, 2-oct-2026).
+        out[(_UNI, f.cliente_id, f.producto_id, f.sucursal_id)] = (
+            (f.presentacion or f.unidad_base or "").strip().upper() or None,
+            bool((f.presentacion or "").strip()),
+        )
     # La clave BASE del producto entra al MISMO dict bajo (None, producto,
     # None): `cliente_id` es NOT NULL, así que esa llave no puede chocar con la
     # de un cliente, y así los cuatro puntos que resuelven una línea heredan el
@@ -292,13 +302,21 @@ def catalogo_sae(db: Session, tenant_id: UUID, empresa: Optional[str]) -> Option
 def codigo_cliente_de(
     codigos: dict, cliente_id, producto_id, sucursal_id, presentacion: Optional[str] = None
 ) -> Optional[str]:
-    """La clave para UNA línea: la de su PRESENTACIÓN manda si el producto la
-    tiene; si no, la fila de SU sucursal; si no, la genérica del cliente; y si
-    tampoco, la clave BASE del producto.
+    """La clave para UNA línea, en este orden:
 
-    La de la presentación va primero porque la del catálogo del cliente es la
-    del artículo en su unidad normal: AJOKG no ampara una línea en PIEZA, y
-    SAE facturaría kilos donde se entregaron piezas (29-sep-2026).
+      1. el código del cliente (su sucursal, luego el genérico) si es para la
+         MISMA unidad de la línea: el SKU exclusivo de ese cliente
+         (ZANA-FRUT-508 de Balles y Jubran sobre la ZANAHORIA de todos);
+      2. la clave de la PRESENTACIÓN del producto;
+      3. el código del cliente de una fila que NO fija unidad (lo de siempre
+         para productos sin clave por presentación); una fila que dice «PIEZA»
+         es el artículo en pieza y nunca ampara otra unidad;
+      4. la clave BASE del producto.
+
+    La presentación le gana al código del cliente de OTRA unidad porque ese
+    código es el artículo en la unidad en que el cliente compra: AJOKG no ampara
+    una línea en PIEZA, y SAE facturaría kilos donde se entregaron piezas
+    (29-sep-2026). Si el cliente compra en ESA unidad, su código manda (2-oct).
 
     La clave de OTRA plaza jamás ampara (misma regla que _clave_para_remision):
     prestarla mandaría a la otra empresa SAE una clave que su inventario no
@@ -306,17 +324,20 @@ def codigo_cliente_de(
     todas, porque es justo lo que significa: el mismo artículo en las tres
     empresas (decisión del dueño, 18-sep-2026).
     """
-    if presentacion:
-        clave = codigos.get((_PRES, producto_id, presentacion.strip().upper()))
+    unidad = presentacion.strip().upper() if presentacion else None
+    filas = [sucursal_id, None] if sucursal_id is not None else [None]
+    if unidad:
+        for suc in filas:
+            clave = codigos.get((cliente_id, producto_id, suc))
+            if clave is not None and codigos.get((_UNI, cliente_id, producto_id, suc), (None,))[0] == unidad:
+                return clave
+        clave = codigos.get((_PRES, producto_id, unidad))
         if clave is not None:
             return clave
-    if sucursal_id is not None:
-        clave = codigos.get((cliente_id, producto_id, sucursal_id))
-        if clave is not None:
+    for suc in filas:
+        clave = codigos.get((cliente_id, producto_id, suc))
+        if clave is not None and not codigos.get((_UNI, cliente_id, producto_id, suc), (None, False))[1]:
             return clave
-    clave = codigos.get((cliente_id, producto_id, None))
-    if clave is not None:
-        return clave
     return codigos.get((None, producto_id, None))
 
 
