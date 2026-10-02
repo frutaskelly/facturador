@@ -1520,7 +1520,13 @@ export function DataTable<T>({
                     {isOpen && (
                       <tr className="border-t border-border bg-surface-2/40">
                         <td colSpan={totalCols} className="px-4 pb-4">
-                          <ExpandedPanel>{renderExpanded!(row)}</ExpandedPanel>
+                          {/* El detalle mide lo VISIBLE y se queda pegado a la izquierda:
+                              si no, hereda el ancho de la tabla entera (más ancha que la
+                              pantalla) y su contenido cae fuera de vista a la derecha.
+                              `--ancho-vista` lo pone MarcoScrollH. */}
+                          <div className="sticky left-4" style={{ width: "calc(var(--ancho-vista) - 2rem)" }}>
+                            <ExpandedPanel>{renderExpanded!(row)}</ExpandedPanel>
+                          </div>
                         </td>
                       </tr>
                     )}
@@ -1840,7 +1846,12 @@ function MarcoScrollH({
     if (!cont || !riel) return;
     // El pulgar se mueve escribiendo su estilo directo (sin re-render en cada
     // pixel); sólo las orillas pasan por estado, y cambian pocas veces.
+    let anchoVista = -1;
     const pintar = () => {
+      if (cont.clientWidth !== anchoVista) {
+        anchoVista = cont.clientWidth;
+        cont.style.setProperty("--ancho-vista", `${anchoVista}px`);
+      }
       const max = cont.scrollWidth - cont.clientWidth;
       const desborda = max > 1;
       const izq = desborda && cont.scrollLeft > 1;

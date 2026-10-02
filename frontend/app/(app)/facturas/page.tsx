@@ -5,13 +5,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Eye, FileCode2, FileText, FileX, Mail, Pencil, Plus, Replace, Stamp, Trash2, X } from "lucide-react";
 
 import { FacturaDirectaForm } from "@/components/FacturaDirectaForm";
+import { PartidasDetalle, UuidCopiable } from "@/components/PartidasDetalle";
 import { PeriodoFiltro, esPeriodo, rangoDePeriodo, type Periodo } from "@/components/PeriodoFiltro";
 import { SincronizarSae } from "@/components/SincronizarSae";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { DataTable, type Column, type RowAction } from "@/components/ui/DataTable";
+import type { Column, RowAction } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/Field";
@@ -395,7 +396,7 @@ export default function FacturasPage() {
     const ieps = d.lineas.reduce((s, l) => s + Number(l.ieps_importe || 0), 0);
     return (
       <div className="rounded-xl border border-border bg-background p-4">
-        <div className="mb-3 flex flex-wrap gap-4 text-sm">
+        <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
           <div><span className="text-muted">Cliente:</span> {cliName[d.cliente_id] ?? "—"}</div>
           <div><span className="text-muted">Fecha:</span> {fmtDate(d.fecha)}</div>
           <div><span className="text-muted">Estado:</span> <Badge tone={ESTADO_TONE[d.estado] ?? "muted"}>{d.estado}</Badge></div>
@@ -406,7 +407,7 @@ export default function FacturasPage() {
             </div>
           )}
           {suPedidoDe(d) && <div><span className="text-muted">Su pedido:</span> {suPedidoDe(d)}</div>}
-          {d.uuid && <div><span className="text-muted">UUID:</span> <span className="font-mono text-xs">{d.uuid}</span></div>}
+          {d.uuid && <div><span className="text-muted">UUID:</span> <UuidCopiable uuid={d.uuid} /></div>}
           {d.fecha_timbrado && <div><span className="text-muted">Timbrada:</span> {fmtDateTime(d.fecha_timbrado)}</div>}
           {d.sustituye_a_factura_id && (
             <div>
@@ -421,7 +422,7 @@ export default function FacturasPage() {
           {d.uuid_sustitucion && (
             <div>
               <span className="text-muted">Sustituida por UUID:</span>{" "}
-              <span className="font-mono text-xs">{d.uuid_sustitucion}</span>
+              <UuidCopiable uuid={d.uuid_sustitucion} />
             </div>
           )}
         </div>
@@ -431,25 +432,23 @@ export default function FacturasPage() {
             <span className="whitespace-pre-wrap break-words">{d.notas}</span>
           </div>
         )}
-        <DataTable
-          rows={d.lineas}
-          rowKey={(l) => l.numero_linea}
-          empty="Sin conceptos"
-          columns={[
-            { header: "Cant.", className: "text-right tabular-nums", cell: (l) => l.cantidad },
-            { header: "Descripción", cell: (l) => l.descripcion },
-            { header: "P/U", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.valor_unitario) },
-            { header: "IEPS", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.ieps_importe) },
-            { header: "IVA", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.iva_importe) },
-            { header: "Importe", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.importe) },
-          ]}
+        <PartidasDetalle
+          vacio="Sin conceptos"
+          partidas={d.lineas.map((l) => ({
+            key: l.numero_linea,
+            cantidad: l.cantidad,
+            unidad: l.presentacion || l.clave_unidad,
+            descripcion: l.descripcion,
+            precio: l.valor_unitario,
+            ieps: l.ieps_importe,
+            iva: l.iva_importe,
+            importe: l.importe,
+          }))}
+          subtotal={d.subtotal}
+          ieps={ieps}
+          iva={d.iva_trasladado}
+          total={d.total}
         />
-        <div className="mt-3 flex flex-col items-end gap-1 text-sm">
-          <div className="flex gap-4"><span className="text-muted">Subtotal</span><span className="tabular-nums">{fmtMoney(d.subtotal)}</span></div>
-          {ieps > 0 && <div className="flex gap-4"><span className="text-muted">IEPS</span><span className="tabular-nums">{fmtMoney(ieps)}</span></div>}
-          <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fmtMoney(d.iva_trasladado)}</span></div>
-          <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fmtMoney(d.total)}</span></div>
-        </div>
       </div>
     );
   }
