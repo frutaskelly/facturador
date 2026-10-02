@@ -42801,6 +42801,18 @@
       }
      },
      {
+      "description": "Ignora el rango: todo el historial",
+      "in": "query",
+      "name": "todo",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Ignora el rango: todo el historial",
+       "title": "Todo",
+       "type": "boolean"
+      }
+     },
+     {
       "in": "header",
       "name": "X-Tenant-Id",
       "required": false,
@@ -42850,7 +42862,7 @@
   },
   "/api/v1/reportes/pagos": {
    "get": {
-    "description": "Comprobantes de pago timbrados o cancelados del rango, con sus facturas\nrelacionadas. El total es lo VIGENTE; lo cancelado se informa aparte.",
+    "description": "Comprobantes de pago timbrados o cancelados del rango, con sus facturas\nrelacionadas. El total es lo VIGENTE; lo cancelado se informa aparte.\n\nCobranza → Recibos de pago usa esta misma lista para trabajar: pide los\nborradores, que salen siempre (sin importar el periodo: son pendientes por\ntimbrar) y nunca suman al total.",
     "operationId": "pagos_api_v1_reportes_pagos_get",
     "parameters": [
      {
@@ -42908,6 +42920,30 @@
        ],
        "description": "Acota el reporte a un cliente",
        "title": "Cliente Id"
+      }
+     },
+     {
+      "description": "Ignora el rango: todo el historial",
+      "in": "query",
+      "name": "todo",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Ignora el rango: todo el historial",
+       "title": "Todo",
+       "type": "boolean"
+      }
+     },
+     {
+      "description": "Agrega los borradores (aún sin timbrar) de cualquier fecha, arriba de la lista",
+      "in": "query",
+      "name": "incluir_borradores",
+      "required": false,
+      "schema": {
+       "default": false,
+       "description": "Agrega los borradores (aún sin timbrar) de cualquier fecha, arriba de la lista",
+       "title": "Incluir Borradores",
+       "type": "boolean"
       }
      },
      {

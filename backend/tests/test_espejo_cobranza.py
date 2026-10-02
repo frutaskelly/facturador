@@ -120,6 +120,10 @@ def test_nota_credito_espejo_en_reportes(client, env, auth_as, sin_sesion):
                    headers=_hdr(env["dueno"])).json()
     assert d["notas"] == 1 and Decimal(str(d["total"])) == Decimal("147.58")
     assert d["items"][0]["facturas"][0]["folio"] == 233
+    # «Todas» en Cobranza → Notas de crédito: sin rango, también sale.
+    todo = client.get("/api/v1/reportes/notas-credito", params={"todo": True},
+                      headers=_hdr(env["dueno"])).json()
+    assert todo["notas"] == 1 and todo["desde"] is None
 
     r = client.post("/api/v1/cobranza/espejo/nota-credito",
                     json={**nc, "estado": "CANCELADA", "facturas": []}, headers=bot)

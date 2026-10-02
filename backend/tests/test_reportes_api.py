@@ -254,3 +254,22 @@ def test_pagos_por_fecha_de_pago_sin_borradores(client, env, auth):
     ajeno = client.get("/api/v1/reportes/pagos", params={"cliente_id": env["otro"]},
                        headers=_h(env)).json()
     assert ajeno["items"] == []
+
+
+def test_pagos_con_borradores_y_todo_el_historial(client, env, auth):
+    """Cobranza → Recibos de pago: los borradores salen arriba sin importar el
+    periodo (son trabajo pendiente) y no suman; «todo» ignora el rango."""
+    _recibo(env, monto=500, dias_atras=1, folio=11)
+    _recibo(env, monto=900, dias_atras=90, folio=12, estado="BORRADOR")  # viejo, pero pendiente
+    _recibo(env, monto=800, dias_atras=60, folio=13)                     # fuera del rango
+
+    d = client.get("/api/v1/reportes/pagos", params={"incluir_borradores": True},
+                   headers=_h(env)).json()
+    assert [i["folio"] for i in d["items"]] == [12, 11]
+    assert d["items"][0]["estado"] == "BORRADOR"
+    assert float(d["total"]) == 500.0 and d["comprobantes"] == 1
+    assert d["borradores"] == 1 and d["cancelados"] == 0
+
+    todo = client.get("/api/v1/reportes/pagos", params={"todo": True}, headers=_h(env)).json()
+    assert [i["folio"] for i in todo["items"]] == [11, 13]
+    assert float(todo["total"]) == 1300.0 and todo["desde"] is None

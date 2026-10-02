@@ -4827,6 +4827,10 @@ export interface paths {
          * Pagos
          * @description Comprobantes de pago timbrados o cancelados del rango, con sus facturas
          *     relacionadas. El total es lo VIGENTE; lo cancelado se informa aparte.
+         *
+         *     Cobranza → Recibos de pago usa esta misma lista para trabajar: pide los
+         *     borradores, que salen siempre (sin importar el periodo: son pendientes por
+         *     timbrar) y nunca suman al total.
          */
         get: operations["pagos_api_v1_reportes_pagos_get"];
         put?: never;
@@ -22765,6 +22769,8 @@ export interface operations {
                 hasta?: string | null;
                 /** @description Acota el reporte a un cliente */
                 cliente_id?: string | null;
+                /** @description Ignora el rango: todo el historial */
+                todo?: boolean;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
@@ -22803,6 +22809,10 @@ export interface operations {
                 hasta?: string | null;
                 /** @description Acota el reporte a un cliente */
                 cliente_id?: string | null;
+                /** @description Ignora el rango: todo el historial */
+                todo?: boolean;
+                /** @description Agrega los borradores (aún sin timbrar) de cualquier fecha, arriba de la lista */
+                incluir_borradores?: boolean;
             };
             header?: {
                 "X-Tenant-Id"?: string | null;
