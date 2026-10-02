@@ -18,7 +18,7 @@ semana 40 alcanzó a generar con el formato de arriba se renombraron a éste.
 La fecha va AAMMDD (dueño, 2-oct-2026); la de 8 dígitos (20261009) se sigue leyendo.
 
 Proyecto con CINCO letras (dueño, 2-oct-2026, mismo día): las primeras cinco del
-nombre, como el punto. DIF se queda de tres. Las de tres letras se renombraron y se
+nombre, como el punto (DIF HIDALGO → DIFHI). Las de tres letras se renombraron y se
 siguen leyendo.
     HGPA-HOSPI-PACHU-261009   (antes HGPA-HOS-PACHU-261009)
 
@@ -47,15 +47,16 @@ _RE_ALMACEN = re.compile(r"^([A-Z]{2})([A-Z]{2})-([A-Z]{3,5})-([A-Z]{3,5})-(\d{6
 RE_NUEVO_EN_TEXTO = re.compile(r"\b([A-Z]{4,5}(?:-[A-Z]{3,5})?-[A-Z]{3,5}-\d{6}(?:\d{2})?(?:-\d{1,2})?)\b")
 
 # (sucursal, código del proyecto) → el prefijo de siempre. Lo que no está aquí
-# (BIC) no tuvo prefijo viejo y se queda con su código.
+# (BIENE, Bienestar Coor; antes BIC) no tuvo prefijo viejo y se queda con su código.
 PROYECTO_5 = {
-    ("HG", "HOSPI"): "HO", ("HG", "DIF"): "DI", ("HG", "CEREZ"): "CE",
+    ("HG", "HOSPI"): "HO", ("HG", "DIFHI"): "DI", ("HG", "CEREZ"): "CE",
     ("HG", "SEGUR"): "SP", ("HG", "SNERI"): "SN",
     ("TB", "HOSPI"): "VH",
 }
 # Los de tres letras (2-oct-2026, antes del cambio a cinco) se siguen leyendo.
 _PROYECTO_3_VIEJO = {
-    ("HG", "HOS"): "HO", ("HG", "CER"): "CE", ("HG", "SEG"): "SP",
+    ("HG", "HOS"): "HO", ("HG", "DIF"): "DI", ("HG", "CER"): "CE",
+    ("HG", "SEG"): "SP",
     ("HG", "NER"): "SN", ("TB", "HOS"): "VH",
 }
 PROYECTO_3 = {**_PROYECTO_3_VIEJO, **PROYECTO_5}
