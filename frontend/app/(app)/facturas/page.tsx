@@ -40,6 +40,31 @@ const ESTADO_TONE: Record<string, "success" | "warning" | "muted" | "danger"> = 
   CANCELADA: "danger",
 };
 
+// La factura que no trae su pedido propio (las del espejo, las armadas desde
+// remisiones) toma el de la remisión que ampara.
+function suPedidoDe(f: Factura): string | null {
+  return f.su_pedido || f.su_pedido_remision || null;
+}
+
+// Cada folio de remisión abre esa remisión en su pantalla (la búsqueda por
+// folio ignora el periodo). El clic no despliega el renglón de la lista.
+function LigasRemision({ folios }: { folios: string[] }) {
+  return (
+    <>
+      {folios.map((folio, i) => (
+        <span key={folio}>
+          {i > 0 && ", "}
+          <Link href={`/remisiones?q=${encodeURIComponent(folio)}`}
+                onClick={(e) => e.stopPropagation()}
+                className="font-medium text-accent underline underline-offset-2 hover:opacity-70">
+            {folio}
+          </Link>
+        </span>
+      ))}
+    </>
+  );
+}
+
 export default function FacturasPage() {
   const { me } = useAuth();
   const toast = useToast();
@@ -385,7 +410,13 @@ export default function FacturasPage() {
           <div><span className="text-muted">Cliente:</span> {cliName[d.cliente_id] ?? "—"}</div>
           <div><span className="text-muted">Fecha:</span> {fmtDate(d.fecha)}</div>
           <div><span className="text-muted">Estado:</span> <Badge tone={ESTADO_TONE[d.estado] ?? "muted"}>{d.estado}</Badge></div>
-          {d.su_pedido && <div><span className="text-muted">Su pedido:</span> {d.su_pedido}</div>}
+          {(d.remisiones_folios ?? []).length > 0 && (
+            <div>
+              <span className="text-muted">Remisión:</span>{" "}
+              <LigasRemision folios={d.remisiones_folios ?? []} />
+            </div>
+          )}
+          {suPedidoDe(d) && <div><span className="text-muted">Su pedido:</span> {suPedidoDe(d)}</div>}
           {d.uuid && <div><span className="text-muted">UUID:</span> <span className="font-mono text-xs">{d.uuid}</span></div>}
           {d.fecha_timbrado && <div><span className="text-muted">Timbrada:</span> {fmtDateTime(d.fecha_timbrado)}</div>}
           {d.sustituye_a_factura_id && (
@@ -405,6 +436,12 @@ export default function FacturasPage() {
             </div>
           )}
         </div>
+        {d.notas && (
+          <div className="mb-3 text-sm">
+            <span className="text-muted">Observación:</span>{" "}
+            <span className="whitespace-pre-wrap break-words">{d.notas}</span>
+          </div>
+        )}
         <DataTable
           rows={d.lineas}
           rowKey={(l) => l.numero_linea}
@@ -812,12 +849,13 @@ export default function FacturasPage() {
     { header: "Remisión", truncate: true, sortable: true,
       exportValue: (f) => (f.remisiones_folios ?? []).join(", "),
       sortValue: (f) => (f.remisiones_folios ?? []).join(", "),
-      cell: (f) => {
-        const t = (f.remisiones_folios ?? []).join(", ");
-        return <span title={t}>{t}</span>;
-      } },
-    { header: "Su pedido", truncate: true, exportValue: (f) => f.su_pedido ?? "",
-      cell: (f) => <span title={f.su_pedido ?? ""}>{f.su_pedido ?? "—"}</span> },
+      cell: (f) => (
+        <span title={(f.remisiones_folios ?? []).join(", ")}>
+          <LigasRemision folios={f.remisiones_folios ?? []} />
+        </span>
+      ) },
+    { header: "Su pedido", truncate: true, exportValue: (f) => suPedidoDe(f) ?? "",
+      cell: (f) => <span title={suPedidoDe(f) ?? ""}>{suPedidoDe(f) ?? "—"}</span> },
     { header: "Nota", truncate: true, exportValue: (f) => f.notas ?? "", cell: (f) => <span title={f.notas ?? ""}>{f.notas ?? "—"}</span> },
   ], [cliName]);
 
@@ -1291,11 +1329,14 @@ export default function FacturasPage() {
               ? <>Los conceptos de una <strong>sustituta</strong> se copian de la factura original y no se editan; aquí solo la cabecera.</>
               : <>Los conceptos vienen de las <strong>remisiones ligadas</strong>. Para cambiarlos, descarta el borrador, edita las remisiones y vuelve a generar la factura.</>}
           </Alert>
-          <Field label="Su pedido (OC)" hint="La orden de compra del cliente">
+          <Field label="Su pedido (OC)"
+                 hint={toEditarCab?.su_pedido_remision
+                   ? `Vacío, toma el de la remisión: ${toEditarCab.su_pedido_remision}`
+                   : "La orden de compra del cliente"}>
             <Input
               value={cabSuPedido}
               maxLength={30}
-              placeholder="p. ej. 4500123456"
+              placeholder={toEditarCab?.su_pedido_remision ?? "p. ej. 4500123456"}
               onChange={(e) => setCabSuPedido(e.target.value)}
             />
           </Field>

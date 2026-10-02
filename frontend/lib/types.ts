@@ -499,8 +499,11 @@ export type Factura = {
   // OC del cliente ("su pedido"): la captura la factura directa, que no tiene
   // remisión donde anotarla; en las demás es editable en el borrador.
   su_pedido?: string | null;
-  // Folios internos de las remisiones ligadas (solo en la lista).
+  // Folios internos de las remisiones ligadas (lista y detalle).
   remisiones_folios?: string[];
+  // El su pedido de esas remisiones: lo toma la factura que no trae el suyo
+  // (las del espejo, las armadas desde remisiones). Ver `suPedidoDe`.
+  su_pedido_remision?: string | null;
   created_at: string;
   updated_at: string;
 };
