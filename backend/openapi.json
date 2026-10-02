@@ -7181,6 +7181,17 @@
       ],
       "title": "Su Pedido"
      },
+     "su_pedido_remision": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido Remision"
+     },
      "subtotal": {
       "title": "Subtotal",
       "type": "string"
@@ -7794,6 +7805,17 @@
        }
       ],
       "title": "Su Pedido"
+     },
+     "su_pedido_remision": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Su Pedido Remision"
      },
      "subtotal": {
       "title": "Subtotal",

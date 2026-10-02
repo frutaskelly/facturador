@@ -312,24 +312,37 @@ def _con_remisiones(db: Session, rows: list[Factura]) -> None:
     consultas para toda la página. El vínculo es `remision.factura_id`; a una
     espejo se le suma la remisión que la reclama sólo por la marca capturada a
     mano (`factura_sae` = 'ZHGO 233', con ceros o sin espacio) y que el espejo
-    todavía no ligó por id."""
+    todavía no ligó por id.
+
+    De las mismas remisiones sale `su_pedido_remision`: la factura que no trae
+    su pedido propio (las del espejo, las armadas desde remisiones) toma el de
+    su remisión, igual que el Master de facturas. No se escribe en la factura:
+    si la OC se renombra en la remisión, la factura lo ve sin re-sincronizar."""
     from ...services.export_sae import parsear_marca
 
     if not rows:
         return
     folios: dict = {f.id: [] for f in rows}
-    for fid, folio in (
-        db.query(Remision.factura_id, Remision.folio_interno)
+    pedidos: dict = {f.id: [] for f in rows}
+
+    def _pedido(fid, su_pedido) -> None:
+        p = (su_pedido or "").strip()
+        if p and p not in pedidos[fid]:
+            pedidos[fid].append(p)
+
+    for fid, folio, su_pedido in (
+        db.query(Remision.factura_id, Remision.folio_interno, Remision.su_pedido)
         .filter(Remision.factura_id.in_(list(folios)), Remision.deleted_at.is_(None))
         .order_by(Remision.folio_interno)
         .all()
     ):
         folios[fid].append(folio)
+        _pedido(fid, su_pedido)
     espejo = {(f.serie, f.folio): f.id for f in rows if f.origen == "ESPEJO_SAE"}
     if espejo:
         series = {s for s, _ in espejo}
-        for marca, folio in (
-            db.query(Remision.factura_sae, Remision.folio_interno)
+        for marca, folio, su_pedido in (
+            db.query(Remision.factura_sae, Remision.folio_interno, Remision.su_pedido)
             .filter(
                 Remision.tenant_id == rows[0].tenant_id,
                 Remision.factura_id.is_(None),
@@ -341,12 +354,14 @@ def _con_remisiones(db: Session, rows: list[Factura]) -> None:
             fid = espejo.get(parsear_marca(marca or ""))
             if fid is not None and folio not in folios[fid]:
                 folios[fid].append(folio)
+                _pedido(fid, su_pedido)
     # El proyecto de cada factura con el mismo criterio que Reportes (también
     # las del espejo, que no lo traen): por su remisión o por su serie.
     from ...services.proyecto_de_factura import ProyectoDeFactura
     clasificador = ProyectoDeFactura(db, rows[0].tenant_id, factura_ids=list(folios))
     for f in rows:
         f.remisiones_folios = folios[f.id]
+        f.su_pedido_remision = ", ".join(pedidos[f.id]) or None
         p = clasificador.propio(f)
         f.proyecto_nombre = p.nombre if p else None
 
@@ -398,6 +413,8 @@ def get_factura(
     factura = get_or_404(db, Factura, factura_id)
     if not ctx.cliente_permitido(factura.cliente_id):
         raise HTTPException(status_code=404, detail="Factura no encontrada")
+    # El panel del detalle muestra la remisión (con liga) y su pedido.
+    _con_remisiones(db, [factura])
     return factura
 
 

@@ -1458,6 +1458,12 @@ export default function RemisionesPage() {
             </Badge>
           ) : null}
         </div>
+        {d.notas ? (
+          <div className="mb-3 text-sm">
+            <span className="text-muted">Observación:</span>{" "}
+            <span className="whitespace-pre-wrap break-words">{d.notas}</span>
+          </div>
+        ) : null}
         {d.revision_pendiente ? (
           <Alert tone="warning">
             Llegó de la bandeja tal como venía: nadie ha revisado sus unidades ni sus precios. Cada

@@ -8323,6 +8323,8 @@ export interface components {
             serie: string;
             /** Su Pedido */
             su_pedido?: string | null;
+            /** Su Pedido Remision */
+            su_pedido_remision?: string | null;
             /** Subtotal */
             subtotal: string;
             /** Sustituye A Factura Id */
@@ -8511,6 +8513,8 @@ export interface components {
             serie: string;
             /** Su Pedido */
             su_pedido?: string | null;
+            /** Su Pedido Remision */
+            su_pedido_remision?: string | null;
             /** Subtotal */
             subtotal: string;
             /** Sustituye A Factura Id */

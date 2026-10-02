@@ -272,8 +272,12 @@ class FacturaOut(ORMModel):
     notas: Optional[str] = None
     su_pedido: Optional[str] = None
     # Folios internos de las remisiones que ampara (la columna «Remisión» de la
-    # lista). Solo lo hidrata GET /facturas; en el resto viaja vacío.
+    # lista). Solo lo hidratan GET /facturas y GET /facturas/{id}; en el resto
+    # viaja vacío.
     remisiones_folios: List[str] = []
+    # El su_pedido de esas remisiones (distintos, separados por coma): lo toma
+    # la factura que no trae el suyo. Mismas rutas que `remisiones_folios`.
+    su_pedido_remision: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

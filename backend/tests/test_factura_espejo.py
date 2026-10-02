@@ -388,6 +388,29 @@ def test_espejo_liga_por_oc_sin_estampa_previa(client, env, auth_as, sin_sesion)
     assert det["estado"] == "BORRADOR"
 
 
+def test_factura_toma_su_pedido_de_su_remision(client, env, auth_as, sin_sesion):
+    """La espejo no trae su pedido propio: lo toma de la remisión ligada, en la
+    lista y en el detalle (el panel), sin escribirlo en la factura."""
+    auth_as(env["dueno"]); h = _hdr(env["dueno"])
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli"], "su_pedido": "HO-39BIE-LUNES",
+        "lineas": [{"producto_id": env["prod"], "cantidad_solicitada": 1,
+                    "precio_unitario": 10}]}).json()
+    client.patch(f"/api/v1/remisiones/{rem['id']}", headers=h, json={"factura_sae": "ZHGO 912"})
+    hk = _clave_bot(client, env, auth_as, sin_sesion)
+    f = client.post("/api/v1/facturas/espejo", headers=hk,
+                    json=_espejo(folio=912, observaciones="OC HO-39BIE-LUNES")).json()
+    auth_as(env["dueno"])
+    row = next(x for x in client.get("/api/v1/facturas?limit=200", headers=h).json()["items"]
+               if x["id"] == f["id"])
+    assert row["su_pedido"] is None
+    assert row["su_pedido_remision"] == "HO-39BIE-LUNES"
+    det = client.get(f"/api/v1/facturas/{f['id']}", headers=h).json()
+    assert det["remisiones_folios"] == [rem["folio_interno"]]
+    assert det["su_pedido_remision"] == "HO-39BIE-LUNES"
+    assert det["notas"] == "OC HO-39BIE-LUNES"
+
+
 def test_espejo_no_adivina_con_dos_remisiones_misma_oc(client, env, auth_as, sin_sesion):
     auth_as(env["dueno"]); h = _hdr(env["dueno"])
     ids = []
