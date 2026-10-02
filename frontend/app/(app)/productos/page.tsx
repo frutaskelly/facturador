@@ -701,7 +701,7 @@ export default function ProductosPage() {
           </Alert>
         ) : null}
 
-        {/* Sin pestañas: «Así lo escriben» se fue a /vocabulario (2-oct-2026),
+        {/* Sin pestañas: «Así lo escriben» se fue a Vocabulario (2-oct-2026),
             que es donde se administra cómo escribe cada cliente un producto. */}
         {form && (
           <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">

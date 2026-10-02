@@ -1,7 +1,7 @@
 "use client";
 
 // Selector de categoría: busca entre las categorías ACTIVAS del negocio
-// (las de /categorias), permite dejarlo sin categoría y dar de alta una nueva
+// (las de Productos → Categorías), permite dejarlo sin categoría y dar de alta una nueva
 // sin salir de la pantalla. Mismo patrón que ProductoCombobox.
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Check, Plus, X } from "lucide-react";

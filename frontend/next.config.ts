@@ -22,6 +22,12 @@ const nextConfig: NextConfig = {
       { source: "/oc/:id", destination: "/remisiones", permanent: false },
       // Cobranza automática se volvió pestañas de /cobranza (oct-2026).
       { source: "/cobranza/automatica", destination: "/cobranza?tab=envios", permanent: false },
+      // Categorías, Esquemas de impuesto y Vocabulario se volvieron pestañas de
+      // Productos (oct-2026). Las mismas rutas viven en `antes` de lib/nav.tsx,
+      // que muda los favoritos; la query (?cliente=…) pasa sola.
+      { source: "/categorias", destination: "/productos/categorias", permanent: false },
+      { source: "/esquemas-impuesto", destination: "/productos/impuestos", permanent: false },
+      { source: "/vocabulario", destination: "/productos/vocabulario", permanent: false },
     ];
   },
 
