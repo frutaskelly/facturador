@@ -2045,6 +2045,33 @@ def test_folio_nuevo_se_interpreta():
     assert _RE_SUFIJO_APARTE.match("TBVH-ROVIR-20261007") is None
 
 
+def test_folio_con_almacen_se_interpreta():
+    """2-oct-2026: sucursal + almacén · proyecto de 3 letras · punto · fecha.
+    `proyecto` sigue siendo el prefijo de siempre (el que el bot traduce)."""
+    from datetime import date
+    from app.api.v1.oc_recibidas import _RE_SUFIJO_APARTE
+    from app.services.espejo_cruce import extraer_oc
+    from app.services.folio_oc import like_con_fecha, parse_nuevo
+
+    f = parse_nuevo("hgpa-hos-pachu-20261009")
+    assert f and (f.sucursal, f.almacen, f.proyecto3, f.proyecto, f.punto, f.fecha) == (
+        "HG", "PA", "HOS", "HO", "PACHU", date(2026, 10, 9))
+    assert f.prefijo == "HGPA-HOS"
+    assert parse_nuevo("TBVH-HOS-ROVIR-20261007").proyecto == "VH"
+    assert parse_nuevo("HGPA-DIF-COSTA-20261006").proyecto == "DI"
+    assert parse_nuevo("HGPA-BIC-PACHU-20261006").proyecto == "BIC"   # sin prefijo viejo
+    assert parse_nuevo("HGPA-HOS-PACHU-20261009-2").aparte == 2
+    assert parse_nuevo("HGPA-HOS-PACHU-20261309") is None
+    # el formato de la semana 40 sin almacén se sigue leyendo
+    assert parse_nuevo("HGHO-PACHU-20261009").proyecto == "HO"
+
+    assert like_con_fecha("HO") == ["__HO-%", "HG__-HOS-%"]
+    assert like_con_fecha("BIC") == ["__BIC-%"]
+    assert extraer_oc("SEMANA 40 PACHUCA HGPA-HOS-PACHU-20261009") == "HGPA-HOS-PACHU-20261009"
+    m = _RE_SUFIJO_APARTE.match("HGPA-HOS-PACHU-20261009-2")
+    assert m and m.group(1) == "HGPA-HOS-PACHU-20261009"
+
+
 def test_ubicaciones_con_folio_nuevo_dan_el_prefijo_del_proyecto(client, env, auth_as):
     """El bot traduce el prefijo a proyecto (VH → HOSPITALES). Con la sucursal
     al frente, las dos primeras letras serían «TB» y la OC nacería con el
@@ -2099,6 +2126,31 @@ def test_el_antigemela_con_folio_nuevo_mira_la_semana_de_la_fecha(client, env, a
         folio_externo="TBVH-SEGUR-20261012", ubicacion="SSP", fecha_entrega="2026-10-12",
         lineas=base))
     assert r3.status_code == 201, r3.text
+
+
+def test_folio_con_almacen_da_el_prefijo_y_frena_la_gemela(client, env, auth_as):
+    """HGPA-HOS-… (2-oct-2026): el catálogo de ubicaciones devuelve el prefijo
+    de siempre (VH), y la misma entrega con el folio de la semana 40 sin
+    almacén se frena como renombrada."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    comun = dict(ubicacion="ROVIROSA", fecha_entrega="2026-10-07", lineas=_lineas(21))
+    r1 = client.post("/api/v1/oc-recibidas", headers=h,
+                     json=_oc(folio_externo="TBVH-HOS-ROVIR-20261007", **comun))
+    assert r1.status_code == 201, r1.text
+    r = client.get("/api/v1/oc-recibidas/ubicaciones", headers=h)
+    assert {u["ubicacion"]: u["prefijo"] for u in r.json()["ubicaciones"]}["ROVIROSA"] == "VH"
+
+    r2 = client.post("/api/v1/oc-recibidas", headers=h,
+                     json=_oc(folio_externo="TBVH-ROVIR-20261007", **comun))
+    assert r2.status_code == 409, r2.text
+    assert "TBVH-HOS-ROVIR-20261007" in r2.json()["detail"]
+
+    # la misma foto otro día de esa semana: gemela, aunque cambie el formato
+    r3 = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(
+        folio_externo="TBVH-HOS-ROVIR-20261009", ubicacion="ROVIROSA",
+        fecha_entrega="2026-10-09", lineas=_lineas(21)))
+    assert r3.status_code == 409, r3.text
 
 
 # ─── el lote también destraba las órdenes SIN CLIENTE (26-sep-2026) ──────────
