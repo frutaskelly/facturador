@@ -8,6 +8,7 @@ import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobo
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
 import { CrearProductoModal, type ProductoCreado } from "@/components/CrearProductoModal";
 import { ClaveSaeInline } from "@/components/ClaveSaeInline";
+import { PartidasDetalle } from "@/components/PartidasDetalle";
 import { PeriodoFiltro, esPeriodo, rangoDePeriodo, type Periodo } from "@/components/PeriodoFiltro";
 import { CambioOCPanel } from "./CambioOCPanel";
 import { AprenderPreciosDialog, divergentes, type PrecioDivergente } from "@/components/AprenderPreciosDialog";
@@ -17,7 +18,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { DataTable, type Column, type RowAction } from "@/components/ui/DataTable";
+import type { Column, RowAction } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { LoadingDots } from "@/components/ui/LoadingDots";
@@ -37,7 +38,7 @@ import {
   nuevaLinea, pegarLocalFallback, unidadBaseDesde,
   type FiscalPreview, type LineaForm,
 } from "@/lib/lineas";
-import type { Almacen, Cliente, ContextoPrecios, Factura, LineaPegada, LineaRemision, MatchResult, OCRecibida, Producto, Proyecto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
+import type { Almacen, Cliente, ContextoPrecios, Factura, LineaPegada, MatchResult, OCRecibida, Producto, Proyecto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "remision:gestionar";
 // Este mes al entrar (pedido del dueño, 2-oct-2026). OJO: los borradores de
@@ -187,6 +188,21 @@ function rangoFolios(folios: string[]): string {
     return `${partidos[0]![1]}${nums[0]} al ${nums[nums.length - 1]}`;
   }
   return `${limpios[0]} al ${limpios[limpios.length - 1]}`;
+}
+
+/** Nota de una línea por revisar: «Como venía: … · Revisar: …». Lo que hay
+ *  que revisar va en color de aviso para que no se pierda en la letra chica. */
+function NotaRevision({ texto }: { texto: string }) {
+  const i = texto.search(/revisar:/i);
+  if (i < 0) return <>{texto}</>;
+  const antes = texto.slice(0, i).replace(/[\s·]+$/, "");
+  return (
+    <>
+      {antes}
+      {antes ? " · " : ""}
+      <span className="text-amber-700">{texto.slice(i)}</span>
+    </>
+  );
 }
 
 export default function RemisionesPage() {
@@ -1418,7 +1434,7 @@ export default function RemisionesPage() {
         {r.oc_id && r.oc_cambio_abierto ? (
           <CambioOCPanel ocId={r.oc_id} canWrite={canWrite} onResuelto={reload} />
         ) : null}
-        <div className="mb-3 flex flex-wrap gap-4 text-sm">
+        <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
           <div><span className="text-muted">Cliente:</span> {cliName[d.cliente_facturacion_id] ?? "—"}</div>
           <div><span className="text-muted">Fecha:</span> {fmtDate(d.fecha_remision)}</div>
           <div><span className="text-muted">Estado:</span> <Badge tone={ESTADO_TONE[d.estado] ?? "muted"}>{d.estado}</Badge></div>
@@ -1589,34 +1605,27 @@ export default function RemisionesPage() {
             </ul>
           </div>
         ) : null}
-        <DataTable
-          rows={d.lineas}
-          rowKey={(l) => l.id}
-          empty="Sin líneas"
-          columns={[
-            { header: "Cant.", className: "text-right tabular-nums", cell: (l) => fmtNumber(l.cantidad_solicitada) },
-            { header: "Pres.", cell: (l) => l.presentacion },
-            { header: "Descr.", cell: (l) => l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id },
-            { header: "P/U", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.precio_unitario) },
-            { header: "IEPS", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.ieps_importe ?? 0) },
-            { header: "IVA", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.iva_importe ?? 0) },
-            { header: "Importe", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.importe) },
-            ...(d.revision_pendiente
-              ? [{
-                  header: "Qué revisar",
-                  cell: (l: LineaRemision) =>
-                    l.notas
-                      ? <span className="block max-w-96 text-xs text-muted">{l.notas}</span>
-                      : <span className="text-xs text-muted">—</span>,
-                }]
-              : []),
-          ]}
-        />
-        <div className="mt-3 flex flex-col items-end gap-1 text-sm">
-          <div className="flex gap-4"><span className="text-muted">Subtotal</span><span className="tabular-nums">{fmtMoney(subtotal)}</span></div>
-          <div className="flex gap-4"><span className="text-muted">IEPS</span><span className="tabular-nums">{fmtMoney(ieps)}</span></div>
-          <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fmtMoney(iva)}</span></div>
-          <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fmtMoney(total)}</span></div>
+        <div className={d.revision_pendiente || (d.sin_clave_sae ?? 0) > 0 ? "mt-3" : ""}>
+          <PartidasDetalle
+            vacio="Sin líneas"
+            partidas={d.lineas.map((l) => ({
+              key: l.id,
+              cantidad: l.cantidad_solicitada,
+              unidad: l.presentacion,
+              descripcion: l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id,
+              // Lo que venía en el documento, bajo la descripción; sólo mientras
+              // está por revisar (después la nota ya no le dice nada a nadie).
+              nota: d.revision_pendiente && l.notas ? <NotaRevision texto={l.notas} /> : null,
+              precio: l.precio_unitario,
+              ieps: l.ieps_importe ?? 0,
+              iva: l.iva_importe ?? 0,
+              importe: l.importe,
+            }))}
+            subtotal={subtotal}
+            ieps={ieps}
+            iva={iva}
+            total={total}
+          />
         </div>
         {(d.devoluciones?.length ?? 0) > 0 && (
           <div className="mt-3 rounded-lg border border-border bg-surface-2 p-3 text-sm">
