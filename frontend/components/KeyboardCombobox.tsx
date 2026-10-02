@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { FloatingPanel } from "@/components/ui/FloatingPanel";
+
 const BASE =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
 
@@ -43,7 +45,12 @@ export function KeyboardCombobox({
   const [open, setOpen] = useState(false);
   const [hi, setHi] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
+  // La lista va en un portal (FloatingPanel) para no cortarse dentro de un
+  // Modal. Se guarda en estado (no en un ref) para que el efecto de abajo se
+  // vuelva a correr cuando el panel aparece: en la primera apertura el portal
+  // se monta un render después que `open`, y con un ref el resaltado inicial
+  // no se llevaba a la vista.
+  const [listEl, setListEl] = useState<HTMLDivElement | null>(null);
 
   const selectedLabel = options.find((o) => o.value === value)?.label ?? "";
   const filtered = useMemo(() => {
@@ -64,10 +71,10 @@ export function KeyboardCombobox({
 
   // mantener el resaltado a la vista
   useEffect(() => {
-    if (!open) return;
-    const el = listRef.current?.querySelector<HTMLElement>(`[data-i="${hi}"]`);
+    if (!open || !listEl) return;
+    const el = listEl.querySelector<HTMLElement>(`[data-i="${hi}"]`);
     el?.scrollIntoView({ block: "nearest" });
-  }, [hi, open]);
+  }, [hi, open, listEl]);
 
   function choose(opt: ComboOption) {
     onSelect(opt.value);
@@ -98,6 +105,9 @@ export function KeyboardCombobox({
         choose(filtered[0]);
       }
     } else if (e.key === "Escape") {
+      // Con la lista abierta, Escape solo la cierra (no le llega a quien
+      // escuche Escape más arriba).
+      if (open) e.stopPropagation();
       setOpen(false);
     } else if (e.key === "ArrowRight" && (inputRef.current?.selectionStart ?? 0) >= query.length) {
       if (value) {
@@ -118,6 +128,9 @@ export function KeyboardCombobox({
         ref={inputRef}
         className={BASE}
         aria-label={ariaLabel ?? (placeholder || "Buscar")}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open}
         disabled={disabled}
         value={open ? query : selectedLabel}
         placeholder={selectedLabel || placeholder}
@@ -134,24 +147,35 @@ export function KeyboardCombobox({
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         onKeyDown={onKeyDown}
       />
-      {open && (
-        <div ref={listRef} className="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-border bg-surface shadow-lg">
-          {filtered.length === 0 && <div className="px-3 py-2 text-sm text-muted">{emptyText}</div>}
-          {filtered.map((o, i) => (
-            <button
-              key={o.value}
-              data-i={i}
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => choose(o)}
-              onMouseEnter={() => setHi(i)}
-              className={`block w-full px-3 py-2 text-left text-sm ${i === hi ? "bg-accent/10 text-foreground" : "hover:bg-surface-2"}`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
+      <FloatingPanel
+        ref={setListEl}
+        anchorRef={inputRef}
+        open={open}
+        maxHeight={256}
+        role="listbox"
+        aria-label={ariaLabel ?? (placeholder || "Opciones")}
+        // Se cierra con el blur del input: un clic en la lista (opción, barra
+        // de scroll o el texto de vacío) no debe quitarle el foco.
+        onMouseDown={(e) => e.preventDefault()}
+        className="overflow-auto rounded-lg border border-border bg-surface shadow-lg"
+      >
+        {filtered.length === 0 && <div className="px-3 py-2 text-sm text-muted">{emptyText}</div>}
+        {filtered.map((o, i) => (
+          <button
+            key={o.value}
+            data-i={i}
+            type="button"
+            role="option"
+            aria-selected={i === hi}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => choose(o)}
+            onMouseEnter={() => setHi(i)}
+            className={`block w-full px-3 py-2 text-left text-sm ${i === hi ? "bg-accent/10 text-foreground" : "hover:bg-surface-2"}`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </FloatingPanel>
     </div>
   );
 }

@@ -477,10 +477,11 @@ export default function SucursalesPage() {
         open={sucModal}
         onClose={() => setSucModal(false)}
         title="Nueva sucursal"
+        size="md"
         footer={
           <>
             <Button variant="secondary" onClick={() => setSucModal(false)}>Cancelar</Button>
-            <Button onClick={createSucursal}>Crear sucursal</Button>
+            <Button onClick={createSucursal} disabled={saving}>Crear sucursal</Button>
           </>
         }
       >
@@ -519,6 +520,7 @@ export default function SucursalesPage() {
         open={!!vincModal}
         onClose={() => setVincModal(null)}
         title={vincModal?.existente ? "Series del cliente en esta sucursal" : "Vincular cliente"}
+        size="lg"
         footer={
           <>
             <Button variant="secondary" onClick={() => setVincModal(null)}>Cancelar</Button>
@@ -619,10 +621,11 @@ export default function SucursalesPage() {
         open={ovrModal}
         onClose={() => setOvrModal(false)}
         title="Nuevo precio especial"
+        size="lg"
         footer={
           <>
             <Button variant="secondary" onClick={() => setOvrModal(false)}>Cancelar</Button>
-            <Button onClick={createOverride}>Agregar precio</Button>
+            <Button onClick={createOverride} disabled={saving}>Agregar precio</Button>
           </>
         }
       >

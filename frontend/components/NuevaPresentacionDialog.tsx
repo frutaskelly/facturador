@@ -71,14 +71,14 @@ export function NuevaPresentacionDialog({
     <Modal
       open={open}
       onClose={onClose}
-      resizable={false}
       title="Nueva presentación del producto"
+      size="sm"
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={guardando}>
             Cancelar
           </Button>
-          <Button onClick={() => void guardar()} disabled={!valido || guardando}>
+          <Button data-modal-primary onClick={() => void guardar()} disabled={!valido || guardando}>
             {guardando ? "Guardando…" : "Agregar al producto"}
           </Button>
         </>

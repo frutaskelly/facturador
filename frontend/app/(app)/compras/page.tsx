@@ -240,7 +240,7 @@ export default function ComprasPage() {
         open={creating}
         onClose={() => setCreating(false)}
         title="Nueva orden de compra"
-        wide
+        size="lg"
         footer={
           <>
             <Button variant="secondary" onClick={() => setCreating(false)}>Cancelar</Button>
@@ -334,24 +334,20 @@ export default function ComprasPage() {
         open={detail !== null}
         onClose={() => setDetail(null)}
         title={detail ? `Orden ${detail.folio ?? ""}` : "Orden"}
-        wide
+        size="xl"
+        footerStart={detail && canWrite && !TERMINAL.has(detail.estado) ? (
+          <Button variant="danger" disabled={busy} onClick={() => setConfirmCancelar(true)}>Cancelar orden</Button>
+        ) : undefined}
         footer={detail ? (
-          <div className="flex w-full items-center justify-between gap-2">
-            <div>
-              {canWrite && !TERMINAL.has(detail.estado) && (
-                <Button variant="danger" disabled={busy} onClick={() => setConfirmCancelar(true)}>Cancelar orden</Button>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => setDetail(null)}>Cerrar</Button>
-              {canWrite && (FLOW[detail.estado] ?? []).map((t) => (
-                <Button key={t.to} variant="secondary" disabled={busy} onClick={() => doTransition(t.to)}>{t.label}</Button>
-              ))}
-              {canWrite && RECEIVABLE.has(detail.estado) && (
-                <Button disabled={busy} onClick={() => setConfirmRecibir(true)}><PackageCheck size={16} /> Recibir todo</Button>
-              )}
-            </div>
-          </div>
+          <>
+            <Button variant="secondary" onClick={() => setDetail(null)}>Cerrar</Button>
+            {canWrite && (FLOW[detail.estado] ?? []).map((t) => (
+              <Button key={t.to} variant="secondary" disabled={busy} onClick={() => doTransition(t.to)}>{t.label}</Button>
+            ))}
+            {canWrite && RECEIVABLE.has(detail.estado) && (
+              <Button disabled={busy} onClick={() => setConfirmRecibir(true)}><PackageCheck size={16} /> Recibir todo</Button>
+            )}
+          </>
         ) : undefined}
       >
         {detail && (

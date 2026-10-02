@@ -281,6 +281,7 @@ export function useOrdenesPorResolver(
         open={aResolver !== null}
         onClose={() => setAResolver(null)}
         title="Resolver la orden"
+        size="sm"
         footer={
           <>
             <Button variant="secondary" onClick={() => setAResolver(null)}>Cancelar</Button>
@@ -334,11 +335,13 @@ export function useOrdenesPorResolver(
         open={aCorregir !== null}
         onClose={() => setACorregir(null)}
         title="Corregir fecha y folio"
+        size="md"
         footer={
           <>
             <Button variant="secondary" onClick={() => setACorregir(null)}>Cancelar</Button>
             <Button
               variant="secondary"
+              data-modal-primary
               onClick={() => void guardarCorreccion(false)}
               disabled={!hayCambios || faltaDato || ocupada === aCorregir?.id}
             >
@@ -382,6 +385,7 @@ export function useOrdenesPorResolver(
         open={aDescartar !== null}
         onClose={() => setADescartar(null)}
         title="Descartar la orden"
+        size="sm"
         footer={
           <>
             <Button variant="secondary" onClick={() => setADescartar(null)}>Cancelar</Button>

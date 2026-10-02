@@ -210,7 +210,7 @@ export function RegistrarPago({ clientes, preClienteId, preFacturaIds, onClose, 
   }
 
   return (
-    <Modal open onClose={onClose} title="Registrar pago" wide
+    <Modal open onClose={onClose} title="Registrar pago" size="lg"
       footer={<>
         <Button variant="secondary" onClick={onClose} disabled={busy}>Cancelar</Button>
         <Button onClick={() => void guardar()} disabled={!puede || busy}>

@@ -19,7 +19,7 @@ const config: CrudConfig<Cliente> = {
   writePerm: "cliente:gestionar",
   deletePerm: "cliente:eliminar",
   searchable: false,
-  wide: true,
+  size: "lg",
   columns: [
     { header: "Código", cell: (c) => c.codigo ?? "—" },
     { header: "Razón social", cell: (c) => <span className="font-medium">{c.legal_name}</span> },

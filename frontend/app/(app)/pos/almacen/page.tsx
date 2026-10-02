@@ -116,14 +116,14 @@ function SurtirModal({ rem, prodById, onClose, onDone }: {
   }
 
   return (
-    <Modal open onClose={onClose} title={`Surtir ${rem.folio_interno}`} wide
+    <Modal open onClose={onClose} title={`Surtir ${rem.folio_interno}`} size="lg"
+      description="Marca cada línea al tomarla del almacén."
       footer={<>
         <Button variant="secondary" onClick={onClose} disabled={busy}>Cancelar</Button>
         <Button onClick={() => void marcar()} disabled={!todo || busy}>
           {busy ? "Marcando…" : "Marcar surtido"}
         </Button>
       </>}>
-      <p className="mb-3 text-sm text-muted">Marca cada línea al tomarla del almacén.</p>
       <div className="space-y-1">
         {rem.lineas.map((l) => {
           const prod = prodById[l.producto_id];

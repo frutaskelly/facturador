@@ -59,6 +59,7 @@ export function AgregarEmpresaModal({ onClose }: { onClose: () => void }) {
     // Con el request en vuelo el modal no se cierra (ni con Escape): cerrar a
     // media creación dejaría al usuario sin saber si la empresa se creó.
     <Modal open onClose={() => { if (!busy) onClose(); }} title="Agregar empresa al grupo"
+      size="md"
       footer={<>
         <Button variant="secondary" onClick={onClose} disabled={busy}>Cancelar</Button>
         <Button onClick={() => void crear()} disabled={!valid || busy}>

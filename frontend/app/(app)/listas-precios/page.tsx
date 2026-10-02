@@ -416,10 +416,11 @@ export default function ListasPreciosPage() {
         open={listaForm !== null}
         onClose={() => setListaForm(null)}
         title={listaForm?.id ? "Editar lista" : "Nueva lista"}
+        size="lg"
         footer={
           <>
             <Button variant="secondary" onClick={() => setListaForm(null)}>Cancelar</Button>
-            <Button onClick={saveLista} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</Button>
+            <Button data-modal-primary onClick={saveLista} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</Button>
           </>
         }
       >
@@ -468,7 +469,7 @@ export default function ListasPreciosPage() {
       <Modal
         open={activeLista !== null}
         onClose={() => setActiveLista(null)}
-        wide
+        size="xl"
         title={activeLista ? `Precios — ${activeLista.nombre}` : ""}
         footer={<Button variant="secondary" onClick={() => setActiveLista(null)}>Cerrar</Button>}
       >
@@ -592,7 +593,7 @@ export default function ListasPreciosPage() {
       <Modal
         open={cargarOpen}
         onClose={() => setCargarOpen(false)}
-        wide
+        size="xl"
         title="Cargar productos del catálogo"
         footer={
           <>
@@ -614,15 +615,13 @@ export default function ListasPreciosPage() {
 
           <p className="text-xs text-muted">Captura un precio en los productos que quieras agregar; los renglones vacíos se omiten.</p>
 
-          <div className="max-h-[50vh] overflow-y-auto">
-            <DataTable
-              columns={cargarCols}
-              rows={cargarRows}
-              empty="No hay productos en esta categoría"
-              paginated
-              defaultPageSize={50}
-            />
-          </div>
+          <DataTable
+            columns={cargarCols}
+            rows={cargarRows}
+            empty="No hay productos en esta categoría"
+            paginated
+            defaultPageSize={50}
+          />
         </div>
       </Modal>
 

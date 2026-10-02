@@ -237,7 +237,7 @@ export function AprenderPreciosDialog({
     <Modal
       open={open}
       onClose={onCancel}
-      wide
+      size="lg"
       title="Estos precios no son los del catálogo"
       footer={
         <>

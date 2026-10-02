@@ -1012,7 +1012,7 @@ export default function FacturasPage() {
       />
 
       {/* generar */}
-      <Modal open={genOpen} onClose={() => setGenOpen(false)} title="Generar factura desde remisiones" wide
+      <Modal open={genOpen} onClose={() => setGenOpen(false)} title="Generar factura desde remisiones" size="xl"
         footer={<><Button variant="secondary" onClick={() => setGenOpen(false)}>Cancelar</Button>
           <Button onClick={generar} disabled={busy || selIds.length === 0}>{busy ? "Generando…" : `Generar (${selIds.length})`}</Button></>}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -1075,7 +1075,7 @@ export default function FacturasPage() {
                 : "Ningún folio del cliente cae en esos filtros."}
             </div>
           )}
-          <div className="max-h-64 space-y-1 overflow-auto">
+          <div className="space-y-1">
             {genVisibles.map((r) => (
               <label key={r.id} className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm">
                 <span className="flex items-center gap-2">
@@ -1131,7 +1131,7 @@ export default function FacturasPage() {
         onClose={() => { setTimbrarBulkSobregiro([]); clearSelection(); }} loading={bulkBusy} />
 
       {/* ── Lote: cancelar N ── */}
-      <Modal open={cancelBulkOpen} onClose={() => setCancelBulkOpen(false)}
+      <Modal open={cancelBulkOpen} onClose={() => setCancelBulkOpen(false)} size="sm"
         title={`Cancelar ${timbradasSel.length} factura(s)`}
         footer={<>
           <Button variant="secondary" onClick={() => setCancelBulkOpen(false)} disabled={bulkBusy}>Cerrar</Button>
@@ -1173,7 +1173,7 @@ export default function FacturasPage() {
         onClose={() => setCancelBulkConfirm(false)} loading={bulkBusy} />
 
       {/* ── Lote: enviar por correo (un correo por cliente) ── */}
-      <Modal open={bulkSendOpen} onClose={() => setBulkSendOpen(false)} title="Enviar facturas por correo" wide
+      <Modal open={bulkSendOpen} onClose={() => setBulkSendOpen(false)} title="Enviar facturas por correo" size="md"
         footer={<>
           <Button variant="secondary" onClick={() => setBulkSendOpen(false)} disabled={bulkBusy}>Cancelar</Button>
           <Button onClick={() => void confirmarBulkEnvio()} disabled={bulkBusy}>
@@ -1215,6 +1215,7 @@ export default function FacturasPage() {
         open={toCancel !== null}
         onClose={() => setToCancel(null)}
         title={`Cancelar factura ${toCancel?.serie ?? ""}${toCancel?.folio ?? ""}`}
+        size="sm"
         footer={
           <>
             <Button variant="secondary" onClick={() => setToCancel(null)} disabled={actBusy}>Cerrar</Button>
@@ -1280,10 +1281,11 @@ export default function FacturasPage() {
         open={toEditarCab !== null}
         onClose={() => setToEditarCab(null)}
         title={`Editar factura ${toEditarCab?.serie ?? ""}${toEditarCab?.folio ?? ""}`}
+        size="md"
         footer={
           <>
             <Button variant="secondary" onClick={() => setToEditarCab(null)} disabled={actBusy}>Cerrar</Button>
-            <Button onClick={() => { void guardarCabecera(); }} disabled={actBusy}>
+            <Button data-modal-primary onClick={() => { void guardarCabecera(); }} disabled={actBusy}>
               {actBusy ? "Guardando…" : "Guardar cambios"}
             </Button>
           </>
@@ -1333,6 +1335,7 @@ export default function FacturasPage() {
         open={toSustituir !== null}
         onClose={() => setToSustituir(null)}
         title={`Sustituir factura ${toSustituir?.serie ?? ""}${toSustituir?.folio ?? ""}`}
+        size="md"
         footer={
           <>
             <Button variant="secondary" onClick={() => setToSustituir(null)} disabled={sustBusy}>Cerrar</Button>
@@ -1373,6 +1376,7 @@ export default function FacturasPage() {
         open={toEnviar !== null}
         onClose={() => setToEnviar(null)}
         title={`Enviar factura ${toEnviar?.serie ?? ""}${toEnviar?.folio ?? ""} por correo`}
+        size="md"
         footer={
           <>
             <Button variant="secondary" onClick={() => setToEnviar(null)} disabled={enviarBusy}>Cerrar</Button>

@@ -159,6 +159,7 @@ export default function InventarioPage() {
         open={form !== null}
         onClose={() => setForm(null)}
         title="Registrar movimiento"
+        size="lg"
         footer={
           <>
             <Button variant="secondary" onClick={() => setForm(null)}>

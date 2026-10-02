@@ -475,6 +475,7 @@ export default function VocabularioPage() {
         open={editar !== null}
         onClose={() => setEditar(null)}
         title="Editar equivalencia"
+        size="md"
         footer={
           <>
             <Button variant="secondary" onClick={() => setEditar(null)} disabled={saving}>
@@ -545,6 +546,7 @@ export default function VocabularioPage() {
         open={alta}
         onClose={() => setAlta(false)}
         title="Agregar equivalencia"
+        size="md"
         footer={
           <>
             <Button variant="secondary" onClick={() => setAlta(false)} disabled={saving}>
