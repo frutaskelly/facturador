@@ -1,14 +1,15 @@
 "use client";
 
-// Cobranza automática: el estado de cuenta que sale solo cada semana.
-// Tres pestañas: la COLA (lo que se preparó, se aprueba y se manda, y la
-// bitácora de lo que ya salió), los CONTACTOS (a quién se le cobra, por
-// cliente o por serie, y quién está en pausa) y los AJUSTES (cuándo sale, qué
-// incluye, a quién se copia al escalar, adjuntos y el modo). Todo lo decide el
-// negocio aquí; el backend solo lo ejecuta (services/cobranza_auto.py).
+// Cobranza → las pestañas de la cobranza automática: el estado de cuenta que
+// sale solo cada semana. Tres vistas: los ENVÍOS (la cola que se preparó, se
+// aprueba y se manda, y la bitácora de lo que ya salió), los CONTACTOS (a quién
+// se le cobra, por cliente o por serie, y quién está en pausa) y los AJUSTES
+// (cuándo sale, qué incluye, a quién se copia al escalar, adjuntos y el modo).
+// Todo lo decide el negocio aquí; el backend solo lo ejecuta
+// (services/cobranza_auto.py).
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ArrowLeft, FileText, Pause, Pencil, Play, RefreshCw, Send, Trash2, X } from "lucide-react";
+import { FileText, Pause, Pencil, Play, RefreshCw, Send, Trash2, X } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -17,11 +18,9 @@ import { Card } from "@/components/ui/Card";
 import { DataTableSmart, type Column, type RowAction } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiOpenInTab } from "@/lib/api";
-import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtDateTime, fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page as Pagina } from "@/lib/hooks";
 import type { Cliente } from "@/lib/types";
@@ -48,7 +47,7 @@ type Envio = {
   dias_max_vencida: number; escalado: boolean; error: string | null; enviado_at: string | null;
 };
 
-type Pestana = "cola" | "contactos" | "ajustes";
+export type PestanaAuto = "envios" | "contactos" | "ajustes";
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 const TONO: Record<Envio["estado"], "warning" | "accent" | "success" | "danger" | "muted"> = {
   PENDIENTE: "warning", ENVIANDO: "accent", ENVIADO: "success", ERROR: "danger", DESCARTADO: "muted",
@@ -72,38 +71,17 @@ function correosDeFicha(c: Cliente | undefined): string[] {
   return dom.email ? [String(dom.email)] : [];
 }
 
-export default function Page() {
-  const { me } = useAuth();
-  const canWrite = can(me, "factura:gestionar");
-  const [pestana, setPestana] = useState<Pestana>("cola");
+/** Las tres pestañas automáticas, con la franja de estado arriba. La pestaña la
+ *  escoge la página de Cobranza; este componente sigue montado al pasar entre
+ *  las tres, así la configuración se pide una sola vez. */
+export function Automatica({ pestana, canWrite }: { pestana: PestanaAuto; canWrite: boolean }) {
   const cfgRes = useResource<Config>("/api/v1/cobranza/automatica/config");
   const cfg = cfgRes.data;
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Cobranza automática"
-        subtitle="El estado de cuenta de las facturas pendientes, por correo y a su hora"
-        actions={
-          <Link href="/cobranza" className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-surface-2">
-            <ArrowLeft size={16} /> Cobranza
-          </Link>
-        }
-      />
-
       {cfg && <Estado cfg={cfg} />}
-
-      <div role="tablist" className="flex gap-1 border-b border-border">
-        {([["cola", "Cola y bitácora"], ["contactos", "Contactos"], ["ajustes", "Ajustes"]] as const).map(([k, l]) => (
-          <button key={k} type="button" role="tab" aria-selected={pestana === k} onClick={() => setPestana(k)}
-                  className={`-mb-px border-b-2 px-3 py-2 text-sm transition ${pestana === k
-                    ? "border-accent font-medium text-foreground" : "border-transparent text-muted hover:text-foreground"}`}>
-            {l}
-          </button>
-        ))}
-      </div>
-
-      {pestana === "cola" && <Cola canWrite={canWrite} onCambio={cfgRes.reload} />}
+      {pestana === "envios" && <Cola canWrite={canWrite} onCambio={cfgRes.reload} />}
       {pestana === "contactos" && <Contactos canWrite={canWrite} />}
       {pestana === "ajustes" && (cfg
         ? <Ajustes cfg={cfg} canWrite={canWrite} onGuardado={(c) => cfgRes.setData(c)} />

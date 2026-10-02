@@ -17,7 +17,6 @@ import {
   Palette,
   Percent,
   HandCoins,
-  MailCheck,
   Inbox,
   Receipt,
   Repeat,
@@ -61,8 +60,8 @@ export const NAV: NavSection[] = [
       // mano»), con su número. Va junto a Remisiones porque hoy son pedidos atorados.
       { label: "Buzón de tickets", href: "/tickets", perm: "menu:tickets", icon: Inbox },
       { label: "Facturas", href: "/facturas", perm: "menu:facturas", icon: Receipt },
-      { label: "Cobranza (REP)", href: "/cobranza", perm: "menu:facturas", icon: HandCoins },
-      { label: "Cobranza automática", href: "/cobranza/automatica", perm: "menu:facturas", icon: MailCheck },
+      // Una sola entrada: por cobrar, REP y cobranza automática son pestañas.
+      { label: "Cobranza", href: "/cobranza", perm: "menu:facturas", icon: HandCoins },
       // Los cortes del negocio (saldos por proyecto y los que vengan). Mismo
       // permiso que cobranza: ver reportes de saldos ES ver cobranza.
       { label: "Reportes", href: "/reportes", perm: "menu:facturas", icon: BarChart3 },
