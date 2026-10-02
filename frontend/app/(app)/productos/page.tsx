@@ -87,6 +87,19 @@ function clavesPorPresentacion(p: Producto): Record<string, string> {
  *  solo SKU, pero en SAE son dos artículos y cada unidad tiene su precio. */
 type FilaUnidad = { p: Producto; unidad: string; esBase: boolean; clave: string | null };
 
+/** SKU exclusivo de cliente: el artículo de SAE con el que ESOS clientes facturan
+ *  el producto en esa unidad (ZANA-FRUT-508 de Balles y Jubran). */
+type ClaveCliente = { producto_id: string; unidad: string; clave: string; clientes: string[] };
+
+// «OPERADORA BALLES VEGA DE HIDALGO» → BALLES: la palabra que lo distingue.
+const RELLENO = new Set([
+  "OPERADORA", "OPERADOR", "DISTRIBUIDORA", "COMERCIALIZADORA", "GRUPO", "MEDIOS", "DE", "DEL", "LA", "LOS",
+  "Y", "ALIMENTOS", "ALIMENTACION", "PRODUCTOS", "SA", "CV", "S", "A", "C", "V",
+]);
+function nombreCorto(legal: string): string {
+  return legal.toUpperCase().split(/[\s.,]+/).find((w) => w && !RELLENO.has(w)) ?? legal;
+}
+
 function filasPorUnidad(productos: Producto[]): FilaUnidad[] {
   const out: FilaUnidad[] = [];
   for (const p of productos) {
@@ -172,6 +185,12 @@ export default function ProductosPage() {
     saeConectado ? "/api/v1/productos/claves-sae/estado" : null
   );
   const estados = useMemo(() => indexarEstados(estadosRes.data), [estadosRes.data]);
+  const clavesClienteRes = useResource<ClaveCliente[]>("/api/v1/productos/claves-cliente");
+  const clavesCliente = useMemo(() => {
+    const m: Record<string, ClaveCliente[]> = {};
+    for (const c of clavesClienteRes.data ?? []) (m[`${c.producto_id}:${c.unidad}`] ??= []).push(c);
+    return m;
+  }, [clavesClienteRes.data]);
 
   const categoriasRes = useResource<Page<Categoria>>("/api/v1/categorias?limit=200");
   const categorias = useMemo(() => categoriasRes.data?.items ?? [], [categoriasRes.data]);
@@ -425,7 +444,18 @@ export default function ProductosPage() {
       sortValue: (f) => f.clave ?? "",
       cell: (f) =>
         f.clave ? (
-          <span className="tabular-nums">{f.clave}</span>
+          <div>
+            <span className="tabular-nums">{f.clave}</span>
+            {(clavesCliente[`${f.p.id}:${f.unidad}`] ?? []).map((c) => (
+              <div
+                key={c.clave}
+                className="text-xs text-muted"
+                title={`Para ${c.clientes.join(", ")} sale como ${c.clave}: es su artículo en SAE`}
+              >
+                {c.clave} · {c.clientes.map(nombreCorto).join(", ")}
+              </div>
+            ))}
+          </div>
         ) : (
           <span
             className="text-warning"
@@ -521,7 +551,7 @@ export default function ProductosPage() {
           </div>
         ) : null,
     },
-  ], [catName, esqName, canWrite, canDelete, openEdit, saeConectado, estados, estadosRes.loading]);
+  ], [catName, esqName, canWrite, canDelete, openEdit, saeConectado, estados, estadosRes.loading, clavesCliente]);
 
   return (
     <div>

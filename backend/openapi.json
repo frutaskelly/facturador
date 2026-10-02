@@ -2384,6 +2384,39 @@
     "title": "ChecklistMarcaIn",
     "type": "object"
    },
+   "ClaveClienteOut": {
+    "description": "Un SKU exclusivo de cliente: el artículo de SAE con el que ESOS clientes\nfacturan el producto en esa unidad, distinto de la clave de todos.",
+    "properties": {
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "clientes": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Clientes",
+      "type": "array"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     },
+     "unidad": {
+      "title": "Unidad",
+      "type": "string"
+     }
+    },
+    "required": [
+     "producto_id",
+     "unidad",
+     "clave",
+     "clientes"
+    ],
+    "title": "ClaveClienteOut",
+    "type": "object"
+   },
    "ClaveInfo": {
     "properties": {
      "clave": {
@@ -39405,6 +39438,65 @@
      }
     ],
     "summary": "Catalogo Cliente Batch",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/claves-cliente": {
+   "get": {
+    "description": "Los SKU exclusivos de cliente: códigos del catálogo de cliente que NO son\nla clave del producto en esa unidad (ZANA-FRUT-508 de Balles y Jubran sobre\nla ZANAHORIA de todos, 2-oct-2026). Productos los pinta junto a la clave\npara que se vea que es el mismo producto con el artículo de ese cliente y\nnadie dé de alta otro.\n\nLa unidad es la de la fila (`presentacion`) o, vacía, la base del producto:\nla misma que usa el export (`codigo_cliente_de`).",
+    "operationId": "claves_de_cliente_api_v1_productos_claves_cliente_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ClaveClienteOut"
+         },
+         "title": "Response Claves De Cliente Api V1 Productos Claves Cliente Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Claves De Cliente",
     "tags": [
      "productos"
     ]

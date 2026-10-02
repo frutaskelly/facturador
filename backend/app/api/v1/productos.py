@@ -90,6 +90,7 @@ from ...schemas.clave_sae import (
     ArticuloSaeOut,
     ClaveSaeBuscadaOut,
     ClaveSaeEstadoEmpresa,
+    ClaveClienteOut,
     ClaveSaeEstadoOut,
     SolicitudSaeResumenOut,
 )
@@ -2548,6 +2549,43 @@ def estado_claves_sae(
         )
         for c in sorted(claves)
     ]
+
+
+@router.get("/claves-cliente", response_model=list[ClaveClienteOut])
+def claves_de_cliente(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Los SKU exclusivos de cliente: códigos del catálogo de cliente que NO son
+    la clave del producto en esa unidad (ZANA-FRUT-508 de Balles y Jubran sobre
+    la ZANAHORIA de todos, 2-oct-2026). Productos los pinta junto a la clave
+    para que se vea que es el mismo producto con el artículo de ese cliente y
+    nadie dé de alta otro.
+
+    La unidad es la de la fila (`presentacion`) o, vacía, la base del producto:
+    la misma que usa el export (`codigo_cliente_de`)."""
+    filas = (db.query(ProductoCliente.producto_id, ProductoCliente.presentacion,
+                      ProductoCliente.codigo_cliente, Cliente.legal_name,
+                      Producto.unidad_base, Producto.clave_sae, Producto.presentaciones)
+             .join(Producto, Producto.id == ProductoCliente.producto_id)
+             .join(Cliente, Cliente.id == ProductoCliente.cliente_id)
+             .filter(ProductoCliente.tenant_id == ctx.tenant_id,
+                     ProductoCliente.codigo_cliente.isnot(None),
+                     Producto.deleted_at.is_(None))
+             .all())
+    juntas: dict[tuple, set[str]] = {}
+    for pid, pres, codigo, cliente, base, clave_base, presentaciones in filas:
+        codigo = norm_clave(codigo)
+        unidad = (pres or base or "").strip().upper()
+        if not codigo or not unidad:
+            continue
+        propia = (norm_clave(clave_base) if unidad == (base or "").upper()
+                  else claves_sae_por_presentacion(presentaciones).get(unidad) or norm_clave(clave_base))
+        if codigo == propia:
+            continue
+        juntas.setdefault((pid, unidad, codigo), set()).add(cliente)
+    return [ClaveClienteOut(producto_id=pid, unidad=u, clave=c, clientes=sorted(cs))
+            for (pid, u, c), cs in sorted(juntas.items(), key=lambda kv: (str(kv[0][0]), kv[0][1], kv[0][2]))]
 
 
 # Las descripciones de los esquemas de SAE (IMPU) cambian casi nunca y «Así

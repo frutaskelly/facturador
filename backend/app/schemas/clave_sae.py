@@ -120,3 +120,12 @@ class ClaveSaeEstadoOut(BaseModel):
     # Sólo las empresas 02-05 donde el espejo la tiene.
     empresas: Dict[str, ClaveSaeEstadoEmpresa] = Field(default_factory=dict)
     solicitud: Optional[SolicitudSaeResumenOut] = None
+
+
+class ClaveClienteOut(BaseModel):
+    """Un SKU exclusivo de cliente: el artículo de SAE con el que ESOS clientes
+    facturan el producto en esa unidad, distinto de la clave de todos."""
+    producto_id: uuid.UUID
+    unidad: str
+    clave: str
+    clientes: list[str]

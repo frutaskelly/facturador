@@ -1305,6 +1305,46 @@ def test_clave_por_presentacion_manda_en_su_presentacion(client, env, auth_as):
     assert ctx["claves_sae_presentacion"][sid] == {"PIEZA": "SANDIAPZ"}
 
 
+def test_sku_exclusivo_del_cliente_manda_en_su_unidad(client, env, auth_as):
+    """Un solo producto para todos y el artículo propio de un cliente en SAE
+    (Balles y Jubran: ZANA-FRUT-508 sobre la ZANAHORIA de todos, 2-oct-2026).
+    Su código manda en la unidad en que compra —incluso sobre la clave de esa
+    presentación— y nunca ampara otra unidad."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    db = SessionLocal()
+    try:
+        suffix = uuid.uuid4().hex[:6]
+        p = Producto(tenant_id=env["tenant"], sku=f"8{suffix}", nombre="ZANAHORIA",
+                     clave_sat="50404100", unidad_sat="KGM", clave_sae="ZANAHORIAKG",
+                     unidad_base="KILO",
+                     presentaciones={"KILO": 1, "PIEZA": {"factor": 1, "clave_sae": "ZANAHORIAPZ"}})
+        db.add(p); db.commit()
+        pid = str(p.id)
+    finally:
+        db.close()
+    # El cliente compra en PIEZA con su artículo exclusivo.
+    r = client.put(f"/api/v1/clientes/{env['cli']}/catalogo/{pid}", headers=h,
+                   json={"codigo_cliente": "ZANA-FRUT-508", "presentacion": "PIEZA"})
+    assert r.status_code in (200, 201), r.text
+    rem = _rem(client, h, env, su_pedido="7790", lineas=[
+        {"producto_id": pid, "cantidad_solicitada": 3, "precio_unitario": 10, "presentacion": "PIEZA"},
+        {"producto_id": pid, "cantidad_solicitada": 5, "precio_unitario": 20, "presentacion": "KILO"},
+    ])
+    r = client.post("/api/v1/remisiones/export-sae", headers=h,
+                    json={"ids": [rem["id"]], "tipo": "FACTURA", "folios": {"ZHGO": 952}})
+    assert r.status_code == 200, r.text
+    hoja = xlrd.open_workbook(file_contents=r.content).sheet_by_name("Facturas")
+    claves = sorted(hoja.row(i)[4].value for i in range(1, hoja.nrows))
+    assert claves == ["ZANA-FRUT-508", "ZANAHORIAKG"]
+
+    # Productos lo enseña junto a la clave: es el mismo producto, no otro.
+    r = client.get("/api/v1/productos/claves-cliente", headers=h)
+    assert r.status_code == 200, r.text
+    mias = [x for x in r.json() if x["producto_id"] == pid]
+    assert [(x["unidad"], x["clave"]) for x in mias] == [("PIEZA", "ZANA-FRUT-508")]
+    assert len(mias[0]["clientes"]) == 1
+
+
 def test_clave_desde_la_linea_se_guarda_en_su_nivel(client, env, auth_as):
     """Toda clave de la línea es editable, y la corrección cae en el nivel del
     que sale hoy: presentación no base → esa presentación; base con clave del
