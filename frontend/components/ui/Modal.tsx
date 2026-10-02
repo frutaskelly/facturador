@@ -157,10 +157,22 @@ export function Modal({
   useEffect(() => {
     if (!open) return;
     const root = dialogRef.current;
+    // Si en el mismo commit se cerró otro modal y abrió este, el opener era un
+    // botón de aquel que ya no existe; el cleanup de aquel acaba de devolver el
+    // foco a SU opener, que pasa a ser también el de este.
+    if (!opener.current?.isConnected && root && !root.contains(document.activeElement)) {
+      opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
     if (root && !root.contains(document.activeElement)) root.focus();
     return () => {
+      // StrictMode (dev) simula desmontar y volver a montar con el nodo aún en
+      // el DOM: eso no es un cierre, no se mueve el foco.
+      if (root?.isConnected) return;
+      // Solo se devuelve el foco si se perdió al cerrar (quedó en <body>): no
+      // se le quita a una caja que otro modal ya enfocó.
+      const a = document.activeElement;
       const prev = opener.current;
-      if (prev && prev.isConnected) prev.focus();
+      if (prev?.isConnected && (!a || a === document.body)) prev.focus();
     };
   }, [open]);
 
@@ -184,6 +196,19 @@ export function Modal({
     if (!primary || primary.disabled) return;
     e.preventDefault();
     primary.click();
+    // Con Enter sostenido, las repeticiones le llegarían al botón que abrió el
+    // modal (recibe el foco al cerrar) y lo volverían a abrir: se tragan hasta
+    // soltar la tecla.
+    const tragar = (ev: KeyboardEvent) => {
+      if (ev.key === "Enter" && ev.repeat) ev.preventDefault();
+    };
+    const soltar = (ev: KeyboardEvent) => {
+      if (ev.key !== "Enter") return;
+      document.removeEventListener("keydown", tragar, true);
+      document.removeEventListener("keyup", soltar, true);
+    };
+    document.addEventListener("keydown", tragar, true);
+    document.addEventListener("keyup", soltar, true);
   }
 
   if (!open) return null;

@@ -45,9 +45,11 @@ export function SatClaveCombobox({
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const listaId = useId();
-  // Al elegir una opción, o con un valor puesto desde fuera, no se re-busca.
-  // Arranca en true: el valor inicial no abre la lista al montar.
-  const skipSearch = useRef(true);
+  // Texto que NO se busca: el valor inicial (no abre la lista al montar), el
+  // puesto desde fuera o la clave recién elegida. Es el texto y no una bandera
+  // que se consume, para no depender de cuántas veces corra el efecto
+  // (StrictMode) ni quedarse armado si el texto no cambia.
+  const noBuscar = useRef<string | null>(value.trim());
   const sinAbrir = useRef(false);     // foco devuelto a la caja sin reabrir la lista
   const mostrar = abierto && opciones.length > 0;
 
@@ -57,43 +59,55 @@ export function SatClaveCombobox({
   useEffect(() => {
     if (value === texto.trim()) return;
     setTexto(value);
-    skipSearch.current = true;
+    noBuscar.current = value.trim();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
-  // Búsqueda con debounce contra el catálogo oficial.
+  // Búsqueda con debounce contra el catálogo oficial. `vivo` descarta las
+  // respuestas que llegan después de seguir tecleando o de salir.
   useEffect(() => {
-    if (skipSearch.current) {
-      skipSearch.current = false;
+    const q = texto.trim();
+    let vivo = true;
+    if (q === noBuscar.current) {
       // Aun así se resuelve la descripción oficial de una clave completa.
-      if (/^\d{8}$/.test(texto.trim())) {
-        apiFetch<Opcion[]>(`/api/v1/sat/claves?q=${encodeURIComponent(texto.trim())}`)
+      if (/^\d{8}$/.test(q)) {
+        apiFetch<Opcion[]>(`/api/v1/sat/claves?q=${encodeURIComponent(q)}`)
           .then((ops) => {
-            const exacta = ops.find((o) => o.clave === texto.trim());
+            if (!vivo) return;
+            const exacta = ops.find((o) => o.clave === q);
             setDescripcion(exacta ? exacta.descripcion : "");
           })
-          .catch(() => setDescripcion(""));
+          .catch(() => { if (vivo) setDescripcion(""); });
       } else {
         setDescripcion("");
       }
-      return;
+      return () => { vivo = false; };
     }
-    const q = texto.trim();
     if (q.length < 2) {
       setOpciones([]);
+      setDescripcion("");
       return;
     }
     const t = setTimeout(() => {
       apiFetch<Opcion[]>(`/api/v1/sat/claves?q=${encodeURIComponent(q)}&limit=8`)
         .then((ops) => {
+          // Si mientras tanto se eligió esa misma clave, no se reabre la lista.
+          if (!vivo || noBuscar.current === q) return;
           setOpciones(ops);
           setAbierto(true);
           const exacta = ops.find((o) => o.clave === q);
           setDescripcion(exacta ? exacta.descripcion : "");
         })
-        .catch(() => setOpciones([]));
+        .catch(() => {
+          if (!vivo) return;
+          setOpciones([]);
+          setDescripcion("");
+        });
     }, 300);
-    return () => clearTimeout(t);
+    return () => {
+      vivo = false;
+      clearTimeout(t);
+    };
   }, [texto]);
 
   // Cierra el panel al hacer clic fuera. La lista vive en un portal
@@ -109,7 +123,7 @@ export function SatClaveCombobox({
   }, []);
 
   function elegir(o: Opcion) {
-    skipSearch.current = true;
+    noBuscar.current = o.clave;
     setTexto(o.clave);
     setDescripcion(o.descripcion);
     // Cierra y regresa el foco a la caja: la opción (clic o Tab + Enter) se
@@ -140,6 +154,7 @@ export function SatClaveCombobox({
         value={texto}
         placeholder={placeholder}
         onChange={(e) => {
+          noBuscar.current = null;
           setTexto(e.target.value);
           onChange(e.target.value.trim());
         }}

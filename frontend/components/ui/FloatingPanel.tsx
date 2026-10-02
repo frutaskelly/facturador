@@ -47,6 +47,10 @@ function recorte(el: HTMLElement) {
       bottom = Math.min(bottom, r.bottom);
       right = Math.min(right, r.right);
     }
+    // Lo que está arriba de un elemento fijo ya no lo recorta: un Modal abierto
+    // desde otro Modal vive dentro del cuerpo con scroll del de afuera (no hay
+    // portal), pero en pantalla se sale de él.
+    if (s.position === "fixed") break;
   }
   return { top, left, bottom, right };
 }

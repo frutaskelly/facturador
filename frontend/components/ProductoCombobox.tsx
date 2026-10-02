@@ -100,6 +100,8 @@ export function ProductoCombobox({
   const lista = mostrandoSug ? sugerencias! : cands;
   // La lista se ve (y el teclado la maneja) solo con sugerencias o 2+ letras.
   const visible = open && (mostrandoSug || q.trim().length >= 2);
+  // Con sugerencias a la vista no hay búsqueda del catálogo en curso.
+  const buscando = loading && !mostrandoSug;
   useEffect(() => setHi(0), [cands, sugerencias]);
   // Enfoca cuando el flujo encadenado apunta a esta caja (no solo al montar).
   useEffect(() => {
@@ -110,10 +112,17 @@ export function ProductoCombobox({
   }, [autoFocus]);
 
   useEffect(() => {
-    if (!open || mostrandoSug) return;
+    // Cada salida temprana baja `loading`: si una búsqueda quedó cancelada a
+    // media espera (el cleanup borra su timer), «Buscando…» no debe quedarse
+    // pegado ni bloquear el Enter.
+    if (!open || mostrandoSug) {
+      setLoading(false);
+      return;
+    }
     const t = q.trim();
     if (t.length < 2) {
       setCands([]);
+      setLoading(false);
       return;
     }
     let active = true;
@@ -199,6 +208,10 @@ export function ProductoCombobox({
   function abrirCrear() {
     const texto = (aliasTexto ?? q).trim();
     setOpen(false);
+    // Suelta el foco antes de abrir el alta: el Modal devuelve el foco a quien
+    // lo abrió, y si fuera esta caja, al cerrar reabriría la lista de
+    // sugerencias (un Enter cambiaría el producto recién creado por otro).
+    inputRef.current?.blur();
     if (onCrear) { onCrear(texto); return; }
     setCreateNombre(texto);
     setCreateOpen(true);
@@ -238,7 +251,7 @@ export function ProductoCombobox({
           else if (e.key === "Enter") {
             if (visible) {
               e.preventDefault();
-              if (!loading && lista[hi]) pick(lista[hi]);
+              if (!buscando && lista[hi]) pick(lista[hi]);
             }
           }
           else if (e.key === "Escape") {
@@ -263,13 +276,13 @@ export function ProductoCombobox({
         onMouseDown={(e) => e.preventDefault()}
         className="overflow-auto rounded-lg border border-border bg-surface shadow-lg"
       >
-        {loading && <div className="px-3 py-2 text-sm text-muted">Buscando…</div>}
-        {!loading && mostrandoSug && (
+        {buscando && <div className="px-3 py-2 text-sm text-muted">Buscando…</div>}
+        {!buscando && mostrandoSug && (
           <div className="px-3 pt-2 text-[11px] uppercase tracking-wide text-muted">
             Sugerencias · escribe para buscar en todo el catálogo
           </div>
         )}
-        {!loading && lista.length === 0 && (
+        {!buscando && lista.length === 0 && (
           <div className="px-3 py-2 text-sm text-muted">
             <div>Sin coincidencias.</div>
             {!iaTried && (
@@ -283,7 +296,7 @@ export function ProductoCombobox({
             )}
           </div>
         )}
-        {!loading &&
+        {!buscando &&
           lista.map((c, i) => (
             <button
               key={c.producto_id}
@@ -324,7 +337,7 @@ export function ProductoCombobox({
               </span>
             </button>
           ))}
-        {!loading && (
+        {!buscando && (
           <button
             type="button"
             onMouseDown={(e) => e.preventDefault()}

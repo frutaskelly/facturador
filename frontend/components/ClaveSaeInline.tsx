@@ -70,6 +70,39 @@ function tabEnLista(e: ReactKeyboardEvent<HTMLElement>): "dentro" | "antes" | "d
   return e.shiftKey ? "antes" : "despues";
 }
 
+/** Un renglón de la lista. Vive fuera del componente: definido dentro, cada
+ *  render sería un tipo nuevo y React volvería a montar los botones, tirando el
+ *  foco a <body> si el usuario estaba sobre uno (con Tab dentro de la lista). */
+function Fila({
+  clave, detalle, aviso, tono = "normal", seleccionada, onElegir,
+}: {
+  clave: string;
+  detalle?: string | null;
+  aviso?: string | null;
+  tono?: "normal" | "usa";
+  seleccionada: boolean;
+  onElegir: (clave: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={seleccionada}
+      onClick={() => onElegir(clave)}
+      className={`flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-surface-2 disabled:opacity-60 ${
+        tono === "usa" ? "bg-success/5" : ""
+      }`}
+    >
+      <span className="min-w-0">
+        <span className="font-medium">{clave}</span>
+        {detalle ? <span className="ml-2 text-xs text-muted">{detalle}</span> : null}
+        {aviso ? <span className="block text-xs text-warning">{aviso}</span> : null}
+      </span>
+      <Check size={14} className="mt-0.5 shrink-0 text-muted" />
+    </button>
+  );
+}
+
 export function ClaveSaeInline({
   remisionId,
   clienteId,
@@ -203,29 +236,6 @@ export function ClaveSaeInline({
     };
   }
 
-  function Fila({
-    clave, detalle, aviso, tono = "normal",
-  }: { clave: string; detalle?: string | null; aviso?: string | null; tono?: "normal" | "usa" }) {
-    return (
-      <button
-        type="button"
-        role="option"
-        aria-selected={clave.toUpperCase() === value.toUpperCase()}
-        onClick={() => elegir(clave)}
-        className={`flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-surface-2 disabled:opacity-60 ${
-          tono === "usa" ? "bg-success/5" : ""
-        }`}
-      >
-        <span className="min-w-0">
-          <span className="font-medium">{clave}</span>
-          {detalle ? <span className="ml-2 text-xs text-muted">{detalle}</span> : null}
-          {aviso ? <span className="block text-xs text-warning">{aviso}</span> : null}
-        </span>
-        <Check size={14} className="mt-0.5 shrink-0 text-muted" />
-      </button>
-    );
-  }
-
   return (
     <div ref={caja} className={`relative align-middle ${compacto ? "block w-full" : "inline-block w-72"}`}>
       <div className={`flex items-center gap-1 rounded-lg border bg-background px-2 ${
@@ -302,6 +312,8 @@ export function ClaveSaeInline({
                 key={`usa-${c.clave}`}
                 tono="usa"
                 clave={c.clave}
+                seleccionada={c.clave.toUpperCase() === value.toUpperCase()}
+                onElegir={elegir}
                 detalle={`${c.descripcion ?? ""}${c.descripcion ? " · " : ""}${c.de_donde}`}
                 aviso={
                   c.activa === false
@@ -333,6 +345,8 @@ export function ClaveSaeInline({
               <Fila
                 key={c.clave}
                 clave={c.clave}
+                seleccionada={c.clave.toUpperCase() === value.toUpperCase()}
+                onElegir={elegir}
                 detalle={[c.descripcion, donde].filter(Boolean).join(" · ")}
                 aviso={
                   !c.activa
