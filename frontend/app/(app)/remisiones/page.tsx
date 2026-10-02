@@ -246,21 +246,15 @@ export default function RemisionesPage() {
     [clientes],
   );
 
-  // ── filtros de lista (server-side: el backend filtra sobre TODO el
-  // historial, no solo la página cargada — decisión 2026-07-29 #6) ──
+  // ── filtros de lista ──
   // El periodo acota lo que se descarga; fDesde/fHasta son solo las fechas
-  // del periodo «Rango». Ver PERIODO_DEFAULT.
+  // del periodo «Rango». Ver PERIODO_DEFAULT. Es el único filtro de fuera:
+  // cliente, sucursal, estado y «por revisar» se filtran con los embudos de la
+  // tabla, que ven TODO lo descargado (useListadoCompleto ya no corta en una
+  // página, que era por lo que antes iban al servidor).
   const [periodo, setPeriodo] = useState<Periodo>(PERIODO_DEFAULT);
   const [fDesde, setFDesde] = useState("");
   const [fHasta, setFHasta] = useState("");
-  const [fCliente, setFCliente] = useState("");
-  // Las que llegaron de la bandeja sin revisar: es la cola de trabajo del
-  // revisor, y sin filtro se pierden entre el histórico.
-  const [fPorRevisar, setFPorRevisar] = useState(false);
-  // Filtros combinables del ticket 86bby31f9: estado y plaza van al SERVIDOR
-  // (la tabla solo ve lo cargado; filtrar ahí miente con históricos largos).
-  const [fEstado, setFEstado] = useState("");
-  const [fSucursal, setFSucursal] = useState("");
   // Búsqueda de folio/pedido/factura SAE en el servidor: el buscador de la
   // tabla solo ve las 200 filas cargadas y las remisiones viejas se le escapan.
   const [busca, setBusca] = useState("");
@@ -286,10 +280,6 @@ export default function RemisionesPage() {
     else if (p.get("desde") || p.get("hasta")) setPeriodo("rango");
     if (p.get("desde")) setFDesde(p.get("desde")!);
     if (p.get("hasta")) setFHasta(p.get("hasta")!);
-    if (p.get("cliente")) setFCliente(p.get("cliente")!);
-    if (p.get("revisar") === "1") setFPorRevisar(true);
-    if (p.get("estado")) setFEstado(p.get("estado")!);
-    if (p.get("sucursal")) setFSucursal(p.get("sucursal")!);
     setHidratado(true);
   }, []);
   useEffect(() => {
@@ -300,21 +290,14 @@ export default function RemisionesPage() {
     setOrDel("periodo", periodo === PERIODO_DEFAULT ? "" : periodo);
     setOrDel("desde", periodo === "rango" ? fDesde : "");
     setOrDel("hasta", periodo === "rango" ? fHasta : "");
-    setOrDel("cliente", fCliente);
-    setOrDel("revisar", fPorRevisar ? "1" : "");
-    setOrDel("estado", fEstado);
-    setOrDel("sucursal", fSucursal);
+    // Ligas guardadas de antes: los filtros que ya no existen no se arrastran.
+    for (const k of ["cliente", "revisar", "estado", "sucursal"]) p.delete(k);
     const qs = p.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [hidratado, buscaAplicada, periodo, fDesde, fHasta, fCliente, fPorRevisar, fEstado, fSucursal]);
-  // Buscar un folio y la cola «por revisar» miran TODO el historial: con el
-  // periodo encima, la remisión de marzo «no existía» y lo pendiente de un mes
-  // anterior se escondía de quien tiene que atenderlo.
-  const periodoIgnorado = buscaAplicada
-    ? "La búsqueda recorre todo el historial"
-    : fPorRevisar
-      ? "«Por revisar» recorre todo el historial"
-      : undefined;
+  }, [hidratado, buscaAplicada, periodo, fDesde, fHasta]);
+  // Buscar un folio mira TODO el historial: con el periodo encima, la remisión
+  // de marzo «no existía».
+  const periodoIgnorado = buscaAplicada ? "La búsqueda recorre todo el historial" : undefined;
   const rangoEfectivo = periodoIgnorado
     ? { desde: "", hasta: "" }
     : rangoDePeriodo(periodo, fDesde, fHasta);
@@ -323,24 +306,15 @@ export default function RemisionesPage() {
     const p = new URLSearchParams();
     if (rangoEfectivo.desde) p.set("fecha_desde", rangoEfectivo.desde);
     if (rangoEfectivo.hasta) p.set("fecha_hasta", rangoEfectivo.hasta);
-    if (fCliente) p.set("cliente_id", fCliente);
-    if (fPorRevisar) p.set("revision_pendiente", "true");
-    if (fEstado) p.set("estado", fEstado);
-    if (fSucursal) p.set("sucursal_id", fSucursal);
     if (buscaAplicada) p.set("q", buscaAplicada);
     const qs = p.toString();
     return qs ? `/api/v1/remisiones?${qs}` : "/api/v1/remisiones";
-  }, [hidratado, rangoEfectivo.desde, rangoEfectivo.hasta, fCliente, fPorRevisar, fEstado, fSucursal, buscaAplicada]);
-  // UNA sola regla para «hay filtros»: el conteo, el botón Limpiar y el
-  // estado vacío la comparten (antes cada uno tenía su propia lista).
-  const hayFiltros = Boolean(
-    busca || buscaAplicada || periodo !== PERIODO_DEFAULT || fCliente || fPorRevisar || fEstado || fSucursal,
-  );
+  }, [hidratado, rangoEfectivo.desde, rangoEfectivo.hasta, buscaAplicada]);
+  const hayFiltros = Boolean(busca || buscaAplicada || periodo !== PERIODO_DEFAULT);
   const limpiarFiltros = () => {
     setBusca(""); setBuscaAplicada("");
     setPeriodo(PERIODO_DEFAULT);
-    setFDesde(""); setFHasta(""); setFCliente("");
-    setFPorRevisar(false); setFEstado(""); setFSucursal("");
+    setFDesde(""); setFHasta("");
   };
 
   // lista
@@ -350,7 +324,7 @@ export default function RemisionesPage() {
   // Lo que llegó por WhatsApp/correo y no pudo volverse remisión solo. No tiene
   // pantalla propia: entra en esta misma tabla con los mismos filtros.
   const porResolver = useOrdenesPorResolver({
-    filtros: { desde: rangoEfectivo.desde, hasta: rangoEfectivo.hasta, clienteId: fCliente, q: buscaAplicada },
+    filtros: { desde: rangoEfectivo.desde, hasta: rangoEfectivo.hasta, q: buscaAplicada },
     onCambio: reload,
   });
   // Arriba las órdenes: son la cola de trabajo, y el histórico de remisiones las
@@ -2707,8 +2681,7 @@ export default function RemisionesPage() {
     },
     {
       // La plaza del documento (ticket 86bby31f9): con clientes multi-plaza,
-      // «solo lo de Pachuca» es la consulta diaria. Se filtra con su embudo o
-      // con el filtro de arriba (este va al servidor).
+      // «solo lo de Pachuca» es la consulta diaria. Se filtra con su embudo.
       header: "Sucursal",
       sortable: true,
       truncate: true,
@@ -2760,6 +2733,17 @@ export default function RemisionesPage() {
       sortable: true,
       sortValue: (f) => (f.rem ? f.rem.estado : "REVISAR"),
       exportValue: (f) => (f.rem ? f.rem.estado : `REVISAR — ${f.oc.motivo ?? ""}`),
+      // El embudo lista también las marcas de abajo del estado: «POR REVISAR»
+      // ahí ES el antiguo «Solo por revisar» (la cola del revisor), y «OC
+      // CAMBIÓ» / «SIN CLAVE SAE» salen igual de fácil.
+      filterValues: (f) => (f.rem
+        ? [
+            f.rem.estado,
+            ...(f.rem.revision_pendiente ? ["POR REVISAR"] : []),
+            ...(f.rem.oc_cambio_abierto ? ["OC CAMBIÓ"] : []),
+            ...((f.rem.sin_clave_sae ?? 0) > 0 ? ["SIN CLAVE SAE"] : []),
+          ]
+        : ["REVISAR"]),
       // «Por revisar» va JUNTO al estado, no en su lugar: la remisión sigue
       // siendo un BORRADOR con todo lo que eso implica; lo que añade la marca
       // es que nadie ha mirado sus unidades ni sus precios todavía.
@@ -3490,75 +3474,6 @@ export default function RemisionesPage() {
         )}
       />
 
-      {/* Filtros */}
-      <div className="mb-3 flex flex-wrap items-end gap-3">
-        <PeriodoFiltro
-          periodo={periodo}
-          onPeriodo={setPeriodo}
-          desde={fDesde}
-          hasta={fHasta}
-          onDesde={setFDesde}
-          onHasta={setFHasta}
-          ignorado={periodoIgnorado}
-        />
-        <Field label="Cliente">
-          <Select className="min-w-64" value={fCliente} onChange={(e) => setFCliente(e.target.value)} aria-label="Filtrar por cliente">
-            <option value="">Todos</option>
-            {clientes.map((c) => (
-              <option key={c.id} value={c.id}>{c.legal_name}</option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Sucursal">
-          <Select value={fSucursal} onChange={(e) => setFSucursal(e.target.value)} aria-label="Filtrar por sucursal">
-            <option value="">Todas</option>
-            {sucursalesTodas.map((x) => (
-              <option key={x.id} value={x.id}>{x.nombre}</option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Estado">
-          <Select value={fEstado} onChange={(e) => setFEstado(e.target.value)} aria-label="Filtrar por estado">
-            <option value="">Todos</option>
-            {["BORRADOR", "RESERVADO", "CONFIRMADA", "FACTURADA", "CANCELADA"].map((x) => (
-              <option key={x} value={x}>{x}</option>
-            ))}
-          </Select>
-        </Field>
-        <label className="flex h-9 cursor-pointer items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={fPorRevisar}
-            onChange={(e) => setFPorRevisar(e.target.checked)}
-            className="h-4 w-4 rounded border-border"
-          />
-          Solo por revisar
-        </label>
-        {hayFiltros && (
-          <Button variant="secondary" onClick={limpiarFiltros}>
-            Limpiar filtros
-          </Button>
-        )}
-        {!loading && data && (() => {
-          // Las órdenes por resolver son filas de la tabla: cuentan. Y el
-          // conteo sale SIEMPRE: con el periodo acotando, «¿cuántas son?» es
-          // la pregunta de cualquier vistazo, filtre o no.
-          if (progreso) {
-            return (
-              <span className="pb-2 text-sm text-muted">
-                Cargando {fmtNumber(progreso.cargadas, 0)} de {fmtNumber(progreso.total, 0)}<LoadingDots />
-              </span>
-            );
-          }
-          const n = data.total + porResolver.ordenes.length;
-          return (
-            <span className="pb-2 text-sm text-muted">
-              {fmtNumber(n, 0)} resultado{n === 1 ? "" : "s"}
-            </span>
-          );
-        })()}
-      </div>
-
       {/* Barra de acciones en lote */}
       {selected.length > 0 && (
         <div className="sticky top-2 z-10 mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface-2 px-4 py-2.5 shadow-sm">
@@ -3623,6 +3538,27 @@ export default function RemisionesPage() {
         searchValue={busca}
         onSearchChange={setBusca}
         searchPlaceholder="Folio, su pedido o factura SAE…"
+        // Buscador, periodo y conteo en UNA barra con Excel y Columnas: el
+        // resto de los filtros son los embudos de cada columna.
+        toolbarStart={(
+          <PeriodoFiltro
+            periodo={periodo}
+            onPeriodo={setPeriodo}
+            desde={fDesde}
+            hasta={fHasta}
+            onDesde={setFDesde}
+            onHasta={setFHasta}
+            ignorado={periodoIgnorado}
+            // Las órdenes por resolver son filas de la tabla: cuentan. Y el
+            // conteo sale SIEMPRE: con el periodo acotando, «¿cuántas son?»
+            // es la pregunta de cualquier vistazo, filtre o no.
+            conteo={!loading && data ? (
+              progreso
+                ? <>Cargando {fmtNumber(progreso.cargadas, 0)} de {fmtNumber(progreso.total, 0)}<LoadingDots /></>
+                : <>{fmtNumber(data.total + porResolver.ordenes.length, 0)} resultado{data.total + porResolver.ordenes.length === 1 ? "" : "s"}</>
+            ) : undefined}
+          />
+        )}
         empty={
           hayFiltros ? (
             <EmptyState

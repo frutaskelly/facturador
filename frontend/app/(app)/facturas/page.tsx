@@ -129,17 +129,14 @@ export default function FacturasPage() {
     const t = setTimeout(() => setBuscaAplicada(busca.trim()), 300);
     return () => clearTimeout(t);
   }, [busca]);
-  // Filtros de lista (server-side, como en Remisiones): la lista trae una página
-  // acotada, así que las facturas de un cliente que factura poco se pierden
-  // entre el histórico si no se puede acotar por cliente o por fechas.
   // El periodo acota lo que se descarga (miles de facturas): por defecto el
   // mes en curso; «Todas» trae el histórico completo en lotes. fDesde/fHasta
-  // son solo las fechas del periodo «Rango».
+  // son solo las fechas del periodo «Rango». Es el único filtro de fuera:
+  // cliente y estado se filtran con los embudos de la tabla, que ven TODO lo
+  // descargado (useListadoCompleto ya no corta en una página).
   const [periodo, setPeriodo] = useState<Periodo>(PERIODO_DEFAULT);
   const [fDesde, setFDesde] = useState("");
   const [fHasta, setFHasta] = useState("");
-  const [fCliente, setFCliente] = useState("");
-  const [fEstado, setFEstado] = useState("");
   // Los filtros viven en la URL: sobreviven F5, volver de un detalle y abrir
   // en otra pestaña. Se hidratan al montar (client-only, como ?ver=) y cada
   // cambio se refleja con history.replaceState — sin navegación ni scroll.
@@ -156,8 +153,6 @@ export default function FacturasPage() {
     else if (p.get("desde") || p.get("hasta")) setPeriodo("rango");
     if (p.get("desde")) setFDesde(p.get("desde")!);
     if (p.get("hasta")) setFHasta(p.get("hasta")!);
-    if (p.get("cliente")) setFCliente(p.get("cliente")!);
-    if (p.get("estado")) setFEstado(p.get("estado")!);
     const ver = p.get("ver");
     if (!ver) { setHidratado(true); return; }
     // La factura del deep-link puede ser de otro mes: se busca por su folio,
@@ -179,11 +174,11 @@ export default function FacturasPage() {
     setOrDel("periodo", periodo === PERIODO_DEFAULT ? "" : periodo);
     setOrDel("desde", periodo === "rango" ? fDesde : "");
     setOrDel("hasta", periodo === "rango" ? fHasta : "");
-    setOrDel("cliente", fCliente);
-    setOrDel("estado", fEstado);
+    // Ligas guardadas de antes: los filtros que ya no existen no se arrastran.
+    p.delete("cliente"); p.delete("estado");
     const qs = p.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [hidratado, buscaAplicada, periodo, fDesde, fHasta, fCliente, fEstado]);
+  }, [hidratado, buscaAplicada, periodo, fDesde, fHasta]);
   const listPath = useMemo(() => {
     if (!hidratado) return null;
     const p = new URLSearchParams();
@@ -194,21 +189,15 @@ export default function FacturasPage() {
       if (r.desde) p.set("fecha_desde", r.desde);
       if (r.hasta) p.set("fecha_hasta", r.hasta);
     }
-    if (fCliente) p.set("cliente_id", fCliente);
-    if (fEstado) p.set("estado", fEstado);
     if (buscaAplicada) p.set("q", buscaAplicada);
     const qs = p.toString();
     return qs ? `/api/v1/facturas?${qs}` : "/api/v1/facturas";
-  }, [hidratado, periodo, fDesde, fHasta, fCliente, fEstado, buscaAplicada]);
-  // UNA sola regla para «hay filtros»: antes el conteo de resultados y el
-  // botón Limpiar usaban listas distintas (el conteo olvidaba fEstado).
-  const hayFiltros = Boolean(
-    busca || buscaAplicada || periodo !== PERIODO_DEFAULT || fCliente || fEstado,
-  );
+  }, [hidratado, periodo, fDesde, fHasta, buscaAplicada]);
+  const hayFiltros = Boolean(busca || buscaAplicada || periodo !== PERIODO_DEFAULT);
   const limpiarFiltros = () => {
     setBusca(""); setBuscaAplicada("");
     setPeriodo(PERIODO_DEFAULT);
-    setFDesde(""); setFHasta(""); setFCliente(""); setFEstado("");
+    setFDesde(""); setFHasta("");
   };
   const { data, loading, progreso, error, reload } = useListadoCompleto<Factura>(listPath);
   const rows = data?.items ?? [];
@@ -926,49 +915,6 @@ export default function FacturasPage() {
         )}
       />
 
-      {/* Filtros */}
-      <div className="mb-3 flex flex-wrap items-end gap-3">
-        <PeriodoFiltro
-          periodo={periodo}
-          onPeriodo={setPeriodo}
-          desde={fDesde}
-          hasta={fHasta}
-          onDesde={setFDesde}
-          onHasta={setFHasta}
-          ignorado={buscaAplicada ? "La búsqueda recorre todo el historial" : undefined}
-        />
-        <Field label="Cliente">
-          <Select className="min-w-64" value={fCliente} onChange={(e) => setFCliente(e.target.value)} aria-label="Filtrar por cliente">
-            <option value="">Todos</option>
-            {clientes.map((c) => (
-              <option key={c.id} value={c.id}>{c.legal_name}</option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Estado">
-          <Select value={fEstado} onChange={(e) => setFEstado(e.target.value)} aria-label="Filtrar por estado">
-            <option value="">Todos</option>
-            {["BORRADOR", "TIMBRADA", "CANCELADA"].map((x) => (
-              <option key={x} value={x}>{x}</option>
-            ))}
-          </Select>
-        </Field>
-        {hayFiltros && (
-          <Button variant="secondary" onClick={limpiarFiltros}>
-            Limpiar filtros
-          </Button>
-        )}
-        {/* El conteo sale SIEMPRE: con el periodo acotando, «¿cuántas son?»
-            es la pregunta de cualquier vistazo, filtre o no. */}
-        {!loading && data && (
-          <span className="pb-2 text-sm text-muted">
-            {progreso
-              ? <>Cargando {fmtNumber(progreso.cargadas, 0)} de {fmtNumber(progreso.total, 0)}<LoadingDots /></>
-              : <>{fmtNumber(data.total, 0)} factura{data.total === 1 ? "" : "s"}</>}
-          </span>
-        )}
-      </div>
-
       {/* Barra de acciones en lote */}
       {selected.length > 0 && (
         <div className="sticky top-2 z-10 mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface-2 px-4 py-2.5 shadow-sm">
@@ -1024,6 +970,26 @@ export default function FacturasPage() {
         searchValue={busca}
         onSearchChange={setBusca}
         searchPlaceholder="Folio, UUID u orden (p. ej. SN-33NER-JUE)…"
+        // Buscador, periodo y conteo en UNA barra con Excel y Columnas: el
+        // resto de los filtros son los embudos de cada columna.
+        toolbarStart={(
+          <PeriodoFiltro
+            periodo={periodo}
+            onPeriodo={setPeriodo}
+            desde={fDesde}
+            hasta={fHasta}
+            onDesde={setFDesde}
+            onHasta={setFHasta}
+            ignorado={buscaAplicada ? "La búsqueda recorre todo el historial" : undefined}
+            // El conteo sale SIEMPRE: con el periodo acotando, «¿cuántas son?»
+            // es la pregunta de cualquier vistazo, filtre o no.
+            conteo={!loading && data ? (
+              progreso
+                ? <>Cargando {fmtNumber(progreso.cargadas, 0)} de {fmtNumber(progreso.total, 0)}<LoadingDots /></>
+                : <>{fmtNumber(data.total, 0)} factura{data.total === 1 ? "" : "s"}</>
+            ) : undefined}
+          />
+        )}
         empty={
           hayFiltros ? (
             <EmptyState

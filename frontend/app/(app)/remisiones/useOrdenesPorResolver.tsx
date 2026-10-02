@@ -26,7 +26,6 @@ import type { Cliente, OCRecibida, Sucursal } from "@/lib/types";
 export type FiltrosOrdenes = {
   desde: string;
   hasta: string;
-  clienteId: string;
   q: string;
 };
 
@@ -64,10 +63,9 @@ export function useOrdenesPorResolver(
     const p = new URLSearchParams({ estado: "PENDIENTE", limit: "200" });
     if (filtros.desde) p.set("fecha_desde", filtros.desde);
     if (filtros.hasta) p.set("fecha_hasta", filtros.hasta);
-    if (filtros.clienteId) p.set("cliente_id", filtros.clienteId);
     if (filtros.q) p.set("q", filtros.q);
     return `/api/v1/oc-recibidas?${p.toString()}`;
-  }, [canVer, filtros.desde, filtros.hasta, filtros.clienteId, filtros.q]);
+  }, [canVer, filtros.desde, filtros.hasta, filtros.q]);
 
   // Sin permiso o sin red la lista se queda vacía y no estorba: estas filas son
   // un añadido a la tabla, no la tabla.

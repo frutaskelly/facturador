@@ -520,6 +520,10 @@ export type DataTableProps<T> = {
   /** Botones propios de la pantalla en la barra de la tabla, a la izquierda
    *  del botón "Excel". */
   toolbarExtra?: ReactNode;
+  /** Controles propios de la pantalla a la derecha del buscador (p. ej. el
+   *  periodo de Facturas/Remisiones): así filtros y botones caben en una sola
+   *  barra en vez de una fila de filtros encima de la tabla. */
+  toolbarStart?: ReactNode;
   /** Se llama con las filas que quedan tras TODOS los filtros (externo,
    *  por columna y buscador), p. ej. para descargar exactamente lo que se ve. */
   onFilteredRowsChange?: (rows: T[]) => void;
@@ -562,6 +566,7 @@ export function DataTable<T>({
   rowFilterKey,
   rowClassName,
   toolbarExtra,
+  toolbarStart,
   onFilteredRowsChange,
 }: DataTableProps<T>) {
   // ── identidad estable de cada columna ──
@@ -1057,7 +1062,7 @@ export function DataTable<T>({
   }
 
   const customized = order.length > 0 || hidden.length > 0 || Object.keys(widths).length > 0 || actionOrder.length > 0 || actionHidden.length > 0;
-  const hasToolbar = searchable || columnsMenu || exportable || toolbarExtra != null;
+  const hasToolbar = searchable || columnsMenu || exportable || toolbarExtra != null || toolbarStart != null;
 
   // Quita una entrada de un record de filtros (dejar la clave con [] ya no es
   // «sin filtro»: significa «ningún valor», como en Excel).
@@ -1111,8 +1116,8 @@ export function DataTable<T>({
   ) : null;
 
   const toolbar = hasToolbar ? (
-    <div className="mb-2 flex items-center justify-between gap-2">
-      <div className="flex-1">
+    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-1 flex-wrap items-center gap-2">
         {searchable && (
           <input
             type="search"
@@ -1122,6 +1127,7 @@ export function DataTable<T>({
             className="w-full max-w-xs rounded-lg border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-accent"
           />
         )}
+        {toolbarStart}
       </div>
       <div className="flex shrink-0 gap-2">
       {toolbarExtra}
