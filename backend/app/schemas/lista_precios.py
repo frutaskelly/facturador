@@ -19,6 +19,8 @@ class ListaPreciosBase(BaseModel):
     moneda: str = Field(default="MXN", max_length=3)
     notas: Optional[str] = None
     es_default: bool = False
+    # La lista enseña y sube el SKU de sus clientes (lo guarda su catálogo).
+    lleva_sku_cliente: bool = False
     # Sin `sae_empresa`/`sae_lista` a propósito (26-sep-2026, decisión del
     # dueño): las listas de precios de SAE ya no se usan y el precio sale SOLO
     # del Facturador. Quitarlos del schema es lo que impide volver a ligar una
@@ -43,6 +45,7 @@ class ListaPreciosUpdate(BaseModel):
     moneda: Optional[str] = Field(default=None, max_length=3)
     notas: Optional[str] = None
     es_default: Optional[bool] = None
+    lleva_sku_cliente: Optional[bool] = None
     # Tampoco aquí van `sae_empresa`/`sae_lista` (26-sep-2026): ver arriba.
 
 
@@ -168,3 +171,35 @@ class ListaAsignacionOut(ORMModel, ListaAsignacionBase):
     sucursal_nombre: Optional[str] = None
     serie_codigo: Optional[str] = None
     proyecto_nombre: Optional[str] = None
+
+
+# ─── SKU del cliente (desde la lista) ───────────────────────────────────────
+class ClienteDeLista(BaseModel):
+    id: uuid.UUID
+    nombre: str
+
+
+class SkuClienteRenglon(BaseModel):
+    producto_id: uuid.UUID
+    presentacion: str
+    # El SKU que tienen TODOS los clientes de la lista; None si ninguno.
+    sku: Optional[str] = None
+    # Los clientes no coinciden (uno lo tiene distinto o sólo algunos lo tienen).
+    distintos: bool = False
+    por_cliente: dict[str, Optional[str]] = Field(default_factory=dict)
+
+
+class SkuClienteLista(BaseModel):
+    clientes: list[ClienteDeLista]
+    renglones: list[SkuClienteRenglon]
+
+
+class SkuClienteIn(BaseModel):
+    producto_id: uuid.UUID
+    presentacion: str = Field(max_length=20)
+    # Vacío = quitarle el SKU (el XML vuelve a llevar el SKU interno).
+    sku: Optional[str] = Field(default=None, max_length=50)
+
+
+class SkuClienteGuardado(SkuClienteRenglon):
+    avisos: list[str] = Field(default_factory=list)

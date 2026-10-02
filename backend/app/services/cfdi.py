@@ -86,7 +86,7 @@ def build_payload(db: Session, factura: Factura) -> dict:
 
     # Catálogo por cliente: cómo llama ESTE cliente a cada producto. Estándar
     # de línea: Description = nombre del cliente (si lo definió) o el interno;
-    # IdentificationNumber (NoIdentificacion) = código del cliente o el SKU —
+    # IdentificationNumber (NoIdentificacion) = SKU del cliente o el SKU interno —
     # siempre viaja, así todos los CFDI llevan una clave rastreable sin duplicar
     # productos por cliente.
     # Con claves por plaza (producto_clientes.sucursal_id), la GENÉRICA manda
@@ -152,6 +152,12 @@ def build_payload(db: Session, factura: Factura) -> dict:
         prod_ln = productos.get(ln.producto_id)
         descripcion = (pc.nombre_cliente or "").strip() if pc else ""
         no_ident = (pc.codigo_cliente or "").strip() if pc else ""
+        # El SKU del cliente de una fila que FIJA unidad («PIEZA») es el de esa
+        # unidad: en otra unidad el cliente no tiene SKU y viaja el interno
+        # (dueño, 2-oct-2026; misma regla que el masivo de SAE).
+        unidad_ln = (getattr(ln, "presentacion", None) or (prod_ln.unidad_base if prod_ln else "") or "").strip().upper()
+        if pc and (pc.presentacion or "").strip() and pc.presentacion.strip().upper() != unidad_ln:
+            no_ident = ""
         item = {
             "ProductCode": ln.clave_prod_serv,
             "Description": descripcion or ln.descripcion,

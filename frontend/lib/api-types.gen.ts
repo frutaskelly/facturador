@@ -2394,6 +2394,32 @@ export interface paths {
         patch: operations["update_precio_api_v1_listas_precios__lista_id__precios__precio_id__patch"];
         trace?: never;
     };
+    "/api/v1/listas-precios/{lista_id}/sku-cliente": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sku Cliente De Lista
+         * @description El SKU de los clientes asignados a la lista, por renglón (producto +
+         *     presentación). Vive en su catálogo de cliente: ver services/sku_cliente.
+         */
+        get: operations["sku_cliente_de_lista_api_v1_listas_precios__lista_id__sku_cliente_get"];
+        /**
+         * Guardar Sku Cliente
+         * @description Pone (o quita, vacío) el SKU de ese renglón en el catálogo de CADA
+         *     cliente de la lista: es el NoIdentificacion de su XML.
+         */
+        put: operations["guardar_sku_cliente_api_v1_listas_precios__lista_id__sku_cliente_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/memberships": {
         parameters: {
             query?: never;
@@ -7390,6 +7416,16 @@ export interface components {
             /** Uso Cfdi Default */
             uso_cfdi_default?: string | null;
         };
+        /** ClienteDeLista */
+        ClienteDeLista: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+        };
         /**
          * ClienteDelGrupoOut
          * @description Un cliente que recibe órdenes por ese grupo, con lo suyo.
@@ -10430,6 +10466,11 @@ export interface components {
              */
             es_default: boolean;
             /**
+             * Lleva Sku Cliente
+             * @default false
+             */
+            lleva_sku_cliente: boolean;
+            /**
              * Moneda
              * @default MXN
              */
@@ -10468,6 +10509,11 @@ export interface components {
              */
             id: string;
             /**
+             * Lleva Sku Cliente
+             * @default false
+             */
+            lleva_sku_cliente: boolean;
+            /**
              * Moneda
              * @default MXN
              */
@@ -10502,6 +10548,8 @@ export interface components {
             codigo?: string | null;
             /** Es Default */
             es_default?: boolean | null;
+            /** Lleva Sku Cliente */
+            lleva_sku_cliente?: boolean | null;
             /** Moneda */
             moneda?: string | null;
             /** Nombre */
@@ -13955,6 +14003,69 @@ export interface components {
         SincronizarGruposIn: {
             /** Grupos */
             grupos?: components["schemas"]["app__schemas__conexion__GrupoIn"][];
+        };
+        /** SkuClienteGuardado */
+        SkuClienteGuardado: {
+            /** Avisos */
+            avisos?: string[];
+            /**
+             * Distintos
+             * @default false
+             */
+            distintos: boolean;
+            /** Por Cliente */
+            por_cliente?: {
+                [key: string]: string | null;
+            };
+            /** Presentacion */
+            presentacion: string;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Sku */
+            sku?: string | null;
+        };
+        /** SkuClienteIn */
+        SkuClienteIn: {
+            /** Presentacion */
+            presentacion: string;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Sku */
+            sku?: string | null;
+        };
+        /** SkuClienteLista */
+        SkuClienteLista: {
+            /** Clientes */
+            clientes: components["schemas"]["ClienteDeLista"][];
+            /** Renglones */
+            renglones: components["schemas"]["SkuClienteRenglon"][];
+        };
+        /** SkuClienteRenglon */
+        SkuClienteRenglon: {
+            /**
+             * Distintos
+             * @default false
+             */
+            distintos: boolean;
+            /** Por Cliente */
+            por_cliente?: {
+                [key: string]: string | null;
+            };
+            /** Presentacion */
+            presentacion: string;
+            /**
+             * Producto Id
+             * Format: uuid
+             */
+            producto_id: string;
+            /** Sku */
+            sku?: string | null;
         };
         /**
          * SolicitudSaeResumenOut
@@ -19915,6 +20026,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PrecioOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sku_cliente_de_lista_api_v1_listas_precios__lista_id__sku_cliente_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                lista_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkuClienteLista"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    guardar_sku_cliente_api_v1_listas_precios__lista_id__sku_cliente_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                lista_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkuClienteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkuClienteGuardado"];
                 };
             };
             /** @description Validation Error */

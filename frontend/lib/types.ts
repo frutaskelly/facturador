@@ -81,6 +81,8 @@ export type ListaPrecios = {
   notas?: string | null;
   /** La lista base del negocio: la que se cobra cuando ninguna asignación aplica. */
   es_default: boolean;
+  /** La lista enseña y sube el SKU de sus clientes (se guarda en el catálogo de cada uno). */
+  lleva_sku_cliente?: boolean;
   // Sin sae_empresa/sae_lista (26-sep-2026): las listas de SAE ya no se usan,
   // no hay espejo de precios y el API ya no los acepta ni los devuelve.
   created_at: string;
