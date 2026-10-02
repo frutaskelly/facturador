@@ -1606,6 +1606,10 @@ export interface paths {
          *     ligadas a la factura y en FACTURADA; si SAE la cancela, se liberan para
          *     re-exportarse.
          *
+         *     Cada partida se liga a su producto por la CLAVE SAE (la del producto o la
+         *     de una presentación) y lleva la unidad SAT de esa presentación; el código
+         *     del cliente queda de respaldo. La regla vive en services/espejo_productos.
+         *
          *     Un timbrado FALLIDO en SAE (documento emitido, CFDI02.UUID vacío) llega
          *     como BORRADOR: se refleja para que el folio no desaparezca, pero sin
          *     efectos — ni estado de cuenta ni remisiones. TIMBRADA exige uuid_fiscal.
@@ -9139,9 +9143,11 @@ export interface components {
         };
         /**
          * LineaFacturaEspejoIn
-         * @description Una partida tal como SAE la facturó. `clave` es la CVE_ART de SAE: si
-         *     cruza con producto_clientes se liga al producto; si no, la línea se guarda
-         *     igual con su descripción — el espejo no pierde renglones.
+         * @description Una partida tal como SAE la facturó. `clave` es la CVE_ART de SAE: se
+         *     liga al producto que trae esa clave (en el producto o en una presentación;
+         *     desde el 2-oct-2026, services/espejo_productos) y, si ninguno la trae, al
+         *     del código del cliente. Si no cruza, la línea se guarda igual con su
+         *     descripción — el espejo no pierde renglones.
          */
         LineaFacturaEspejoIn: {
             /** Cantidad */
