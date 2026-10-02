@@ -3,6 +3,11 @@
 // Cobranza → «Por cobrar»: la mesa de trabajo. Las facturas PPD con saldo, de
 // todos los clientes; se marcan las que cubre un pago y se registra. El REP que
 // sale de ahí se timbra en la pestaña «Recibos de pago».
+//
+// Una sola barra, como Facturas y Remisiones (#309): buscador · conteo · Excel
+// · Columnas. Se descargan TODAS las pendientes (antes cortaba en 200 sin
+// avisar), así que el buscador y los embudos —cliente, serie, estado de pago—
+// ven todo; ya no hay filtro de cliente encima de la tabla.
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert } from "@/components/ui/Alert";
@@ -12,11 +17,12 @@ import { type Column } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { KeyboardCombobox } from "@/components/KeyboardCombobox";
+import { LoadingDots } from "@/components/ui/LoadingDots";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
-import { fmtDate, fmtMoney } from "@/lib/format";
-import { useResource } from "@/lib/hooks";
+import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
+import { useListadoCompleto } from "@/lib/hooks";
 import { FORMA_PAGO_SAT, type FacturaPendiente, type FacturaSaldo } from "@/lib/cobranza";
 import type { Cliente } from "@/lib/types";
 
@@ -25,34 +31,22 @@ import type { Cliente } from "@/lib/types";
 export function PorCobrar({ clientes, canWrite, rev }: { clientes: Cliente[]; canWrite: boolean; rev: number }) {
   const cliName = useMemo(() => Object.fromEntries(clientes.map((c) => [c.id, c.legal_name])), [clientes]);
 
-  // Rediseño 86bbyw5u2: la tabla grande de PENDIENTES es la protagonista —
-  // antes las facturas por cobrar solo se veían DENTRO del popup, cliente por
-  // cliente. Buscador contra el servidor + filtro de cliente; los embudos de
-  // encabezado (serie, estado de pago) vienen con la tabla.
-  const [pBusca, setPBusca] = useState("");
-  const [pBuscaAplicada, setPBuscaAplicada] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setPBuscaAplicada(pBusca.trim()), 300);
-    return () => clearTimeout(t);
-  }, [pBusca]);
-  const [pCliente, setPCliente] = useState("");
-  const pendPath = useMemo(() => {
-    const p = new URLSearchParams({ limit: "200" });
-    if (pCliente) p.set("cliente_id", pCliente);
-    if (pBuscaAplicada) p.set("q", pBuscaAplicada);
-    return `/api/v1/cobranza/facturas-pendientes?${p.toString()}`;
-  }, [pCliente, pBuscaAplicada]);
-  const pendientes = useResource<{ items: FacturaPendiente[]; total: number }>(pendPath);
+  // Lotes de 500 = el tope del endpoint.
+  const pendientes = useListadoCompleto<FacturaPendiente>("/api/v1/cobranza/facturas-pendientes", 500);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (rev) pendientes.reload(); }, [rev]);
+  const filas = pendientes.data?.items;
+  // Lo que queda tras el buscador y los embudos; null = aún sin filtrar.
+  const [visibles, setVisibles] = useState<FacturaPendiente[] | null>(null);
   const [pendSel, setPendSel] = useState<FacturaPendiente[]>([]);
+  const [selReset, setSelReset] = useState(0);
   // Un pago = un cliente (regla del REP): con selección mixta se avisa.
   const pendClientes = useMemo(() => [...new Set(pendSel.map((f) => f.cliente_id))], [pendSel]);
   const [pagoPre, setPagoPre] = useState<{ clienteId: string; facturaIds: string[] } | null>(null);
 
   const pendCols: Column<FacturaPendiente>[] = useMemo(() => [
     { header: "Folio", sortable: true, exportValue: (f) => `${f.serie}${f.folio}`,
-      sortValue: (f) => `${f.serie}${f.folio}`,
+      sortValue: (f) => `${f.serie}${String(f.folio).padStart(8, "0")}`,
       cell: (f) => <span className="font-medium">{f.serie}{f.folio}</span> },
     { header: "Cliente", truncate: true, sortable: true,
       exportValue: (f) => cliName[f.cliente_id] ?? "",
@@ -81,46 +75,64 @@ export function PorCobrar({ clientes, canWrite, rev }: { clientes: Cliente[]; ca
   ], [cliName]);
   const pendTotalSel = pendSel.reduce((s, f) => s + Number(f.saldo_insoluto), 0);
 
+  // El conteo, el saldo y lo vencido siguen a lo VISIBLE (buscador y embudos).
+  const suma = useMemo(() => {
+    const base = visibles ?? filas ?? [];
+    const saldo = (xs: FacturaPendiente[]) => xs.reduce((t, f) => t + Number(f.saldo_insoluto), 0);
+    return { facturas: base.length, saldo: saldo(base), vencido: saldo(base.filter((f) => f.dias_vencida > 0)) };
+  }, [visibles, filas]);
+
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-end gap-3">
-        <Field label="Cliente">
-          <Select className="min-w-64" value={pCliente} onChange={(e) => setPCliente(e.target.value)} aria-label="Filtrar por cliente">
-            <option value="">Todos</option>
-            {clientes.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
-          </Select>
-        </Field>
-        {pendSel.length > 0 && (
-          <div className="flex flex-1 flex-wrap items-center justify-end gap-3 rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm">
-            <span>
-              {pendSel.length} factura{pendSel.length === 1 ? "" : "s"} · saldo{" "}
-              <b className="tabular-nums">{fmtMoney(pendTotalSel)}</b>
-            </span>
-            {pendClientes.length > 1 ? (
-              <span className="text-warning">Un pago cubre facturas de UN solo cliente — la selección tiene {pendClientes.length}.</span>
-            ) : canWrite ? (
-              <Button onClick={() => setPagoPre({ clienteId: pendClientes[0], facturaIds: pendSel.map((f) => f.factura_id) })}>
-                Registrar pago ({pendSel.length})
-              </Button>
-            ) : null}
-          </div>
-        )}
-      </div>
+      {/* Barra de la selección, como la de acciones en lote de Remisiones. */}
+      {pendSel.length > 0 && (
+        <div className="sticky top-2 z-10 mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface-2 px-4 py-2.5 shadow-sm">
+          <span className="text-sm font-medium">
+            {pendSel.length} factura{pendSel.length === 1 ? "" : "s"} · saldo{" "}
+            <span className="tabular-nums">{fmtMoney(pendTotalSel)}</span>
+          </span>
+          <span className="text-sm text-muted">·</span>
+          {pendClientes.length > 1 ? (
+            <span className="text-sm text-warning">Un pago cubre facturas de UN solo cliente — la selección tiene {pendClientes.length}.</span>
+          ) : canWrite ? (
+            <Button onClick={() => setPagoPre({ clienteId: pendClientes[0], facturaIds: pendSel.map((f) => f.factura_id) })}>
+              Registrar pago ({pendSel.length})
+            </Button>
+          ) : null}
+        </div>
+      )}
       {pendientes.error ? (
         <Alert tone="danger">No se pudieron cargar las facturas pendientes.</Alert>
       ) : (
         <DataTableSmart
-          rows={pendientes.data?.items ?? []}
+          rows={filas ?? []}
           rowKey={(f) => f.factura_id}
           columns={pendCols}
           loading={pendientes.loading}
           empty="Sin facturas PPD con saldo pendiente."
           storageKey="cobranza-pendientes"
+          exportFilename="facturas-por-cobrar"
+          defaultPageSize={50}
           selectable
           onSelectionChange={setPendSel}
-          searchValue={pBusca}
-          onSearchChange={setPBusca}
-          searchPlaceholder="Folio (p. ej. FEHMOHOS12)…"
+          selectionResetKey={selReset}
+          onFilteredRowsChange={setVisibles}
+          searchPlaceholder="Folio o cliente (p. ej. FEHMOHOS12)…"
+          toolbarStart={filas && (
+            <span className="whitespace-nowrap text-sm text-muted">
+              {pendientes.progreso ? (
+                <>Cargando {fmtNumber(pendientes.progreso.cargadas, 0)} de {fmtNumber(pendientes.progreso.total, 0)}<LoadingDots /></>
+              ) : (
+                <>
+                  {fmtNumber(suma.facturas, 0)} factura{suma.facturas === 1 ? "" : "s"} · saldo{" "}
+                  <span className="font-medium tabular-nums text-foreground">{fmtMoney(suma.saldo)}</span>
+                  {suma.vencido > 0 && (
+                    <> · <span className="text-danger">vencido <span className="tabular-nums">{fmtMoney(suma.vencido)}</span></span></>
+                  )}
+                </>
+              )}
+            </span>
+          )}
         />
       )}
       {pagoPre && (
@@ -128,7 +140,7 @@ export function PorCobrar({ clientes, canWrite, rev }: { clientes: Cliente[]; ca
           preClienteId={pagoPre.clienteId}
           preFacturaIds={pagoPre.facturaIds}
           onClose={() => setPagoPre(null)}
-          onDone={() => { setPagoPre(null); setPendSel([]); pendientes.reload(); }} />
+          onDone={() => { setPagoPre(null); setPendSel([]); setSelReset((n) => n + 1); pendientes.reload(); }} />
       )}
     </div>
   );

@@ -310,7 +310,9 @@ def facturas_pendientes(
     if fecha_hasta:
         query = query.filter(Factura.fecha < fecha_hasta + timedelta(days=1))
     total = query.count()
-    filas = query.order_by(Factura.fecha.asc()).offset(offset).limit(limit).all()
+    # El id desempata: la pantalla pide TODAS en lotes (offset), y con la fecha
+    # sola dos facturas del mismo día podían repetirse o perderse entre lotes.
+    filas = query.order_by(Factura.fecha.asc(), Factura.id).offset(offset).limit(limit).all()
 
     # Días de crédito por cliente, una consulta para toda la página.
     dias_por_cliente = {
