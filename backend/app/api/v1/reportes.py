@@ -539,31 +539,49 @@ def pagos(
     desde: date | None = Query(default=None, description="Inicio del rango (por omisión, hace 30 días)"),
     hasta: date | None = Query(default=None, description="Fin del rango (por omisión, hoy)"),
     cliente_id: UUID | None = Query(default=None, description="Acota el reporte a un cliente"),
+    todo: bool = Query(default=False, description="Ignora el rango: todo el historial"),
+    incluir_borradores: bool = Query(
+        default=False,
+        description="Agrega los borradores (aún sin timbrar) de cualquier fecha, arriba de la lista",
+    ),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     """Comprobantes de pago timbrados o cancelados del rango, con sus facturas
-    relacionadas. El total es lo VIGENTE; lo cancelado se informa aparte."""
+    relacionadas. El total es lo VIGENTE; lo cancelado se informa aparte.
+
+    Cobranza → Recibos de pago usa esta misma lista para trabajar: pide los
+    borradores, que salen siempre (sin importar el periodo: son pendientes por
+    timbrar) y nunca suman al total."""
     hoy = datetime.now(timezone.utc).date()
     if cliente_id is not None and not ctx.cliente_permitido(cliente_id):
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
-    desde, hasta = _rango_pedido(desde, hasta, hoy)
+    if todo:
+        desde = hasta = None
+        en_rango: list = []
+    else:
+        desde, hasta = _rango_pedido(desde, hasta, hoy)
+        en_rango = [
+            sa.cast(ReciboPago.fecha_pago, sa.Date) >= desde,
+            sa.cast(ReciboPago.fecha_pago, sa.Date) <= hasta,
+        ]
+    emitidos = sa.and_(ReciboPago.estado.in_(("TIMBRADO", "CANCELADO")), *en_rango)
 
     q = (
         db.query(ReciboPago, Cliente.legal_name)
         .join(Cliente, Cliente.id == ReciboPago.cliente_id)
         .filter(
             ReciboPago.tenant_id == ctx.tenant_id,
-            ReciboPago.estado.in_(("TIMBRADO", "CANCELADO")),
-            sa.cast(ReciboPago.fecha_pago, sa.Date) >= desde,
-            sa.cast(ReciboPago.fecha_pago, sa.Date) <= hasta,
+            sa.or_(emitidos, ReciboPago.estado == "BORRADOR") if incluir_borradores else emitidos,
         )
     )
     if ctx.cliente_scope:
         q = q.filter(ReciboPago.cliente_id.in_(ctx.cliente_scope))
     if cliente_id is not None:
         q = q.filter(ReciboPago.cliente_id == cliente_id)
-    filas = q.order_by(ReciboPago.fecha_pago.desc(), ReciboPago.folio.desc()).all()
+    filas = q.order_by(
+        (ReciboPago.estado == "BORRADOR").desc(), ReciboPago.fecha_pago.desc(), ReciboPago.folio.desc(),
+    ).all()
 
     # Mismo armado que el listado de cobranza, precargado en dos consultas.
     ids = [r.id for r, _ in filas]
@@ -590,15 +608,17 @@ def pagos(
     } if any(d.factura_id for d in detalle) else {}
 
     total = cancelado = ZERO
-    vigentes = cancelados = 0
+    vigentes = cancelados = borradores = 0
     items = []
     for r, nombre_cliente in filas:
         if r.estado == "TIMBRADO":
             total += Decimal(r.monto)
             vigentes += 1
-        else:
+        elif r.estado == "CANCELADO":
             cancelado += Decimal(r.monto)
             cancelados += 1
+        else:
+            borradores += 1
         out = _recibo_out(db, r, filas_pre=por_recibo.get(r.id, []), folios_pre=folios)
         for fr in out["facturas"]:
             f = fiscal.get(UUID(fr["factura_id"])) if fr["factura_id"] else None
@@ -621,6 +641,7 @@ def pagos(
         "comprobantes": vigentes,
         "total_cancelado": cancelado,
         "cancelados": cancelados,
+        "borradores": borradores,
     }
 
 
@@ -636,6 +657,7 @@ def notas_credito(
     desde: date | None = Query(default=None, description="Inicio del rango (por omisión, hace 30 días)"),
     hasta: date | None = Query(default=None, description="Fin del rango (por omisión, hoy)"),
     cliente_id: UUID | None = Query(default=None, description="Acota el reporte a un cliente"),
+    todo: bool = Query(default=False, description="Ignora el rango: todo el historial"),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
@@ -644,17 +666,19 @@ def notas_credito(
     hoy = datetime.now(timezone.utc).date()
     if cliente_id is not None and not ctx.cliente_permitido(cliente_id):
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
-    desde, hasta = _rango_pedido(desde, hasta, hoy)
-
     q = (
         db.query(NotaCredito, Cliente.legal_name)
         .join(Cliente, Cliente.id == NotaCredito.cliente_id)
-        .filter(
-            NotaCredito.tenant_id == ctx.tenant_id,
+        .filter(NotaCredito.tenant_id == ctx.tenant_id)
+    )
+    if todo:
+        desde = hasta = None
+    else:
+        desde, hasta = _rango_pedido(desde, hasta, hoy)
+        q = q.filter(
             sa.cast(NotaCredito.fecha, sa.Date) >= desde,
             sa.cast(NotaCredito.fecha, sa.Date) <= hasta,
         )
-    )
     if ctx.cliente_scope:
         q = q.filter(NotaCredito.cliente_id.in_(ctx.cliente_scope))
     if cliente_id is not None:

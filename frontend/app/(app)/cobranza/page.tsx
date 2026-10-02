@@ -1,11 +1,15 @@
 "use client";
 
-// Cobranza — una sola pantalla para todo lo que es cobrar. Primero lo manual:
-// las facturas PPD por cobrar (se registra el pago) y los Recibos de pago (REP,
-// Complemento de Pago 2.0: se timbran, descargan, envían y cancelan). Después,
-// tras la raya, la cobranza automática: los envíos del estado de cuenta, sus
-// contactos y sus ajustes. Antes eran dos pantallas (/cobranza y
-// /cobranza/automatica); la vieja dirección redirige aquí (next.config.ts).
+// Cobranza — una sola pantalla para todo lo que es cobrar. Primero lo que se
+// trabaja a mano: las facturas PPD por cobrar (se registra el pago), la
+// antigüedad de saldos (la cartera de hoy), los Recibos de pago (REP,
+// Complemento de Pago 2.0: se timbran, descargan, envían y cancelan) y las
+// notas de crédito. Después, tras la raya, la cobranza automática: los envíos
+// del estado de cuenta, sus contactos y sus ajustes.
+//
+// Antes esto vivía en tres lados: /cobranza, /cobranza/automatica (redirige
+// aquí, next.config.ts) y las pestañas Comprobantes de pago, Notas de crédito
+// y Cuentas por cobrar de Reportes, que se quedó con lo que se vende.
 import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 
@@ -16,13 +20,17 @@ import { useResource, type Page as Pagina } from "@/lib/hooks";
 import type { Cliente } from "@/lib/types";
 
 import { Automatica, type PestanaAuto } from "./Automatica";
+import { Cartera } from "./Cartera";
+import { NotasCredito } from "./NotasCredito";
 import { PorCobrar, RegistrarPago } from "./PorCobrar";
 import { RecibosPago } from "./RecibosPago";
 
-type Pestana = "por-cobrar" | "recibos" | PestanaAuto;
+type Pestana = "por-cobrar" | "cartera" | "recibos" | "notas" | PestanaAuto;
 const PESTANAS: { key: Pestana; label: string; auto?: boolean }[] = [
   { key: "por-cobrar", label: "Por cobrar" },
+  { key: "cartera", label: "Antigüedad de saldos" },
   { key: "recibos", label: "Recibos de pago (REP)" },
+  { key: "notas", label: "Notas de crédito" },
   { key: "envios", label: "Envíos automáticos", auto: true },
   { key: "contactos", label: "Contactos", auto: true },
   { key: "ajustes", label: "Ajustes", auto: true },
@@ -67,17 +75,18 @@ export default function Page() {
   // (pendientes o recibos) se recarga sola.
   const [nuevo, setNuevo] = useState(false);
   const [rev, setRev] = useState(0);
-  const manual = pestana === "por-cobrar" || pestana === "recibos";
+  const conPago = pestana === "por-cobrar" || pestana === "recibos";
+  const automatica = pestana === "envios" || pestana === "contactos" || pestana === "ajustes";
 
   return (
     <div>
       <PageHeader
         title="Cobranza"
-        subtitle="Facturas PPD por cobrar, sus complementos de pago (REP) y el estado de cuenta automático"
-        actions={canWrite && manual && <Button onClick={() => setNuevo(true)}><Plus size={16} /> Registrar pago</Button>}
+        subtitle="Lo que nos deben, lo que se ha pagado (REP y notas de crédito) y el estado de cuenta automático"
+        actions={canWrite && conPago && <Button onClick={() => setNuevo(true)}><Plus size={16} /> Registrar pago</Button>}
       />
 
-      {/* En el celular las cinco pestañas no caben: se desliza de lado, sin
+      {/* En el celular las pestañas no caben: se desliza de lado, sin
           barra de scroll. La raya de abajo es una sombra y no un borde, para
           que el scroll no la recorte. */}
       <div ref={barra} role="tablist" aria-label="Cobranza"
@@ -106,8 +115,10 @@ export default function Page() {
       {hidratado && (
         <>
           {pestana === "por-cobrar" && <PorCobrar clientes={clientes} canWrite={canWrite} rev={rev} />}
+          {pestana === "cartera" && <Cartera />}
           {pestana === "recibos" && <RecibosPago clientes={clientes} canWrite={canWrite} rev={rev} />}
-          {!manual && <Automatica pestana={pestana} canWrite={canWrite} />}
+          {pestana === "notas" && <NotasCredito />}
+          {automatica && <Automatica pestana={pestana} canWrite={canWrite} />}
         </>
       )}
 

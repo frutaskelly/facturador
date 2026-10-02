@@ -1,20 +1,22 @@
 "use client";
 
-// Notas de crédito (CFDI de egreso) del periodo: las timbra SAE y las aplica en
-// su CxC; el espejo las trae con las facturas a las que se aplicaron. Cuelgan de
-// los mismos filtros que ventas —rango y cliente— por su fecha de emisión. No
-// mueven nada aquí: la cartera ya llega con ellas descontadas desde SAE. La
-// tabla es DataTableSmart: el embudo de «Facturas relacionadas» lista cada
-// factura por separado, y el conteo y el total siguen a lo que se ve.
+// Cobranza → «Notas de crédito» (CFDI de egreso): las timbra SAE y las aplica
+// en su CxC; el espejo las trae con las facturas a las que se aplicaron. Vivían
+// en Reportes; están aquí porque son lo que reduce lo que nos deben. Van por su
+// fecha de emisión, con el periodo en la barra de la tabla; el cliente se
+// filtra con el embudo de su columna. No mueven nada aquí: la cartera ya llega
+// con ellas descontadas desde SAE. El embudo de «Facturas relacionadas» lista
+// cada factura por separado, y el conteo y el total siguen a lo que se ve.
 import { useMemo, useState } from "react";
 
+import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
-import { Card } from "@/components/ui/Card";
 import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
-import { Spinner } from "@/components/ui/Spinner";
 import { folioRelacionado } from "@/lib/cobranza";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { useResource } from "@/lib/hooks";
+
+import { usePeriodo } from "./periodo";
 
 type Nota = {
   id: string; serie: string; folio: number; fecha: string;
@@ -24,7 +26,7 @@ type Nota = {
               factura_ref: string | null; importe: string }[];
 };
 type Notas = {
-  desde: string; hasta: string; items: Nota[];
+  items: Nota[];
   total: string; notas: number; total_cancelado: string; canceladas: number;
 };
 
@@ -32,15 +34,9 @@ type Notas = {
 const foliosRelacionados = (n: Nota) => [...new Set(n.facturas.map(folioRelacionado))];
 const relacionadas = (n: Nota) => foliosRelacionados(n).join(", ");
 
-export function NotasCredito({
-  filtros, rango, clienteNombre,
-}: {
-  /** El query string de los filtros de la página (desde, hasta, cliente_id). */
-  filtros: string;
-  rango: string;
-  clienteNombre?: string;
-}) {
-  const res = useResource<Notas>(`/api/v1/reportes/notas-credito?${filtros}`);
+export function NotasCredito() {
+  const { query, filtro } = usePeriodo();
+  const res = useResource<Notas>(`/api/v1/reportes/notas-credito?${query}`);
   const d = res.data;
   // Lo que queda tras el buscador y los embudos; null = aún sin filtrar.
   const [visibles, setVisibles] = useState<Nota[] | null>(null);
@@ -86,53 +82,36 @@ export function NotasCredito({
     return { vigentes: vig.length, total: monto(vig), canceladas: can.length, totalCancelado: monto(can) };
   }, [visibles, d]);
 
-  if (res.error) {
-    return (
-      <Card title="Notas de crédito">
-        <p className="py-8 text-center text-sm text-muted">No se pudieron cargar las notas de crédito.</p>
-      </Card>
-    );
-  }
-
   return (
-    <Card
-      title="Notas de crédito"
-      subtitle={`CFDI de egreso emitidos en ${rango}${clienteNombre ? ` · solo ${clienteNombre}` : ""}`}
-    >
-      {!d ? (
-        <div className="flex justify-center py-8"><Spinner /></div>
+    <div>
+      {res.error ? (
+        <Alert tone="danger">No se pudieron cargar las notas de crédito.</Alert>
       ) : (
-        <>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span className="text-muted">
-              {fmtNumber(suma.vigentes, 0)} {suma.vigentes === 1 ? "nota vigente" : "notas vigentes"}
-              {suma.vigentes !== d.notas && ` de ${fmtNumber(d.notas, 0)}`}
-            </span>
-            <span>
-              Total: <span className="font-semibold tabular-nums">{fmtMoney(suma.total)}</span>
-            </span>
-          </div>
-          <div className={res.loading ? "opacity-50 transition-opacity" : "transition-opacity"}>
-            <DataTableSmart
-              rows={d.items}
-              rowKey={(n) => n.id}
-              columns={cols}
-              empty="Sin notas de crédito en el rango."
-              storageKey="reportes-notas-credito"
-              searchPlaceholder="Folio, cliente o factura (p. ej. FEHMOHOS12)…"
-              exportFilename="notas-de-credito"
-              defaultPageSize={50}
-              onFilteredRowsChange={setVisibles}
-            />
-          </div>
-          {suma.canceladas > 0 && (
-            <p className="mt-3 text-xs text-muted">
-              Fuera del total: {fmtMoney(suma.totalCancelado)} en {fmtNumber(suma.canceladas, 0)}{" "}
-              {suma.canceladas === 1 ? "nota cancelada" : "notas canceladas"}.
-            </p>
-          )}
-        </>
+        <DataTableSmart
+          rows={d?.items ?? []}
+          rowKey={(n) => n.id}
+          columns={cols}
+          loading={res.loading}
+          empty="Sin notas de crédito en el periodo."
+          storageKey="cobranza-notas-credito"
+          searchPlaceholder="Folio, cliente o factura (p. ej. FEHMOHOS12)…"
+          exportFilename="notas-de-credito"
+          defaultPageSize={50}
+          onFilteredRowsChange={setVisibles}
+          toolbarStart={filtro(d && (
+            <>
+              {fmtNumber(suma.vigentes, 0)} {suma.vigentes === 1 ? "vigente" : "vigentes"} ·{" "}
+              <span className="font-medium tabular-nums text-foreground">{fmtMoney(suma.total)}</span>
+            </>
+          ))}
+        />
       )}
-    </Card>
+      {suma.canceladas > 0 && (
+        <p className="mt-3 text-xs text-muted">
+          Fuera del total: {fmtMoney(suma.totalCancelado)} en {fmtNumber(suma.canceladas, 0)}{" "}
+          {suma.canceladas === 1 ? "nota cancelada" : "notas canceladas"}.
+        </p>
+      )}
+    </div>
   );
 }
