@@ -2065,7 +2065,7 @@ def test_folio_con_almacen_se_interpreta():
     # el formato de la semana 40 sin almacén se sigue leyendo
     assert parse_nuevo("HGHO-PACHU-20261009").proyecto == "HO"
 
-    assert like_con_fecha("HO") == ["__HO-%", "HG__-HOS-%"]
+    assert like_con_fecha("HO") == ["__HO-%", "HG__-HOSPI-%", "HG__-HOS-%"]
     assert like_con_fecha("BIC") == ["__BIC-%"]
     assert extraer_oc("SEMANA 40 PACHUCA HGPA-HOS-PACHU-20261009") == "HGPA-HOS-PACHU-20261009"
     m = _RE_SUFIJO_APARTE.match("HGPA-HOS-PACHU-20261009-2")
@@ -2144,6 +2144,33 @@ def test_folio_con_fecha_corta_se_interpreta():
     m = _RE_SUFIJO_APARTE.match("HGPA-HOS-PACHU-261009-2")
     assert m and m.group(1) == "HGPA-HOS-PACHU-261009"
     assert _RE_SUFIJO_APARTE.match("HGPA-HOS-PACHU-261009") is None
+
+
+def test_folio_con_proyecto_de_cinco_letras():
+    """2-oct-2026: el proyecto va con cinco letras (HOS → HOSPI); DIF se queda.
+    Los de tres se siguen leyendo con el mismo prefijo."""
+    from datetime import date
+    from app.api.v1.oc_recibidas import _RE_SUFIJO_APARTE, _misma_entrega_otro_folio
+    from app.services.espejo_cruce import extraer_oc
+    from app.services.folio_oc import parse_nuevo
+
+    f = parse_nuevo("HGPA-HOSPI-PACHU-261009")
+    assert f and (f.proyecto3, f.proyecto, f.punto, f.fecha) == (
+        "HOSPI", "HO", "PACHU", date(2026, 10, 9))
+    assert f.prefijo == "HGPA-HOSPI"
+    assert parse_nuevo("TBVH-HOSPI-ROVIR-261007").proyecto == "VH"
+    assert parse_nuevo("HGPA-CEREZ-CERES-261006").proyecto == "CE"
+    assert parse_nuevo("HGPA-SEGUR-SECRE-261006").proyecto == "SP"
+    assert parse_nuevo("HGPA-SNERI-NERIX-261006").proyecto == "SN"
+    assert parse_nuevo("HGPA-DIF-COSTA-261006").proyecto == "DI"
+    assert parse_nuevo("HGPA-HOSPI-PACHU-261009-2").aparte == 2
+    assert extraer_oc("SEMANA 40 PACHUCA HGPA-HOSPI-PACHU-261009") == "HGPA-HOSPI-PACHU-261009"
+    m = _RE_SUFIJO_APARTE.match("HGPA-HOSPI-PACHU-261009-2")
+    assert m and m.group(1) == "HGPA-HOSPI-PACHU-261009"
+    # el renombrado HOS → HOSPI es la misma entrega; otro punto u otra fecha, no
+    assert _misma_entrega_otro_folio("HGPA-HOS-PACHU-261009", "HGPA-HOSPI-PACHU-261009")
+    assert not _misma_entrega_otro_folio("HGPA-HOS-PACHU-261009", "HGPA-HOSPI-PACHU-261010")
+    assert not _misma_entrega_otro_folio("HGPA-HOSPI-PACHU-261009", "HGPA-HOSPI-PACHU-261010")
 
 
 def test_folio_con_almacen_da_el_prefijo_y_frena_la_gemela(client, env, auth_as):

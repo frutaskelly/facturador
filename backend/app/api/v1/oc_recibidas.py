@@ -339,7 +339,7 @@ def _candado_folio_repetido(db: Session, ctx: AuthContext, payload) -> None:
 
 
 # La base termina en el día (HO-39ACT-LUN-2, VH-38PAL-MIE-B-2) o, desde la
-# semana 40, en la fecha (TBVH-ROVIR-20261007-2, HGPA-HOS-PACHU-20261009-2).
+# semana 40, en la fecha (TBVH-ROVIR-20261007-2, HGPA-HOSPI-PACHU-261009-2).
 # Ver services/folio_oc.
 _RE_SUFIJO_APARTE = re.compile(r"^(.*-(?:[A-Z]{2,3}(?:-B)?|\d{6}(?:\d{2})?))-(\d{1,2})$")
 
@@ -503,8 +503,9 @@ def _misma_entrega_otro_folio(a: str, b: str) -> bool:
     if na is not None and nb is not None:
         # Con fecha los dos, pero uno con almacén (HGPA-HOS-ROVIR-…) y otro sin
         # él (HGHO-ROVIR-…, la semana 40 antes del 2-oct): mismo proyecto,
-        # punto y fecha es la misma entrega renombrada.
-        if (na.almacen is None) == (nb.almacen is None):
+        # punto y fecha es la misma entrega renombrada. Igual entre el proyecto
+        # de tres letras y el de cinco (HGPA-HOS-… y HGPA-HOSPI-…, 2-oct).
+        if (na.almacen is None, na.proyecto3) == (nb.almacen is None, nb.proyecto3):
             return False
         return (na.proyecto, na.punto, na.fecha) == (nb.proyecto, nb.punto, nb.fecha)
     if (na is None) == (nb is None):
@@ -634,7 +635,8 @@ def _candado_antigemela(db: Session, ctx: AuthContext, payload) -> None:
         prefijo, semana, fecha = m.group(1), m.group(2), _fecha_entrega(payload)
     else:
         return
-    # TBVH-ROVIR-… y, desde el 2-oct, HGPA-HOS-… (con almacén): los dos con fecha.
+    # TBVH-ROVIR-… y, desde el 2-oct, HGPA-HOSPI-… (con almacén; HGPA-HOS-… los
+    # de tres letras): todos con fecha.
     del_formato_nuevo = or_(*(OCRecibida.folio_externo.like(p)
                               for p in folio_oc.like_con_fecha(prefijo)))
     mismo_folio = OCRecibida.folio_externo.like(f"{prefijo}-{semana}%")
