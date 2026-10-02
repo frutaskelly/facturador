@@ -7,9 +7,20 @@
 //
 // Va SIN periodo: la cartera es lo que se debe al corte de hoy, sin importar
 // cuándo se facturó, y recortarla escondía saldos viejos justo donde más
-// importan. Cada fila lleva al estado de cuenta del cliente con las cajas que
-// estaban marcadas.
-import { useState } from "react";
+// importan. El nombre de cada fila lleva al estado de cuenta del cliente con
+// las cajas que estaban marcadas.
+//
+// Al hacer clic, la fila se despliega EN CASCADA, de lo grande a lo chico:
+//   Cliente  → Plaza → Proyecto → Serie
+//   Plaza    → Proyecto → Serie
+//   Proyecto → Serie
+// La serie va al último porque no cuelga de un solo proyecto: ZMAFAN se reparte
+// entre CERESOS, DIF HIDALGO y CDMX según la observación, y HOSPITALES HIDALGO
+// junta ZEHMOHOS, ZEHMOFAC y FEHMOHOS. Cada factura cae en un solo lugar de
+// cada nivel, así que cada nivel suma exacto a su padre.
+import Link from "next/link";
+import { useCallback, useState } from "react";
+import { ChevronRight } from "lucide-react";
 
 import { BarraSegmentada } from "@/components/ui/Barras";
 import { Card } from "@/components/ui/Card";
@@ -25,7 +36,19 @@ type FilaCartera = {
   cliente_id: string | null; serie: string | null;
   antiguedad: Record<CubetaKey, string>;
   facturas_por_cubeta: Record<CubetaKey, number>;
+  hijos: FilaCartera[];
 };
+/** Una fila ya con las cajas de antigüedad aplicadas, en cualquier nivel. */
+type Nodo = FilaSumario & { hijos: Nodo[] };
+
+type Nivel = "sucursal" | "proyecto" | "serie";
+// El mismo orden que `_CASCADA` en reportes.py.
+const CASCADA: Record<Agrupar, Nivel[]> = {
+  cliente: ["sucursal", "proyecto", "serie"],
+  sucursal: ["proyecto", "serie"],
+  proyecto: ["serie"],
+};
+const NOMBRE_NIVEL: Record<Nivel, string> = { sucursal: "Plaza", proyecto: "Proyecto", serie: "Serie" };
 type CarteraDatos = {
   corte: string; agrupar: Agrupar; filas: FilaCartera[];
   saldo_total: string; vencido_total: string;
@@ -57,7 +80,7 @@ export function Cartera() {
   const toggleCubeta = (k: string) => setCubetasSel((prev) =>
     prev.includes(k as CubetaKey) ? prev.filter((x) => x !== k) : [...prev, k as CubetaKey]);
 
-  const carteraRes = useResource<CarteraDatos>(`/api/v1/reportes/cartera?agrupar=${agrupar}`);
+  const carteraRes = useResource<CarteraDatos>(`/api/v1/reportes/cartera?agrupar=${agrupar}&desglose=true`);
   const cartera = carteraRes.data;
 
   const destino = (f: { cliente_id: string | null; serie: string | null }, cubetas: CubetaKey[] = []) => {
@@ -69,21 +92,31 @@ export function Cartera() {
     const s = qs.toString();
     return `/clientes/${f.cliente_id}/estado-cuenta${s ? `?${s}` : ""}`;
   };
-  // Con cajas marcadas, cada fila suma solo esas cubetas (el vencido, las
-  // que no son «por vencer») y se van las que quedan en cero.
+  // Con cajas marcadas, cada fila —y cada nivel de su cascada— suma solo esas
+  // cubetas (el vencido, las que no son «por vencer») y se van las que quedan
+  // en cero.
   const sumaSel = (a: Record<CubetaKey, string | number>, soloVencido = false) =>
     cubetasSel.reduce((t, k) => (soloVencido && k === "por_vencer" ? t : t + Number(a[k] ?? 0)), 0);
-  const filasCartera: FilaSumario[] = cubetasSel.length === 0
-    ? (cartera?.filas ?? []).map((f) => ({
+  const aNodos = (fs: FilaCartera[]): Nodo[] => cubetasSel.length === 0
+    ? fs.map((f) => ({
         etiqueta: f.etiqueta, monto: f.saldo, facturas: f.facturas, href: destino(f), alerta: f.vencido,
+        hijos: aNodos(f.hijos ?? []),
       }))
-    : (cartera?.filas ?? [])
+    : fs
         .map((f) => ({
           etiqueta: f.etiqueta, monto: sumaSel(f.antiguedad), facturas: sumaSel(f.facturas_por_cubeta),
-          href: destino(f, cubetasSel), alerta: sumaSel(f.antiguedad, true),
+          href: destino(f, cubetasSel), alerta: sumaSel(f.antiguedad, true), hijos: aNodos(f.hijos ?? []),
         }))
         .filter((f) => f.monto > 0)
         .sort((a, b) => b.monto - a.monto);
+  const filasCartera = aNodos(cartera?.filas ?? []);
+  const niveles = CASCADA[agrupar];
+  const cascada = useCallback(
+    (f: Nodo) => <Cascada nodos={f.hijos} niveles={niveles} />,
+    // `niveles` sale de `agrupar`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [agrupar],
+  );
   const totalCartera = cubetasSel.length === 0 ? cartera?.saldo_total : cartera && sumaSel(cartera.antiguedad);
   const vencidoCartera = cubetasSel.length === 0 ? cartera?.vencido_total : cartera && sumaSel(cartera.antiguedad, true);
 
@@ -144,6 +177,7 @@ export function Cartera() {
                 </>
               }
               filas={filasCartera}
+              renderExpanded={cascada}
               columnaMonto="Saldo"
               columnaAlerta="Vencido"
               vacio="Ninguna factura tiene saldo pendiente."
@@ -158,5 +192,85 @@ export function Cartera() {
         </>
       )}
     </Card>
+  );
+}
+
+/** El desglose bajo una fila: un renglón por nodo, con sangría por nivel. Un
+ *  nodo con un solo hijo arranca abierto, así la cadena Balles → Hidalgo →
+ *  BALLES → ZHGO se ve completa sin tres clics; con varios, se abre a mano. */
+function Cascada({ nodos, niveles }: { nodos: Nodo[]; niveles: Nivel[] }) {
+  const [abiertos, setAbiertos] = useState<Set<string>>(() => {
+    const s = new Set<string>();
+    const recorrer = (ns: Nodo[], ruta: string) => ns.forEach((n) => {
+      const r = `${ruta}/${n.etiqueta}`;
+      if (n.hijos.length === 1) s.add(r);
+      recorrer(n.hijos, r);
+    });
+    recorrer(nodos, "");
+    return s;
+  });
+  const alternar = (r: string) => setAbiertos((prev) => {
+    const s = new Set(prev);
+    if (s.has(r)) s.delete(r); else s.add(r);
+    return s;
+  });
+
+  if (nodos.length === 0) {
+    return <p className="px-4 py-3 text-sm text-muted">Sin desglose.</p>;
+  }
+  const renglones: { n: Nodo; ruta: string; nivel: number }[] = [];
+  const aplanar = (ns: Nodo[], ruta: string, nivel: number) => ns.forEach((n) => {
+    const r = `${ruta}/${n.etiqueta}`;
+    renglones.push({ n, ruta: r, nivel });
+    if (abiertos.has(r)) aplanar(n.hijos, r, nivel + 1);
+  });
+  aplanar(nodos, "", 0);
+
+  const num = "px-3 py-1.5 text-right tabular-nums whitespace-nowrap";
+  return (
+    <div className="overflow-x-auto px-4 py-3">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border text-xs uppercase tracking-wide text-muted">
+            <th className="px-3 py-1.5 text-left font-medium">{niveles.map((n) => NOMBRE_NIVEL[n]).join(" › ")}</th>
+            <th className={`${num} font-medium`}>Facturas</th>
+            <th className={`${num} font-medium`}>Saldo</th>
+            <th className={`${num} font-medium`}>Vencido</th>
+          </tr>
+        </thead>
+        <tbody>
+          {renglones.map(({ n, ruta, nivel }) => {
+            const abre = n.hijos.length > 0;
+            const abierto = abiertos.has(ruta);
+            return (
+              <tr key={ruta} className={`border-b border-border/60 ${abre ? "cursor-pointer hover:bg-surface-2" : ""}`}
+                  onClick={abre ? () => alternar(ruta) : undefined}>
+                <td className="py-1.5 pr-3" style={{ paddingLeft: `${0.75 + nivel * 1.5}rem` }}>
+                  <span className="inline-flex items-center gap-1.5">
+                    {abre ? (
+                      <ChevronRight size={14} aria-hidden
+                        className={`shrink-0 text-muted transition-transform ${abierto ? "rotate-90" : ""}`} />
+                    ) : <span className="inline-block w-3.5 shrink-0" aria-hidden />}
+                    <span className="text-[11px] uppercase tracking-wide text-muted">{NOMBRE_NIVEL[niveles[nivel]]}</span>
+                    {n.href ? (
+                      <Link href={n.href} title={`${n.etiqueta} · ver estado de cuenta`}
+                            className={`hover:underline ${nivel === 0 ? "font-medium" : ""}`}
+                            onClick={(e) => e.stopPropagation()}>{n.etiqueta}</Link>
+                    ) : <span className={nivel === 0 ? "font-medium" : undefined}>{n.etiqueta}</span>}
+                  </span>
+                </td>
+                <td className={`${num} text-muted`}>{n.facturas}</td>
+                <td className={num}>{fmtMoney(n.monto)}</td>
+                <td className={num}>
+                  {Number(n.alerta ?? 0) > 0
+                    ? <span className="text-danger">{fmtMoney(n.alerta ?? 0)}</span>
+                    : <span className="text-muted">—</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

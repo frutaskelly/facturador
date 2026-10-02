@@ -70,6 +70,40 @@ def test_cartera_por_cliente_y_por_sucursal(client, env, auth):
     assert float(por_plaza["saldo_total"]) == 300.0
 
 
+def test_cartera_desglose_en_cascada(client, env, auth):
+    """Bajo cada fila, la cascada: cliente → plaza → proyecto → serie. Cada
+    nivel reparte EXACTO a su padre; lo que no cae en proyecto es «Sin
+    proyecto» bajo el cliente, y el cliente mismo bajo una plaza."""
+    _proyecto(env, "HOSPITALES TUXTLA", series=["ZEHMOTG"])
+    _factura_ppd_timbrada(env, total=1000, dias_atras=40, folio=51, serie="ZEHMOTG")
+    _factura_ppd_timbrada(env, total=500, dias_atras=5, folio=52, serie="ZEHMOTG")
+    _factura_ppd_timbrada(env, total=200, dias_atras=5, folio=53, serie="ZEHMOVH")   # sin proyecto
+
+    d = client.get("/api/v1/reportes/cartera", params={"agrupar": "cliente", "desglose": True},
+                   headers=_h(env)).json()
+    cli = d["filas"][0]
+    assert float(cli["saldo"]) == 1700.0
+    plaza = cli["hijos"][0]                               # sin vínculo sembrado: «Sin plaza»
+    assert plaza["etiqueta"] == "Sin plaza" and float(plaza["saldo"]) == 1700.0
+    proyectos = {p["etiqueta"]: p for p in plaza["hijos"]}
+    assert set(proyectos) == {"HOSPITALES TUXTLA", "Sin proyecto"}
+    ht = proyectos["HOSPITALES TUXTLA"]
+    assert float(ht["saldo"]) == 1500.0 and float(ht["vencido"]) == 1000.0 and ht["facturas"] == 2
+    assert [s["etiqueta"] for s in ht["hijos"]] == ["ZEHMOTG"]
+    assert ht["hijos"][0]["hijos"] == []                  # la serie es la hoja
+    assert ht["hijos"][0]["serie"] == "ZEHMOTG"           # enlaza al estado de cuenta de esa serie
+    # cada nivel cuadra con su padre
+    assert sum(float(p["saldo"]) for p in plaza["hijos"]) == float(plaza["saldo"])
+
+    por_plaza = client.get("/api/v1/reportes/cartera", params={"agrupar": "sucursal", "desglose": True},
+                           headers=_h(env)).json()
+    bajo_plaza = {p["etiqueta"] for p in por_plaza["filas"][0]["hijos"]}
+    assert "HOSPITALES TUXTLA" in bajo_plaza and "Sin proyecto" not in bajo_plaza   # el cliente es la fila
+
+    sin = client.get("/api/v1/reportes/cartera", params={"agrupar": "cliente"}, headers=_h(env)).json()
+    assert "hijos" not in sin["filas"][0]                 # sin desglose, la respuesta de siempre
+
+
 def test_ventas_rellena_los_dias_sin_factura(client, env, auth):
     """Los días en cero van en la serie: una gráfica que salta del lunes al
     jueves miente sobre el ritmo."""

@@ -120,9 +120,85 @@ def _etiquetador(db: Session, tenant_id, agrupar: str):
     return lambda f, nombre_cliente, cliente_id: clasificador.fila(f, nombre_cliente)
 
 
+# Lo que se despliega bajo cada fila de la cartera, en cascada: de lo grande a
+# lo chico. Cada factura tiene UN cliente, UNA plaza, UN proyecto y UNA serie,
+# así que cada nivel reparte exactamente a su padre. Ojo: una serie puede caer
+# en varios proyectos (ZMAFAN → CERESOS, DIF HIDALGO, CDMX por la observación) y
+# un proyecto tener varias series (HOSPITALES HIDALGO: ZEHMOHOS, ZEHMOFAC,
+# FEHMOHOS); por eso la serie va al último, como detalle del proyecto.
+_CASCADA: dict[str, tuple[str, ...]] = {
+    "cliente": ("sucursal", "proyecto", "serie"),
+    "sucursal": ("proyecto", "serie"),
+    "proyecto": ("serie",),
+}
+
+
+def _nombradores_cascada(db: Session, tenant_id, agrupar: str):
+    """[(nivel, función que nombra la factura en ese nivel)] bajo la fila."""
+    niveles = _CASCADA[agrupar]
+    serie_plaza = _serie_a_plaza(db, tenant_id) if "sucursal" in niveles else {}
+    plaza_unica = _plaza_unica(db, tenant_id) if "sucursal" in niveles else {}
+    clasificador = ProyectoDeFactura(db, tenant_id) if "proyecto" in niveles else None
+
+    def nombrar(nivel, f, nombre_cliente, cliente_id) -> str:
+        if nivel == "sucursal":
+            return serie_plaza.get(f.serie or "") or plaza_unica.get(cliente_id) or "Sin plaza"
+        if nivel == "proyecto":
+            # Bajo un cliente, lo que no cae en proyecto es eso: «Sin proyecto».
+            # Bajo una plaza, el cliente ES la fila (Balles y Jubran en Hidalgo),
+            # igual que en la vista por proyecto.
+            return clasificador.nombre(f) or ("Sin proyecto" if agrupar == "cliente" else nombre_cliente)
+        return f.serie or "Sin serie"
+
+    return [(n, nombrar) for n in niveles]
+
+
+def _nodo_cartera(cliente_id, serie) -> dict:
+    return {
+        "saldo": ZERO, "vencido": ZERO, "facturas": 0,
+        "cliente_id": str(cliente_id), "serie": serie,
+        # El reparto por cubeta de CADA fila: deja que la pantalla filtre
+        # por antigüedad sin volver a pedir el reporte.
+        "antiguedad": {c: ZERO for c in _CUBETAS},
+        "facturas_por_cubeta": {c: 0 for c in _CUBETAS},
+    }
+
+
+def _sumar_a_nodo(nodo: dict, saldo: Decimal, cubeta: str, vencida: bool, cliente_id, serie) -> None:
+    nodo["saldo"] += saldo
+    nodo["facturas"] += 1
+    nodo["antiguedad"][cubeta] += saldo
+    nodo["facturas_por_cubeta"][cubeta] += 1
+    if vencida:
+        nodo["vencido"] += saldo
+    # Una fila que mezcla clientes o series no puede enlazar a un estado de
+    # cuenta acotado: el enlace se deja en blanco antes que llevar a otro lado.
+    if nodo["serie"] != serie:
+        nodo["serie"] = None
+    if nodo["cliente_id"] != str(cliente_id):
+        nodo["cliente_id"] = None
+
+
+def _filas_cartera(nodos: dict, desglose: bool) -> list[dict]:
+    """De mayor a menor saldo; con `desglose`, cada fila trae sus `hijos`."""
+    salida = []
+    for nombre, datos in sorted(nodos.items(), key=lambda kv: kv[1]["saldo"], reverse=True):
+        hijos = datos.pop("_hijos", {})
+        fila = {"etiqueta": nombre, **datos}
+        if desglose:
+            fila["hijos"] = _filas_cartera(hijos, True)
+        salida.append(fila)
+    return salida
+
+
 @router.get("/cartera")
 def cartera(
     agrupar: Agrupar = Query(default="proyecto"),
+    desglose: bool = Query(
+        default=False,
+        description="Cada fila trae `hijos` en cascada: cliente → plaza → proyecto → serie, "
+                    "plaza → proyecto → serie, proyecto → serie",
+    ),
     incluir_en_cancelacion: bool = Query(default=False),
     desde: date | None = Query(default=None, description="Solo facturas emitidas desde esta fecha"),
     hasta: date | None = Query(default=None, description="Solo facturas emitidas hasta esta fecha"),
@@ -146,6 +222,7 @@ def cartera(
     if cliente_id is not None and not ctx.cliente_permitido(cliente_id):
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     etiqueta_de = _etiquetador(db, ctx.tenant_id, agrupar)
+    cascada = _nombradores_cascada(db, ctx.tenant_id, agrupar) if desglose else []
 
     filas: dict[str, dict] = {}
     antiguedad = {c: ZERO for c in _CUBETAS}
@@ -177,32 +254,22 @@ def cartera(
             if not incluir_en_cancelacion:
                 continue
         etiqueta = etiqueta_de(f, nombre_cliente, fila_cliente_id)
-
-        fila = filas.setdefault(etiqueta, {
-            "saldo": ZERO, "vencido": ZERO, "facturas": 0,
-            "cliente_id": str(fila_cliente_id), "serie": f.serie,
-            # El reparto por cubeta de CADA fila: deja que la pantalla filtre
-            # por antigüedad sin volver a pedir el reporte.
-            "antiguedad": {c: ZERO for c in _CUBETAS},
-            "facturas_por_cubeta": {c: 0 for c in _CUBETAS},
-        })
-        fila["saldo"] += saldo
-        fila["facturas"] += 1
         f_fecha = f.fecha.date() if isinstance(f.fecha, datetime) else f.fecha
         dias_vencida = (hoy - (f_fecha + timedelta(days=int(dias_credito or 0)))).days
-        antiguedad[_cubeta(dias_vencida)] += saldo
-        fila["antiguedad"][_cubeta(dias_vencida)] += saldo
-        fila["facturas_por_cubeta"][_cubeta(dias_vencida)] += 1
+        cubeta = _cubeta(dias_vencida)
+        antiguedad[cubeta] += saldo
         total += saldo
         if dias_vencida > 0:
-            fila["vencido"] += saldo
             vencido_total += saldo
-        # Una fila que mezcla clientes o series no puede enlazar a un estado de
-        # cuenta acotado: el enlace se deja en blanco antes que llevar a otro lado.
-        if fila["serie"] != f.serie:
-            fila["serie"] = None
-        if fila["cliente_id"] != str(fila_cliente_id):
-            fila["cliente_id"] = None
+
+        nodo = filas.setdefault(etiqueta, _nodo_cartera(fila_cliente_id, f.serie))
+        _sumar_a_nodo(nodo, saldo, cubeta, dias_vencida > 0, fila_cliente_id, f.serie)
+        for nivel, nombrar in cascada:
+            hijos = nodo.setdefault("_hijos", {})
+            nodo = hijos.setdefault(
+                nombrar(nivel, f, nombre_cliente, fila_cliente_id), _nodo_cartera(fila_cliente_id, f.serie),
+            )
+            _sumar_a_nodo(nodo, saldo, cubeta, dias_vencida > 0, fila_cliente_id, f.serie)
 
     return {
         "corte": hoy,
@@ -210,10 +277,7 @@ def cartera(
         "desde": desde,
         "hasta": hasta,
         "cliente_id": cliente_id,
-        "filas": [
-            {"etiqueta": nombre, **datos}
-            for nombre, datos in sorted(filas.items(), key=lambda kv: kv[1]["saldo"], reverse=True)
-        ],
+        "filas": _filas_cartera(filas, desglose),
         "saldo_total": total,
         "vencido_total": vencido_total,
         "antiguedad": antiguedad,
