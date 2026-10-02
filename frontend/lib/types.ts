@@ -985,6 +985,17 @@ export type AlcanceMiniConta = {
   precios: boolean;             // precio de lista por cliente
 };
 
+/** Panel de Smart Supply: una clave por cuenta (plaza), solo lectura. */
+export type AlcancePanel = {
+  plaza?: string | null;        // la etiqueta de la cuenta; no filtra
+  series: string[];             // de FACTURA: lo facturado
+  series_remision: string[];    // lo remisionado y las OC que se volvieron remisión
+  perfiles: string[];           // «EHMO:villahermosa»: las OC que entran por ahí
+  remisiones: boolean;
+  oc: boolean;
+  catalogo: boolean;
+};
+
 export type Conexion = {
   id: string;
   tipo: string;
@@ -995,12 +1006,20 @@ export type Conexion = {
   activada_at?: string | null;
   ultimo_uso_at?: string | null;
   alcance?: AlcanceMiniConta | null;   // Mini Conta; null = clave de antes, sin límite
+  alcance_panel?: AlcancePanel | null; // solo el panel de Smart Supply
 };
 
 export type OpcionesMiniConta = {
   sucursales: { nombre: string; series: string[] }[];
   series: string[];
   clientes: { id: string; nombre: string; rfc?: string | null; series: string[] }[];
+};
+
+export type OpcionesPanel = {
+  plazas: { nombre: string; series: string[]; series_remision: string[]; perfiles: string[] }[];
+  series: string[];
+  series_remision: string[];
+  perfiles: string[];
 };
 
 export type ConexionEstado = {

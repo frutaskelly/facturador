@@ -16,9 +16,9 @@
  */
 import type { components } from "./api-types.gen";
 import type {
-  Almacen, Categoria, Cliente, ClienteExterno, Conexion, Devolucion, EsquemaImpuesto, Factura, FacturaDetail,
+  AlcancePanel, Almacen, Categoria, Cliente, ClienteExterno, Conexion, Devolucion, EsquemaImpuesto, Factura, FacturaDetail,
   LineaFactura, LineaOC, LineaOrdenCompra, LineaRemision, ListaAsignacion, ListaPrecios, Membership,
-  OCRecibida, OCRecibidaDetalle,
+  OCRecibida, OCRecibidaDetalle, OpcionesPanel,
   OrdenCompra, OrdenCompraDetail, Precio, Producto, Proveedor, Proyecto, Remision,
   RemisionDetail, Role, Serie, Sucursal,
 } from "./types";
@@ -62,6 +62,8 @@ type _OCRecibidaDetalle = Ok<MissingIn<OCRecibidaDetalle, S["OCRecibidaDetailOut
 type _LineaOC = Ok<MissingIn<LineaOC, S["LineaOCRecibidaOut"]>>;
 type _ClienteExterno = Ok<MissingIn<ClienteExterno, S["ClienteExternoOut"]>>;
 type _Conexion = Ok<MissingIn<Conexion, S["ConexionOut"]>>;
+type _AlcancePanel = Ok<MissingIn<AlcancePanel, S["AlcancePanel"]>>;
+type _OpcionesPanel = Ok<MissingIn<OpcionesPanel, S["OpcionesPanelOut"]>>;
 type _Role = Ok<MissingIn<Role, S["RoleOut"]>>;
 
 // Unidades y claves SAE del editor de producto (2-oct-2026). Sus tipos viven en

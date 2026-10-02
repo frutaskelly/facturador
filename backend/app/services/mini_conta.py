@@ -35,9 +35,11 @@ from ..models import (
     ClienteSucursalSerie,
     Conexion,
     Factura,
+    Remision,
     Serie,
     Sucursal,
 )
+from .fecha_entrega import fecha_entrega_de_notas
 
 
 def clave_nombre(nombre: str) -> str:
@@ -255,6 +257,36 @@ def mapa(db: Session, tenant_id, alcance: Alcance) -> dict:
         "clientes": clientes,
         **alcance.datos(),
     }
+
+
+def fechas_de_entrega(db: Session, facturas: dict) -> dict:
+    """{factura_id: (fecha de entrega, de dónde salió)} para {factura_id: (notas,
+    fecha de la factura)}: la primera entrega de sus remisiones, si no la que
+    dicen sus notas, si no la de la factura. Una consulta para todas.
+
+    Vive aquí y no en el router porque la usan Mini Conta y el panel de Smart
+    Supply (services/smart_supply.py): dos copias darían dos fechas distintas
+    para la misma factura."""
+    por_remision: dict = {}
+    if facturas:
+        por_remision = dict(
+            db.query(Remision.factura_id, sa.func.min(Remision.fecha_entrega))
+            .filter(
+                Remision.factura_id.in_(list(facturas)),
+                Remision.deleted_at.is_(None),
+                Remision.fecha_entrega.isnot(None),
+            )
+            .group_by(Remision.factura_id)
+            .all()
+        )
+    out = {}
+    for fid, (notas, fecha_factura) in facturas.items():
+        if por_remision.get(fid) is not None:
+            out[fid] = (por_remision[fid], "remision")
+        else:
+            de_notas = fecha_entrega_de_notas(notas, fecha_factura)
+            out[fid] = (de_notas, "notas") if de_notas is not None else (fecha_factura, "factura")
+    return out
 
 
 def validar_alcance(db: Session, tenant_id, series, clientes, **datos) -> dict:

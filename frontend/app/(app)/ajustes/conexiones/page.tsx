@@ -1,7 +1,8 @@
 "use client";
 
 // Conexiones: enchufar Smart Supply (y Mini Conta) sin repartir contraseñas.
-// Mini Conta tiene una clave por cuenta y vive en MiniContaCuentas.tsx.
+// Mini Conta tiene una clave por cuenta y vive en MiniContaCuentas.tsx; el panel
+// de Smart Supply (una por bodega, solo lectura) en SmartSupplyPanelCuentas.tsx.
 //
 // La pantalla tiene dos vidas. Antes de conectar es un instructivo de un solo
 // botón. Después de conectar deja de ser configuración y pasa a responder una
@@ -37,6 +38,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { MiniContaCuentas } from "./MiniContaCuentas";
+import { SmartSupplyPanelCuentas } from "./SmartSupplyPanelCuentas";
 import { can, useAuth } from "@/lib/auth";
 import type {
   ActividadConexion,
@@ -143,9 +145,9 @@ export default function Page() {
         setEstados(cs);
         // El momento en que se pega la clave en WhatsApp: la pantalla se pone en
         // verde sola y se quita la clave de en medio, sin que nadie recargue.
-        // (Mini Conta tiene una clave por cuenta y avisa por su cuenta.)
+        // (Mini Conta y el panel tienen una clave por cuenta y avisan por su cuenta.)
         for (const c of cs) {
-          if (c.tipo === "MINI_CONTA") continue;
+          if (c.tipo === "MINI_CONTA" || c.tipo === "SMART_SUPPLY_PANEL") continue;
           if (eraPendiente.current.has(c.tipo) && c.conexion?.estado === "ACTIVA") {
             setNueva((n) => (n?.conexion.tipo === c.tipo ? null : n));
             toast.success(metaDe(c.tipo, c.nombre).alConectar);
@@ -360,6 +362,11 @@ export default function Page() {
       {estados.map((e) => {
         if (e.tipo === "MINI_CONTA") {
           return <MiniContaCuentas key={e.tipo} estado={e} canWrite={canWrite} onCambio={reload} />;
+        }
+        if (e.tipo === "SMART_SUPPLY_PANEL") {
+          return (
+            <SmartSupplyPanelCuentas key={e.tipo} estado={e} canWrite={canWrite} onCambio={reload} />
+          );
         }
         const con = e.conexion;
         const conectado = !!con && con.estado !== "REVOCADA";

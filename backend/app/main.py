@@ -46,6 +46,7 @@ from .api.v1 import (
     sat,
     tickets,
     series,
+    smart_supply,
     sucursales,
 )
 
@@ -164,6 +165,7 @@ app.include_router(oc_recibidas.router, prefix="/api/v1")
 app.include_router(tickets.router, prefix="/api/v1")
 app.include_router(conexiones.router, prefix="/api/v1")
 app.include_router(mini_conta.router, prefix="/api/v1")  # lectura de ventas (clave MINI_CONTA)
+app.include_router(smart_supply.router, prefix="/api/v1")  # panel de Smart Supply (clave por cuenta, solo lectura)
 app.include_router(facturas.router, prefix="/api/v1")
 app.include_router(sae.router, prefix="/api/v1")  # lectura en vivo de Aspel
 app.include_router(sae.router_fuentes, prefix="/api/v1")  # SAE 9 y fuentes por tenant

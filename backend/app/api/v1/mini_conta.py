@@ -50,11 +50,11 @@ from ...models import (
     Sucursal,
     Tenant,
 )
-from ...services.fecha_entrega import fecha_entrega_de_notas
 from ...services.mini_conta import (
     Alcance,
     alcance_de,
     clave_nombre,
+    fechas_de_entrega as _entregas,
     mapa,
     series_factura,
     series_por_plaza,
@@ -219,32 +219,6 @@ def _rango(desde: date, hasta: date) -> None:
         raise HTTPException(
             status_code=422, detail=f"El rango no puede pasar de {_MAX_DIAS} días"
         )
-
-
-def _entregas(db: Session, facturas: dict) -> dict:
-    """{factura_id: (fecha de entrega, de dónde salió)} para {factura_id: (notas,
-    fecha de la factura)}: la primera entrega de sus remisiones, si no la que
-    dicen sus notas, si no la de la factura. Una consulta para todas."""
-    por_remision: dict = {}
-    if facturas:
-        por_remision = dict(
-            db.query(Remision.factura_id, sa.func.min(Remision.fecha_entrega))
-            .filter(
-                Remision.factura_id.in_(list(facturas)),
-                Remision.deleted_at.is_(None),
-                Remision.fecha_entrega.isnot(None),
-            )
-            .group_by(Remision.factura_id)
-            .all()
-        )
-    out = {}
-    for fid, (notas, fecha_factura) in facturas.items():
-        if por_remision.get(fid) is not None:
-            out[fid] = (por_remision[fid], "remision")
-        else:
-            de_notas = fecha_entrega_de_notas(notas, fecha_factura)
-            out[fid] = (de_notas, "notas") if de_notas is not None else (fecha_factura, "factura")
-    return out
 
 
 def _requiere(bandera: bool, que: str) -> None:

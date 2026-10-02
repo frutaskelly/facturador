@@ -8,7 +8,8 @@ una vez conectado, eso es lo único que alguien va a venir a mirar.
 Smart Supply tiene UNA clave por empresa. Mini Conta tiene una por CUENTA (cada
 cuenta de Mini Conta es un cliente aparte), con nombre y alcance: qué series,
 qué clientes y si comparte el catálogo. Generar o revocar la de una cuenta no
-toca a las demás.
+toca a las demás. El panel de Smart Supply (SMART_SUPPLY_PANEL) también va por
+cuenta —una por bodega/plaza— y solo lee (services/smart_supply.py).
 
 Gestionar conexiones es cosa del dueño o de quien administre la empresa, así que
 se reusa `membership:gestionar` — el mismo permiso que abre Empresa y Correo.
@@ -36,7 +37,7 @@ from ...models import (
     Sucursal,
     Tenant,
 )
-from ...models.conexion import generar_clave, hash_clave, pista_de
+from ...models.conexion import POR_CUENTA, generar_clave, hash_clave, pista_de
 from ...schemas.conexion import (
     ActividadConexionOut,
     ClaveNuevaOut,
@@ -49,10 +50,12 @@ from ...schemas.conexion import (
     GrupoUpdate,
     NuevaConexionIn,
     OpcionesMiniContaOut,
+    OpcionesPanelOut,
     PruebaOut,
     SincronizarGruposIn,
 )
 from ...services import cliente_match
+from ...services import smart_supply as panel
 from ...services.mini_conta import Alcance, mapa, validar_alcance
 from ._helpers import get_or_404
 
@@ -72,6 +75,10 @@ CATALOGO = {
         "nombre": "Mini Conta",
         "descripcion": "Lee las ventas facturadas por sucursal",
     },
+    "SMART_SUPPLY_PANEL": {
+        "nombre": "Smart Supply · panel",
+        "descripcion": "Lee las OC, lo remisionado y lo facturado de cada bodega",
+    },
 }
 
 # Sin vencimiento (decisión del dueño): una clave que caduca sola se cae de
@@ -80,7 +87,7 @@ _DIAS_PARA_SUGERIR_ROTAR = 365
 
 
 # Tipos con una clave por cuenta (varias vivas a la vez). El resto: una por empresa.
-_POR_CUENTA = {"MINI_CONTA"}
+_POR_CUENTA = set(POR_CUENTA)
 
 
 def _vivas(db: Session, tipo: str) -> list[Conexion]:
@@ -149,9 +156,12 @@ def listar(
     return [_estado(db, tipo) for tipo in CATALOGO]
 
 
-def _nombre_libre(db: Session, nombre: str, excepto=None) -> None:
+def _nombre_libre(db: Session, tipo: str, nombre: str, excepto=None) -> None:
+    """Dos cuentas vivas del mismo tipo no pueden llamarse igual: el nombre es
+    la cuenta y es lo que la pantalla enseña. Entre tipos sí se repite («Kelly
+    Tabasco» en Mini Conta y en el panel es la misma plaza)."""
     q = db.query(Conexion).filter(
-        Conexion.tipo == "MINI_CONTA",
+        Conexion.tipo == tipo,
         Conexion.estado != "REVOCADA",
         func.lower(Conexion.nombre) == nombre.strip().lower(),
     )
@@ -189,6 +199,21 @@ def _clave_nueva(db: Session, ctx: AuthContext, tipo: str, nombre: str,
     )
 
 
+def _alcance_validado(db: Session, ctx: AuthContext, tipo: str, mc, pn) -> dict:
+    """El alcance de una conexión por cuenta, validado según su tipo. Cada tipo
+    tiene su forma: mandar la del otro es un 422, no un alcance vacío."""
+    if tipo == "SMART_SUPPLY_PANEL":
+        if pn is None:
+            raise HTTPException(status_code=422,
+                                detail="Di qué comparte la cuenta (alcance_panel)")
+        return panel.validar_alcance(
+            db, ctx.tenant_id, plaza=pn.plaza, series=pn.series,
+            series_remision=pn.series_remision, perfiles=pn.perfiles, **pn.datos())
+    if mc is None:
+        raise HTTPException(status_code=422, detail="Di qué comparte la cuenta (alcance)")
+    return validar_alcance(db, ctx.tenant_id, mc.series, mc.clientes, **mc.datos())
+
+
 def _revocar(con: Conexion) -> None:
     con.estado = "REVOCADA"
     con.revocada_at = datetime.now(timezone.utc)
@@ -207,8 +232,9 @@ def generar(
     anterior deja de servir» tienen que ser el mismo gesto, o quedarían dos claves
     buenas y nadie sabría cuál está usando el bot—.
 
-    Mini Conta: cada llamada es una cuenta NUEVA (nombre + alcance) y no toca a
-    las demás. Para cambiar la clave de una cuenta existente: `/{id}/regenerar`.
+    Mini Conta y el panel de Smart Supply: cada llamada es una cuenta NUEVA
+    (nombre + alcance) y no toca a las demás. Para cambiar la clave de una
+    cuenta existente: `/{id}/regenerar`.
     """
     tipo = tipo.upper()
     if tipo not in CATALOGO:
@@ -221,9 +247,8 @@ def generar(
                 detail="Di de qué cuenta es la clave y qué comparte (nombre y alcance)",
             )
         nombre = payload.nombre.strip()
-        _nombre_libre(db, nombre)
-        a = payload.alcance
-        alcance = validar_alcance(db, ctx.tenant_id, a.series, a.clientes, **a.datos())
+        _nombre_libre(db, tipo, nombre)
+        alcance = _alcance_validado(db, ctx, tipo, payload.alcance, payload.alcance_panel)
         return _clave_nueva(db, ctx, tipo, nombre, alcance)
 
     anterior = _viva(db, tipo)
@@ -257,22 +282,36 @@ def editar(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_GESTIONAR)),
 ):
-    """Cambia el nombre o lo que comparte una conexión de Mini Conta, sin tocar
-    su clave: Mini Conta ve el cambio la próxima vez que lea."""
+    """Cambia el nombre o lo que comparte una conexión por cuenta (Mini Conta o
+    el panel de Smart Supply), sin tocar su clave: el otro sistema ve el cambio
+    la próxima vez que lea."""
     con = get_or_404(db, Conexion, conexion_id, soft=False)
     if con.tipo not in _POR_CUENTA:
         raise HTTPException(status_code=422, detail="Esta conexión no tiene alcance que editar")
     if con.estado == "REVOCADA":
         raise HTTPException(status_code=409, detail="Esa conexión ya estaba desconectada")
     if payload.nombre is not None:
-        _nombre_libre(db, payload.nombre, excepto=con.id)
+        _nombre_libre(db, con.tipo, payload.nombre, excepto=con.id)
         con.nombre = payload.nombre.strip()
-    if payload.alcance is not None:
-        a = payload.alcance
-        con.alcance = validar_alcance(db, ctx.tenant_id, a.series, a.clientes, **a.datos())
+    nuevo = payload.alcance_panel if con.tipo == "SMART_SUPPLY_PANEL" else payload.alcance
+    if nuevo is not None:
+        con.alcance = _alcance_validado(db, ctx, con.tipo, payload.alcance, payload.alcance_panel)
     db.flush()
     db.refresh(con)
     return con
+
+
+# OJO con el orden: esta ruta va ANTES de /{tipo}/opciones — FastAPI casa en
+# orden de declaración y la genérica contesta con la forma de Mini Conta.
+@router.get("/SMART_SUPPLY_PANEL/opciones", response_model=OpcionesPanelOut)
+def opciones_panel(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_GESTIONAR)),
+):
+    """Lo que se le puede compartir a una cuenta del panel de Smart Supply: cada
+    plaza con sus series de factura y de remisión y los perfiles por los que
+    entran sus órdenes."""
+    return OpcionesPanelOut(**panel.opciones(db, ctx.tenant_id))
 
 
 @router.get("/{tipo}/opciones", response_model=OpcionesMiniContaOut)
@@ -283,7 +322,7 @@ def opciones(
 ):
     """Lo que se le puede compartir a una cuenta de Mini Conta: plazas con sus
     series y los clientes de cada serie."""
-    if tipo.upper() not in _POR_CUENTA:
+    if tipo.upper() != "MINI_CONTA":
         raise HTTPException(status_code=404, detail="Esta conexión no tiene alcance que escoger")
     m = mapa(db, ctx.tenant_id, Alcance.todo())
     return OpcionesMiniContaOut(
@@ -354,9 +393,13 @@ def probar(
 
     t = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one_or_none()
     if ctx.conexion_id is not None:
+        mensaje = "Clave válida. Las órdenes que mandes aparecerán en la bandeja."
+        if "abasto:leer" in ctx.permissions:
+            # El panel de Smart Supply solo lee: no hay bandeja que prometerle.
+            mensaje = "Clave válida. Smart Supply puede leer lo que se le compartió de su cuenta."
         return PruebaOut(
             ok=True,
-            mensaje="Clave válida. Las órdenes que mandes aparecerán en la bandeja.",
+            mensaje=mensaje,
             tenant=t.legal_name if t else None,
             permisos=sorted(ctx.permissions),
         )

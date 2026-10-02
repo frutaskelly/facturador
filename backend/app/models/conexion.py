@@ -17,6 +17,11 @@ Smart Supply tiene UNA clave por empresa. Mini Conta tiene una por CUENTA (cada
 cuenta de Mini Conta es un cliente aparte), y cada una lleva su `alcance`: qué
 series y qué clientes puede leer y si comparte el catálogo. NULL = la clave de
 antes de 0092, sin límite, hasta que el dueño le ponga uno.
+
+El panel de Smart Supply (`SMART_SUPPLY_PANEL`, 0098) también va por CUENTA:
+cada bodega/plaza de Smart Supply lee con su clave solo su facturado, su
+remisionado y sus OC (ver services/smart_supply.py). Su `alcance` tiene otra
+forma que el de Mini Conta y, sin él, no lee nada.
 """
 import hashlib
 import secrets
@@ -31,7 +36,10 @@ from .base import tenant_fk, uuid_pk
 # permite distinguirla de un JWT sin intentar verificarla.
 CLAVE_PREFIJO = "fi_ss_"
 
-TIPOS = ("SMART_SUPPLY", "MINI_CONTA")
+TIPOS = ("SMART_SUPPLY", "MINI_CONTA", "SMART_SUPPLY_PANEL")
+# Tipos con una clave por cuenta (varias vivas a la vez, cada una con su
+# alcance). El resto: una viva por empresa.
+POR_CUENTA = ("MINI_CONTA", "SMART_SUPPLY_PANEL")
 ESTADOS = ("PENDIENTE", "ACTIVA", "REVOCADA")
 
 
@@ -66,3 +74,14 @@ class Conexion(Base):
     ultimo_uso_at = Column(DateTime(timezone=True))
     revocada_at = Column(DateTime(timezone=True))
     alcance = Column(JSONB)
+
+    # `alcance` es un JSONB cuya forma depende del tipo. La respuesta lo separa
+    # en dos campos para que ninguna pantalla lea el de un tipo con la forma
+    # del otro.
+    @property
+    def alcance_mini_conta(self):
+        return self.alcance if self.tipo == "MINI_CONTA" else None
+
+    @property
+    def alcance_panel(self):
+        return self.alcance if self.tipo == "SMART_SUPPLY_PANEL" else None
