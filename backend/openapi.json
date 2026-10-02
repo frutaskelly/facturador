@@ -1122,6 +1122,52 @@
     "title": "AltaSaeReporteIn",
     "type": "object"
    },
+   "AplicarIn": {
+    "description": "Qué grupos aprobados unir. Sin lista = todos los aprobados vigentes.",
+    "properties": {
+     "grupos": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 500,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Grupos"
+     }
+    },
+    "title": "AplicarIn",
+    "type": "object"
+   },
+   "AplicarOut": {
+    "properties": {
+     "aplicados": {
+      "items": {
+       "$ref": "#/components/schemas/GrupoAplicado"
+      },
+      "title": "Aplicados",
+      "type": "array"
+     },
+     "omitidos": {
+      "items": {
+       "$ref": "#/components/schemas/GrupoOmitido"
+      },
+      "title": "Omitidos",
+      "type": "array"
+     }
+    },
+    "required": [
+     "aplicados",
+     "omitidos"
+    ],
+    "title": "AplicarOut",
+    "type": "object"
+   },
    "ArticuloSaeEmpresaOut": {
     "description": "Un artículo en UNA empresa de SAE, leído en vivo de INVE.\n\n`unidad` es el UNI_MED crudo de SAE (KG, PZ, CJ…) y `unidad_canonica` la\nmisma en el idioma del Facturador (KILO, PIEZA, CAJA…), para compararla\ncontra la presentación sin que la pantalla traduzca. Las descripciones del\nesquema y de las claves SAT son informativas: se leen, no se guardan.",
     "properties": {
@@ -8528,6 +8574,29 @@
     "title": "FacturaUpdate",
     "type": "object"
    },
+   "GrupoAplicado": {
+    "properties": {
+     "grupo": {
+      "title": "Grupo",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "resumen": {
+      "title": "Resumen",
+      "type": "object"
+     }
+    },
+    "required": [
+     "grupo",
+     "nombre",
+     "resumen"
+    ],
+    "title": "GrupoAplicado",
+    "type": "object"
+   },
    "GrupoIn": {
     "description": "Un grupo tal como lo reporta el bot desde su config.",
     "properties": {
@@ -8587,6 +8656,29 @@
      "jid"
     ],
     "title": "GrupoIn",
+    "type": "object"
+   },
+   "GrupoOmitido": {
+    "properties": {
+     "grupo": {
+      "title": "Grupo",
+      "type": "string"
+     },
+     "motivo": {
+      "title": "Motivo",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     }
+    },
+    "required": [
+     "grupo",
+     "nombre",
+     "motivo"
+    ],
+    "title": "GrupoOmitido",
     "type": "object"
    },
    "GrupoOut": {
@@ -20047,6 +20139,11 @@
     "properties": {
      "aplicados": {
       "title": "Aplicados",
+      "type": "integer"
+     },
+     "exclusivos": {
+      "default": 0,
+      "title": "Exclusivos",
       "type": "integer"
      },
      "grupos": {
@@ -44395,6 +44492,71 @@
      }
     ],
     "summary": "Listar",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/revision-catalogo/aplicar": {
+   "post": {
+    "description": "Une los grupos aprobados. Cada uno se vuelve a calcular con los datos de\nahora: si cambió desde que se aprobó, o hoy tiene un bloqueo, se omite y se\ndice por qué. Cada grupo va en su propio savepoint: uno que falla no tumba a\nlos demás.",
+    "operationId": "aplicar_api_v1_revision_catalogo_aplicar_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AplicarIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AplicarOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Aplicar",
     "tags": [
      "productos"
     ]

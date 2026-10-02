@@ -257,9 +257,18 @@ def firma(miembros: list[ProductoRev]) -> str:
     return "|".join(f"{p.sku}:{','.join(sorted(p.unidades()))}" for p in sorted(miembros, key=lambda p: p.sku))
 
 
+def es_exclusivo(p: ProductoRev) -> bool:
+    """Clave de formato viejo (CEBO-FRUT-109, ZANA-FRUT-508) en cualquiera de sus
+    unidades: es el artículo de Balles y Jubran en SAE. Se queda como está y no
+    se une con nada (dueño, 2-oct-2026)."""
+    return any(es_clave_vieja(c) for c in p.unidades().values())
+
+
 def armar_grupos(productos: list[ProductoRev], cat: Catalogo) -> list[dict]:
     """Todos los grupos del catálogo: productos con la misma raíz de nombre y, aparte,
-    los empaques que se venden por kilo sin tener con quién unirse."""
+    los empaques que se venden por kilo sin tener con quién unirse. Los exclusivos
+    de Balles y Jubran (`es_exclusivo`) no entran a ningún grupo."""
+    productos = [p for p in productos if not es_exclusivo(p)]
     por_raiz: dict[str, list[ProductoRev]] = {}
     for p in productos:
         raiz, _ = raiz_y_unidad(p.nombre, p.unidad_base)
