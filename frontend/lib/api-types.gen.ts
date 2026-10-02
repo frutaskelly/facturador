@@ -1741,8 +1741,10 @@ export interface paths {
          *
          *     Cada partida se liga a su producto por la CLAVE SAE (la del producto o la
          *     de una presentación) y lleva la unidad SAT de esa presentación; el código
-         *     del cliente queda de respaldo. Un reenvío no le cambia el producto a una
-         *     partida ya ligada, salvo que lo diga la remisión ligada. La regla vive en
+         *     del cliente queda de respaldo. Si varios productos traen la clave, gana
+         *     el que se llama como el artículo del SAE. Un reenvío no le cambia el
+         *     producto a una partida ya ligada, salvo que lo diga la remisión ligada o
+         *     que el SAE la llame como otro gemelo. La regla vive en
          *     services/espejo_productos.
          *
          *     Un timbrado FALLIDO en SAE (documento emitido, CFDI02.UUID vacío) llega
@@ -10023,8 +10025,9 @@ export interface components {
          * @description Una partida tal como SAE la facturó. `clave` es la CVE_ART de SAE: se
          *     liga al producto que trae esa clave (en el producto o en una presentación;
          *     desde el 2-oct-2026, services/espejo_productos) y, si ninguno la trae, al
-         *     del código del cliente. Si no cruza, la línea se guarda igual con su
-         *     descripción — el espejo no pierde renglones.
+         *     del código del cliente. La `descripcion` también cuenta: si varios
+         *     productos traen la clave, gana el que se llama así. Si no cruza, la línea
+         *     se guarda igual con su descripción — el espejo no pierde renglones.
          */
         LineaFacturaEspejoIn: {
             /** Cantidad */
