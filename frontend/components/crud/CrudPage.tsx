@@ -9,7 +9,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { MultiSearchSelect, SearchSelect } from "@/components/ui/SearchBox";
-import { Modal } from "@/components/ui/Modal";
+import { Modal, type ModalSize } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
@@ -164,10 +164,10 @@ export type CrudConfig<T> = {
   /** Advertencia opcional al eliminar (impacto + alternativa). Si devuelve texto,
    * se muestra en el diálogo de confirmación antes de borrar. */
   deleteWarning?: (row: T) => Promise<string | null>;
-  /** Modal de alta/edición más ancho — para formularios con muchos campos o
-   * selects con etiquetas largas (p. ej. catálogos SAT) que se truncan. El
-   * modal también se puede agrandar a mano desde su esquina inferior derecha. */
-  wide?: boolean;
+  /** Tamaño del modal de alta/edición (por defecto `lg`: formulario a dos
+   * columnas). El modal también se puede agrandar a mano desde su esquina
+   * inferior derecha. */
+  size?: ModalSize;
   /** Contenido expandible por fila (clic en el renglón lo abre/cierra): p. ej.
    * los productos de una categoría o de un esquema, con edición inline. */
   renderExpanded?: (row: T) => ReactNode;
@@ -513,7 +513,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
         open={form !== null}
         onClose={() => setForm(null)}
         title={editingId ? `Editar ${lower}` : config.newLabel ?? `Nuevo ${lower}`}
-        wide={config.wide}
+        size={config.size ?? "lg"}
         footer={
           <>
             <Button variant="secondary" onClick={() => setForm(null)}>
@@ -872,7 +872,7 @@ function CrearInlineModal({
       open
       onClose={onClose}
       title={spec.title}
-      resizable={false}
+      size="sm"
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={busy}>
@@ -957,7 +957,8 @@ function SugerenciasModal<T extends { id: string }>({
       open
       onClose={onClose}
       title={spec.title}
-      wide
+      size="md"
+      description={spec.hint}
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={busy}>
@@ -969,7 +970,6 @@ function SugerenciasModal<T extends { id: string }>({
         </>
       }
     >
-      {spec.hint && <p className="mb-3 text-sm text-muted">{spec.hint}</p>}
       {disponibles.length === 0 ? (
         <p className="text-sm text-muted">Ya tienes todas las sugerencias dadas de alta.</p>
       ) : (

@@ -880,9 +880,10 @@ export function FacturaDirectaForm({ ambiente, editar, onClose, onSaved }: Props
       </div>
 
       <Modal open={pasteOpen} onClose={() => { if (!procesando) cerrarPaste(); }} title="Pegar conceptos desde Excel"
+        size="md"
         footer={<>
           <Button variant="secondary" onClick={cerrarPaste} disabled={procesando}>Cancelar</Button>
-          <Button onClick={procesarPaste} disabled={procesando}>{procesando ? <>Procesando<LoadingDots /></> : "Procesar"}</Button>
+          <Button data-modal-primary onClick={procesarPaste} disabled={procesando}>{procesando ? <>Procesando<LoadingDots /></> : "Procesar"}</Button>
         </>}>
         <p className="mb-2 text-sm text-muted">Pega las columnas desde Excel (una fila por línea). La <strong>IA detecta</strong> qué columna es <strong>producto</strong>, <strong>cantidad</strong>, <strong>precio</strong> y <strong>presentación</strong> aunque vengan en cualquier orden, e <strong>ignora el encabezado</strong>. Las líneas entran a la tabla y una columna <strong>Match IA</strong> aparece para elegir el producto del catálogo o crearlo, ahí mismo.</p>
         <Textarea rows={8} value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder={"zanahoria\t10\tKILO\njitomate\t5\t12.50"} />
@@ -897,6 +898,7 @@ export function FacturaDirectaForm({ ambiente, editar, onClose, onSaved }: Props
       />
 
       <Modal open={choiceOpen} onClose={() => setChoiceOpen(false)} title={editar ? "Guardar cambios" : "Guardar factura"}
+        size="md"
         footer={
           <>
             <Button variant="secondary" onClick={() => setChoiceOpen(false)} disabled={busy}>Cancelar</Button>
@@ -916,6 +918,7 @@ export function FacturaDirectaForm({ ambiente, editar, onClose, onSaved }: Props
 
       {/* Sobregiro: sin existencia suficiente para timbrar la directa */}
       <Modal open={sobregiroDe !== null} onClose={declinarSobregiro} title="Existencia insuficiente"
+        size="sm"
         footer={
           <>
             <Button variant="secondary" onClick={declinarSobregiro} disabled={timbrando}>Dejar como borrador</Button>

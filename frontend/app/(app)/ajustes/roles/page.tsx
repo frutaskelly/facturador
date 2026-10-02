@@ -348,7 +348,7 @@ export default function RolesPage() {
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        wide
+        size="lg"
         title={
           editing ? (readOnly ? `Rol: ${editing.nombre}` : `Editar rol: ${editing.nombre}`) : "Nuevo rol"
         }
@@ -358,7 +358,7 @@ export default function RolesPage() {
               {readOnly ? "Cerrar" : "Cancelar"}
             </Button>
             {!readOnly && (
-              <Button onClick={save} disabled={saving || loadingDetail}>
+              <Button data-modal-primary onClick={save} disabled={saving || loadingDetail}>
                 {saving ? "Guardando…" : "Guardar"}
               </Button>
             )}

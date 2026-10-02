@@ -214,6 +214,7 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
         open={form !== null}
         onClose={() => setForm(null)}
         title={form?.esNuevo ? "Agregar producto al catálogo del cliente" : "Editar código/nombre del cliente"}
+        size="md"
         resizable={false}
         footer={
           <>

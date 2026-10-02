@@ -311,6 +311,7 @@ export default function SeriesPage() {
         open={form !== null}
         onClose={() => setForm(null)}
         title={isEdit ? "Editar serie" : "Nueva serie"}
+        size="lg"
         footer={
           <>
             <Button variant="secondary" onClick={() => setForm(null)}>Cancelar</Button>

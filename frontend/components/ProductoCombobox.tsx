@@ -7,6 +7,7 @@ import { Plus, Sparkles } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import type { Candidato, MatchResult } from "@/lib/types";
 import { CrearProductoModal } from "@/components/CrearProductoModal";
+import { FloatingPanel } from "@/components/ui/FloatingPanel";
 
 const BASE =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
@@ -84,6 +85,9 @@ export function ProductoCombobox({
   const [hi, setHi] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // La lista va en un portal (FloatingPanel) para no cortarse dentro de un
+  // Modal: ya no vive dentro de `boxRef`, así que el clic fuera la revisa aparte.
+  const panelRef = useRef<HTMLDivElement>(null);
   // Alta rápida de producto desde el buscador ("+ Crear Producto Nuevo").
   // Se delega en el modal compartido: trae el candado de duplicados, la
   // sugerencia de clave SAT y el precio a la lista del cliente.
@@ -94,6 +98,10 @@ export function ProductoCombobox({
   // Mientras no se teclee, la lista son las sugerencias que ya trae la línea.
   const mostrandoSug = !tecleado && !!sugerencias?.length;
   const lista = mostrandoSug ? sugerencias! : cands;
+  // La lista se ve (y el teclado la maneja) solo con sugerencias o 2+ letras.
+  const visible = open && (mostrandoSug || q.trim().length >= 2);
+  // Con sugerencias a la vista no hay búsqueda del catálogo en curso.
+  const buscando = loading && !mostrandoSug;
   useEffect(() => setHi(0), [cands, sugerencias]);
   // Enfoca cuando el flujo encadenado apunta a esta caja (no solo al montar).
   useEffect(() => {
@@ -104,10 +112,17 @@ export function ProductoCombobox({
   }, [autoFocus]);
 
   useEffect(() => {
-    if (!open || mostrandoSug) return;
+    // Cada salida temprana baja `loading`: si una búsqueda quedó cancelada a
+    // media espera (el cleanup borra su timer), «Buscando…» no debe quedarse
+    // pegado ni bloquear el Enter.
+    if (!open || mostrandoSug) {
+      setLoading(false);
+      return;
+    }
     const t = q.trim();
     if (t.length < 2) {
       setCands([]);
+      setLoading(false);
       return;
     }
     let active = true;
@@ -134,7 +149,9 @@ export function ProductoCombobox({
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (!boxRef.current || boxRef.current.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -191,6 +208,10 @@ export function ProductoCombobox({
   function abrirCrear() {
     const texto = (aliasTexto ?? q).trim();
     setOpen(false);
+    // Suelta el foco antes de abrir el alta: el Modal devuelve el foco a quien
+    // lo abrió, y si fuera esta caja, al cerrar reabriría la lista de
+    // sugerencias (un Enter cambiaría el producto recién creado por otro).
+    inputRef.current?.blur();
     if (onCrear) { onCrear(texto); return; }
     setCreateNombre(texto);
     setCreateOpen(true);
@@ -202,6 +223,9 @@ export function ProductoCombobox({
         ref={inputRef}
         className={BASE}
         aria-label="Buscar producto"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={visible}
         value={q}
         placeholder={placeholder}
         autoFocus={autoFocus}
@@ -212,87 +236,118 @@ export function ProductoCombobox({
           onSelect(null, e.target.value); // limpia la selección mientras escribe
         }}
         onFocus={(e) => { setOpen(true); if (sugerencias?.length) e.currentTarget.select(); }}
+        // Tras elegir con el mouse el foco se queda en la caja (la lista no se
+        // lo roba), así que `onFocus` no vuelve a dispararse: el clic reabre.
+        onClick={() => setOpen(true)}
         onPaste={onPaste}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHi((h) => Math.min(h + 1, Math.max(lista.length - 1, 0))); }
           else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
-          else if (e.key === "Enter") { if (lista[hi]) { e.preventDefault(); pick(lista[hi]); } }
-          else if (e.key === "Escape") setOpen(false);
+          // Enter elige solo con la lista a la vista; cerrada, la tecla sigue su
+          // camino (en un Modal, a su acción principal). Mientras dice
+          // «Buscando…», `cands` todavía son los de la búsqueda anterior: Enter
+          // no elige (escogería algo que no se ve y aprendería un alias
+          // equivocado), pero tampoco se le pasa al Modal.
+          else if (e.key === "Enter") {
+            if (visible) {
+              e.preventDefault();
+              if (!buscando && lista[hi]) pick(lista[hi]);
+            }
+          }
+          else if (e.key === "Escape") {
+            // Con la lista abierta, Escape solo la cierra (no le llega a quien
+            // escuche Escape más arriba).
+            if (visible) e.stopPropagation();
+            setOpen(false);
+          }
+          // La lista ya no sigue a la caja en el orden de tabulado (vive en un
+          // portal): al salir con Tab se cierra en vez de quedarse flotando.
+          else if (e.key === "Tab") setOpen(false);
         }}
       />
-      {open && (mostrandoSug || q.trim().length >= 2) && (
-        <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-border bg-surface shadow-lg">
-          {loading && <div className="px-3 py-2 text-sm text-muted">Buscando…</div>}
-          {!loading && mostrandoSug && (
-            <div className="px-3 pt-2 text-[11px] uppercase tracking-wide text-muted">
-              Sugerencias · escribe para buscar en todo el catálogo
-            </div>
-          )}
-          {!loading && lista.length === 0 && (
-            <div className="px-3 py-2 text-sm text-muted">
-              <div>Sin coincidencias.</div>
-              {!iaTried && (
-                <button
-                  type="button"
-                  onClick={buscarIa}
-                  className="mt-1 inline-flex items-center gap-1 text-accent hover:underline"
-                >
-                  <Sparkles size={14} /> Buscar con IA
-                </button>
-              )}
-            </div>
-          )}
-          {!loading &&
-            lista.map((c, i) => (
+      <FloatingPanel
+        ref={panelRef}
+        anchorRef={inputRef}
+        open={visible}
+        maxHeight={288}
+        role="listbox"
+        aria-label="Productos"
+        // El input no pierde el foco al hacer clic en la lista.
+        onMouseDown={(e) => e.preventDefault()}
+        className="overflow-auto rounded-lg border border-border bg-surface shadow-lg"
+      >
+        {buscando && <div className="px-3 py-2 text-sm text-muted">Buscando…</div>}
+        {!buscando && mostrandoSug && (
+          <div className="px-3 pt-2 text-[11px] uppercase tracking-wide text-muted">
+            Sugerencias · escribe para buscar en todo el catálogo
+          </div>
+        )}
+        {!buscando && lista.length === 0 && (
+          <div className="px-3 py-2 text-sm text-muted">
+            <div>Sin coincidencias.</div>
+            {!iaTried && (
               <button
-                key={c.producto_id}
                 type="button"
-                onClick={() => pick(c)}
-                onMouseEnter={() => setHi(i)}
-                className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${i === hi ? "bg-accent/10" : "hover:bg-surface-2"}`}
+                onClick={buscarIa}
+                className="mt-1 inline-flex items-center gap-1 text-accent hover:underline"
               >
-                <span>
-                  <span className="font-medium">{c.nombre}</span>
-                  <span className="ml-2 text-xs text-muted">{c.sku}</span>
-                </span>
-                <span className="flex shrink-0 items-center gap-1.5">
-                  {c.origen !== "exacto" && (
-                    <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">
-                      {c.origen === "ia" ? "IA" : c.origen === "alias" ? "alias" : `${c.score}%`}
-                    </span>
-                  )}
-                  {claves && (claves.get(c.producto_id) ? (
-                    <span
-                      className="rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success"
-                      title="Clave de este cliente en SAE"
-                    >
-                      {claves.get(c.producto_id)}
-                    </span>
-                  ) : (
-                    <span className="text-[11px] text-warning" title="El cliente no tiene clave de este producto en SAE: el export se seguiría deteniendo">
-                      sin clave
-                    </span>
-                  ))}
-                  {conPrecio && (conPrecio.has(c.producto_id) ? (
-                    <span className="text-xs font-semibold text-success" title="Con precio en el catálogo del cliente">$</span>
-                  ) : (
-                    <span className="text-[11px] text-warning" title="Sin precio en este contexto: habrá que capturarlo">sin $</span>
-                  ))}
-                </span>
+                <Sparkles size={14} /> Buscar con IA
               </button>
-            ))}
-          {!loading && (
+            )}
+          </div>
+        )}
+        {!buscando &&
+          lista.map((c, i) => (
             <button
+              key={c.producto_id}
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={abrirCrear}
-              className="flex w-full items-center gap-1.5 border-t border-border px-3 py-2 text-left text-sm font-medium text-accent hover:bg-accent/5"
+              role="option"
+              aria-selected={i === hi}
+              onClick={() => pick(c)}
+              onMouseEnter={() => setHi(i)}
+              className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${i === hi ? "bg-accent/10" : "hover:bg-surface-2"}`}
             >
-              <Plus size={14} /> Crear Producto Nuevo{q.trim() ? ` «${q.trim()}»` : ""}
+              <span>
+                <span className="font-medium">{c.nombre}</span>
+                <span className="ml-2 text-xs text-muted">{c.sku}</span>
+              </span>
+              <span className="flex shrink-0 items-center gap-1.5">
+                {c.origen !== "exacto" && (
+                  <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">
+                    {c.origen === "ia" ? "IA" : c.origen === "alias" ? "alias" : `${c.score}%`}
+                  </span>
+                )}
+                {claves && (claves.get(c.producto_id) ? (
+                  <span
+                    className="rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success"
+                    title="Clave de este cliente en SAE"
+                  >
+                    {claves.get(c.producto_id)}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-warning" title="El cliente no tiene clave de este producto en SAE: el export se seguiría deteniendo">
+                    sin clave
+                  </span>
+                ))}
+                {conPrecio && (conPrecio.has(c.producto_id) ? (
+                  <span className="text-xs font-semibold text-success" title="Con precio en el catálogo del cliente">$</span>
+                ) : (
+                  <span className="text-[11px] text-warning" title="Sin precio en este contexto: habrá que capturarlo">sin $</span>
+                ))}
+              </span>
             </button>
-          )}
-        </div>
-      )}
+          ))}
+        {!buscando && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={abrirCrear}
+            className="flex w-full items-center gap-1.5 border-t border-border px-3 py-2 text-left text-sm font-medium text-accent hover:bg-accent/5"
+          >
+            <Plus size={14} /> Crear Producto Nuevo{q.trim() ? ` «${q.trim()}»` : ""}
+          </button>
+        )}
+      </FloatingPanel>
 
       <CrearProductoModal
         open={createOpen}

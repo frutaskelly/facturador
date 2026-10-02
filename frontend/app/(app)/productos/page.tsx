@@ -498,10 +498,11 @@ export default function ProductosPage() {
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         title="Nuevo producto"
+        description="Busca primero para evitar duplicados. Si no existe, créalo."
+        size="md"
         footer={<Button variant="secondary" onClick={() => setPickerOpen(false)}>Cancelar</Button>}
       >
         <div className="space-y-3">
-          <p className="text-sm text-muted">Busca primero para evitar duplicados. Si no existe, créalo.</p>
           <ProductoCombobox
             autoFocus
             placeholder="Buscar producto por nombre o SKU…"
@@ -536,7 +537,7 @@ export default function ProductosPage() {
         title={editingId ? "Editar producto" : "Nuevo producto"}
         // Ancho: el vocabulario de un producto se lee agrupado por cliente y en
         // el modal angosto el texto se partía en vertical, una letra por renglón.
-        wide
+        size="lg"
         footer={
           <>
             <Button variant="secondary" onClick={() => setForm(null)}>

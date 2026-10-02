@@ -22,7 +22,7 @@ import { DataTable, type Column, type RowAction } from "@/components/ui/DataTabl
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Checkbox, Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
-import { Modal } from "@/components/ui/Modal";
+import { Modal, type ModalSize } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SearchBox, SearchSelect, type SearchOption } from "@/components/ui/SearchBox";
 import { ProductoCombobox } from "@/components/ProductoCombobox";
@@ -67,6 +67,15 @@ const ONBOARDING_PASOS = [
   { titulo: "Primer cliente con RFC válido", detalle: "Valida el RFC contra el padrón del SAT.", completo: false },
 ];
 
+// Los cuatro tamaños del Modal: para qué sirve cada uno (se elige por lo que
+// lleva adentro, no por gusto).
+const MODAL_SIZES: { size: ModalSize; uso: string; detalle: string }[] = [
+  { size: "sm", uso: "Confirmar o avisar", detalle: "Sí/no, «listo» o uno o dos campos. Ancho 28rem, sin esquina para agrandar." },
+  { size: "md", uso: "Capturar o buscar (por defecto)", detalle: "Formulario de una columna, buscador, enviar por correo. Ancho 36rem." },
+  { size: "lg", uso: "Formularios grandes", detalle: "Dos columnas o una tabla chica de partidas. Ancho 52rem." },
+  { size: "xl", uso: "Tablas grandes", detalle: "Precios de una lista, importar, generar factura. Alto fijo (85vh): la tabla no brinca al filtrar y solo hace scroll el cuerpo." },
+];
+
 const UNIDADES_SAT: SearchOption[] = [
   { value: "KGM", label: "Kilogramo", hint: "KGM" },
   { value: "H87", label: "Pieza", hint: "H87" },
@@ -96,7 +105,7 @@ export default function SistemaDisenoPage() {
   const toast = useToast();
   const [sw, setSw] = useState(true);
   const [chk, setChk] = useState(true);
-  const [modal, setModal] = useState(false);
+  const [modal, setModal] = useState<ModalSize | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [prodSel, setProdSel] = useState<string | null>(null);
@@ -279,13 +288,28 @@ export default function SistemaDisenoPage() {
       {/* Overlays */}
       <Card
         title="Overlays"
-        subtitle="Modal, ConfirmDialog — el Modal se puede agrandar/achicar a mano desde su esquina inferior derecha (líneas diagonales), hacia abajo y hacia la derecha"
+        subtitle="Modal (4 tamaños: sm · md · lg · xl), ConfirmDialog — se cierra solo con Cancelar o la X; Enter en una caja de texto ejecuta la acción marcada con data-modal-primary; la esquina para agrandar (líneas diagonales) está en md, lg y xl"
       >
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => setModal(true)}>Abrir Modal</Button>
-          <Button variant="danger" onClick={() => setConfirm(true)}>
-            <Trash2 size={16} /> Abrir Confirm
-          </Button>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {MODAL_SIZES.map((m) => (
+              <Button key={m.size} variant="secondary" onClick={() => setModal(m.size)}>
+                Modal {m.size}
+              </Button>
+            ))}
+            <Button variant="danger" onClick={() => setConfirm(true)}>
+              <Trash2 size={16} /> Abrir Confirm
+            </Button>
+          </div>
+          <ul className="space-y-1 text-sm">
+            {MODAL_SIZES.map((m) => (
+              <li key={m.size}>
+                <code className="rounded bg-surface-2 px-1">size=&quot;{m.size}&quot;</code>{" "}
+                <span className="font-medium">{m.uso}</span>
+                <span className="text-muted"> — {m.detalle}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </Card>
 
@@ -486,20 +510,37 @@ export default function SistemaDisenoPage() {
       </Card>
 
       <Modal
-        open={modal}
-        onClose={() => setModal(false)}
-        title="Modal de ejemplo"
+        open={modal !== null}
+        onClose={() => setModal(null)}
+        title={`Modal de ejemplo · ${modal ?? "md"}`}
+        size={modal ?? "md"}
+        description={MODAL_SIZES.find((m) => m.size === modal)?.uso}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setModal(false)}>Cancelar</Button>
-            <Button onClick={() => setModal(false)}>Aceptar</Button>
+            <Button variant="secondary" onClick={() => setModal(null)}>Cancelar</Button>
+            <Button
+              data-modal-primary
+              onClick={() => {
+                setModal(null);
+                toast.success("Aceptar");
+              }}
+            >
+              Aceptar
+            </Button>
           </>
         }
       >
-        <p className="text-sm text-muted">
-          Cuerpo del modal. Se usa para formularios y confirmaciones detalladas. Cierra con Esc o el fondo.
-          Arrastra la esquina inferior derecha para agrandarlo o achicarlo.
-        </p>
+        <div className="space-y-3 text-sm">
+          <p>{MODAL_SIZES.find((m) => m.size === modal)?.detalle}</p>
+          <Field label="Prueba Enter" hint="Escribe algo y pulsa Enter: ejecuta «Aceptar», el botón marcado con data-modal-primary.">
+            <Input placeholder="Escribe y pulsa Enter…" />
+          </Field>
+          <p className="text-muted">
+            Se cierra solo con Cancelar o la X: ni Esc ni un clic en el fondo lo cierran, para no perder lo
+            capturado.
+            {modal !== "sm" && " Arrastra la esquina inferior derecha para agrandarlo o achicarlo."}
+          </p>
+        </div>
       </Modal>
 
       <ConfirmDialog

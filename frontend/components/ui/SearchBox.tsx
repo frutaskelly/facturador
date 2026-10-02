@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, Search, X } from "lucide-react";
+
+import { FloatingPanel } from "@/components/ui/FloatingPanel";
 
 /** Normaliza para comparar sin acentos ni mayúsculas. */
 const norm = (s: string) => s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -75,6 +77,8 @@ export function SearchSelect({
   const [hi, setHi] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const listaId = useId();
 
   const selected = options.find((o) => o.value === value) ?? null;
   const ql = norm(q.trim());
@@ -85,8 +89,12 @@ export function SearchSelect({
 
   useEffect(() => setHi(0), [q, open]);
   useEffect(() => {
+    // La lista vive en un portal (FloatingPanel), fuera de boxRef: un clic en
+    // ella no cuenta como «fuera».
     function onDoc(e: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (boxRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -111,13 +119,23 @@ export function SearchSelect({
         ref={inputRef}
         type="text"
         role="combobox"
+        aria-autocomplete="list"
         aria-expanded={open}
+        aria-controls={open ? listaId : undefined}
         aria-label={placeholder}
         value={text}
         placeholder={placeholder}
         onFocus={() => {
           setOpen(true);
           setQ("");
+        }}
+        // Tras elegir, la caja sigue enfocada (la lista no le roba el foco) y
+        // onFocus ya no se dispara: el clic es el que la reabre.
+        onClick={() => {
+          if (!open) {
+            setQ("");
+            setOpen(true);
+          }
         }}
         onChange={(e) => {
           setQ(e.target.value);
@@ -137,6 +155,15 @@ export function SearchSelect({
               pick(filtered[hi]);
             }
           } else if (e.key === "Escape") {
+            // Con la lista abierta, Escape cierra solo la lista.
+            if (open) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+            setOpen(false);
+          } else if (e.key === "Tab") {
+            // La lista vive al final de <body>: el Tab ya no pasa por ella. Se
+            // cierra y el foco sigue al siguiente campo (las flechas eligen).
             setOpen(false);
           }
         }}
@@ -156,31 +183,44 @@ export function SearchSelect({
         <ChevronDown size={15} className={`text-muted transition-transform ${open ? "rotate-180" : ""}`} />
       </div>
 
-      {open && (
-        <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-border bg-surface shadow-lg">
-          {filtered.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-muted">{emptyText}</div>
-          ) : (
-            filtered.map((o, i) => (
-              <button
-                key={o.value}
-                type="button"
-                onClick={() => pick(o)}
-                onMouseEnter={() => setHi(i)}
-                className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${
-                  i === hi ? "bg-accent/10" : "hover:bg-surface-2"
-                }`}
-              >
-                <span className="truncate">
-                  <span className="font-medium">{o.label}</span>
-                  {o.hint && <span className="ml-2 text-xs text-muted">{o.hint}</span>}
-                </span>
-                {o.value === value && <Check size={15} className="shrink-0 text-accent" />}
-              </button>
-            ))
-          )}
-        </div>
-      )}
+      {/* En portal: dentro de un Modal (cuerpo con overflow-auto) ya no se corta.
+          mousedown sin default: la caja nunca pierde el foco. Si una opción se
+          lo quedara, al desmontarse la lista el siguiente Tab partiría del final
+          de <body> (la X del Modal) y no del campo de abajo. */}
+      <FloatingPanel
+        ref={panelRef}
+        anchorRef={boxRef}
+        open={open}
+        maxHeight={288}
+        id={listaId}
+        role="listbox"
+        onMouseDown={(e) => e.preventDefault()}
+        className="overflow-auto rounded-lg border border-border bg-surface shadow-lg"
+      >
+        {filtered.length === 0 ? (
+          <div className="px-3 py-2 text-sm text-muted">{emptyText}</div>
+        ) : (
+          filtered.map((o, i) => (
+            <button
+              key={o.value}
+              type="button"
+              role="option"
+              aria-selected={o.value === value}
+              onClick={() => pick(o)}
+              onMouseEnter={() => setHi(i)}
+              className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${
+                i === hi ? "bg-accent/10" : "hover:bg-surface-2"
+              }`}
+            >
+              <span className="truncate">
+                <span className="font-medium">{o.label}</span>
+                {o.hint && <span className="ml-2 text-xs text-muted">{o.hint}</span>}
+              </span>
+              {o.value === value && <Check size={15} className="shrink-0 text-accent" />}
+            </button>
+          ))
+        )}
+      </FloatingPanel>
     </div>
   );
 }
@@ -218,6 +258,8 @@ export function MultiSearchSelect({
   const [hi, setHi] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const listaId = useId();
 
   const ql = norm(q.trim());
   const filtered = options.filter(
@@ -234,8 +276,12 @@ export function MultiSearchSelect({
 
   useEffect(() => setHi(0), [q, open]);
   useEffect(() => {
+    // La lista vive en un portal (FloatingPanel), fuera de boxRef: un clic en
+    // ella no cuenta como «fuera».
     function onDoc(e: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (boxRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -277,7 +323,9 @@ export function MultiSearchSelect({
           ref={inputRef}
           type="text"
           role="combobox"
+          aria-autocomplete="list"
           aria-expanded={open}
+          aria-controls={open ? listaId : undefined}
           aria-label={placeholder}
           value={q}
           placeholder={values.length ? "" : placeholder}
@@ -305,6 +353,15 @@ export function MultiSearchSelect({
             } else if (e.key === "Backspace" && !q && values.length) {
               onChange(values.slice(0, -1));
             } else if (e.key === "Escape") {
+              // Con la lista abierta, Escape cierra solo la lista.
+              if (open) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+              setOpen(false);
+            } else if (e.key === "Tab") {
+              // La lista vive al final de <body>: el Tab ya no pasa por ella. Se
+              // cierra y el foco sigue al siguiente campo (las flechas eligen).
               setOpen(false);
             }
           }}
@@ -316,31 +373,44 @@ export function MultiSearchSelect({
         className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted transition-transform ${open ? "rotate-180" : ""}`}
       />
 
-      {open && (
-        <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-border bg-surface shadow-lg">
-          {items.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-muted">{emptyText}</div>
-          ) : (
-            items.map((o, i) => (
-              <button
-                key={o.value + (i === filtered.length ? ":custom" : "")}
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  add(o.value);
-                }}
-                onMouseEnter={() => setHi(i)}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${
-                  i === hi ? "bg-accent/10" : "hover:bg-surface-2"
-                }`}
-              >
-                <span className="font-medium">{o.label}</span>
-                {o.hint && <span className="text-xs text-muted">{o.hint}</span>}
-              </button>
-            ))
-          )}
-        </div>
-      )}
+      {/* En portal: dentro de un Modal (cuerpo con overflow-auto) ya no se corta.
+          mousedown sin default: el foco se queda en la caja mientras se suman
+          chips (add() lo devolvía ahí de todos modos). */}
+      <FloatingPanel
+        ref={panelRef}
+        anchorRef={boxRef}
+        open={open}
+        maxHeight={240}
+        id={listaId}
+        role="listbox"
+        aria-multiselectable
+        onMouseDown={(e) => e.preventDefault()}
+        className="overflow-auto rounded-lg border border-border bg-surface shadow-lg"
+      >
+        {items.length === 0 ? (
+          <div className="px-3 py-2 text-sm text-muted">{emptyText}</div>
+        ) : (
+          items.map((o, i) => (
+            <button
+              key={o.value + (i === filtered.length ? ":custom" : "")}
+              type="button"
+              role="option"
+              aria-selected={false}
+              onClick={(e) => {
+                e.preventDefault();
+                add(o.value);
+              }}
+              onMouseEnter={() => setHi(i)}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${
+                i === hi ? "bg-accent/10" : "hover:bg-surface-2"
+              }`}
+            >
+              <span className="font-medium">{o.label}</span>
+              {o.hint && <span className="text-xs text-muted">{o.hint}</span>}
+            </button>
+          ))
+        )}
+      </FloatingPanel>
     </div>
   );
 }

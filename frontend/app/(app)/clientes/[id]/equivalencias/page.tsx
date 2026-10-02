@@ -248,6 +248,7 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
         open={abierto}
         onClose={() => setAbierto(false)}
         title="Agregar equivalencia"
+        size="md"
         resizable={false}
         footer={
           <>

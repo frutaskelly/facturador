@@ -101,7 +101,7 @@ function EntregarModal({ rem, cliente, onClose, onDone }: {
   }
 
   return (
-    <Modal open onClose={onClose} title={`Entregar ${rem.folio_interno}`}
+    <Modal open onClose={onClose} title={`Entregar ${rem.folio_interno}`} size="sm"
       footer={<>
         <Button variant="secondary" onClick={onClose} disabled={busy}>Cancelar</Button>
         <Button onClick={() => void entregar()} disabled={busy}>

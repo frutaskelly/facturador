@@ -389,11 +389,11 @@ function EditarContactos({ fila, ficha, onClose, onGuardado }: {
   };
 
   return (
-    <Modal open onClose={onClose} title={`Contactos de cobranza — ${fila.cliente}`} wide
+    <Modal open onClose={onClose} title={`Contactos de cobranza — ${fila.cliente}`} size="lg"
            footer={
              <div className="flex justify-end gap-2">
                <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-               <Button onClick={guardar} disabled={loading}>{loading ? "Guardando…" : "Guardar"}</Button>
+               <Button data-modal-primary onClick={guardar} disabled={loading}>{loading ? "Guardando…" : "Guardar"}</Button>
              </div>
            }>
       <div className="space-y-4">

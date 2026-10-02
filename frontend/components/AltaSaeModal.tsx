@@ -208,7 +208,7 @@ export function AltaSaeModal({
       open
       onClose={onClose}
       title={`Dar de alta en SAE · ${producto.nombre}`}
-      wide
+      size="lg"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cerrar</Button>

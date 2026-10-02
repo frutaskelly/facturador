@@ -301,6 +301,7 @@ export function CrearProductoModal({
       open={open}
       onClose={onClose}
       title="Nuevo producto"
+      size="lg"
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={cSaving}>Cancelar</Button>

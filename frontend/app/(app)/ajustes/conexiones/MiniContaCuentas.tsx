@@ -496,7 +496,7 @@ function FormAlcance({
   return (
     <Modal
       open
-      wide
+      size="lg"
       onClose={onCerrar}
       title={conexion ? `Qué comparte ${conexion.nombre}` : "Conectar una cuenta de Mini Conta"}
       footer={
@@ -504,7 +504,7 @@ function FormAlcance({
           <Button variant="secondary" onClick={onCerrar} disabled={guardando}>
             Cancelar
           </Button>
-          <Button onClick={enviar} disabled={guardando || faltaNombre || faltanSeries || faltanClientes}>
+          <Button data-modal-primary onClick={enviar} disabled={guardando || faltaNombre || faltanSeries || faltanClientes}>
             {conexion ? "Guardar" : <><KeyRound size={16} /> Generar clave</>}
           </Button>
         </>

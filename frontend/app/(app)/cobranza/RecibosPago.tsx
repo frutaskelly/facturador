@@ -320,13 +320,13 @@ function EnviarRecibo({ recibo, defaultTo, onClose, onDone }: {
   }
 
   return (
-    <Modal open onClose={onClose} title={`Enviar REP ${recibo.serie}${recibo.folio}`}
+    <Modal open onClose={onClose} title={`Enviar REP ${recibo.serie}${recibo.folio}`} size="md"
+      description="Se adjuntan el PDF y el XML del recibo."
       footer={<>
         <Button variant="secondary" onClick={onClose} disabled={busy}>Cerrar</Button>
         <Button onClick={() => void enviar()} disabled={busy}>{busy ? "Enviando…" : "Enviar"}</Button>
       </>}>
       <div className="space-y-3">
-        <p className="text-sm text-muted">Se adjuntan el PDF y el XML del recibo.</p>
         <Field label="Para" hint="Separa varios correos con coma o espacio">
           <Input value={to} onChange={(e) => setTo(e.target.value)} placeholder="cliente@correo.com" />
         </Field>
@@ -363,7 +363,7 @@ function CancelarRecibo({ recibo, onClose, onDone }: {
   }
 
   return (
-    <Modal open onClose={onClose} title={`Cancelar REP ${recibo.serie}${recibo.folio}`}
+    <Modal open onClose={onClose} title={`Cancelar REP ${recibo.serie}${recibo.folio}`} size="sm"
       footer={<>
         <Button variant="secondary" onClick={onClose} disabled={busy}>Cerrar</Button>
         <Button variant="danger" onClick={() => void confirmar()} disabled={busy}>

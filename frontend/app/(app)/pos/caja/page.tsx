@@ -158,7 +158,7 @@ function CobroModal({ rem, cliente, credito, onClose, onDone }: {
   }
 
   return (
-    <Modal open onClose={onClose} title={`Cobrar ${rem.folio_interno}`}
+    <Modal open onClose={onClose} title={`Cobrar ${rem.folio_interno}`} size="md"
       footer={<>
         <Button variant="secondary" onClick={onClose} disabled={busy}>Cancelar</Button>
         <Button onClick={() => void cobrar()} disabled={!puedeCobrar || busy}>
@@ -244,10 +244,10 @@ function CorteBar({ corte, onChange, onRefresh }: {
         <Button variant="secondary" onClick={() => setAbrirOpen(true)}>
           <Unlock size={16} /> Abrir caja
         </Button>
-        <Modal open={abrirOpen} onClose={() => setAbrirOpen(false)} title="Abrir caja"
+        <Modal open={abrirOpen} onClose={() => setAbrirOpen(false)} title="Abrir caja" size="sm"
           footer={<>
             <Button variant="secondary" onClick={() => setAbrirOpen(false)} disabled={busy}>Cancelar</Button>
-            <Button onClick={() => void abrir()} disabled={busy}>Abrir turno</Button>
+            <Button data-modal-primary onClick={() => void abrir()} disabled={busy}>Abrir turno</Button>
           </>}>
           <Field label="Fondo inicial (efectivo en caja)">
             <Input type="number" min="0" step="0.01" value={fondo}
@@ -268,7 +268,7 @@ function CorteBar({ corte, onChange, onRefresh }: {
           <Lock size={15} /> Cerrar caja
         </Button>
       </div>
-      <Modal open={cerrarOpen} onClose={() => setCerrarOpen(false)} title="Cerrar caja (arqueo)"
+      <Modal open={cerrarOpen} onClose={() => setCerrarOpen(false)} title="Cerrar caja (arqueo)" size="sm"
         footer={<>
           <Button variant="secondary" onClick={() => setCerrarOpen(false)} disabled={busy}>Cancelar</Button>
           <Button onClick={() => void cerrar()} disabled={busy}>Cerrar turno</Button>

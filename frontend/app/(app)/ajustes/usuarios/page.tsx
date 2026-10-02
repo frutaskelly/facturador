@@ -422,6 +422,7 @@ export default function UsuariosPage() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="Crear usuario"
+        size="md"
         footer={
           <>
             <Button variant="secondary" onClick={() => setCreateOpen(false)}>
@@ -494,6 +495,7 @@ export default function UsuariosPage() {
         open={scopeFor !== null}
         onClose={() => setScopeFor(null)}
         title="Limitar a clientes"
+        size="md"
         footer={
           <>
             <Button variant="secondary" onClick={() => setScopeFor(null)}>
@@ -555,6 +557,8 @@ export default function UsuariosPage() {
         open={empresasFor !== null}
         onClose={() => setEmpresasFor(null)}
         title={`Empresas: ${empresasFor?.user_full_name || empresasFor?.user_email || ""}`}
+        size="md"
+        description="Marca en qué empresas del grupo puede entrar este usuario y con qué rol."
         footer={
           <Button variant="secondary" onClick={() => setEmpresasFor(null)}>
             Cerrar
@@ -567,9 +571,6 @@ export default function UsuariosPage() {
           </div>
         ) : (
           <div className="space-y-2">
-            <p className="text-sm text-muted">
-              Marca en qué empresas del grupo puede entrar este usuario y con qué rol.
-            </p>
             {empresas.map((e) => {
               const opcionesRol = rolesDeEmpresa(e);
               return (
@@ -624,12 +625,13 @@ export default function UsuariosPage() {
         open={pwdFor !== null}
         onClose={() => setPwdFor(null)}
         title="Cambiar contraseña"
+        size="sm"
         footer={
           <>
             <Button variant="secondary" onClick={() => setPwdFor(null)}>
               Cancelar
             </Button>
-            <Button onClick={submitPwd} disabled={savingPwd || newPass.length < 8}>
+            <Button data-modal-primary onClick={submitPwd} disabled={savingPwd || newPass.length < 8}>
               {savingPwd ? "Guardando…" : "Guardar"}
             </Button>
           </>
