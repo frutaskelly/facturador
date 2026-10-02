@@ -6,6 +6,8 @@ ni otro inquilino—; revocarla corta en el siguiente request; y las listas se
 paginan por llave sin saltarse ni repetir líneas aunque el espejo recree una
 factura entre página y página.
 """
+import base64
+import json
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -13,12 +15,14 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import text
 
+from app.api.v1.oc_recibidas import _detectar_cambio
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
+from app.core.rbac import AuthContext
 from app.main import app
 from app.models import (
-    Cliente, ClienteSucursal, Factura, LineaFactura, LineaRemision, Membership, OCRecibida,
-    Producto, Remision, Role, Serie, Sucursal, Tenant, User,
+    Cliente, ClienteSucursal, Conexion, Factura, LineaFactura, LineaRemision, Membership,
+    OCRecibida, Producto, Remision, Role, Serie, Sucursal, Tenant, User,
 )
 
 _PURGE = (
@@ -307,6 +311,10 @@ def test_mismo_nombre_del_mismo_tipo_es_409(client, env, auth_as):
     ({"series": ["ZPATITO"]}, "no son de factura"),
     ({"series_remision": ["ZEHMOVH"]}, "no son de remisión"),
     ({"perfiles": ["EHMO:villa%"]}, "Perfil inválido"),
+    # Un tramo suelto es el canal de toda la empresa: abriría todas las plazas.
+    ({"perfiles": ["MANUAL"]}, "Perfil inválido"),
+    ({"perfiles": ["EHMO"]}, "Perfil inválido"),
+    ({"plaza": None}, "escoge la plaza"),
     ({"series_remision": []}, "serie de remisión"),
     ({"series_remision": [], "perfiles": [], "remisiones": False}, "perfil o una serie"),
     ({"plaza": "Narnia"}, "No hay plaza"),
@@ -551,6 +559,72 @@ def test_no_ve_otra_plaza_ni_otro_inquilino(client, env, auth_as):
     assert fac_b[0]["factura_id"] not in {env["fac_vh1"], env["fac_vh2"]}
 
 
+def _oc_suelta(db, tenant_id, origen, *, plaza=None):
+    """Una OC PENDIENTE sin remisión, con entrega el 21-sep, en esa plaza (o sin plaza)."""
+    cli = db.query(Cliente).filter(Cliente.tenant_id == tenant_id).first()
+    suc = (db.query(Sucursal).filter(Sucursal.tenant_id == tenant_id,
+                                     Sucursal.nombre == plaza).one() if plaza else None)
+    o = OCRecibida(tenant_id=tenant_id, canal="MANUAL" if origen.startswith("MANUAL") else "WHATSAPP",
+                   origen_externo=origen, folio_externo=origen.split(":")[-1][:40],
+                   estado="PENDIENTE", cliente_id=cli.id, sucursal_id=suc.id if suc else None,
+                   fecha_entrega=date(2026, 9, 21),
+                   payload={"lineas": [{"clave": "JITOMATEKG", "cantidad": "5"}]})
+    db.add(o)
+    db.flush()
+    return str(o.id)
+
+
+def test_un_perfil_solo_abre_las_oc_de_su_plaza(client, env, auth_as):
+    """«MANUAL» es el canal de captura a mano de TODA la empresa, y un grupo de
+    WhatsApp puede pedir para dos plazas: ni uno ni otro le abre a la clave de
+    Hidalgo las órdenes de Tabasco. Lo que aún no tiene plaza sí lo ve."""
+    db = SessionLocal()
+    try:
+        ta = env["ta"]
+        _oc_suelta(db, ta, f"MANUAL:{uuid.uuid4()}", plaza="Hidalgo")
+        _oc_suelta(db, ta, f"MANUAL:{uuid.uuid4()}", plaza="Hidalgo")
+        manual_tab = _oc_suelta(db, ta, f"MANUAL:{uuid.uuid4()}", plaza="Tabasco")
+        # El perfil de Hidalgo (2 de 3 órdenes con plaza son suyas: la pantalla
+        # se lo ofrece a Hidalgo), con una de Tabasco y otra sin plaza.
+        ehmo_hgo = _oc_suelta(db, ta, f"EHMO:ehmo:HO-H-{uuid.uuid4().hex[:6]}", plaza="Hidalgo")
+        ehmo_tab = _oc_suelta(db, ta, f"EHMO:ehmo:HO-T-{uuid.uuid4().hex[:6]}", plaza="Tabasco")
+        ehmo_sin = _oc_suelta(db, ta, f"EHMO:ehmo:HO-N-{uuid.uuid4().hex[:6]}")
+        db.commit()
+    finally:
+        db.close()
+
+    auth_as(env["dueno_a"])
+    op = client.get("/api/v1/conexiones/SMART_SUPPLY_PANEL/opciones",
+                    headers=_hdr(env["dueno_a"])).json()
+    hgo = next(p for p in op["plazas"] if p["nombre"] == "Hidalgo")
+    # La pantalla ya no prellena «MANUAL»: ni en la plaza ni suelto.
+    assert hgo["perfiles"] == ["EHMO:ehmo"]
+    assert "MANUAL" not in op["perfiles"]
+    k = _clave(client, env["dueno_a"], nombre="Kelly Hidalgo", plaza="Hidalgo",
+               series=hgo["series"], series_remision=hgo["series_remision"],
+               perfiles=hgo["perfiles"])
+    _sin_sesion()
+    h = _bearer(k["clave"])
+    ocs, _ = _todas(client, h, "/api/v1/smart-supply/oc", {**_SEP, "campo": "entrega"})
+    assert {i["id"] for i in ocs} == {env["oc_hgo"], ehmo_hgo, ehmo_sin}
+    assert {i["plaza"] for i in ocs} == {"Hidalgo", None}
+    lineas, _ = _todas(client, h, "/api/v1/smart-supply/oc-lineas", _SEP)
+    assert {i["oc_id"] for i in lineas} == {env["oc_hgo"], ehmo_hgo, ehmo_sin}
+
+    # Aunque «MANUAL» llegara guardado en la clave (por fuera de la validación),
+    # no abre nada: el filtro solo usa perfiles de dos tramos.
+    db = SessionLocal()
+    try:
+        con = db.get(Conexion, uuid.UUID(k["conexion"]["id"]))
+        con.alcance = {**con.alcance, "perfiles": ["EHMO:ehmo", "MANUAL"]}
+        db.commit()
+    finally:
+        db.close()
+    ocs, _ = _todas(client, h, "/api/v1/smart-supply/oc", {**_SEP, "campo": "entrega"})
+    assert {i["id"] for i in ocs} == {env["oc_hgo"], ehmo_hgo, ehmo_sin}
+    assert manual_tab not in {i["id"] for i in ocs} and ehmo_tab not in {i["id"] for i in ocs}
+
+
 def test_remisionado(client, env, auth_as):
     auth_as(env["dueno_a"])
     clave = _clave(client, env["dueno_a"])["clave"]
@@ -635,6 +709,44 @@ def test_oc_lineas_del_documento_vigente(client, env, auth_as):
     [c] = por_oc[env["oc_cambio"]]
     assert c["documento"] == "payload_nuevo" and c["cambio_abierto"] is True
     assert c["clave"] == "C" and c["cantidad"] == "7"
+
+
+def test_cambio_deshecho_vuelve_al_documento_original(client, env, auth_as):
+    """El cliente corrige el pedido y luego lo deshace: el aviso se cierra solo,
+    pero `payload_nuevo` se queda con la versión corregida. El pedido vigente
+    es el original, no la corrección que ya no existe."""
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"])["clave"]
+    _sin_sesion()
+    h = _bearer(clave)
+    ctx = AuthContext(user_id=None, auth_user_id="bot", email=None, tenant_id=env["ta"],
+                      role_id=None, role_name="conexion", is_owner=False, permissions=set())
+
+    def _lineas_vh1():
+        items, _ = _todas(client, h, "/api/v1/smart-supply/oc-lineas", _SEP)
+        return [(i["clave"], i["cantidad"], i["documento"]) for i in items
+                if i["oc_id"] == env["oc_vh1"]]
+
+    def _oc_vh1():
+        items, _ = _todas(client, h, "/api/v1/smart-supply/oc", {**_SEP, "campo": "entrega"})
+        return next(i for i in items if i["id"] == env["oc_vh1"])
+
+    db = SessionLocal()
+    try:
+        oc = db.get(OCRecibida, uuid.UUID(env["oc_vh1"]))
+        original = dict(oc.payload)
+        _detectar_cambio(db, oc, {"lineas": [{"clave": "SANDIAPZ", "cantidad": "999"}]}, ctx)
+        db.commit()
+        # Con el cambio abierto manda la versión nueva.
+        assert _lineas_vh1() == [("SANDIAPZ", "999", "payload_nuevo")]
+        _detectar_cambio(db, oc, original, ctx)
+        db.commit()
+        assert oc.cambio_resuelto_at is not None and oc.payload_nuevo is not None
+    finally:
+        db.close()
+    assert _lineas_vh1() == [("SANDIAPZ", "10", "payload"), ("JITOMATEKG", "25.5", "payload")]
+    o = _oc_vh1()
+    assert o["documento"] == "payload" and o["partidas"] == 2 and o["cambio_abierto"] is False
 
 
 def test_catalogo(client, env, auth_as):
@@ -726,6 +838,20 @@ def test_cursor_y_rango_invalidos(client, env, auth_as):
     r = client.get("/api/v1/smart-supply/facturado", headers=h,
                    params={**_SEP, "despues": "no-es-cursor"})
     assert r.status_code == 422
+
+    def _b64(partes):
+        return base64.urlsafe_b64encode(json.dumps(partes).encode()).decode().rstrip("=")
+
+    # Bien codificados pero con lo que `_cursor` nunca escribe: 422, no 500.
+    for ruta, partes in (("remisionado", [123, 1]), ("facturado", [123, 1]),
+                         ("oc-lineas", [123, 1]), ("catalogo", [123]),
+                         ("facturado", [[str(uuid.uuid4())], "1"]),
+                         ("oc", [None, str(uuid.uuid4())])):
+        params = {**_SEP, "despues": _b64(partes)}
+        if ruta == "oc":
+            params["campo"] = "entrega"
+        r = client.get(f"/api/v1/smart-supply/{ruta}", headers=h, params=params)
+        assert r.status_code == 422, (ruta, partes, r.status_code)
     r = client.get("/api/v1/smart-supply/facturado", headers=h,
                    params={"desde": "2026-06-01", "hasta": "2026-09-30"})
     assert r.status_code == 422 and "93" in r.json()["detail"]

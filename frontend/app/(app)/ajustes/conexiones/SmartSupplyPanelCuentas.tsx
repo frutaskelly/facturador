@@ -57,8 +57,9 @@ const VACIO: AlcancePanel = {
   catalogo: true,
 };
 
-// Misma forma que valida el backend (services/smart_supply.py::_PERFIL).
-const PERFIL_VALIDO = /^[A-Z]{2,12}(:[A-Za-z0-9@.-]{1,100})?$/;
+// Misma forma que valida el backend (services/smart_supply.py::_PERFIL): siempre
+// canal:origen. «MANUAL» o «EHMO» solos abrirían las órdenes de todas las plazas.
+const PERFIL_VALIDO = /^[A-Z]{2,12}:[A-Za-z0-9@.-]{1,100}$/;
 
 function haceCuanto(iso?: string | null): string {
   if (!iso) return "nunca";
@@ -435,6 +436,8 @@ function FormAlcancePanel({
   const faltanSeries = series.size === 0;
   const faltaRemision = datos.remisiones && rems.size === 0;
   const faltaOrigen = datos.oc && rems.size === 0 && perfiles.size === 0;
+  // El perfil solo abre las órdenes de la plaza de la clave: sin plaza, el backend da 422.
+  const faltaPlaza = perfiles.size > 0 && !plaza;
 
   async function enviar() {
     setGuardando(true);
@@ -498,7 +501,9 @@ function FormAlcancePanel({
           <Button
             data-modal-primary
             onClick={enviar}
-            disabled={guardando || faltaNombre || faltanSeries || faltaRemision || faltaOrigen}
+            disabled={
+              guardando || faltaNombre || faltanSeries || faltaRemision || faltaOrigen || faltaPlaza
+            }
           >
             {conexion ? "Guardar" : <><KeyRound size={16} /> Generar clave</>}
           </Button>
@@ -549,7 +554,8 @@ function FormAlcancePanel({
           <h3 className="text-sm font-medium">Perfiles de órdenes de compra</h3>
           <p className="mb-2 text-xs text-muted">
             Por dónde entran sus órdenes (el inicio de su origen, p. ej. EHMO:villahermosa). Abren
-            también las que todavía no tienen remisión o se descartaron.
+            también las que todavía no tienen remisión o se descartaron, pero solo las de la plaza
+            de arriba o las que aún no tienen plaza.
           </p>
           <div className="grid grid-cols-1 gap-0.5 rounded-lg border border-border p-2 sm:grid-cols-2">
             {todosPerfiles.map((p) => (
@@ -619,6 +625,9 @@ function FormAlcancePanel({
         ) : null}
         {faltaOrigen ? (
           <Alert tone="warning">Para compartir las órdenes marca un perfil o una serie de remisión.</Alert>
+        ) : null}
+        {faltaPlaza ? (
+          <Alert tone="warning">Para abrir órdenes por perfil escoge la plaza: el perfil solo abre las de ella.</Alert>
         ) : null}
       </div>
     </Modal>

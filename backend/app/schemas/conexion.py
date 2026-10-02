@@ -28,10 +28,10 @@ class AlcanceMiniConta(BaseModel):
 class AlcancePanel(BaseModel):
     """Qué comparte una clave del panel de Smart Supply: una cuenta = una plaza
     (ver services/smart_supply.py)."""
-    plaza: Optional[str] = Field(default=None, max_length=120)   # etiqueta; no filtra
+    plaza: Optional[str] = Field(default=None, max_length=120)   # acota los perfiles a su plaza
     series: list[str] = Field(default_factory=list)              # de FACTURA: el facturado
     series_remision: list[str] = Field(default_factory=list)     # el remisionado y sus OC
-    perfiles: list[str] = Field(default_factory=list)            # «EHMO:villahermosa»: sus OC
+    perfiles: list[str] = Field(default_factory=list)            # «EHMO:villahermosa»: sus OC (exige plaza)
     remisiones: bool = False
     oc: bool = False
     catalogo: bool = False

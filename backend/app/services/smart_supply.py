@@ -13,14 +13,18 @@ Conta, que lee ventas por serie.
 
 Lo que comparte cada clave vive en `conexiones.alcance`:
 
-- `plaza`: el nombre de la plaza de la cuenta. Es la etiqueta; no filtra.
+- `plaza`: el nombre de la plaza de la cuenta. Acota los perfiles: una OC que
+  entra por perfil solo se ve si es de esta plaza o si todavía no tiene plaza.
 - `series`: series de FACTURA cuyo facturado puede leer (ZEHMOVH).
 - `series_remision`: series de REMISIÓN cuyo remisionado puede leer
   (RZEHMOVH). También abren las OC que se volvieron remisión de esas series.
 - `perfiles`: por dónde entran sus órdenes, como prefijo de `origen_externo`
   (`EHMO:villahermosa` = todo lo que el bot deposita con
   `EHMO:villahermosa:<folio>`). Abren las OC aunque todavía no tengan remisión
-  o se hayan descartado.
+  o se hayan descartado, pero solo las de la plaza de la clave (o sin plaza):
+  un grupo de WhatsApp que pide para dos plazas no le abre a una las de la
+  otra. Siempre van en dos tramos; «MANUAL» o «EHMO» solos abrirían las OC de
+  todas las plazas.
 - `remisiones`, `oc`, `catalogo`: si además del facturado lee lo remisionado,
   la bandeja de OC y el catálogo de productos.
 
@@ -59,9 +63,12 @@ ZONA = "America/Mexico_City"
 # Lo que una clave puede leer además del facturado. Una bandera que falta es False.
 DATOS = ("remisiones", "oc", "catalogo")
 
-# «EHMO:villahermosa», «WA:120363…@g.us», «MANUAL». Sin comodines de LIKE ni
-# espacios: el perfil se usa como prefijo exacto de `origen_externo`.
-_PERFIL = re.compile(r"^[A-Z]{2,12}(:[A-Za-z0-9@.\-]{1,100})?$")
+# «EHMO:villahermosa», «WA:120363…@g.us». Sin comodines de LIKE ni espacios:
+# el perfil se usa como prefijo exacto de `origen_externo`. SIEMPRE dos tramos
+# (canal:origen): un tramo suelto es el canal entero de la empresa —«MANUAL»
+# abre las OC capturadas a mano en todas las plazas, porque en `MANUAL:<uuid>`
+# lo que va después de «:» identifica la orden, no a quien la manda—.
+_PERFIL = re.compile(r"^[A-Z]{2,12}:[A-Za-z0-9@.\-]{1,100}$")
 
 
 def perfil_de(origen: Optional[str]) -> Optional[str]:
@@ -70,6 +77,8 @@ def perfil_de(origen: Optional[str]) -> Optional[str]:
     `EHMO:villahermosa:HO-34VIL-MIE` → `EHMO:villahermosa`;
     `WA:<jid>:<folio>` → `WA:<jid>`; `MANUAL:<uuid>` → `MANUAL`. Se corta por
     los dos primeros «:» y no por el último: un folio con «:» no mueve el perfil.
+    `MANUAL` sale como dato de la OC, pero no es un perfil que se pueda
+    compartir (no pasa `_PERFIL`).
     """
     partes = (origen or "").split(":")
     if len(partes) >= 3:
@@ -157,10 +166,25 @@ def ids_de_series(db: Session, tenant_id, codigos: Iterable[str], tipo: str) -> 
     ).all()]
 
 
+def sucursales_de_plaza(db: Session, tenant_id, plaza: Optional[str]) -> list[UUID]:
+    """Los ids de las sucursales que se llaman como la plaza (una plaza puede
+    tener varias filas con el mismo nombre; las borradas guardan su historia)."""
+    k = clave_nombre(plaza or "")
+    if not k:
+        return []
+    return [i for i, nombre in db.query(Sucursal.id, Sucursal.nombre)
+            .filter(Sucursal.tenant_id == tenant_id).all()
+            if clave_nombre(nombre) == k]
+
+
 def perfiles_vistos(db: Session, tenant_id, dias: int = 93) -> dict[str, Optional[str]]:
     """{perfil: plaza} de las OC de los últimos `dias`. La plaza sale de la OC o,
-    si no la trae (pasa en ~1/4 de las de Pachuca), de su remisión; un perfil
-    que cae en dos plazas se queda con la que más órdenes tiene."""
+    si no la trae (pasa en ~1/4 de las de Pachuca), de su remisión.
+
+    Es solo con qué se PRELLENA la pantalla al escoger la plaza: un perfil que
+    cae en dos plazas se ofrece en la que más órdenes tiene, y aunque se marque
+    en la otra no le abre lo ajeno (`filtro_oc` lo acota a la plaza de la
+    clave). Los de un solo tramo (`MANUAL`) no se ofrecen."""
     desde = date.today() - timedelta(days=dias)
     plaza = sa.func.coalesce(OCRecibida.sucursal_id, Remision.sucursal_id)
     filas = (
@@ -269,6 +293,12 @@ def validar_alcance(db: Session, tenant_id, *, plaza: Optional[str], series, ser
             status_code=422,
             detail=f"Perfil inválido: {', '.join(malos)} (forma: EHMO:villahermosa)",
         )
+    nombre_plaza = " ".join((plaza or "").split()) or None
+    if pfs and nombre_plaza is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Para abrir órdenes por perfil escoge la plaza: el perfil solo abre las de ella",
+        )
     banderas = {d: bool(datos.get(d)) for d in DATOS}
     if banderas["remisiones"] and not rem:
         raise HTTPException(status_code=422,
@@ -278,7 +308,6 @@ def validar_alcance(db: Session, tenant_id, *, plaza: Optional[str], series, ser
             status_code=422,
             detail="Para compartir las OC marca un perfil o una serie de remisión",
         )
-    nombre_plaza = " ".join((plaza or "").split()) or None
     if nombre_plaza is not None:
         existe = db.query(Sucursal.id).filter(
             Sucursal.tenant_id == tenant_id, Sucursal.deleted_at.is_(None),
@@ -297,19 +326,30 @@ def validar_alcance(db: Session, tenant_id, *, plaza: Optional[str], series, ser
 
 # ─── Filtros por alcance ────────────────────────────────────────────────────
 
-def filtro_oc(db: Session, tenant_id, a: AlcancePanel, serie_remision_col):
-    """La condición que deja ver una OC: entró por uno de sus perfiles, o se
-    volvió remisión de una de sus series. `serie_remision_col` es la columna
-    `remisiones.serie_id` ya unida a la consulta (outer join)."""
+def filtro_oc(db: Session, tenant_id, a: AlcancePanel, *, serie_remision, plaza):
+    """La condición que deja ver una OC: se volvió remisión de una de sus
+    series, o entró por uno de sus perfiles Y es de su plaza (o todavía no
+    tiene). `serie_remision` es `remisiones.serie_id` ya unida a la consulta
+    (outer join) y `plaza`, el id de sucursal de la OC con el de su remisión de
+    respaldo: `coalesce(oc.sucursal_id, remision.sucursal_id)`.
+
+    El perfil solo no basta: el mismo grupo de WhatsApp puede pedir para dos
+    plazas, y la clave de una vería las órdenes de la otra."""
     if a.perfiles is None and a.series_remision is None:
         return sa.true()
-    condiciones = [
-        OCRecibida.origen_externo.like(_patron_like(p), escape="\\")
-        for p in sorted(a.perfiles or [])
-    ]
+    condiciones = []
+    perfiles = sorted(p for p in (a.perfiles or []) if _PERFIL.match(p))
+    if perfiles:
+        propias = sucursales_de_plaza(db, tenant_id, a.plaza)
+        de_la_plaza = sa.or_(plaza.is_(None), plaza.in_(propias)) if propias else plaza.is_(None)
+        condiciones.append(sa.and_(
+            sa.or_(*(OCRecibida.origen_externo.like(_patron_like(p), escape="\\")
+                     for p in perfiles)),
+            de_la_plaza,
+        ))
     ids = ids_de_series(db, tenant_id, a.series_remision or [], "REMISION")
     if ids:
-        condiciones.append(serie_remision_col.in_(ids))
+        condiciones.append(serie_remision.in_(ids))
     return sa.or_(*condiciones) if condiciones else sa.false()
 
 

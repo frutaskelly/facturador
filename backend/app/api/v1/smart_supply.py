@@ -70,6 +70,7 @@ from ...schemas.smart_supply import (
 from ...services import smart_supply as panel
 from ...services.espejo_productos import norm_clave_sae
 from ...services.inventario import claves_sae_por_presentacion
+from ...services.oc_cambios import NOTA_DOCUMENTO_REVERTIDO
 
 router = APIRouter(prefix="/smart-supply", tags=["smart-supply"])
 
@@ -103,10 +104,13 @@ def _leer_cursor(texto: Optional[str], *tipos: Callable) -> Optional[tuple]:
     try:
         crudo = base64.urlsafe_b64decode(texto + "=" * (-len(texto) % 4))
         partes = json.loads(crudo)
-        if not isinstance(partes, list) or len(partes) != len(tipos):
+        # `_cursor` solo escribe textos: un número o una lista adentro no salió
+        # de aquí (y `UUID(123)` truena con AttributeError, no ValueError).
+        if (not isinstance(partes, list) or len(partes) != len(tipos)
+                or not all(isinstance(p, str) for p in partes)):
             raise ValueError
         return tuple(t(p) for t, p in zip(tipos, partes))
-    except (ValueError, TypeError, json.JSONDecodeError):
+    except (ValueError, TypeError, AttributeError, json.JSONDecodeError):
         raise HTTPException(
             status_code=422,
             detail="«despues» no es un cursor válido: usa el «siguiente» de la página anterior",
@@ -249,12 +253,18 @@ def _doc_vigente():
 
     La versión que manda es la del documento más nuevo: `payload_nuevo` si
     trae partidas (un cambio abierto o ya resuelto), si no `payload`. Es la
-    misma regla que el reporte de armado. CASE y no AND: Postgres no promete el
-    orden de un AND, y `jsonb_array_length` de algo que no es arreglo truena."""
+    misma regla que el reporte de armado, con una excepción: cuando el cambio
+    se cerró SOLO porque el documento volvió a coincidir con la remisión, el
+    cliente deshizo su corrección y `payload_nuevo` guarda la versión que ya no
+    existe; manda `payload`. CASE y no AND: Postgres no promete el orden de un
+    AND, y `jsonb_array_length` de algo que no es arreglo truena."""
     nuevo = OCRecibida.payload_nuevo["lineas"]
     viejo = OCRecibida.payload["lineas"]
+    revertido = sa.and_(OCRecibida.cambio_resuelto_at.isnot(None),
+                        OCRecibida.cambio_resuelto_nota == NOTA_DOCUMENTO_REVERTIDO)
     usa_nuevo = sa.case(
         (sa.func.jsonb_typeof(nuevo) != "array", sa.false()),
+        (revertido, sa.false()),
         (sa.func.jsonb_array_length(nuevo) > 0, sa.true()),
         else_=sa.false(),
     )
@@ -320,6 +330,7 @@ def oc(
                        else_=0)
     actualizado = sa.func.greatest(OCRecibida.updated_at, Remision.updated_at, Factura.updated_at)
     entrega = sa.func.coalesce(OCRecibida.fecha_entrega, Remision.fecha_entrega)
+    plaza_oc = sa.func.coalesce(OCRecibida.sucursal_id, Remision.sucursal_id)
     q = (
         db.query(
             OCRecibida.id, OCRecibida.canal, OCRecibida.origen_externo, OCRecibida.folio_externo,
@@ -348,11 +359,11 @@ def oc(
         .outerjoin(Factura, sa.and_(Factura.id == Remision.factura_id,
                                     Factura.deleted_at.is_(None)))
         .outerjoin(Cliente, Cliente.id == OCRecibida.cliente_id)
-        .outerjoin(Sucursal, Sucursal.id == sa.func.coalesce(OCRecibida.sucursal_id,
-                                                             Remision.sucursal_id))
+        .outerjoin(Sucursal, Sucursal.id == plaza_oc)
         .outerjoin(Proyecto, Proyecto.id == OCRecibida.proyecto_id)
         .filter(OCRecibida.tenant_id == ctx.tenant_id,
-                panel.filtro_oc(db, ctx.tenant_id, a, Remision.serie_id))
+                panel.filtro_oc(db, ctx.tenant_id, a, serie_remision=Remision.serie_id,
+                                plaza=plaza_oc))
     )
     if desde is not None:
         if campo == "recibida":
@@ -426,6 +437,7 @@ def oc_lineas(
         .lateral("partida")
     )
     entrega = sa.func.coalesce(OCRecibida.fecha_entrega, Remision.fecha_entrega)
+    plaza_oc = sa.func.coalesce(OCRecibida.sucursal_id, Remision.sucursal_id)
     q = (
         db.query(
             OCRecibida.id.label("oc_id"), lineas.c.numero, lineas.c.valor,
@@ -439,14 +451,14 @@ def oc_lineas(
         .select_from(OCRecibida)
         .outerjoin(Remision, sa.and_(Remision.id == OCRecibida.remision_id,
                                      Remision.deleted_at.is_(None)))
-        .outerjoin(Sucursal, Sucursal.id == sa.func.coalesce(OCRecibida.sucursal_id,
-                                                             Remision.sucursal_id))
+        .outerjoin(Sucursal, Sucursal.id == plaza_oc)
         .join(lineas, sa.true())
         .filter(
             OCRecibida.tenant_id == ctx.tenant_id,
             OCRecibida.estado.in_(("PENDIENTE", "ASIGNADA")),
             entrega >= desde, entrega <= hasta,
-            panel.filtro_oc(db, ctx.tenant_id, a, Remision.serie_id),
+            panel.filtro_oc(db, ctx.tenant_id, a, serie_remision=Remision.serie_id,
+                            plaza=plaza_oc),
         )
     )
     if tras is not None:
