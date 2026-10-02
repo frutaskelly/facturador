@@ -10,6 +10,7 @@ import {
   Home,
   Languages,
   Library,
+  ListChecks,
   Plug,
   LayoutDashboard,
   Mail,
@@ -75,6 +76,9 @@ export const NAV: NavSection[] = [
     icon: Library,
     items: [
       { label: "Productos", href: "/productos", perm: "menu:productos", icon: Package },
+      // Grupos de productos que son el mismo (gemelos, otra unidad, empaques por
+      // kilo), calculados en vivo; reemplaza la hoja de Excel del 30-sep.
+      { label: "Revisión del catálogo", href: "/productos/revision", perm: "menu:productos", icon: ListChecks },
       { label: "Categorías", href: "/categorias", perm: "menu:productos.categorias", icon: FolderTree },
       { label: "Clientes", href: "/clientes", perm: "menu:clientes", icon: Users },
       { label: "Sucursales y precios", href: "/sucursales", perm: "menu:clientes", icon: Building2 },

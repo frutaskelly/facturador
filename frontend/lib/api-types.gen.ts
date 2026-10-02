@@ -4894,6 +4894,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/revision-catalogo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listar */
+        get: operations["listar_api_v1_revision_catalogo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/revision-catalogo/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decidir */
+        post: operations["decidir_api_v1_revision_catalogo_decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/revision-catalogo/propuesta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recalcular
+         * @description Cómo quedaría el grupo con lo que la persona cambió. No guarda nada.
+         */
+        post: operations["recalcular_api_v1_revision_catalogo_propuesta_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/roles": {
         parameters: {
             query?: never;
@@ -5662,6 +5716,24 @@ export interface components {
             recibida_at: string;
             /** Remitente */
             remitente?: string | null;
+        };
+        /**
+         * AjusteIn
+         * @description Lo que la persona cambió de la propuesta automática. Todo opcional.
+         */
+        AjusteIn: {
+            /** Claves */
+            claves?: {
+                [key: string]: string;
+            } | null;
+            /** Grupo */
+            grupo: string;
+            /** Nombre Final */
+            nombre_final?: string | null;
+            /** Queda Sku */
+            queda_sku?: string | null;
+            /** Quitar */
+            quitar?: string[] | null;
         };
         /**
          * AlcanceMiniConta
@@ -6433,6 +6505,19 @@ export interface components {
             completo: boolean;
             /** Paso */
             paso: string;
+        };
+        /** ClaveInfo */
+        ClaveInfo: {
+            /** Clave */
+            clave: string;
+            /** De Sku */
+            de_sku?: string | null;
+            /** En Sae */
+            en_sae: string[];
+            /** Facturas */
+            facturas: number;
+            /** Formato Viejo */
+            formato_viejo: boolean;
         };
         /**
          * ClaveNuevaOut
@@ -7499,6 +7584,47 @@ export interface components {
              * Format: uuid
              */
             producto_id: string;
+        };
+        /** DecisionIn */
+        DecisionIn: {
+            /** Claves */
+            claves?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Estado
+             * @enum {string}
+             */
+            estado: "APROBADO" | "RECHAZADO" | "PENDIENTE";
+            /** Grupo */
+            grupo: string;
+            /** Nombre Final */
+            nombre_final?: string | null;
+            /** Nota */
+            nota?: string | null;
+            /** Queda Sku */
+            queda_sku?: string | null;
+            /** Quitar */
+            quitar?: string[] | null;
+        };
+        /** DecisionOut */
+        DecisionOut: {
+            /** At */
+            at?: string | null;
+            /**
+             * Desactualizada
+             * @default false
+             */
+            desactualizada: boolean;
+            /**
+             * Estado
+             * @enum {string}
+             */
+            estado: "APROBADO" | "RECHAZADO" | "APLICADO";
+            /** Nota */
+            nota?: string | null;
+            /** Por */
+            por?: string | null;
         };
         /** DevolucionIn */
         DevolucionIn: {
@@ -8630,6 +8756,29 @@ export interface components {
             sincronizado_at?: string | null;
             /** Ultima Orden At */
             ultima_orden_at?: string | null;
+        };
+        /** GrupoRevision */
+        GrupoRevision: {
+            /** Clave */
+            clave: string;
+            decision?: components["schemas"]["DecisionOut"] | null;
+            /**
+             * Estado
+             * @enum {string}
+             */
+            estado: "PENDIENTE" | "APROBADO" | "RECHAZADO" | "APLICADO";
+            /** Miembros */
+            miembros: components["schemas"]["MiembroRevision"][];
+            propuesta: components["schemas"]["Propuesta"];
+            /** Raiz */
+            raiz: string;
+            /**
+             * Tipo
+             * @enum {string}
+             */
+            tipo: "GEMELOS" | "UNIDADES" | "EMPAQUE";
+            /** Ventas */
+            ventas: number;
         };
         /**
          * GrupoUpdate
@@ -10069,6 +10218,35 @@ export interface components {
             cliente_scope?: string[] | null;
             /** Role Id */
             role_id?: string | null;
+        };
+        /** MiembroRevision */
+        MiembroRevision: {
+            /** Alias */
+            alias: number;
+            /** Alta */
+            alta?: string | null;
+            /** Catalogo */
+            catalogo: number;
+            /** Categoria */
+            categoria: string;
+            /** Clave Sat */
+            clave_sat: string;
+            /** Esquema */
+            esquema: string;
+            /** Id */
+            id: string;
+            /** Nombre */
+            nombre: string;
+            /** Precios */
+            precios: number;
+            /** Sku */
+            sku: string;
+            /** Unidad Base */
+            unidad_base: string;
+            /** Unidades */
+            unidades: components["schemas"]["UnidadMiembro"][];
+            /** Ventas */
+            ventas: number;
         };
         /** MovimientoCreate */
         MovimientoCreate: {
@@ -11605,6 +11783,25 @@ export interface components {
             /** Series */
             series: string[];
         };
+        /** Propuesta */
+        Propuesta: {
+            /** Alertas */
+            alertas: string[];
+            /** Bloqueos */
+            bloqueos: string[];
+            /** Nombre Final */
+            nombre_final: string;
+            /** Queda Sku */
+            queda_sku: string;
+            /** Quitar */
+            quitar: string[];
+            /** Se Unen */
+            se_unen: string[];
+            /** Unidad Base */
+            unidad_base: string;
+            /** Unidades */
+            unidades: components["schemas"]["UnidadPropuesta"][];
+        };
         /** ProveedorCreate */
         ProveedorCreate: {
             /**
@@ -12355,6 +12552,29 @@ export interface components {
              * Format: uuid
              */
             producto_id: string;
+        };
+        /** ResumenRevision */
+        ResumenRevision: {
+            /** Aplicados */
+            aplicados: number;
+            /** Grupos */
+            grupos: number;
+            /** Por Estado */
+            por_estado: {
+                [key: string]: number;
+            };
+            /** Por Tipo */
+            por_tipo: {
+                [key: string]: number;
+            };
+            /** Productos */
+            productos: number;
+        };
+        /** RevisionOut */
+        RevisionOut: {
+            /** Grupos */
+            grupos: components["schemas"]["GrupoRevision"][];
+            resumen: components["schemas"]["ResumenRevision"];
         };
         /** RoleCreate */
         RoleCreate: {
@@ -13127,6 +13347,34 @@ export interface components {
              * @enum {string}
              */
             nuevo_estado: "BORRADOR" | "ENVIADA" | "ACEPTADA" | "EN_TRANSITO" | "RECIBIDA_PARCIAL" | "RECIBIDA" | "CANCELADA";
+        };
+        /** UnidadMiembro */
+        UnidadMiembro: {
+            /** Borradores */
+            borradores: number;
+            /** Clave */
+            clave: string;
+            /** En Sae */
+            en_sae: boolean;
+            /** Unidad */
+            unidad: string;
+        };
+        /** UnidadPropuesta */
+        UnidadPropuesta: {
+            /** Alternativas */
+            alternativas: components["schemas"]["ClaveInfo"][];
+            /** Clave */
+            clave: string;
+            /** De Sku */
+            de_sku?: string | null;
+            /** En Sae */
+            en_sae: string[];
+            /** Facturas */
+            facturas: number;
+            /** Formato Viejo */
+            formato_viejo: boolean;
+            /** Unidad */
+            unidad: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -22910,6 +23158,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listar_api_v1_revision_catalogo_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decidir_api_v1_revision_catalogo_decision_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrupoRevision"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recalcular_api_v1_revision_catalogo_propuesta_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AjusteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrupoRevision"];
                 };
             };
             /** @description Validation Error */
