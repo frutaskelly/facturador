@@ -75,11 +75,18 @@ const aLista = (s: string) => s.split(/[,;\s]+/).map((x) => x.trim()).filter(Boo
 export const errorDe = (e: unknown, def: string) => (e instanceof ApiError ? e.message : def);
 const claveNodo = (n: Nodo) => n.proyecto_id ?? `serie:${n.serie ?? ""}`;
 
+// Lo mismo que services/cobranza_grupos.py (ASUNTO y MENSAJE): un envío nuevo
+// los trae escritos, y uno que los tiene vacíos manda estos. {nombre} y {fecha}
+// los rellena el sistema al mandar.
+export const ASUNTO_OMISION = "Estado de cuenta {nombre} al {fecha}";
+export const MENSAJE_OMISION =
+  "Buen día, les compartimos su estado de cuenta.\n\nQuedamos atentos a cualquier aclaración o comprobante de pago.";
+
 const VACIO: Borrador = {
   nombre: "", agrupar_por: "PROYECTO", mostrar_antiguedad: false, correos: "", cc: "",
   modo: "MANUAL", dia_semana: 0, hora: 8, incluir_por_vencer: true, saldo_minimo: "100",
   escalar_dias: "30", escalar_cc: "", adjuntar_pdf: true, adjuntar_excel: true,
-  asunto: "", mensaje: "", nota: "", orden: [], alcance: {},
+  asunto: ASUNTO_OMISION, mensaje: MENSAJE_OMISION, nota: "", orden: [], alcance: {},
 };
 
 /** El borrador de un envío guardado, o uno nuevo (vacío o para una razón social). */
@@ -95,7 +102,7 @@ export function borradorDe(e: Envio | null, para?: Pick<Opcion, "cliente_id" | "
     incluir_por_vencer: e.incluir_por_vencer, saldo_minimo: String(e.saldo_minimo),
     escalar_dias: String(e.escalar_dias), escalar_cc: e.escalar_cc.join(", "),
     adjuntar_pdf: e.adjuntar_pdf, adjuntar_excel: e.adjuntar_excel,
-    asunto: e.asunto ?? "", mensaje: e.mensaje ?? "", nota: e.nota ?? "",
+    asunto: e.asunto || ASUNTO_OMISION, mensaje: e.mensaje || MENSAJE_OMISION, nota: e.nota ?? "",
     orden: e.alcance.map((a) => a.cliente_id),
     alcance: Object.fromEntries(e.alcance.map((a) => [a.cliente_id,
       { completo: a.completo, proyectos: a.proyectos, series: a.series }])),
@@ -364,12 +371,11 @@ export function EditarEnvio({ inicial, opciones, cargando, envios, automaticosEn
               <Switch checked={b.adjuntar_pdf} onChange={(v) => set("adjuntar_pdf", v)} /> PDF
             </label>
           </div>
-          <Field label="Asunto" hint="Vacío = «Estado de cuenta <nombre> al dd/mm/aaaa».">
+          <Field label="Asunto" hint="{nombre} = el nombre del envío · {fecha} = la fecha de corte. Vacío vuelve al de omisión.">
             <Input value={b.asunto} maxLength={200} onChange={(e) => set("asunto", e.target.value)} />
           </Field>
-          <Field label="Mensaje" hint="Va antes del resumen de saldo y la tabla, que el sistema agrega solos.">
-            <Textarea rows={3} value={b.mensaje} onChange={(e) => set("mensaje", e.target.value)}
-                      placeholder="Buen día, les compartimos su estado de cuenta…" />
+          <Field label="Mensaje" hint="Va antes del resumen de saldo y la tabla, que el sistema agrega solos. Una línea en blanco separa párrafos. También acepta {nombre} y {fecha}.">
+            <Textarea rows={4} value={b.mensaje} onChange={(e) => set("mensaje", e.target.value)} />
           </Field>
         </Seccion>
 

@@ -207,3 +207,24 @@ def test_toca_y_proximo():
     assert svc.proximo(g, cfg, lunes_7, salio_hoy=False).date() == dt.date(2026, 9, 28)
     assert svc.proximo(g, cfg, lunes_9, salio_hoy=True).date() == dt.date(2026, 10, 5)
     assert svc.proximo(g, cfg, martes, salio_hoy=False).date() == dt.date(2026, 10, 5)
+
+
+def test_asunto_y_mensaje_de_omision_con_comodines(client, env, auth, correo):
+    from zoneinfo import ZoneInfo
+
+    _config(client, env)
+    _factura_ppd_timbrada(env, total=1000, dias_atras=40, folio=1)
+    hoy = dt.datetime.now(ZoneInfo("America/Mexico_City")).strftime("%d/%m/%Y")
+
+    # Sin asunto ni mensaje: salen los de omisión, ya rellenos.
+    g = _envio(client, env, nombre="EHMO")
+    client.post(f"{_GRUPOS}/{g['id']}/enviar", headers=_h(env))
+    assert correo[0]["subject"] == f"Estado de cuenta EHMO al {hoy}"
+    assert "<p>Buen día, les compartimos su estado de cuenta.</p>" in correo[0]["html"]
+
+    # Con los suyos: {nombre} y {fecha} se rellenan; unas llaves cualquiera no truenan.
+    g = _envio(client, env, nombre="Otro", asunto="Cobranza {nombre} · corte {fecha}",
+               mensaje="Hola {nombre}\nlínea dos\n\nAdiós {llaves}")
+    client.post(f"{_GRUPOS}/{g['id']}/enviar", headers=_h(env))
+    assert correo[1]["subject"] == f"Cobranza Otro · corte {hoy}"
+    assert "<p>Hola Otro<br>línea dos</p>" in correo[1]["html"] and "<p>Adiós {llaves}</p>" in correo[1]["html"]

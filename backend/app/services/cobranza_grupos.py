@@ -352,9 +352,23 @@ _REJILLA = "#BFBFBF"
 _ROJO = "#C00000"
 
 
+# Lo que trae un envío nuevo (el editor los muestra ya escritos) y lo que se
+# usa si el envío los deja vacíos. {nombre} y {fecha} se rellenan al mandar.
+ASUNTO = "Estado de cuenta {nombre} al {fecha}"
+MENSAJE = ("Buen día, les compartimos su estado de cuenta.\n\n"
+           "Quedamos atentos a cualquier aclaración o comprobante de pago.")
+
+
+def rellena(texto: str, datos: dict) -> str:
+    """Los comodines del asunto y el mensaje. Reemplazo literal (no .format):
+    unas llaves sueltas que alguien escriba no truenan el envío."""
+    return (texto.replace("{nombre}", datos["nombre"])
+            .replace("{fecha}", f"{datos['corte']:%d/%m/%Y}"))
+
+
 def asunto(d: Definicion, datos: dict) -> str:
-    """El asunto del envío; vacío = «Estado de cuenta <nombre> al dd/mm/aaaa»."""
-    return (d.asunto or "").strip() or f"Estado de cuenta {datos['nombre']} al {datos['corte']:%d/%m/%Y}"
+    """El asunto del envío; vacío = el de omisión."""
+    return rellena((d.asunto or "").strip() or ASUNTO, datos)
 
 
 def _lista(v) -> list[str]:
@@ -384,9 +398,10 @@ def html_correo(d: Definicion, datos: dict, *, encabezado: str = "") -> str:
     ignoran las hojas de estilo). Todo dato dinámico va con html.escape."""
     e = html_mod.escape
     adjunta_excel = d.adjuntar_excel
-    mensaje = (d.mensaje or "").strip()
+    mensaje = rellena((d.mensaje or "").strip() or MENSAJE, datos)
     partes = [encabezado] if encabezado else []
-    partes += [f"<p>{e(p)}</p>" for p in mensaje.split("\n\n") if p.strip()]
+    # Línea en blanco = otro párrafo; un salto suelto se respeta dentro del párrafo.
+    partes += [f"<p>{e(p.strip()).replace(chr(10), '<br>')}</p>" for p in mensaje.split("\n\n") if p.strip()]
     partes.append(f"<p>Estado de cuenta de <strong>{e(datos['nombre'])}</strong> al {datos['corte']:%d/%m/%Y}.</p>")
     n = datos["facturas"]
     if n == 0:
