@@ -4,11 +4,17 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .common import ORMModel
 
 ClienteTipo = Literal["PRINCIPAL_GOV", "SUB", "PRIVADO", "OTRO"]
+
+
+def _nombre_corto(v: Optional[str]) -> Optional[str]:
+    """Sin espacios de sobra; vacío = sin nombre corto (sale la razón social)."""
+    v = " ".join((v or "").split())
+    return v or None
 
 
 class ClienteBase(BaseModel):
@@ -17,6 +23,8 @@ class ClienteBase(BaseModel):
     status: str = Field(default="ACTIVO", max_length=20)
     # fiscal identity (CFDI receptor)
     legal_name: str = Field(max_length=254)
+    # Como se le dice en las tablas de cobranza (EHMO en vez de la razón social).
+    nombre_corto: Optional[str] = Field(default=None, max_length=40)
     rfc: str = Field(max_length=15)
     regimen_fiscal: Optional[str] = Field(default=None, max_length=4)
     uso_cfdi_default: Optional[str] = Field(default=None, max_length=5)
@@ -35,6 +43,8 @@ class ClienteBase(BaseModel):
     serie_factura_id: Optional[uuid.UUID] = None
     serie_remision_id: Optional[uuid.UUID] = None
 
+    _limpia_nombre_corto = field_validator("nombre_corto")(_nombre_corto)
+
 
 class ClienteCreate(ClienteBase):
     # La lista con la que se le cobra en cualquier plaza (su renglón de
@@ -47,6 +57,7 @@ class ClienteUpdate(BaseModel):
     tipo: Optional[ClienteTipo] = None
     status: Optional[str] = Field(default=None, max_length=20)
     legal_name: Optional[str] = Field(default=None, max_length=254)
+    nombre_corto: Optional[str] = Field(default=None, max_length=40)
     rfc: Optional[str] = Field(default=None, max_length=15)
     regimen_fiscal: Optional[str] = Field(default=None, max_length=4)
     uso_cfdi_default: Optional[str] = Field(default=None, max_length=5)
@@ -68,6 +79,8 @@ class ClienteUpdate(BaseModel):
     espejo_sae: Optional[bool] = None
     # Omitido = no tocar; null = quitarla.
     lista_id: Optional[uuid.UUID] = None
+
+    _limpia_nombre_corto = field_validator("nombre_corto")(_nombre_corto)
 
 
 class ClienteOut(ORMModel, ClienteBase):

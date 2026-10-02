@@ -85,6 +85,10 @@ class ProyectoDeFactura:
                 return p
         return None
 
+    def por_id(self, proyecto_id) -> Proyecto | None:
+        """El proyecto del catálogo por su id (borrados incluidos)."""
+        return self._por_id.get(proyecto_id)
+
     def nombre(self, f) -> str | None:
         p = self.proyecto(f)
         return p.nombre if p else None

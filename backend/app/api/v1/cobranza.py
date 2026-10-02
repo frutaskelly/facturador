@@ -74,6 +74,7 @@ def _armar_estado_cuenta(
     serie: str | None = None, incluir_en_cancelacion: bool = False,
     solo_facturas: set[UUID] | None = None,
     excluir_series: set[str] | None = None,
+    clasificador: ProyectoDeFactura | None = None,
 ) -> dict:
     """El cálculo del estado de cuenta, uno solo para el JSON, el PDF, el Excel
     y el correo.
@@ -89,6 +90,10 @@ def _armar_estado_cuenta(
     `solo_facturas` acota a lo que la pantalla deja ver tras sus filtros
     (antigüedad, columnas, buscador): saldo y antigüedad se recalculan sobre
     ese subconjunto, para que el Excel diga lo mismo que la tabla.
+
+    `clasificador` deja reusar el mismo `ProyectoDeFactura` entre llamadas:
+    los grupos de cobranza arman el estado de cuenta de varias razones
+    sociales y cargar el catálogo una vez por cada una sobra.
     """
     if not ctx.cliente_permitido(cliente_id):
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
@@ -145,7 +150,7 @@ def _armar_estado_cuenta(
         )
         for factura_id, su_pedido in filas:
             pedido_de_remision[factura_id] = pedido_de_remision.get(factura_id) or su_pedido
-    clasificador = ProyectoDeFactura(db, cliente.tenant_id)
+    clasificador = clasificador or ProyectoDeFactura(db, cliente.tenant_id)
 
     antiguedad = {"por_vencer": Decimal("0"), "d1_30": Decimal("0"),
                   "d31_60": Decimal("0"), "d61_90": Decimal("0"), "d90_mas": Decimal("0")}
@@ -159,6 +164,7 @@ def _armar_estado_cuenta(
         saldo_total += saldo
         antiguedad[_bucket(dias_vencida)] += saldo
         su_pedido = pedido_de_remision.get(f.id)
+        proyecto = clasificador.proyecto(f)
         docs.append({
             "factura_id": str(f.id),
             "serie": f.serie,
@@ -170,7 +176,8 @@ def _armar_estado_cuenta(
             "total": f.total,
             "saldo_insoluto": saldo,
             "semana": extraer_semana(f.notas, su_pedido),
-            "proyecto": clasificador.nombre(f),
+            "proyecto": proyecto.nombre if proyecto else None,
+            "proyecto_id": str(proyecto.id) if proyecto else None,
             "cancelacion_msj": f.cancelacion_msj,
         })
 

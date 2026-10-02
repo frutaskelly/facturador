@@ -4,12 +4,15 @@
 // trabaja a mano: las facturas PPD por cobrar (se registra el pago), la
 // antigüedad de saldos (la cartera de hoy), los Recibos de pago (REP,
 // Complemento de Pago 2.0: se timbran, descargan, envían y cancelan) y las
-// notas de crédito. Después, tras la raya, la cobranza automática: los envíos
-// del estado de cuenta, sus contactos y sus ajustes.
+// notas de crédito. Después, tras la raya, los envíos del estado de cuenta:
+// cada uno (una razón social o varias) con su propia configuración, su
+// interruptor Automático/Manual y su botón Enviar.
 //
 // Antes esto vivía en tres lados: /cobranza, /cobranza/automatica (redirige
 // aquí, next.config.ts) y las pestañas Comprobantes de pago, Notas de crédito
-// y Cuentas por cobrar de Reportes, que se quedó con lo que se vende.
+// y Cuentas por cobrar de Reportes, que se quedó con lo que se vende. Las
+// pestañas Contactos y Ajustes (oct-2026) se volvieron parte de cada envío:
+// sus ligas viejas abren Envíos.
 import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 
@@ -19,22 +22,22 @@ import { can, useAuth } from "@/lib/auth";
 import { useResource, type Page as Pagina } from "@/lib/hooks";
 import type { Cliente } from "@/lib/types";
 
-import { Automatica, type PestanaAuto } from "./Automatica";
 import { Cartera } from "./Cartera";
+import { Envios } from "./Envios";
 import { NotasCredito } from "./NotasCredito";
 import { PorCobrar, RegistrarPago } from "./PorCobrar";
 import { RecibosPago } from "./RecibosPago";
 
-type Pestana = "por-cobrar" | "cartera" | "recibos" | "notas" | PestanaAuto;
+type Pestana = "por-cobrar" | "cartera" | "recibos" | "notas" | "envios";
 const PESTANAS: { key: Pestana; label: string; auto?: boolean }[] = [
   { key: "por-cobrar", label: "Por cobrar" },
   { key: "cartera", label: "Antigüedad de saldos" },
   { key: "recibos", label: "Recibos de pago (REP)" },
   { key: "notas", label: "Notas de crédito" },
-  { key: "envios", label: "Envíos automáticos", auto: true },
-  { key: "contactos", label: "Contactos", auto: true },
-  { key: "ajustes", label: "Ajustes", auto: true },
+  { key: "envios", label: "Envíos de estado de cuenta", auto: true },
 ];
+// Las pestañas que se volvieron parte de cada envío: su liga abre Envíos.
+const ANTES_ENVIOS = ["contactos", "ajustes", "grupos"];
 const DEFAULT: Pestana = "por-cobrar";
 const esPestana = (v: string | null): v is Pestana => PESTANAS.some((p) => p.key === v);
 
@@ -50,6 +53,7 @@ export default function Page() {
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
     if (esPestana(t)) setPestana(t);
+    else if (t && ANTES_ENVIOS.includes(t)) setPestana("envios");
     setHidratado(true);
   }, []);
   useEffect(() => {
@@ -60,7 +64,7 @@ export default function Page() {
     window.history.replaceState(window.history.state, "", qs ? `?${qs}` : window.location.pathname);
   }, [hidratado, pestana]);
   // En el celular la barra se desliza: la pestaña abierta (la de la liga, p.
-  // ej. ?tab=ajustes) se centra para que no quede escondida a la derecha.
+  // ej. ?tab=envios) se centra para que no quede escondida a la derecha.
   const barra = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const b = barra.current;
@@ -76,13 +80,12 @@ export default function Page() {
   const [nuevo, setNuevo] = useState(false);
   const [rev, setRev] = useState(0);
   const conPago = pestana === "por-cobrar" || pestana === "recibos";
-  const automatica = pestana === "envios" || pestana === "contactos" || pestana === "ajustes";
 
   return (
     <div>
       <PageHeader
         title="Cobranza"
-        subtitle="Lo que nos deben, lo que se ha pagado (REP y notas de crédito) y el estado de cuenta automático"
+        subtitle="Lo que nos deben, lo que se ha pagado (REP y notas de crédito) y los envíos del estado de cuenta"
         actions={canWrite && conPago && <Button onClick={() => setNuevo(true)}><Plus size={16} /> Registrar pago</Button>}
       />
 
@@ -118,7 +121,7 @@ export default function Page() {
           {pestana === "cartera" && <Cartera />}
           {pestana === "recibos" && <RecibosPago clientes={clientes} canWrite={canWrite} rev={rev} />}
           {pestana === "notas" && <NotasCredito />}
-          {automatica && <Automatica pestana={pestana} canWrite={canWrite} />}
+          {pestana === "envios" && <Envios canWrite={canWrite} />}
         </>
       )}
 

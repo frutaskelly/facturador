@@ -42,6 +42,9 @@ class Cliente(Base, TimestampMixin, SoftDeleteMixin):
 
     # ── fiscal identity (CFDI 4.0 receptor) ──
     legal_name = Column(String(254), nullable=False)
+    # Como se le dice en las tablas de cobranza (EHMO, SUREÑA, MAFAN). Vacío =
+    # la razón social completa (migración 0097).
+    nombre_corto = Column(String(40))
     rfc = Column(String(15), nullable=False, index=True)
     regimen_fiscal = Column(String(4))         # RegimenFiscalReceptor
     uso_cfdi_default = Column(String(5))       # UsoCFDI
