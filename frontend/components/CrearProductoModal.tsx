@@ -5,10 +5,24 @@ import { ExternalLink, Sparkles } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { ApiError, apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Field, Input, Select } from "@/components/ui/Field";
+import { DescripcionSat } from "@/components/DescripcionSat";
 import { SatClaveCombobox } from "@/components/SatClaveCombobox";
+import {
+  UnidadesClavesSae,
+  altasDesdeFilas,
+  cambiarUnidadBase,
+  cambiosSaeDesdeFilas,
+  filaBase,
+  normalizarClave,
+  problemasClavesSae,
+  validarClavesSae,
+  type AltaSaeResumen,
+  type FilaClave,
+} from "@/components/UnidadesClavesSae";
 import { useToast } from "@/components/ui/Toast";
 
 // Unidades para el alta rápida de producto (mismas que el buscador de producto).
@@ -38,6 +52,8 @@ export type ProductoCreado = {
   presentaciones: Record<string, number>;
   presentacion_default?: string | null;
   unidad_base?: string | null;
+  /** Las altas en SAE que se encolaron con el producto (sólo al crear). */
+  altas_sae?: AltaSaeResumen[];
 };
 
 /** Un producto del catálogo que se parece al que se está dando de alta. El
@@ -82,6 +98,11 @@ export function candidatosDuplicados(e: unknown): CandidatoDuplicado[] {
  * Con `clienteId`, además se puede dejar el precio en la lista de ese cliente
  * sin salir del modal: el producto nuevo nace con precio y la partida deja de
  * quedarse en blanco esperando a que alguien lo capture en otra pantalla.
+ *
+ * Reglas del dueño (2-oct-2026): la categoría es obligatoria, y en el tenant
+ * dueño de SAE el producto no nace sin clave SAE en su unidad base — se liga
+ * una que ya existe o se pide el alta, que viaja con el producto. Aquí sólo la
+ * base: las demás unidades se agregan después en Productos.
  */
 export function CrearProductoModal({
   open,
@@ -103,6 +124,8 @@ export function CrearProductoModal({
   onCreated: (p: ProductoCreado) => void;
 }) {
   const toast = useToast();
+  const { me } = useAuth();
+  const saeConectado = !!me?.active_tenant.sae_conectado;
   const [cNombre, setCNombre] = useState(nombreInicial);
   const [cClaveSat, setCClaveSat] = useState("01010101");
   const [cUnidadBase, setCUnidadBase] = useState(unidadBaseInicial);
@@ -117,6 +140,11 @@ export function CrearProductoModal({
   const [satConfianza, setSatConfianza] = useState("");
   const [sugiriendo, setSugiriendo] = useState(false);
   const [satManual, setSatManual] = useState(false);
+
+  // Categoría (obligatoria) y la clave SAE de la unidad base.
+  const [categorias, setCategorias] = useState<{ id: string; nombre: string }[]>([]);
+  const [categoriaSel, setCategoriaSel] = useState("");
+  const [filas, setFilas] = useState<FilaClave[]>(() => [filaBase(unidadBaseInicial || "KILO")]);
 
   // Precio para la lista del cliente (opcional).
   const [precio, setPrecio] = useState("");
@@ -146,8 +174,11 @@ export function CrearProductoModal({
         });
         setSatOpciones(s.opciones);
         setSatConfianza(s.confianza);
-        // La mejor queda puesta: el caso bueno es no tocar nada.
-        if (s.opciones[0]?.clave_sat) setCClaveSat(s.opciones[0].clave_sat);
+        // La mejor queda puesta: el caso bueno es no tocar nada. Salvo con
+        // confianza BAJA (2-oct-2026): ahí la primera es casi un volado y
+        // dejarla puesta es invitar a no revisarla — se deja vacía y se escoge.
+        if ((s.confianza || "").toLowerCase() === "baja") setCClaveSat("");
+        else if (s.opciones[0]?.clave_sat) setCClaveSat(s.opciones[0].clave_sat);
         if (s.unidad_sat) setCUnidadSat(s.unidad_sat);
       } catch {
         // Sin IA (o sin llave) el alta sigue: queda el genérico y el buscador.
@@ -174,6 +205,8 @@ export function CrearProductoModal({
     setSatManual(false);
     setPrecio("");
     setListaSel("");
+    setCategoriaSel("");
+    setFilas([filaBase(base)]);
     // El nombre ya viene tecleado desde el buscador: se sugiere sin pedirlo.
     if (nombreInicial.trim()) void sugerirSat(nombreInicial);
   }, [open, nombreInicial, unidadBaseInicial, sugerirSat]);
@@ -192,6 +225,14 @@ export function CrearProductoModal({
         setEsquemaSel("");
       })
       .catch(() => setEsquemas([]));
+  }, [open]);
+
+  // Las categorías activas: la categoría es obligatoria en el alta.
+  useEffect(() => {
+    if (!open) return;
+    apiFetch<{ items: { id: string; nombre: string; activo: boolean }[] }>("/api/v1/categorias?limit=200")
+      .then((r) => setCategorias(r.items.filter((c) => c.activo)))
+      .catch(() => setCategorias([]));
   }, [open]);
 
   // Las listas del cliente, para ofrecer dónde guardar el precio.
@@ -244,25 +285,52 @@ export function CrearProductoModal({
     if (cSaving) return;
     if (!cNombre.trim()) { toast.error("Escribe el nombre del producto"); return; }
     if (!esquemaSel) { toast.error("Elige el esquema de impuesto"); return; }
+    if (faltas.length) { toast.error(faltas[0]); return; }
+    const altas = saeConectado ? altasDesdeFilas(filas, cNombre.trim(), cUnidadSat) : [];
     setCSaving(true);
     try {
       const prod = await apiFetch<ProductoCreado>("/api/v1/productos", {
         method: "POST",
         body: JSON.stringify({
           nombre: cNombre.trim(),
+          categoria_id: categoriaSel,
           esquema_impuesto_id: esquemaSel,
-          clave_sat: cClaveSat.trim() || "01010101",
+          clave_sat: cClaveSat.trim(),
           unidad_sat: cUnidadSat,
           unidad_base: cUnidadBase,
+          // Sin SAE conectado no hay clave que pedir: nace como siempre.
+          ...(saeConectado ? { clave_sae: normalizarClave(filas[0]?.clave) || null } : {}),
           presentaciones: { [cUnidadBase]: 1 },
           presentacion_default: cUnidadBase,
+          ...(altas.length ? { altas_sae: altas } : {}),
           forzar,
         }),
       });
       // El producto nace con una sola presentación: la unidad base elegida.
       await guardarPrecio(prod.id, cUnidadBase);
+      const avisos = [`Producto "${prod.nombre}" creado`];
+      for (const a of prod.altas_sae ?? []) avisos.push(`Alta de ${a.clave} pedida (${a.empresas.join(", ")})`);
+      // «Dejar la mía y pedir cambio en SAE» (2-oct-2026): igual que en
+      // Productos, va DESPUÉS de crear; si falla, el producto ya existe — se
+      // avisa, no se deshace. Sin esto la fila prometía el cambio y nadie lo
+      // pedía: producto y SAE quedaban con claves SAT distintas.
+      const cambios = saeConectado
+        ? cambiosSaeDesdeFilas(filas, cClaveSat, esquemaCodigo, prod.id)
+        : [];
+      const fallidos: string[] = [];
+      for (const c of cambios) {
+        try {
+          await apiFetch("/api/v1/productos/cambio-sae", { method: "POST", body: JSON.stringify(c) });
+          avisos.push(`Cambio de ${c.clave} pedido en SAE`);
+        } catch (e) {
+          fallidos.push(`${c.clave}: ${e instanceof ApiError ? e.message : "no se pudo"}`);
+        }
+      }
       onCreated(prod);
-      toast.success(`Producto "${prod.nombre}" creado`);
+      toast.success(avisos.join(" · "));
+      if (fallidos.length) {
+        toast.error(`El producto sí se creó, pero no pude pedir el cambio en SAE — ${fallidos.join(" · ")}`);
+      }
       onClose();
     } catch (e) {
       const dups = candidatosDuplicados(e);
@@ -274,6 +342,35 @@ export function CrearProductoModal({
     } finally {
       setCSaving(false);
     }
+  }
+
+  // El número de SAE del esquema elegido (su `codigo` en el Facturador).
+  const esquemaCodigo = esquemas.find((e) => e.id === esquemaSel)?.codigo.trim() || null;
+  const satBaja = (satConfianza || "").toLowerCase() === "baja";
+  const nAltas = saeConectado ? filas.filter((f) => f.estado === "nueva").length : 0;
+
+  // Lo que impide crear; el primero va en rojo al pie y apaga el botón.
+  const faltas: string[] = [];
+  if (!categoriaSel) faltas.push("Elige la categoría");
+  if (!cClaveSat.trim()) faltas.push("Elige la clave SAT");
+  const sinClave = validarClavesSae(filas, saeConectado);
+  if (sinClave.length) faltas.push(`Falta la clave SAE de ${sinClave.join(", ")}`);
+  faltas.push(...problemasClavesSae(filas, cNombre, saeConectado));
+  if (nAltas) {
+    if (!esquemaCodigo || !/^\d+$/.test(esquemaCodigo)) {
+      faltas.push("Para pedir el alta en SAE, elige un esquema de impuesto con número de SAE");
+    }
+    if (!/^\d{8}$/.test(cClaveSat.trim())) faltas.push("Para pedir el alta en SAE, la clave SAT lleva 8 dígitos");
+  }
+
+  /** «Usar la de SAE» para el esquema: el de este lado con ese número. */
+  function usarEsquemaDeSae(codigo: number) {
+    const esq = esquemas.find((e) => e.codigo.trim() === String(codigo));
+    if (!esq) {
+      toast.error(`No hay un esquema activo con el número ${codigo} de SAE: créalo en Esquemas de impuesto`);
+      return;
+    }
+    setEsquemaSel(esq.id);
   }
 
   /** "Es el mismo": no se crea nada — se devuelve el producto que ya existía,
@@ -301,17 +398,24 @@ export function CrearProductoModal({
       open={open}
       onClose={onClose}
       title="Nuevo producto"
+      // Con SAE la clave se busca aquí mismo, y las candidatas traen su
+      // descripción y sus empresas: en el modal angosto no caben.
       size="lg"
+      // Lo que falta va a la izquierda del pie: el Modal mete `footer` en un
+      // bloque alineado a la derecha.
+      footerStart={faltas.length ? (
+        <span className="text-sm text-danger">{faltas[0]}</span>
+      ) : undefined}
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={cSaving}>Cancelar</Button>
           {parecidos.length ? (
-            <Button variant="secondary" onClick={() => crearProducto(true)} disabled={cSaving}>
+            <Button variant="secondary" onClick={() => crearProducto(true)} disabled={cSaving || faltas.length > 0}>
               {cSaving ? "Creando…" : "Es distinto — crearlo igual"}
             </Button>
           ) : (
-            <Button onClick={() => crearProducto()} disabled={cSaving}>
-              {cSaving ? "Creando…" : "Crear producto"}
+            <Button onClick={() => crearProducto()} disabled={cSaving || faltas.length > 0}>
+              {cSaving ? "Creando…" : nAltas ? "Crear y pedir 1 alta en SAE" : "Crear producto"}
             </Button>
           )}
         </>
@@ -339,7 +443,7 @@ export function CrearProductoModal({
       ) : null}
 
       <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2${parecidos.length ? " mt-3" : ""}`}>
-        <div className="sm:col-span-2">
+        <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-[2fr_1fr]">
           <Field label="Nombre" required>
             <Input
               value={cNombre}
@@ -358,9 +462,23 @@ export function CrearProductoModal({
               autoFocus
             />
           </Field>
+          <Field label="Categoría" required>
+            <Select value={categoriaSel} onChange={(e) => setCategoriaSel(e.target.value)}>
+              <option value="">— Elige —</option>
+              {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </Select>
+          </Field>
         </div>
         <Field label="Unidad base" hint="Unidad de inventario">
-          <Select value={cUnidadBase} onChange={(e) => { const b = e.target.value; setCUnidadBase(b); setCUnidadSat(satPorBase(b)); }}>
+          <Select
+            value={cUnidadBase}
+            onChange={(e) => {
+              const b = e.target.value;
+              setCUnidadBase(b);
+              setCUnidadSat(satPorBase(b));
+              setFilas((fs) => cambiarUnidadBase(fs, b));
+            }}
+          >
             {UNIDADES_BASE.map((u) => <option key={u} value={u}>{u}</option>)}
           </Select>
         </Field>
@@ -399,11 +517,16 @@ export function CrearProductoModal({
             hint="Producto/servicio. La mal puesta no rebota al timbrar: clasifica mal la factura."
           >
             {satManual ? (
-              <SatClaveCombobox value={cClaveSat} onChange={setCClaveSat} />
+              <SatClaveCombobox value={cClaveSat} onChange={setCClaveSat} mostrarDescripcion={false} />
             ) : (
-              <Input value={cClaveSat} onChange={(e) => setCClaveSat(e.target.value)} />
+              <Input
+                value={cClaveSat}
+                placeholder={satBaja ? "Elige una de las opciones de abajo" : undefined}
+                onChange={(e) => setCClaveSat(e.target.value.trim())}
+              />
             )}
           </Field>
+          <DescripcionSat clave={cClaveSat} />
 
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
             {sugiriendo ? (
@@ -438,9 +561,18 @@ export function CrearProductoModal({
 
           {satOpciones.length ? (
             <div className="mt-2 rounded-lg border border-border bg-surface-2 p-2">
-              <div className="mb-1 text-xs text-muted">
-                Sugerencias de la IA{satConfianza ? ` · confianza ${satConfianza}` : ""} — la
-                primera ya quedó puesta. Verifícala en el SAT antes de timbrar.
+              <div className={`mb-1 text-xs ${satBaja ? "text-warning" : "text-muted"}`}>
+                {satBaja ? (
+                  <>
+                    Sugerencias de la IA · confianza baja — no estoy segura, así que no dejé
+                    ninguna puesta: escoge tú la que le toca (o búscala en el catálogo).
+                  </>
+                ) : (
+                  <>
+                    Sugerencias de la IA{satConfianza ? ` · confianza ${satConfianza}` : ""} — la
+                    primera ya quedó puesta. Verifícala en el SAT antes de timbrar.
+                  </>
+                )}
               </div>
               <div className="space-y-1">
                 {satOpciones.map((o) => {
@@ -490,8 +622,26 @@ export function CrearProductoModal({
           </>
         ) : null}
 
+        {saeConectado ? (
+          <div className="sm:col-span-2">
+            <UnidadesClavesSae
+              nombre={cNombre}
+              filas={filas}
+              onChange={setFilas}
+              esquemaCodigo={esquemaCodigo}
+              esquemaNombre={esquemas.find((e) => e.id === esquemaSel)?.nombre ?? null}
+              claveSat={cClaveSat}
+              unidadSat={cUnidadSat}
+              onUsarSatDeSae={(c) => setCClaveSat(c)}
+              onUsarEsquemaDeSae={usarEsquemaDeSae}
+              saeConectado
+              soloBase
+            />
+          </div>
+        ) : null}
+
         <p className="text-xs text-muted sm:col-span-2">
-          Se crea con lo esencial. Puedes completar categoría y presentaciones después en Productos.
+          Se crea con lo esencial. Las demás presentaciones se agregan después en Productos.
         </p>
       </div>
     </Modal>

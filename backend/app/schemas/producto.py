@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -35,6 +35,29 @@ class ClaveSaeLineaOut(BaseModel):
     # "presentacion" | "cliente" | "producto": dónde quedó guardada.
     origen: str
     presentacion: Optional[str] = None
+
+
+class AltaSaeProductoIn(BaseModel):
+    """Una clave NUEVA de SAE que se pide crear junto con el producto que la
+    lleva (2-oct-2026): «Crear clave nueva en SAE» del editor de producto.
+
+    Viaja con el alta o la edición del producto y se encola en la MISMA
+    transacción: así el producto nunca existe sin su clave y la clave nunca se
+    pide para un producto que no se guardó. El esquema y la clave SAT NO
+    vienen aquí: salen del producto, que es la fuente (pedirlos dos veces es
+    la forma de que el producto diga una cosa y SAE otra).
+
+    `empresas` vacío = las cuatro (02-05). Las que ya tienen la clave se
+    quitan solas: ahí es una liga, no un alta.
+    """
+    clave: str = Field(min_length=1, max_length=20)
+    unidad: Literal["KILO", "PIEZA", "CAJA", "LITRO", "PAQUETE"]
+    descripcion: str = Field(min_length=1, max_length=60)
+    # Línea de SAE (su categorización interna, CLIN): obligatoria, sin ella el
+    # escritor caería a ABARR en silencio.
+    linea: str = Field(pattern=r"^[A-Z0-9]{1,10}$")
+    empresas: list[str] = Field(default_factory=list, max_length=10)
+    sat_unidad: Optional[str] = Field(default=None, max_length=10)
 
 
 class ProductoBase(BaseModel):
@@ -80,6 +103,9 @@ class ProductoCreate(ProductoBase):
     # Sin `forzar`, el alta truena con 409 si el catálogo ya tiene un candidato
     # fuerte con ese nombre — el detector de duplicados deja de ser opcional.
     forzar: bool = False
+    # Claves nuevas que hay que crear en SAE para este producto (sólo el tenant
+    # dueño de SAE). Cada una tiene que ser la base o la de una presentación.
+    altas_sae: list[AltaSaeProductoIn] = Field(default_factory=list, max_length=20)
 
 
 class ProductoUpdate(BaseModel):
@@ -110,6 +136,8 @@ class ProductoUpdate(BaseModel):
     sinonimos: Optional[list[str]] = None
     activo: Optional[bool] = None
     custom_fields: Optional[dict] = None
+    # Igual que en el alta; no es un campo del producto (no se guarda en él).
+    altas_sae: Optional[list[AltaSaeProductoIn]] = Field(default=None, max_length=20)
 
 
 class ProductoOut(ORMModel, ProductoBase):
@@ -121,6 +149,9 @@ class ProductoOut(ORMModel, ProductoBase):
     # en el producto: la clave es el dato, la descripción es cómo se lee. La
     # resuelve el listado en una sola consulta (ver `preparar` en la ruta).
     clave_sat_descripcion: Optional[str] = None
+    # Las altas en SAE que se encolaron (o se reusaron, si ya había una viva)
+    # en ESTA llamada de alta/edición. Vacío en GET y en el listado.
+    altas_sae: list["AltaSaeOut"] = Field(default_factory=list)
 
 
 # ─── Cruce de productos (match / alias aprendidos) ───────────────────────────
@@ -594,3 +625,8 @@ class AltaSaeReporteIn(BaseModel):
     """
     por_empresa: dict = Field(default_factory=dict)
     motivo: Optional[str] = Field(default=None, max_length=300)
+
+
+# `ProductoOut.altas_sae` apunta a `AltaSaeOut`, que se define después, con el
+# resto de la cola de SAE: ya con las dos clases se resuelve la referencia.
+ProductoOut.model_rebuild()

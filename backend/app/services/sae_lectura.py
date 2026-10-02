@@ -56,6 +56,14 @@ class SAENoDisponible(RuntimeError):
     """No hay acceso a SAE: sin configuración, sin driver o sin red."""
 
 
+def es_falla_de_red(e: Exception) -> bool:
+    """¿El error dice «SAE no está» más que «la consulta está mal»? Sin red, sin
+    login o con timeout pymssql lanza OperationalError/InterfaceError; se
+    reconocen por nombre porque el driver ni siquiera se importa sin SAE."""
+    return (isinstance(e, (SAENoDisponible, OSError, TimeoutError))
+            or type(e).__name__ in ("OperationalError", "InterfaceError"))
+
+
 class _EmpresaActiva:
     """La empresa del SAE 9 que se está leyendo, con UNA conexión para todo el
     bloque: cada conexión a Firebird por Tailscale cuesta medio segundo, y una
@@ -614,3 +622,47 @@ def esquemas_de(empresa: str) -> list[dict[str, Any]]:
                        "descripcion": str(f.get("descripcion") or "").strip(),
                        "iva": _pct(f.get("iva")), "ieps": _pct(f.get("ieps"))})
     return salida
+
+
+def articulo(empresa: str, clave: str) -> Optional[dict[str, Any]]:
+    """Cómo está UN artículo en INVE<empresa>, leído en este momento: lo que
+    enseña «Así está en SAE» al ligar una clave a un producto (2-oct-2026).
+
+    No sale del espejo porque el espejo sólo guarda clave, descripción y
+    STATUS: para decir si la unidad, el esquema o la clave SAT del producto
+    coinciden con los de SAE hay que leer la fila entera. Sólo el SAE 10 (es
+    donde se liga y se escribe); dentro de `en_empresa` de una del SAE 9 es un
+    error, no una lectura.
+
+    None = esa empresa no tiene la clave. La clave viaja como PARÁMETRO y se
+    compara sin relleno (SAE guarda CVE_ART con espacios).
+    """
+    if motor() != "mssql":
+        raise ValueError("articulo() sólo lee el SAE 10")
+    c = str(clave or "").strip()
+    if not c:
+        return None
+    filas = consultar(
+        "SELECT TOP 1 LTRIM(RTRIM(CVE_ART)) AS clave, DESCR AS descripcion, "
+        "UNI_MED AS unidad, LIN_PROD AS linea, CVE_ESQIMPU AS esquema, "
+        "CVE_PRODSERV AS sat, CVE_UNIDAD AS sat_unidad, STATUS AS status "
+        f"FROM {tabla('INVE', empresa)} WHERE LTRIM(RTRIM(CVE_ART)) = %s",
+        (c,),
+    )
+    if not filas:
+        return None
+    f = filas[0]
+    try:
+        esquema = int(f.get("esquema")) if f.get("esquema") is not None else None
+    except (TypeError, ValueError):
+        esquema = None
+    return {
+        "clave": texto(f.get("clave")),
+        "descripcion": descripcion_inve(f.get("descripcion")),
+        "unidad": texto(f.get("unidad")) or None,
+        "linea": texto(f.get("linea")) or None,
+        "esquema": esquema,
+        "sat": texto(f.get("sat")) or None,
+        "sat_unidad": texto(f.get("sat_unidad")) or None,
+        "activa": status_activo(f.get("status")),
+    }

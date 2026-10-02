@@ -198,11 +198,9 @@ _catalogos_lock = threading.Lock()
 
 
 def _es_de_red(e: Exception) -> bool:
-    """¿El error dice «SAE no está» más que «la consulta está mal»? Sin red, sin
-    login o con timeout pymssql lanza OperationalError/InterfaceError; se
-    reconocen por nombre porque el driver ni siquiera se importa sin SAE."""
-    return (isinstance(e, (sae_lectura.SAENoDisponible, OSError, TimeoutError))
-            or type(e).__name__ in ("OperationalError", "InterfaceError"))
+    """¿El error dice «SAE no está» más que «la consulta está mal»? La regla vive
+    en `sae_lectura`: «Así está en SAE» (productos) la usa igual."""
+    return sae_lectura.es_falla_de_red(e)
 
 
 @router.get("/catalogos", response_model=SaeCatalogosOut)

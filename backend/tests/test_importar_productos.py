@@ -16,6 +16,7 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
+from .conftest import categoria_de_prueba
 from app.models import (
     Almacen, CategoriaProducto, Cliente, EsquemaImpuesto, ImportProductosLog,
     ListaAsignacion, ListaPrecios, Membership, Precio, Producto, ProductoAlias,
@@ -1824,6 +1825,7 @@ def test_alta_y_edicion_individual_dejan_autor(client, env, auth_as):
     r = client.post("/api/v1/productos", headers=h, json={
         "sku": "", "nombre": "PEPINO PERSA", "clave_sat": "50421800",
         "unidad_sat": "KGM", "esquema_impuesto_id": _esquema_lote(env["tenant_id"]),
+        "categoria_id": categoria_de_prueba(env["tenant_id"]),
     })
     assert r.status_code == 201, r.text
     pid = r.json()["id"]

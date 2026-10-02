@@ -1,8 +1,9 @@
 """El catálogo de claves de SAE (espejo de INVE##): su depósito y su búsqueda."""
 import uuid
+from datetime import datetime
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ClaveSaeItem(BaseModel):
@@ -55,3 +56,67 @@ class ClaveSaeBuscadaOut(BaseModel):
     empresas: Dict[str, ClaveSaeEnEmpresa] = Field(default_factory=dict)
     producto_id: Optional[uuid.UUID] = None
     producto_nombre: Optional[str] = None
+
+
+# ── «Así está en SAE» y el estado de las claves del catálogo (2-oct-2026) ────
+
+class ArticuloSaeEmpresaOut(BaseModel):
+    """Un artículo en UNA empresa de SAE, leído en vivo de INVE.
+
+    `unidad` es el UNI_MED crudo de SAE (KG, PZ, CJ…) y `unidad_canonica` la
+    misma en el idioma del Facturador (KILO, PIEZA, CAJA…), para compararla
+    contra la presentación sin que la pantalla traduzca. Las descripciones del
+    esquema y de las claves SAT son informativas: se leen, no se guardan.
+    """
+    existe: bool = False
+    activa: Optional[bool] = None
+    descripcion: Optional[str] = None
+    unidad: Optional[str] = None
+    unidad_canonica: Optional[str] = None
+    linea: Optional[str] = None
+    esquema: Optional[int] = None
+    esquema_descripcion: Optional[str] = None
+    sat: Optional[str] = None
+    sat_descripcion: Optional[str] = None
+    sat_unidad: Optional[str] = None
+    sat_unidad_descripcion: Optional[str] = None
+
+
+class ArticuloSaeOut(BaseModel):
+    """Respuesta de `GET /productos/claves-sae/{clave}/en-sae`.
+
+    Siempre trae las cuatro empresas del SAE 10 (02-05); la que no tiene la
+    clave sale con `existe=false`. Con SAE caído o sin configurar contesta
+    igual, con `disponible=false` y el motivo: la pantalla de ligar se degrada
+    a lo que dice el espejo, nunca a un error.
+    """
+    clave: str
+    disponible: bool
+    motivo: Optional[str] = None
+    empresas: Dict[str, ArticuloSaeEmpresaOut] = Field(default_factory=dict)
+
+
+class ClaveSaeEstadoEmpresa(BaseModel):
+    activa: bool
+
+
+class SolicitudSaeResumenOut(BaseModel):
+    """La última alta pedida de una clave, lo justo para pintar su chip
+    («Alta pendiente», «Alta con error»)."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    tipo: str
+    estado: str
+    empresas: List[str] = Field(default_factory=list)
+    solicitada_at: datetime
+    motivo: Optional[str] = None
+
+
+class ClaveSaeEstadoOut(BaseModel):
+    """Una clave que usa el catálogo: en qué empresas existe según el espejo y
+    su última solicitud de ALTA (si alguna)."""
+    clave: str
+    # Sólo las empresas 02-05 donde el espejo la tiene.
+    empresas: Dict[str, ClaveSaeEstadoEmpresa] = Field(default_factory=dict)
+    solicitud: Optional[SolicitudSaeResumenOut] = None

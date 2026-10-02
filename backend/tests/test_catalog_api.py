@@ -16,6 +16,9 @@ from app.core.db import SessionLocal
 from app.main import app
 from app.models import EsquemaImpuesto, Membership, Role, Tenant, User
 
+# El alta exige categoría (2-oct-2026); como el esquema, se crea bajo demanda.
+from .conftest import categoria_de_prueba as _categoria
+
 # Tables to purge (FK order) for the two test tenants at teardown.
 _CATALOG_TABLES = (
     "precios",
@@ -237,7 +240,7 @@ def test_nested_precios_crud(client, env, auth_as):
 
     prod = client.post(
         "/api/v1/productos", headers=h,
-        json={"sku": "91000019", "nombre": "Prod 9", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"},
+        json={"sku": "91000019", "nombre": "Prod 9", "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"},
     ).json()
     lista = client.post("/api/v1/listas-precios", headers=h, json={"codigo": "L1", "nombre": "Lista 1"}).json()
 
@@ -492,15 +495,16 @@ def test_producto_update_swaps_and_clears_fk(client, env, auth_as):
     r = client.patch(f"/api/v1/productos/{prod['id']}", headers=h, json={"categoria_id": str(uuid.uuid4())})
     assert r.status_code == 422
 
-    # Explicit null clears the optional FK → 200, categoria_id None.
+    # Vaciarla ya no se puede (2-oct-2026): se CAMBIA, nunca se quita.
     r = client.patch(f"/api/v1/productos/{prod['id']}", headers=h, json={"categoria_id": None})
-    assert r.status_code == 200 and r.json()["categoria_id"] is None
+    assert r.status_code == 422 and "categoría" in r.json()["detail"]
+    assert client.get(f"/api/v1/productos/{prod['id']}", headers=h).json()["categoria_id"] == cat2["id"]
 
 
 def test_producto_duplicate_sku_conflicts(client, env, auth_as):
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
-    body = {"sku": "91000040", "nombre": "Uno", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"}
+    body = {"sku": "91000040", "nombre": "Uno", "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"}
     assert client.post("/api/v1/productos", headers=h, json=body).status_code == 201
     # Mismo SKU con otro nombre: el 409 viene del UNIQUE de SKU, no del
     # detector de duplicados por nombre.
@@ -527,7 +531,7 @@ def test_producto_no_se_queda_sin_esquema_al_editar(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     prod = client.post("/api/v1/productos", headers=h, json={
         "sku": "91000061", "nombre": "CON ESQUEMA",
-        "esquema_impuesto_id": _esquema(env["tenant_a"]),
+        "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]),
         "clave_sat": "01010101", "unidad_sat": "KGM"}).json()
 
     r = client.patch(f"/api/v1/productos/{prod['id']}", headers=h,
@@ -543,33 +547,25 @@ def test_producto_no_se_queda_sin_esquema_al_editar(client, env, auth_as):
     assert r.status_code == 200 and r.json()["esquema_impuesto_id"] == otro["id"]
 
 
-def test_producto_sin_categoria_cae_en_sin_categorizar(client, env, auth_as):
-    """Un producto sin categoría no se queda en un hueco invisible: cae en la
-    categoría por defecto del sistema, y así se puede listar y repartir desde
-    la pantalla de Categorías."""
+def test_producto_no_nace_sin_categoria(client, env, auth_as):
+    """La categoría se elige en el alta (regla del dueño, 2-oct-2026): ya no cae
+    sola en «Sin categorizar». Esa caída queda sólo para las puertas sin
+    pantalla (importación, alta desde SAE)."""
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
-    prod = client.post("/api/v1/productos", headers=h, json={
+    r = client.post("/api/v1/productos", headers=h, json={
         "sku": "91000062", "nombre": "SIN CATEGORIA",
         "esquema_impuesto_id": _esquema(env["tenant_a"]),
-        "clave_sat": "01010101", "unidad_sat": "KGM"}).json()
-    assert prod["categoria_id"] is not None
-
-    cats = client.get("/api/v1/categorias", headers=h).json()["items"]
-    default = next(c for c in cats if c["id"] == prod["categoria_id"])
-    assert default["nombre"] == "Sin categorizar"
-    # Se crea UNA sola vez: el segundo producto reusa la misma. Nombre bien
-    # distinto a propósito — parecido dispara el detector de duplicados (409).
-    r = client.post("/api/v1/productos", headers=h, json={
-        "sku": "91000063", "nombre": "MANGO ATAULFO",
-        "esquema_impuesto_id": _esquema(env["tenant_a"]),
         "clave_sat": "01010101", "unidad_sat": "KGM"})
-    assert r.status_code == 201, r.text
-    assert r.json()["categoria_id"] == prod["categoria_id"]
-    assert sum(1 for c in cats if c["nombre"] == "Sin categorizar") == 1
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Elige la categoría del producto"
+    assert client.get("/api/v1/productos", headers=h).json()["total"] == 0
+    # ni se fabricó la categoría del sistema por el camino
+    cats = client.get("/api/v1/categorias", headers=h).json()["items"]
+    assert not any(c["nombre"] == "Sin categorizar" for c in cats)
 
 
 def test_producto_con_categoria_no_la_pierde(client, env, auth_as):
-    """El default es solo para el hueco: la categoría elegida se respeta."""
+    """La categoría elegida se respeta tal cual."""
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     cat = client.post("/api/v1/categorias", headers=h,
                       json={"codigo": "CX", "nombre": "Frutas"}).json()
@@ -585,7 +581,7 @@ def test_producto_soft_delete(client, env, auth_as):
     h = _hdr(env["admin_a"])
     prod = client.post(
         "/api/v1/productos", headers=h,
-        json={"sku": "91000050", "nombre": "Borrar", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"},
+        json={"sku": "91000050", "nombre": "Borrar", "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"},
     ).json()
     assert client.get("/api/v1/productos", headers=h).json()["total"] == 1
     assert client.delete(f"/api/v1/productos/{prod['id']}", headers=h).status_code == 204
@@ -601,7 +597,7 @@ def test_producto_list_filters(client, env, auth_as):
         "sku": "91000061", "nombre": "Manzana roja", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "01010101",
         "unidad_sat": "KGM", "categoria_id": cat["id"], "activo": True})
     client.post("/api/v1/productos", headers=h, json={
-        "sku": "91000062", "nombre": "Pera verde", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "01010101",
+        "sku": "91000062", "nombre": "Pera verde", "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]), "clave_sat": "01010101",
         "unidad_sat": "KGM", "activo": False})
 
     # q matches name OR sku.
@@ -673,7 +669,7 @@ def test_precio_update_and_tier_conflict(client, env, auth_as):
     h = _hdr(env["admin_a"])
     prod = client.post(
         "/api/v1/productos", headers=h,
-        json={"sku": "91000080", "nombre": "Prod P", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"},
+        json={"sku": "91000080", "nombre": "Prod P", "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"},
     ).json()
     lista = client.post("/api/v1/listas-precios", headers=h, json={"codigo": "L1", "nombre": "Lista 1"}).json()
 
@@ -701,7 +697,7 @@ def test_precio_wrong_lista_is_404(client, env, auth_as):
     h = _hdr(env["admin_a"])
     prod = client.post(
         "/api/v1/productos", headers=h,
-        json={"sku": "91000090", "nombre": "Prod W", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"},
+        json={"sku": "91000090", "nombre": "Prod W", "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"},
     ).json()
     l1 = client.post("/api/v1/listas-precios", headers=h, json={"codigo": "L1", "nombre": "L1"}).json()
     l2 = client.post("/api/v1/listas-precios", headers=h, json={"codigo": "L2", "nombre": "L2"}).json()
@@ -737,7 +733,7 @@ def test_producto_peso_variable_and_fiscal_fields(client, env, auth_as):
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
     r = client.post("/api/v1/productos", headers=h, json={
-        "sku": "91000101", "nombre": "Sandía", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "50360000", "unidad_sat": "KGM",
+        "sku": "91000101", "nombre": "Sandía", "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]), "clave_sat": "50360000", "unidad_sat": "KGM",
         "unidad_base": "KILO", "presentaciones": {"KILO": 1, "PIEZA": 8},
         "peso_variable": True, "codigo_barras": "7501234567890", "contenido_litros": "0.6"})
     assert r.status_code == 201, r.text
@@ -748,7 +744,7 @@ def test_producto_peso_variable_and_fiscal_fields(client, env, auth_as):
 
     # defaults: omitting them → peso_variable False, the rest null
     r2 = client.post("/api/v1/productos", headers=h, json={
-        "sku": "91000102", "nombre": "Arroz", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "50100000", "unidad_sat": "H87"})
+        "sku": "91000102", "nombre": "Arroz", "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]), "clave_sat": "50100000", "unidad_sat": "H87"})
     body = r2.json()
     assert body["peso_variable"] is False
     assert body["codigo_barras"] is None and body["contenido_litros"] is None
@@ -784,13 +780,13 @@ def test_sku_autogenerated_when_blank(client, env, auth_as):
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
     r = client.post("/api/v1/productos", headers=h, json={
-        "nombre": "Sin SKU", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"})
+        "nombre": "Sin SKU", "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"})
     assert r.status_code == 201, r.text
     sku1 = r.json()["sku"]
     assert sku1.isdigit() and len(sku1) == 8
     # next one increments
     r2 = client.post("/api/v1/productos", headers=h, json={
-        "nombre": "Papel aluminio", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"})
+        "nombre": "Papel aluminio", "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]), "clave_sat": "01010101", "unidad_sat": "KGM"})
     assert int(r2.json()["sku"]) == int(sku1) + 1
 
 
@@ -798,7 +794,7 @@ def test_search_matches_sinonimos(client, env, auth_as):
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
     client.post("/api/v1/productos", headers=h, json={
-        "sku": "91000110", "nombre": "Jitomate", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "50420000", "unidad_sat": "KGM",
+        "sku": "91000110", "nombre": "Jitomate", "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]), "clave_sat": "50420000", "unidad_sat": "KGM",
         "sinonimos": ["tomate saladette", "guaje"]})
     # q matches a synonym, not just nombre/sku
     r = client.get("/api/v1/productos", headers=h, params={"q": "saladette"})
@@ -809,7 +805,7 @@ def test_similares_endpoint(client, env, auth_as):
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
     client.post("/api/v1/productos", headers=h, json={
-        "sku": "91000120", "nombre": "Lechuga romana", "esquema_impuesto_id": _esquema(env["tenant_a"]), "clave_sat": "50430000", "unidad_sat": "H87",
+        "sku": "91000120", "nombre": "Lechuga romana", "esquema_impuesto_id": _esquema(env["tenant_a"]), "categoria_id": _categoria(env["tenant_a"]), "clave_sat": "50430000", "unidad_sat": "H87",
         "sinonimos": ["lechuga orejona"]})
     r = client.get("/api/v1/productos/similares", headers=h, params={"nombre": "lechuga"})
     assert r.status_code == 200

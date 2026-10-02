@@ -80,7 +80,10 @@ export function ProductosDelGrupo({ filtro, canWrite }: { filtro: Filtro; canWri
         method: "PATCH",
         body: JSON.stringify({
           nombre: e.nombre.trim(),
-          categoria_id: e.categoria_id || null,
+          // La categoría se puede cambiar, nunca vaciar (2-oct-2026): el PATCH
+          // con null es un 422. Un producto viejo que nunca tuvo categoría no
+          // la manda, para que corregirle el nombre o el esquema no se trabe.
+          ...(e.categoria_id || p.categoria_id ? { categoria_id: e.categoria_id || null } : {}),
           esquema_impuesto_id: e.esquema_impuesto_id || null,
           clave_sat: e.clave_sat.trim() || null,
         }),
@@ -130,7 +133,9 @@ export function ProductosDelGrupo({ filtro, canWrite }: { filtro: Filtro; canWri
                 <td className="min-w-40 px-2 py-1.5">
                   {canWrite ? (
                     <Select value={e.categoria_id} onChange={(ev) => cambiar(p, { categoria_id: ev.target.value })}>
-                      <option value="">— Sin categoría —</option>
+                      {/* La opción vacía sólo para el producto viejo que nunca
+                          tuvo categoría: al que ya tiene, quitársela es un 422. */}
+                      {p.categoria_id ? null : <option value="">— Sin categoría —</option>}
                       {cats.map((c) => (
                         <option key={c.id} value={c.id}>{c.nombre}</option>
                       ))}
