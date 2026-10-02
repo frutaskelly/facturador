@@ -35,6 +35,9 @@ from ...models import (
     Sucursal,
 )
 from ...schemas.lista_precios import (
+    SkuClienteGuardado,
+    SkuClienteIn,
+    SkuClienteLista,
     ListaAsignacionCreate,
     ListaAsignacionOut,
     ListaAsignacionUpdate,
@@ -51,6 +54,7 @@ from ...schemas.lista_precios import (
     PrecioUpdate,
 )
 from ...schemas.common import Page
+from ...services.sku_cliente import guardar_sku, skus_de_lista
 from ...services.inventario import presentacion_declarada
 from ...services.precios import resolver_asignacion
 from ...services.proyecto_alcance import proyecto_aplica
@@ -242,6 +246,35 @@ def list_precios(
         query = query.filter(Precio.producto_id == producto_id)
     query = query.order_by(Precio.producto_id.asc(), Precio.cantidad_minima.asc())
     return paginate(query, PrecioOut, limit, offset)
+
+
+@router.get("/{lista_id}/sku-cliente", response_model=SkuClienteLista)
+def sku_cliente_de_lista(
+    lista_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """El SKU de los clientes asignados a la lista, por renglón (producto +
+    presentación). Vive en su catálogo de cliente: ver services/sku_cliente."""
+    lista = get_or_404(db, ListaPrecios, lista_id)
+    return skus_de_lista(db, ctx.tenant_id, lista)
+
+
+@router.put("/{lista_id}/sku-cliente", response_model=SkuClienteGuardado)
+def guardar_sku_cliente(
+    lista_id: UUID,
+    payload: SkuClienteIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Pone (o quita, vacío) el SKU de ese renglón en el catálogo de CADA
+    cliente de la lista: es el NoIdentificacion de su XML."""
+    lista = get_or_404(db, ListaPrecios, lista_id)
+    if not lista.lleva_sku_cliente:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Esta lista no lleva SKU del cliente: actívalo en la lista primero")
+    return guardar_sku(db, ctx.tenant_id, lista, payload.producto_id, payload.presentacion,
+                       payload.sku, ctx.user_id)
 
 
 def _productos_validados(db: Session, producto_ids) -> dict:

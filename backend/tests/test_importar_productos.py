@@ -319,6 +319,16 @@ def test_cfdi_usa_nombre_y_codigo_del_cliente(client, env, auth_as):
         item = payload["Items"][0]
         assert item["Description"] == "JITOMATE ROMA"
         assert item["IdentificationNumber"] == "JIT-SAD-001"
+
+        # Si su SKU es de OTRA unidad (la fila dice PIEZA), en kilo no tiene
+        # SKU: viaja el interno, y su nombre sigue (2-oct-2026).
+        pc = db.query(ProductoCliente).filter(ProductoCliente.producto_id == uuid.UUID(env["prod_id"]),
+                                              ProductoCliente.cliente_id == uuid.UUID(env["cli_id"])).one()
+        pc.presentacion = "PIEZA"
+        db.flush()
+        item = build_payload(db, f)["Items"][0]
+        assert item["IdentificationNumber"] == "00000010"
+        assert item["Description"] == "JITOMATE ROMA"
         db.rollback()
     finally:
         db.close()

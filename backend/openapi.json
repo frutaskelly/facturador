@@ -3379,6 +3379,25 @@
     "title": "ClienteCreate",
     "type": "object"
    },
+   "ClienteDeLista": {
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "nombre"
+    ],
+    "title": "ClienteDeLista",
+    "type": "object"
+   },
    "ClienteDelGrupoOut": {
     "description": "Un cliente que recibe órdenes por ese grupo, con lo suyo.",
     "properties": {
@@ -11864,6 +11883,11 @@
       "title": "Es Default",
       "type": "boolean"
      },
+     "lleva_sku_cliente": {
+      "default": false,
+      "title": "Lleva Sku Cliente",
+      "type": "boolean"
+     },
      "moneda": {
       "default": "MXN",
       "maxLength": 3,
@@ -11945,6 +11969,11 @@
       "format": "uuid",
       "title": "Id",
       "type": "string"
+     },
+     "lleva_sku_cliente": {
+      "default": false,
+      "title": "Lleva Sku Cliente",
+      "type": "boolean"
      },
      "moneda": {
       "default": "MXN",
@@ -12044,6 +12073,17 @@
        }
       ],
       "title": "Es Default"
+     },
+     "lleva_sku_cliente": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lleva Sku Cliente"
      },
      "moneda": {
       "anyOf": [
@@ -22633,6 +22673,167 @@
      }
     },
     "title": "SincronizarGruposIn",
+    "type": "object"
+   },
+   "SkuClienteGuardado": {
+    "properties": {
+     "avisos": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Avisos",
+      "type": "array"
+     },
+     "distintos": {
+      "default": false,
+      "title": "Distintos",
+      "type": "boolean"
+     },
+     "por_cliente": {
+      "additionalProperties": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "title": "Por Cliente",
+      "type": "object"
+     },
+     "presentacion": {
+      "title": "Presentacion",
+      "type": "string"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     },
+     "sku": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sku"
+     }
+    },
+    "required": [
+     "producto_id",
+     "presentacion"
+    ],
+    "title": "SkuClienteGuardado",
+    "type": "object"
+   },
+   "SkuClienteIn": {
+    "properties": {
+     "presentacion": {
+      "maxLength": 20,
+      "title": "Presentacion",
+      "type": "string"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     },
+     "sku": {
+      "anyOf": [
+       {
+        "maxLength": 50,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sku"
+     }
+    },
+    "required": [
+     "producto_id",
+     "presentacion"
+    ],
+    "title": "SkuClienteIn",
+    "type": "object"
+   },
+   "SkuClienteLista": {
+    "properties": {
+     "clientes": {
+      "items": {
+       "$ref": "#/components/schemas/ClienteDeLista"
+      },
+      "title": "Clientes",
+      "type": "array"
+     },
+     "renglones": {
+      "items": {
+       "$ref": "#/components/schemas/SkuClienteRenglon"
+      },
+      "title": "Renglones",
+      "type": "array"
+     }
+    },
+    "required": [
+     "clientes",
+     "renglones"
+    ],
+    "title": "SkuClienteLista",
+    "type": "object"
+   },
+   "SkuClienteRenglon": {
+    "properties": {
+     "distintos": {
+      "default": false,
+      "title": "Distintos",
+      "type": "boolean"
+     },
+     "por_cliente": {
+      "additionalProperties": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "title": "Por Cliente",
+      "type": "object"
+     },
+     "presentacion": {
+      "title": "Presentacion",
+      "type": "string"
+     },
+     "producto_id": {
+      "format": "uuid",
+      "title": "Producto Id",
+      "type": "string"
+     },
+     "sku": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sku"
+     }
+    },
+    "required": [
+     "producto_id",
+     "presentacion"
+    ],
+    "title": "SkuClienteRenglon",
     "type": "object"
    },
    "SolicitudSaeResumenOut": {
@@ -35844,6 +36045,144 @@
      }
     ],
     "summary": "Update Precio",
+    "tags": [
+     "listas de precios"
+    ]
+   }
+  },
+  "/api/v1/listas-precios/{lista_id}/sku-cliente": {
+   "get": {
+    "description": "El SKU de los clientes asignados a la lista, por renglón (producto +\npresentación). Vive en su catálogo de cliente: ver services/sku_cliente.",
+    "operationId": "sku_cliente_de_lista_api_v1_listas_precios__lista_id__sku_cliente_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "lista_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Lista Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SkuClienteLista"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Sku Cliente De Lista",
+    "tags": [
+     "listas de precios"
+    ]
+   },
+   "put": {
+    "description": "Pone (o quita, vacío) el SKU de ese renglón en el catálogo de CADA\ncliente de la lista: es el NoIdentificacion de su XML.",
+    "operationId": "guardar_sku_cliente_api_v1_listas_precios__lista_id__sku_cliente_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "lista_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Lista Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SkuClienteIn"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SkuClienteGuardado"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Guardar Sku Cliente",
     "tags": [
      "listas de precios"
     ]

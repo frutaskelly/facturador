@@ -52,6 +52,9 @@ class ListaPrecios(Base, TimestampMixin, SoftDeleteMixin):
     # La lista base del negocio (la usan los clientes sin lista propia). La
     # resolución de precios la prefiere sobre la convención codigo='UNICO'.
     es_default = Column(Boolean, nullable=False, server_default="false")
+    # La lista enseña y sube el SKU de sus clientes (2-oct-2026). El SKU se
+    # guarda en el catálogo de cada cliente asignado (services/sku_cliente.py).
+    lleva_sku_cliente = Column(Boolean, nullable=False, server_default="false")
     # VESTIGIO del espejo de precios SAE (empresa de Aspel + CVE_PRECIO de
     # PRECIO_X_PROD). Desde el 26-sep-2026 las listas de SAE ya no se usan: el
     # precio sale sólo del Facturador, no hay espejo en ninguna dirección y el

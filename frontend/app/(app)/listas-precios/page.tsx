@@ -53,6 +53,30 @@ function defaultPresentacion(p: Producto | undefined): string {
   return p.presentacion_default ?? p.unidad_base ?? Object.keys(p.presentaciones ?? {})[0] ?? "";
 }
 
+type SkuRenglon = { producto_id: string; presentacion: string; sku: string | null; distintos: boolean; por_cliente: Record<string, string | null> };
+type SkuLista = { clientes: { id: string; nombre: string }[]; renglones: SkuRenglon[] };
+
+/** El SKU del cliente de un renglón: se edita en su lugar y se guarda al salir. */
+function SkuCelda({ valor, distintos, detalle, editable, onGuardar }: {
+  valor: string; distintos: boolean; detalle: string; editable: boolean; onGuardar: (v: string) => void;
+}) {
+  const [v, setV] = useState(valor);
+  const guardar = () => { if (v.trim().toUpperCase() !== valor) onGuardar(v); };
+  if (!editable) return <span className="tabular-nums">{valor || (distintos ? "distintos" : "—")}</span>;
+  return (
+    <div className="flex items-center gap-1" title={detalle}>
+      <input
+        value={v}
+        onChange={(e) => setV(e.target.value.toUpperCase())}
+        onBlur={guardar}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        placeholder={distintos ? "distintos" : "sin SKU"}
+        className={`w-36 rounded-md border px-2 py-1 text-xs tabular-nums outline-none focus:border-accent ${distintos ? "border-amber-400" : "border-border"} bg-background`}
+      />
+    </div>
+  );
+}
+
 export default function ListasPreciosPage() {
   const { me } = useAuth();
   const toast = useToast();
@@ -79,7 +103,7 @@ export default function ListasPreciosPage() {
   );
 
   // ── editor de lista ──
-  const [listaForm, setListaForm] = useState<{ id?: string; codigo: string; nombre: string; status: string; es_default: boolean; copiarDe: string } | null>(null);
+  const [listaForm, setListaForm] = useState<{ id?: string; codigo: string; nombre: string; status: string; es_default: boolean; lleva_sku_cliente: boolean; copiarDe: string } | null>(null);
 
   async function saveLista() {
     if (!listaForm) return;
@@ -90,7 +114,8 @@ export default function ListasPreciosPage() {
     // Sin vínculo con SAE (26-sep-2026): las listas de SAE ya no se usan y el
     // precio sale sólo del Facturador; el API ya no acepta sae_empresa/sae_lista.
     const body = { codigo: listaForm.codigo.trim(), nombre: listaForm.nombre.trim(),
-                   status: listaForm.status, es_default: listaForm.es_default };
+                   status: listaForm.status, es_default: listaForm.es_default,
+                   lleva_sku_cliente: listaForm.lleva_sku_cliente };
     try {
       if (listaForm.id) {
         await patch(`/api/v1/listas-precios/${listaForm.id}`, body);
@@ -135,14 +160,17 @@ export default function ListasPreciosPage() {
     try {
       const fd = new FormData();
       fd.append("archivo", f);
-      const r = await apiFetch<{ actualizados: number; agregados: number; eliminados: number; sin_cambio: number; errores: string[] }>(
+      const r = await apiFetch<{ actualizados: number; agregados: number; eliminados: number; sin_cambio: number; errores: string[]; skus_guardados?: number; avisos?: string[] }>(
         `/api/v1/listas-precios/${activeLista.id}/importar`,
         { method: "POST", body: fd }
       );
       const partes = [`${r.agregados} agregados`, `${r.actualizados} actualizados`, `${r.eliminados} quitados`];
+      if (r.skus_guardados) partes.push(`${r.skus_guardados} SKU del cliente`);
       if (r.errores.length) partes.push(`${r.errores.length} con error (${r.errores[0]})`);
+      if (r.avisos?.length) partes.push(`${r.avisos.length} aviso(s): ${r.avisos[0]}`);
       toast[r.errores.length ? "error" : "success"](partes.join(" · "));
       void loadPrecios(activeLista.id);
+      if (activeLista.lleva_sku_cliente) void loadSkus(activeLista.id);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo importar");
     } finally {
@@ -169,11 +197,44 @@ export default function ListasPreciosPage() {
     }
   }, [toast]);
 
+  // SKU del cliente (2-oct-2026): sólo en las listas que lo llevan. Se guarda
+  // en el catálogo de cada cliente asignado a la lista; sale en su XML.
+  const [skus, setSkus] = useState<SkuLista | null>(null);
+  const loadSkus = useCallback(async (listaId: string) => {
+    try {
+      setSkus(await apiFetch<SkuLista>(`/api/v1/listas-precios/${listaId}/sku-cliente`));
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudieron cargar los SKU del cliente");
+    }
+  }, [toast]);
+  const skuDe = useMemo(() => {
+    const m: Record<string, SkuRenglon> = {};
+    for (const r of skus?.renglones ?? []) m[`${r.producto_id}:${r.presentacion}`] = r;
+    return m;
+  }, [skus]);
+
   const openPrecios = useCallback(async (lista: ListaPrecios) => {
     setActiveLista(lista);
+    setSkus(null);
     setNuevo({ producto_id: "", presentacion: "", cantidad_minima: "1", precio_unitario: "" });
     await loadPrecios(lista.id);
-  }, [loadPrecios]);
+    if (lista.lleva_sku_cliente) void loadSkus(lista.id);
+  }, [loadPrecios, loadSkus]);
+
+  const guardarSku = useCallback(async (p: Precio, valor: string) => {
+    if (!activeLista) return;
+    try {
+      const r = await apiFetch<SkuRenglon & { avisos: string[] }>(
+        `/api/v1/listas-precios/${activeLista.id}/sku-cliente`,
+        { method: "PUT", body: JSON.stringify({ producto_id: p.producto_id, presentacion: p.presentacion, sku: valor }) },
+      );
+      setSkus((s) => s && { ...s, renglones: [...s.renglones.filter((x) => !(x.producto_id === r.producto_id && x.presentacion === r.presentacion)), r] });
+      if (r.avisos.length) toast.error(r.avisos.join(" · "));
+      else toast.success(valor.trim() ? `SKU ${r.sku} guardado` : "SKU quitado: sale el SKU interno");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo guardar el SKU");
+    }
+  }, [activeLista, toast]);
 
   async function addPrecio() {
     if (!activeLista) return;
@@ -337,7 +398,7 @@ export default function ListasPreciosPage() {
           </Button>
           {canWrite && (
             <button
-              onClick={(e) => { e.stopPropagation(); setListaForm({ id: l.id, codigo: l.codigo, nombre: l.nombre, status: l.status, es_default: !!l.es_default, copiarDe: "" }); }}
+              onClick={(e) => { e.stopPropagation(); setListaForm({ id: l.id, codigo: l.codigo, nombre: l.nombre, status: l.status, es_default: !!l.es_default, lleva_sku_cliente: !!l.lleva_sku_cliente, copiarDe: "" }); }}
               className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground" aria-label="Editar">
               <Pencil size={16} />
             </button>
@@ -368,6 +429,25 @@ export default function ListasPreciosPage() {
           : <span className="text-warning" title="Esta presentación no tiene clave de SAE">—</span>;
       },
     },
+    ...(activeLista?.lleva_sku_cliente
+      ? [{
+          header: "SKU del cliente",
+          cell: (p: Precio) => {
+            const r = skuDe[`${p.producto_id}:${p.presentacion}`];
+            return (
+              <SkuCelda
+                key={`${p.producto_id}:${p.presentacion}:${r?.sku ?? ""}`}
+                valor={r?.sku ?? ""}
+                distintos={!!r?.distintos}
+                detalle={r ? Object.entries(r.por_cliente).map(([cid, v]) =>
+                  `${skus?.clientes.find((c) => c.id === cid)?.nombre ?? cid}: ${v ?? "sin SKU"}`).join("\n") : ""}
+                editable={canWrite}
+                onGuardar={(v) => guardarSku(p, v)}
+              />
+            );
+          },
+        } satisfies Column<Precio>]
+      : []),
     { header: "Desde cant.", cell: (p) => p.cantidad_minima, className: "text-right" },
     { header: "Precio", cell: (p) => fmtMoney(p.precio_unitario), className: "text-right" },
     {
@@ -378,7 +458,7 @@ export default function ListasPreciosPage() {
         </button>
       ) : null,
     },
-  ], [prodName, prodById, canWrite]);
+  ], [prodName, prodById, canWrite, activeLista, skuDe, skus, guardarSku]);
 
   return (
     <div>
@@ -391,7 +471,7 @@ export default function ListasPreciosPage() {
                 SAE ya no se usan; los precios se capturan sólo en el Facturador.
                 El botón sigue en /facturas y /remisiones, donde espeja facturas. */}
             {canWrite && (
-              <Button onClick={() => setListaForm({ codigo: "", nombre: "", status: "ACTIVO", es_default: false, copiarDe: "" })}>
+              <Button onClick={() => setListaForm({ codigo: "", nombre: "", status: "ACTIVO", es_default: false, lleva_sku_cliente: false, copiarDe: "" })}>
                 <Plus size={16} /> Nueva lista de precios
               </Button>
             )}
@@ -442,6 +522,15 @@ export default function ListasPreciosPage() {
                 cliente cuyo producto no esté en su lista negociada. Sin ninguna
                 marcada no hay precio base, que es lo correcto — antes el sistema
                 adivinaba con la lista más vieja y cobraba con la de otro. */}
+            <Field
+              label="Lleva el SKU del cliente"
+              hint="Enseña la columna «SKU del cliente» y el Excel la trae. Se guarda en el catálogo de cada cliente asignado a la lista y sale en su factura (NoIdentificacion); sin SKU sale el interno."
+            >
+              <Switch
+                checked={listaForm.lleva_sku_cliente}
+                onChange={(v) => setListaForm({ ...listaForm, lleva_sku_cliente: v })}
+              />
+            </Field>
             <Field
               label="Lista base del negocio"
               hint="La que se cobra cuando el producto no está en la lista negociada del cliente. No la actives en una lista negociada."
@@ -519,6 +608,15 @@ export default function ListasPreciosPage() {
             El Excel baja y sube con las mismas columnas: cambia PRECIO para actualizar, agrega
             renglones nuevos por SKU, o deja el PRECIO vacío para quitar el renglón de la lista.
           </p>
+          {activeLista?.lleva_sku_cliente && (
+            <p className="rounded-lg border border-border bg-surface-2 px-3 py-2 text-xs text-muted">
+              <b>SKU del cliente:</b>{" "}
+              {skus?.clientes.length
+                ? <>se guarda en el catálogo de {skus.clientes.map((c) => c.nombre).join(" y ")} y sale en su factura.</>
+                : "esta lista no tiene clientes asignados todavía: asígnala en la ficha del cliente para poder guardarlo."}
+              {" "}En el Excel va en la columna SKU CLIENTE: vacía no cambia nada y «-» lo quita.
+            </p>
+          )}
           <Input
             placeholder="Buscar un producto en la lista…"
             value={buscaPrecio}

@@ -32,6 +32,10 @@ HDR = ["SKU", "PRODUCTO", "PRESENTACION", "DESDE CANTIDAD", "PRECIO"]
 # Informativa: el import la ignora (sólo valida y lee las cinco de HDR), así
 # que un archivo viejo sin ella sigue subiendo igual.
 HDR_CLAVE = "CLAVE SAE"
+# Sólo en las listas que llevan el SKU de sus clientes (2-oct-2026). Al subir:
+# vacía = no cambia; «-» = se le quita; otro valor = ése es su SKU. Se guarda en
+# el catálogo de cada cliente de la lista (services/sku_cliente).
+HDR_SKU = "SKU CLIENTE"
 
 
 def clave_sae_de(prod: Producto, presentacion: str) -> str:
@@ -60,11 +64,21 @@ def exportar_xlsx(db: Session, lista: ListaPrecios) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Precios"
-    ws.append([*HDR, HDR_CLAVE])
+    con_sku = bool(lista.lleva_sku_cliente)
+    skus: dict = {}
+    if con_sku:
+        from .sku_cliente import skus_de_lista
+        skus = {(r["producto_id"], r["presentacion"]): r for r in skus_de_lista(db, lista.tenant_id, lista)["renglones"]}
+        prod_por_sku = {p.sku: p.id for p in db.query(Producto).filter(Producto.tenant_id == lista.tenant_id)}
+    ws.append([*HDR, HDR_CLAVE, *([HDR_SKU] if con_sku else [])])
     for sku, nombre, pres, cant, precio, clave in _filas(db, lista):
-        ws.append([sku, nombre, pres, float(cant), float(precio), clave])
+        fila = [sku, nombre, pres, float(cant), float(precio), clave]
+        if con_sku:
+            r = skus.get((prod_por_sku.get(sku), (pres or "").upper())) or {}
+            fila.append(r.get("sku") or "")
+        ws.append(fila)
     # anchos legibles: nadie quiere reacomodar columnas antes de trabajar
-    for col, ancho in zip("ABCDEF", (14, 46, 14, 16, 12, 18)):
+    for col, ancho in zip("ABCDEFG", (14, 46, 14, 16, 12, 18, 18)):
         ws.column_dimensions[col].width = ancho
     buf = io.BytesIO()
     wb.save(buf)
@@ -115,7 +129,10 @@ def importar_xlsx(db: Session, tenant_id: UUID, lista: ListaPrecios, data: bytes
     }
 
     res = {"ok": True, "actualizados": 0, "agregados": 0, "eliminados": 0,
-           "sin_cambio": 0, "errores": []}
+           "sin_cambio": 0, "errores": [], "skus_guardados": 0, "avisos": []}
+    encabezados = [str(x or "").strip().upper() for x in filas[0]]
+    col_sku = encabezados.index(HDR_SKU) if (lista.lleva_sku_cliente and HDR_SKU in encabezados) else None
+    pendientes_sku: list[tuple] = []
     import uuid as _uuid
     for i, fila in enumerate(filas[1:], start=2):
         sku = str(fila[0] or "").strip()
@@ -140,6 +157,8 @@ def importar_xlsx(db: Session, tenant_id: UUID, lista: ListaPrecios, data: bytes
                 f"fila {i}: {prods[pid].nombre} no maneja la presentación {pres} "
                 "(agrégasela al producto, con cuántas unidades base trae)")
             continue
+        if col_sku is not None and col_sku < len(fila) and str(fila[col_sku] or "").strip():
+            pendientes_sku.append((i, pid, pres, str(fila[col_sku]).strip()))
         llave = (pid, pres, cant)
         actual = existentes.get(llave)
         # El precio se interpreta UNA sola vez: «0» tecleado como texto es el
@@ -176,4 +195,25 @@ def importar_xlsx(db: Session, tenant_id: UUID, lista: ListaPrecios, data: bytes
         else:
             res["sin_cambio"] += 1
     db.flush()
+    if pendientes_sku:
+        from fastapi import HTTPException
+
+        from .sku_cliente import clientes_de_lista, guardar_sku
+        clientes = clientes_de_lista(db, tenant_id, lista.id)
+        if not clientes:
+            res["errores"].append("La columna SKU CLIENTE no se guardó: la lista no tiene clientes asignados")
+        else:
+            vistos = set()
+            for i, pid, pres, valor in pendientes_sku:
+                if (pid, pres) in vistos:      # «DESDE CANTIDAD» repite el renglón
+                    continue
+                vistos.add((pid, pres))
+                try:
+                    r = guardar_sku(db, tenant_id, lista, pid, pres, None if valor == "-" else valor, None,
+                                    clientes=clientes, avisar=True)
+                except HTTPException as exc:
+                    res["errores"].append(f"fila {i}: {exc.detail}")
+                    continue
+                res["skus_guardados"] += 1
+                res["avisos"].extend(f"fila {i}: {a}" for a in r["avisos"])
     return res
