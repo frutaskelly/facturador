@@ -20,6 +20,8 @@ const nextConfig: NextConfig = {
       // menús», sep-2026); los marcadores viejos siguen llegando a un lugar útil.
       { source: "/oc", destination: "/remisiones", permanent: false },
       { source: "/oc/:id", destination: "/remisiones", permanent: false },
+      // Cobranza automática se volvió pestañas de /cobranza (oct-2026).
+      { source: "/cobranza/automatica", destination: "/cobranza?tab=envios", permanent: false },
     ];
   },
 

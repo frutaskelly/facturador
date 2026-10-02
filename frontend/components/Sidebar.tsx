@@ -19,8 +19,8 @@ const TODOS_HREF: string[] = NAV.flatMap((sec) => sec.items.map((i) => i.href));
 function esActivo(pathname: string, href: string) {
   if (pathname === href) return true;
   if (!pathname.startsWith(`${href}/`)) return false;
-  // Si una sub-ruta tiene su propio item (/cobranza/automatica), el padre
-  // (/cobranza) no se marca también.
+  // Si una sub-ruta tiene su propio item en el menú, el padre no se marca
+  // también (así estuvo /cobranza/automatica bajo /cobranza).
   return !TODOS_HREF.some((h) => h !== href && h.startsWith(`${href}/`)
     && (pathname === h || pathname.startsWith(`${h}/`)));
 }
