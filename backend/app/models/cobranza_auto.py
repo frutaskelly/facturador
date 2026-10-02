@@ -88,6 +88,10 @@ class CobranzaGrupo(Base, TimestampMixin):
     asunto = Column(String(200))
     mensaje = Column(Text)
     nota = Column(String(254))
+    # Cómo se llama el estado de cuenta ante el cliente (asunto por omisión,
+    # cuerpo, total, Excel y PDF). Vacío = los nombres cortos de sus razones
+    # sociales (`titulo_sugerido`).
+    titulo_tabla = Column(String(120))
 
 
 class CobranzaGrupoAlcance(Base):

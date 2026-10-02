@@ -270,8 +270,53 @@ def test_prueba_solo_a_quien_la_pide(client, env, auth, ehmo, correo):
     r = client.post(f"{_BASE}/prueba", json=_grupo(env), headers=_h(env))
     assert r.status_code == 200, r.text
     assert correo[0]["to"] == [env["email"]] and correo[0]["cc"] is None
-    assert correo[0]["subject"].startswith("[Prueba] Estado de cuenta EHMO al ")
+    assert correo[0]["subject"].startswith("[Prueba] Estado de cuenta EHMO-SUR al ")
     assert sorted(a.rsplit(".", 1)[1] for a in correo[0]["adjuntos"]) == ["pdf", "xlsx"]
+
+
+def test_nombre_de_la_tabla(client, env, auth, ehmo):
+    """El envío «GRUPO OPERADOR DE ALIMENTOS EHMO» juntaba EHMO, SUREÑA y
+    MAFAN y la tabla cerraba con «Total GRUPO OPERADOR…». Lo que lee el
+    cliente dice el nombre de la tabla; vacío, los nombres cortos con guion."""
+    from openpyxl import load_workbook
+
+    _config(client, env)
+    cuerpo = _grupo(env, nombre="GRUPO OPERADOR DE ALIMENTOS EHMO")
+    d = _previo(client, env, cuerpo)
+    assert d["resumen"]["titulo"] == "EHMO-SUR"
+    assert "Total EHMO-SUR" in d["html"] and "Total GRUPO" not in d["html"]
+    assert d["asunto"].startswith("Estado de cuenta EHMO-SUR al ")
+    assert d["adjuntos"][0]["nombre"].startswith("estado-cuenta-EHMO-SUR-")
+
+    # Capturado, manda en el correo y en los archivos.
+    cuerpo["titulo_tabla"] = "  Saldos   EHMO "
+    d = _previo(client, env, cuerpo)
+    assert d["resumen"]["titulo"] == "Saldos EHMO" and "Total Saldos EHMO" in d["html"]
+    r = client.post(f"{_BASE}/previo/xlsx", json=cuerpo, headers=_h(env))
+    total = [row[0] for row in load_workbook(io.BytesIO(r.content))["Resumen"].iter_rows(values_only=True)
+             if row and str(row[0] or "").startswith("TOTAL")]
+    assert total == ["TOTAL SALDOS EHMO"]
+
+    # Se guarda y vuelve en la lista; borrado, regresa al prellenado.
+    r = client.post(_BASE, json=cuerpo, headers=_h(env))
+    assert r.status_code == 201, r.text
+    gid = r.json()["id"]
+    envio = next(e for e in client.get(_BASE, headers=_h(env)).json()["envios"] if e["id"] == gid)
+    assert envio["titulo_tabla"] == "Saldos EHMO"
+    r = client.put(f"{_BASE}/{gid}", json={**cuerpo, "titulo_tabla": "  "}, headers=_h(env))
+    assert r.status_code == 200, r.text
+    envio = next(e for e in client.get(_BASE, headers=_h(env)).json()["envios"] if e["id"] == gid)
+    assert envio["titulo_tabla"] is None
+
+
+def test_titulo_sugerido():
+    from app.services.cobranza_grupos import titulo_sugerido
+
+    assert titulo_sugerido("EHMO", ["SUREÑA", "EHMO", "MAFAN"]) == "EHMO-MAFAN-SUREÑA"
+    assert titulo_sugerido("EHMO", ["EHMO", " EHMO "]) == "EHMO"
+    # Diez razones sociales ya no se leen como nombre: toma el del envío.
+    largas = [f"RAZON SOCIAL NUMERO {i}" for i in range(10)]
+    assert titulo_sugerido("REPORTE CRISTIAN", largas) == "REPORTE CRISTIAN"
 
 
 def test_razones_sociales_sin_envio(client, env, auth, ehmo):

@@ -216,15 +216,17 @@ def test_asunto_y_mensaje_de_omision_con_comodines(client, env, auth, correo):
     _factura_ppd_timbrada(env, total=1000, dias_atras=40, folio=1)
     hoy = dt.datetime.now(ZoneInfo("America/Mexico_City")).strftime("%d/%m/%Y")
 
-    # Sin asunto ni mensaje: salen los de omisión, ya rellenos.
+    # Sin asunto ni mensaje: salen los de omisión, ya rellenos. {nombre} es el
+    # nombre de la tabla (lo que lee el cliente), no el del envío: sin
+    # capturar, el prellenado con la razón social.
     g = _envio(client, env, nombre="EHMO")
     client.post(f"{_GRUPOS}/{g['id']}/enviar", headers=_h(env))
-    assert correo[0]["subject"] == f"Estado de cuenta EHMO al {hoy}"
+    assert correo[0]["subject"] == f"Estado de cuenta Cliente Cobranza al {hoy}"
     assert "<p>Buen día, les compartimos su estado de cuenta.</p>" in correo[0]["html"]
 
     # Con los suyos: {nombre} y {fecha} se rellenan; unas llaves cualquiera no truenan.
-    g = _envio(client, env, nombre="Otro", asunto="Cobranza {nombre} · corte {fecha}",
+    g = _envio(client, env, nombre="Otro", titulo_tabla="EHMO-SUR", asunto="Cobranza {nombre} · corte {fecha}",
                mensaje="Hola {nombre}\nlínea dos\n\nAdiós {llaves}")
     client.post(f"{_GRUPOS}/{g['id']}/enviar", headers=_h(env))
-    assert correo[1]["subject"] == f"Cobranza Otro · corte {hoy}"
-    assert "<p>Hola Otro<br>línea dos</p>" in correo[1]["html"] and "<p>Adiós {llaves}</p>" in correo[1]["html"]
+    assert correo[1]["subject"] == f"Cobranza EHMO-SUR · corte {hoy}"
+    assert "<p>Hola EHMO-SUR<br>línea dos</p>" in correo[1]["html"] and "<p>Adiós {llaves}</p>" in correo[1]["html"]

@@ -3,7 +3,7 @@
 // Cobranza → el editor de un envío y su vista previa. Un envío junta una razón
 // social o varias (EHMO + SUREÑA + MAFAN) y trae TODA su configuración: qué
 // incluye, cuándo sale (automático o con el botón), a quién, cómo se acomoda la
-// tabla del correo, adjuntos, asunto y mensaje. «Vista previa» enseña el correo,
+// tabla del correo y su nombre, adjuntos, asunto y mensaje. «Vista previa» enseña el correo,
 // el Excel y el PDF exactos antes de guardar o mandar nada
 // (backend: services/cobranza_grupos.py y cobranza_auto.py).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -50,6 +50,7 @@ export type Envio = {
   correos: string[]; cc: string[]; modo: Modo; dia_semana: number; hora: number;
   incluir_por_vencer: boolean; saldo_minimo: string | number; escalar_dias: number; escalar_cc: string[];
   adjuntar_pdf: boolean; adjuntar_excel: boolean; asunto: string | null; mensaje: string | null; nota: string | null;
+  titulo_tabla: string | null;
   alcance: AlcanceOut[]; saldo: string; vencido: string; facturas: number;
   cuando: string; proximo: string | null; ultimo: Bitacora | null;
   tambien_en: { grupo_id: string; nombre: string; clientes: string[] }[];
@@ -67,6 +68,8 @@ export type Borrador = {
   correos: string; cc: string; modo: Modo; dia_semana: number; hora: number;
   incluir_por_vencer: boolean; saldo_minimo: string; escalar_dias: string; escalar_cc: string;
   adjuntar_pdf: boolean; adjuntar_excel: boolean; asunto: string; mensaje: string; nota: string;
+  /** null = el prellenado, que sigue a las razones sociales que se marquen. */
+  titulo_tabla: string | null;
   orden: string[]; alcance: Record<string, Sel>;
 };
 
@@ -76,17 +79,25 @@ export const errorDe = (e: unknown, def: string) => (e instanceof ApiError ? e.m
 const claveNodo = (n: Nodo) => n.proyecto_id ?? `serie:${n.serie ?? ""}`;
 
 // Lo mismo que services/cobranza_grupos.py (ASUNTO y MENSAJE): un envío nuevo
-// los trae escritos, y uno que los tiene vacíos manda estos. {nombre} y {fecha}
-// los rellena el sistema al mandar.
+// los trae escritos, y uno que los tiene vacíos manda estos. {nombre} (el
+// nombre de la tabla) y {fecha} los rellena el sistema al mandar.
 export const ASUNTO_OMISION = "Estado de cuenta {nombre} al {fecha}";
 export const MENSAJE_OMISION =
   "Buen día, les compartimos su estado de cuenta.\n\nQuedamos atentos a cualquier aclaración o comprobante de pago.";
+
+/** El prellenado del nombre de la tabla: los nombres cortos en orden alfabético
+ *  y unidos con guion (EHMO-MAFAN-SUREÑA); si quedan muy largos, el nombre del
+ *  envío. Igual que `titulo_sugerido` en services/cobranza_grupos.py. */
+export function tituloSugerido(nombreEnvio: string, cortos: string[]) {
+  const titulo = [...new Set(cortos.map((c) => c.trim()).filter(Boolean))].sort().join("-");
+  return titulo && titulo.length <= 80 ? titulo : nombreEnvio;
+}
 
 const VACIO: Borrador = {
   nombre: "", agrupar_por: "PROYECTO", mostrar_antiguedad: false, correos: "", cc: "",
   modo: "MANUAL", dia_semana: 0, hora: 8, incluir_por_vencer: true, saldo_minimo: "100",
   escalar_dias: "30", escalar_cc: "", adjuntar_pdf: true, adjuntar_excel: true,
-  asunto: ASUNTO_OMISION, mensaje: MENSAJE_OMISION, nota: "", orden: [], alcance: {},
+  asunto: ASUNTO_OMISION, mensaje: MENSAJE_OMISION, nota: "", titulo_tabla: null, orden: [], alcance: {},
 };
 
 /** El borrador de un envío guardado, o uno nuevo (vacío o para una razón social). */
@@ -103,6 +114,7 @@ export function borradorDe(e: Envio | null, para?: Pick<Opcion, "cliente_id" | "
     escalar_dias: String(e.escalar_dias), escalar_cc: e.escalar_cc.join(", "),
     adjuntar_pdf: e.adjuntar_pdf, adjuntar_excel: e.adjuntar_excel,
     asunto: e.asunto || ASUNTO_OMISION, mensaje: e.mensaje || MENSAJE_OMISION, nota: e.nota ?? "",
+    titulo_tabla: e.titulo_tabla,
     orden: e.alcance.map((a) => a.cliente_id),
     alcance: Object.fromEntries(e.alcance.map((a) => [a.cliente_id,
       { completo: a.completo, proyectos: a.proyectos, series: a.series }])),
@@ -117,6 +129,7 @@ export function payloadDe(b: Borrador) {
     saldo_minimo: Number(b.saldo_minimo || 0), escalar_dias: Number(b.escalar_dias || 0),
     escalar_cc: aLista(b.escalar_cc), adjuntar_pdf: b.adjuntar_pdf, adjuntar_excel: b.adjuntar_excel,
     asunto: b.asunto.trim() || null, mensaje: b.mensaje.trim() || null, nota: b.nota.trim() || null,
+    titulo_tabla: b.titulo_tabla?.trim() || null,
     alcance: b.orden.map((id) => ({ cliente_id: id, ...b.alcance[id] })),
   };
 }
@@ -168,6 +181,10 @@ export function EditarEnvio({ inicial, opciones, cargando, envios, automaticosEn
   const set = <K extends keyof Borrador>(k: K, v: Borrador[K]) => setB((x) => ({ ...x, [k]: v }));
   const porCliente = useMemo(() => Object.fromEntries(opciones.map((o) => [o.cliente_id, o])), [opciones]);
   const libres = opciones.filter((o) => !b.orden.includes(o.cliente_id));
+  const sugerido = tituloSugerido(b.nombre.trim(), b.orden.map((id) => porCliente[id]?.nombre ?? ""));
+  // Escribir lo mismo que el prellenado lo deja como prellenado: así sigue a
+  // las razones sociales que se agreguen o quiten después.
+  const cambiarTitulo = (v: string) => set("titulo_tabla", v.trim() === sugerido ? null : v);
 
   const cambiarSel = (clienteId: string, sel: Sel) =>
     setB((x) => ({ ...x, alcance: { ...x.alcance, [clienteId]: sel } }));
@@ -371,7 +388,24 @@ export function EditarEnvio({ inicial, opciones, cargando, envios, automaticosEn
               <Switch checked={b.adjuntar_pdf} onChange={(v) => set("adjuntar_pdf", v)} /> PDF
             </label>
           </div>
-          <Field label="Asunto" hint="{nombre} = el nombre del envío · {fecha} = la fecha de corte. Vacío vuelve al de omisión.">
+          <div>
+            <div className="mb-1 text-sm font-medium">Nombre de la tabla</div>
+            <div className="flex gap-2">
+              <Input value={b.titulo_tabla ?? sugerido} maxLength={120} aria-label="Nombre de la tabla"
+                     onChange={(e) => cambiarTitulo(e.target.value)} />
+              {b.titulo_tabla !== null && sugerido && (
+                <Button variant="secondary" className="shrink-0" onClick={() => set("titulo_tabla", null)}
+                        title={`Volver a «${sugerido}»`}>
+                  Usar el prellenado
+                </Button>
+              )}
+            </div>
+            <div className="mt-1 text-xs text-muted">
+              Lo que lee el cliente: el total de la tabla, el asunto, el Excel y el PDF. Viene prellenado con los
+              nombres cortos de las razones sociales; el nombre del envío solo sirve para encontrarlo en la lista.
+            </div>
+          </div>
+          <Field label="Asunto" hint="{nombre} = el nombre de la tabla · {fecha} = la fecha de corte. Vacío vuelve al de omisión.">
             <Input value={b.asunto} maxLength={200} onChange={(e) => set("asunto", e.target.value)} />
           </Field>
           <Field label="Mensaje" hint="Va antes del resumen de saldo y la tabla, que el sistema agrega solos. Una línea en blanco separa párrafos. También acepta {nombre} y {fecha}.">
