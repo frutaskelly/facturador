@@ -12,7 +12,7 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
-from .conftest import crear_sucursal
+from .conftest import categoria_de_prueba, crear_sucursal
 from app.models import (
     ClaveSae,
     Cliente,
@@ -832,6 +832,7 @@ def test_dos_productos_pueden_compartir_clave_base(client, env, auth_as):
     r = client.post("/api/v1/productos", headers=h, json={
         "nombre": f"RABANO ROJO {uuid.uuid4().hex[:4]}", "clave_sat": "50300000",
         "unidad_sat": "KGM", "esquema_impuesto_id": esq_id,
+        "categoria_id": categoria_de_prueba(env["tenant"]),
         "clave_sae": " rabanokg ",          # mismo artículo, con ruido
         "forzar": True,
     })

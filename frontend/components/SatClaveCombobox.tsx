@@ -32,10 +32,14 @@ export function SatClaveCombobox({
   value,
   onChange,
   placeholder = "Texto o clave: cilantro, 50404…",
+  mostrarDescripcion = true,
 }: {
   value: string;
   onChange: (clave: string) => void;
   placeholder?: string;
+  /** Apagado cuando la pantalla ya pone la descripción con <DescripcionSat>
+   *  (que además dice cuando la clave NO está en el catálogo). */
+  mostrarDescripcion?: boolean;
 }) {
   const [texto, setTexto] = useState(value);
   const [opciones, setOpciones] = useState<Opcion[]>([]);
@@ -220,7 +224,7 @@ export function SatClaveCombobox({
           </button>
         ))}
       </FloatingPanel>
-      {descripcion ? (
+      {mostrarDescripcion && descripcion ? (
         <span className="mt-1 block text-xs text-muted">Catálogo SAT: {descripcion}</span>
       ) : null}
     </div>

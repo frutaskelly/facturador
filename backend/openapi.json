@@ -1038,6 +1038,67 @@
     "title": "AltaSaeOut",
     "type": "object"
    },
+   "AltaSaeProductoIn": {
+    "description": "Una clave NUEVA de SAE que se pide crear junto con el producto que la\nlleva (2-oct-2026): «Crear clave nueva en SAE» del editor de producto.\n\nViaja con el alta o la edición del producto y se encola en la MISMA\ntransacción: así el producto nunca existe sin su clave y la clave nunca se\npide para un producto que no se guardó. El esquema y la clave SAT NO\nvienen aquí: salen del producto, que es la fuente (pedirlos dos veces es\nla forma de que el producto diga una cosa y SAE otra).\n\n`empresas` vacío = las cuatro (02-05). Las que ya tienen la clave se\nquitan solas: ahí es una liga, no un alta.",
+    "properties": {
+     "clave": {
+      "maxLength": 20,
+      "minLength": 1,
+      "title": "Clave",
+      "type": "string"
+     },
+     "descripcion": {
+      "maxLength": 60,
+      "minLength": 1,
+      "title": "Descripcion",
+      "type": "string"
+     },
+     "empresas": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Empresas",
+      "type": "array"
+     },
+     "linea": {
+      "pattern": "^[A-Z0-9]{1,10}$",
+      "title": "Linea",
+      "type": "string"
+     },
+     "sat_unidad": {
+      "anyOf": [
+       {
+        "maxLength": 10,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sat Unidad"
+     },
+     "unidad": {
+      "enum": [
+       "KILO",
+       "PIEZA",
+       "CAJA",
+       "LITRO",
+       "PAQUETE"
+      ],
+      "title": "Unidad",
+      "type": "string"
+     }
+    },
+    "required": [
+     "clave",
+     "unidad",
+     "descripcion",
+     "linea"
+    ],
+    "title": "AltaSaeProductoIn",
+    "type": "object"
+   },
    "AltaSaeReporteIn": {
     "description": "El conector reporta qué creó. `por_empresa` es la verdad de la alta:\n{\"02\": {\"ok\": true, \"clave\": \"AJOKG\"}, \"03\": {\"ok\": false, \"error\": \"...\"}}.\n\nNo hay reintento: lo que aquí se reporte como creado no se vuelve a\nintentar nunca, porque un INSERT repetido duplica el producto en SAE.",
     "properties": {
@@ -1059,6 +1120,176 @@
      }
     },
     "title": "AltaSaeReporteIn",
+    "type": "object"
+   },
+   "ArticuloSaeEmpresaOut": {
+    "description": "Un artículo en UNA empresa de SAE, leído en vivo de INVE.\n\n`unidad` es el UNI_MED crudo de SAE (KG, PZ, CJ…) y `unidad_canonica` la\nmisma en el idioma del Facturador (KILO, PIEZA, CAJA…), para compararla\ncontra la presentación sin que la pantalla traduzca. Las descripciones del\nesquema y de las claves SAT son informativas: se leen, no se guardan.",
+    "properties": {
+     "activa": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Activa"
+     },
+     "descripcion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Descripcion"
+     },
+     "esquema": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Esquema"
+     },
+     "esquema_descripcion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Esquema Descripcion"
+     },
+     "existe": {
+      "default": false,
+      "title": "Existe",
+      "type": "boolean"
+     },
+     "linea": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Linea"
+     },
+     "sat": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sat"
+     },
+     "sat_descripcion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sat Descripcion"
+     },
+     "sat_unidad": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sat Unidad"
+     },
+     "sat_unidad_descripcion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sat Unidad Descripcion"
+     },
+     "unidad": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad"
+     },
+     "unidad_canonica": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unidad Canonica"
+     }
+    },
+    "title": "ArticuloSaeEmpresaOut",
+    "type": "object"
+   },
+   "ArticuloSaeOut": {
+    "description": "Respuesta de `GET /productos/claves-sae/{clave}/en-sae`.\n\nSiempre trae las cuatro empresas del SAE 10 (02-05); la que no tiene la\nclave sale con `existe=false`. Con SAE caído o sin configurar contesta\nigual, con `disponible=false` y el motivo: la pantalla de ligar se degrada\na lo que dice el espejo, nunca a un error.",
+    "properties": {
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "disponible": {
+      "title": "Disponible",
+      "type": "boolean"
+     },
+     "empresas": {
+      "additionalProperties": {
+       "$ref": "#/components/schemas/ArticuloSaeEmpresaOut"
+      },
+      "title": "Empresas",
+      "type": "object"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     }
+    },
+    "required": [
+     "clave",
+     "disponible"
+    ],
+    "title": "ArticuloSaeOut",
     "type": "object"
    },
    "AutoRemisionOut": {
@@ -2297,6 +2528,50 @@
      "de_donde"
     ],
     "title": "ClaveSaeEnUso",
+    "type": "object"
+   },
+   "ClaveSaeEstadoEmpresa": {
+    "properties": {
+     "activa": {
+      "title": "Activa",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "activa"
+    ],
+    "title": "ClaveSaeEstadoEmpresa",
+    "type": "object"
+   },
+   "ClaveSaeEstadoOut": {
+    "description": "Una clave que usa el catálogo: en qué empresas existe según el espejo y\nsu última solicitud de ALTA (si alguna).",
+    "properties": {
+     "clave": {
+      "title": "Clave",
+      "type": "string"
+     },
+     "empresas": {
+      "additionalProperties": {
+       "$ref": "#/components/schemas/ClaveSaeEstadoEmpresa"
+      },
+      "title": "Empresas",
+      "type": "object"
+     },
+     "solicitud": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/SolicitudSaeResumenOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "clave"
+    ],
+    "title": "ClaveSaeEstadoOut",
     "type": "object"
    },
    "ClaveSaeItem": {
@@ -16137,6 +16412,14 @@
       "title": "Activo",
       "type": "boolean"
      },
+     "altas_sae": {
+      "items": {
+       "$ref": "#/components/schemas/AltaSaeProductoIn"
+      },
+      "maxItems": 20,
+      "title": "Altas Sae",
+      "type": "array"
+     },
      "categoria_id": {
       "anyOf": [
        {
@@ -16387,6 +16670,13 @@
       "default": true,
       "title": "Activo",
       "type": "boolean"
+     },
+     "altas_sae": {
+      "items": {
+       "$ref": "#/components/schemas/AltaSaeOut"
+      },
+      "title": "Altas Sae",
+      "type": "array"
      },
      "categoria_id": {
       "anyOf": [
@@ -16646,6 +16936,21 @@
        }
       ],
       "title": "Activo"
+     },
+     "altas_sae": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/AltaSaeProductoIn"
+        },
+        "maxItems": 20,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Altas Sae"
      },
      "categoria_id": {
       "anyOf": [
@@ -20608,6 +20913,55 @@
      }
     },
     "title": "SincronizarGruposIn",
+    "type": "object"
+   },
+   "SolicitudSaeResumenOut": {
+    "description": "La última alta pedida de una clave, lo justo para pintar su chip\n(«Alta pendiente», «Alta con error»).",
+    "properties": {
+     "empresas": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Empresas",
+      "type": "array"
+     },
+     "estado": {
+      "title": "Estado",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "motivo": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     },
+     "solicitada_at": {
+      "format": "date-time",
+      "title": "Solicitada At",
+      "type": "string"
+     },
+     "tipo": {
+      "title": "Tipo",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "tipo",
+     "estado",
+     "solicitada_at"
+    ],
+    "title": "SolicitudSaeResumenOut",
     "type": "object"
    },
    "SucursalBreve": {
@@ -39092,6 +39446,129 @@
      }
     ],
     "summary": "Buscar Claves Sae",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/claves-sae/estado": {
+   "get": {
+    "description": "Cada clave de SAE que usa el catálogo: en qué empresas existe (espejo) y\nsu última solicitud de ALTA. Es lo que pinta el chip de cada clave en\nProductos —«en SAE», «Alta pendiente», «Alta con error»— sin preguntar\nclave por clave (2-oct-2026).\n\nTodas las claves de los productos no borrados, la base y las de cada\npresentación. Tres consultas en total, no una por clave. Un tenant sin SAE\nrecibe la lista vacía y no un 403: la pantalla es la misma para todos y\nsimplemente no tiene chips que pintar.",
+    "operationId": "estado_claves_sae_api_v1_productos_claves_sae_estado_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ClaveSaeEstadoOut"
+         },
+         "title": "Response Estado Claves Sae Api V1 Productos Claves Sae Estado Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Estado Claves Sae",
+    "tags": [
+     "productos"
+    ]
+   }
+  },
+  "/api/v1/productos/claves-sae/{clave}/en-sae": {
+   "get": {
+    "description": "«Así está en SAE»: el artículo leído EN VIVO de INVE en cada empresa\ndonde existe, para compararlo con lo capturado en el producto antes de\nligar la clave (2-oct-2026). Descripción, unidad, línea, esquema y claves\nSAT, con la descripción oficial de cada clave SAT (informativa).\n\nSe leen las empresas 02-05 donde el espejo tiene la clave; si no la tiene\nen ninguna, la 02 (el espejo pudo no haberse puesto al día). Las demás\nsalen con `existe=false`.\n\nNUNCA es un 5xx: con SAE sin configurar o sin contestar, 200 con\n`disponible=false` y el motivo, y las empresas como las dice el espejo. La\npantalla de ligar se degrada; no se cae por una pregunta informativa.",
+    "operationId": "articulo_en_sae_api_v1_productos_claves_sae__clave__en_sae_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "clave",
+      "required": true,
+      "schema": {
+       "title": "Clave",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ArticuloSaeOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Articulo En Sae",
     "tags": [
      "productos"
     ]

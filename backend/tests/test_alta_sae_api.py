@@ -18,6 +18,7 @@ from app.core.auth import Principal, get_principal
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.main import app
+from .conftest import categoria_de_prueba
 from app.models import (ClaveSae, EsquemaImpuesto, Membership, Producto, Role,
                         SolicitudAltaSae, Tenant, User)
 
@@ -357,7 +358,8 @@ def test_dos_productos_pueden_compartir_la_clave_sae(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
     otro = client.post("/api/v1/productos", headers=h, json={
         "sku": "", "nombre": "Ajo primera", "clave_sat": "01010101", "unidad_sat": "KGM",
-        "clave_sae": " ajokg ", "esquema_impuesto_id": str(env["esq2"])})
+        "clave_sae": " ajokg ", "esquema_impuesto_id": str(env["esq2"]),
+        "categoria_id": categoria_de_prueba(env["tenant_id"])})
     assert otro.status_code in (200, 201), otro.text
     otro = otro.json()
     assert otro["clave_sae"] == "AJOKG"

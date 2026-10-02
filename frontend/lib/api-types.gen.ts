@@ -3721,6 +3721,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/productos/claves-sae/estado": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estado Claves Sae
+         * @description Cada clave de SAE que usa el catálogo: en qué empresas existe (espejo) y
+         *     su última solicitud de ALTA. Es lo que pinta el chip de cada clave en
+         *     Productos —«en SAE», «Alta pendiente», «Alta con error»— sin preguntar
+         *     clave por clave (2-oct-2026).
+         *
+         *     Todas las claves de los productos no borrados, la base y las de cada
+         *     presentación. Tres consultas en total, no una por clave. Un tenant sin SAE
+         *     recibe la lista vacía y no un 403: la pantalla es la misma para todos y
+         *     simplemente no tiene chips que pintar.
+         */
+        get: operations["estado_claves_sae_api_v1_productos_claves_sae_estado_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/productos/claves-sae/{clave}/en-sae": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Articulo En Sae
+         * @description «Así está en SAE»: el artículo leído EN VIVO de INVE en cada empresa
+         *     donde existe, para compararlo con lo capturado en el producto antes de
+         *     ligar la clave (2-oct-2026). Descripción, unidad, línea, esquema y claves
+         *     SAT, con la descripción oficial de cada clave SAT (informativa).
+         *
+         *     Se leen las empresas 02-05 donde el espejo tiene la clave; si no la tiene
+         *     en ninguna, la 02 (el espejo pudo no haberse puesto al día). Las demás
+         *     salen con `existe=false`.
+         *
+         *     NUNCA es un 5xx: con SAE sin configurar o sin contestar, 200 con
+         *     `disponible=false` y el motivo, y las empresas como las dice el espejo. La
+         *     pantalla de ligar se degrada; no se cae por una pregunta informativa.
+         */
+        get: operations["articulo_en_sae_api_v1_productos_claves_sae__clave__en_sae_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/productos/importar": {
         parameters: {
             query?: never;
@@ -6076,6 +6135,37 @@ export interface components {
             tipo: string;
         };
         /**
+         * AltaSaeProductoIn
+         * @description Una clave NUEVA de SAE que se pide crear junto con el producto que la
+         *     lleva (2-oct-2026): «Crear clave nueva en SAE» del editor de producto.
+         *
+         *     Viaja con el alta o la edición del producto y se encola en la MISMA
+         *     transacción: así el producto nunca existe sin su clave y la clave nunca se
+         *     pide para un producto que no se guardó. El esquema y la clave SAT NO
+         *     vienen aquí: salen del producto, que es la fuente (pedirlos dos veces es
+         *     la forma de que el producto diga una cosa y SAE otra).
+         *
+         *     `empresas` vacío = las cuatro (02-05). Las que ya tienen la clave se
+         *     quitan solas: ahí es una liga, no un alta.
+         */
+        AltaSaeProductoIn: {
+            /** Clave */
+            clave: string;
+            /** Descripcion */
+            descripcion: string;
+            /** Empresas */
+            empresas?: string[];
+            /** Linea */
+            linea: string;
+            /** Sat Unidad */
+            sat_unidad?: string | null;
+            /**
+             * Unidad
+             * @enum {string}
+             */
+            unidad: "KILO" | "PIEZA" | "CAJA" | "LITRO" | "PAQUETE";
+        };
+        /**
          * AltaSaeReporteIn
          * @description El conector reporta qué creó. `por_empresa` es la verdad de la alta:
          *     {"02": {"ok": true, "clave": "AJOKG"}, "03": {"ok": false, "error": "..."}}.
@@ -6088,6 +6178,65 @@ export interface components {
             motivo?: string | null;
             /** Por Empresa */
             por_empresa?: Record<string, never>;
+        };
+        /**
+         * ArticuloSaeEmpresaOut
+         * @description Un artículo en UNA empresa de SAE, leído en vivo de INVE.
+         *
+         *     `unidad` es el UNI_MED crudo de SAE (KG, PZ, CJ…) y `unidad_canonica` la
+         *     misma en el idioma del Facturador (KILO, PIEZA, CAJA…), para compararla
+         *     contra la presentación sin que la pantalla traduzca. Las descripciones del
+         *     esquema y de las claves SAT son informativas: se leen, no se guardan.
+         */
+        ArticuloSaeEmpresaOut: {
+            /** Activa */
+            activa?: boolean | null;
+            /** Descripcion */
+            descripcion?: string | null;
+            /** Esquema */
+            esquema?: number | null;
+            /** Esquema Descripcion */
+            esquema_descripcion?: string | null;
+            /**
+             * Existe
+             * @default false
+             */
+            existe: boolean;
+            /** Linea */
+            linea?: string | null;
+            /** Sat */
+            sat?: string | null;
+            /** Sat Descripcion */
+            sat_descripcion?: string | null;
+            /** Sat Unidad */
+            sat_unidad?: string | null;
+            /** Sat Unidad Descripcion */
+            sat_unidad_descripcion?: string | null;
+            /** Unidad */
+            unidad?: string | null;
+            /** Unidad Canonica */
+            unidad_canonica?: string | null;
+        };
+        /**
+         * ArticuloSaeOut
+         * @description Respuesta de `GET /productos/claves-sae/{clave}/en-sae`.
+         *
+         *     Siempre trae las cuatro empresas del SAE 10 (02-05); la que no tiene la
+         *     clave sale con `existe=false`. Con SAE caído o sin configurar contesta
+         *     igual, con `disponible=false` y el motivo: la pantalla de ligar se degrada
+         *     a lo que dice el espejo, nunca a un error.
+         */
+        ArticuloSaeOut: {
+            /** Clave */
+            clave: string;
+            /** Disponible */
+            disponible: boolean;
+            /** Empresas */
+            empresas?: {
+                [key: string]: components["schemas"]["ArticuloSaeEmpresaOut"];
+            };
+            /** Motivo */
+            motivo?: string | null;
         };
         /**
          * AutoRemisionOut
@@ -6587,6 +6736,25 @@ export interface components {
             de_donde: string;
             /** Descripcion */
             descripcion?: string | null;
+        };
+        /** ClaveSaeEstadoEmpresa */
+        ClaveSaeEstadoEmpresa: {
+            /** Activa */
+            activa: boolean;
+        };
+        /**
+         * ClaveSaeEstadoOut
+         * @description Una clave que usa el catálogo: en qué empresas existe según el espejo y
+         *     su última solicitud de ALTA (si alguna).
+         */
+        ClaveSaeEstadoOut: {
+            /** Clave */
+            clave: string;
+            /** Empresas */
+            empresas?: {
+                [key: string]: components["schemas"]["ClaveSaeEstadoEmpresa"];
+            };
+            solicitud?: components["schemas"]["SolicitudSaeResumenOut"] | null;
         };
         /** ClaveSaeItem */
         ClaveSaeItem: {
@@ -11497,6 +11665,8 @@ export interface components {
              * @default true
              */
             activo: boolean;
+            /** Altas Sae */
+            altas_sae?: components["schemas"]["AltaSaeProductoIn"][];
             /** Categoria Id */
             categoria_id?: string | null;
             /** Clave Sae */
@@ -11592,6 +11762,8 @@ export interface components {
              * @default true
              */
             activo: boolean;
+            /** Altas Sae */
+            altas_sae?: components["schemas"]["AltaSaeOut"][];
             /** Categoria Id */
             categoria_id?: string | null;
             /** Clave Sae */
@@ -11701,6 +11873,8 @@ export interface components {
         ProductoUpdate: {
             /** Activo */
             activo?: boolean | null;
+            /** Altas Sae */
+            altas_sae?: components["schemas"]["AltaSaeProductoIn"][] | null;
             /** Categoria Id */
             categoria_id?: string | null;
             /** Clave Sae */
@@ -12883,6 +13057,31 @@ export interface components {
         SincronizarGruposIn: {
             /** Grupos */
             grupos?: components["schemas"]["GrupoIn"][];
+        };
+        /**
+         * SolicitudSaeResumenOut
+         * @description La última alta pedida de una clave, lo justo para pintar su chip
+         *     («Alta pendiente», «Alta con error»).
+         */
+        SolicitudSaeResumenOut: {
+            /** Empresas */
+            empresas?: string[];
+            /** Estado */
+            estado: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Motivo */
+            motivo?: string | null;
+            /**
+             * Solicitada At
+             * Format: date-time
+             */
+            solicitada_at: string;
+            /** Tipo */
+            tipo: string;
         };
         /** SucursalBreve */
         SucursalBreve: {
@@ -21062,6 +21261,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClaveSaeBuscadaOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    estado_claves_sae_api_v1_productos_claves_sae_estado_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaveSaeEstadoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    articulo_en_sae_api_v1_productos_claves_sae__clave__en_sae_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                clave: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticuloSaeOut"];
                 };
             };
             /** @description Validation Error */

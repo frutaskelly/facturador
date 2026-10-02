@@ -69,3 +69,28 @@ def crear_sucursal(db, *, tenant_id, cliente_id=None, nombre, serie_factura_id=N
         ))
         db.flush()
     return s
+
+
+def categoria_de_prueba(tenant_id) -> str:
+    """Una categoría para el tenant, y devuelve su id.
+
+    Dar de alta un producto por POST /productos exige categoría desde el
+    2-oct-2026 (ya no cae sola en «Sin categorizar»). Se crea bajo demanda y
+    no en los fixtures: hay pruebas que CUENTAN las categorías del tenant.
+    Idempotente: una sola «FIXT» por tenant."""
+    from app.core.db import SessionLocal
+    from app.models import CategoriaProducto
+
+    db = SessionLocal()
+    try:
+        cat = db.query(CategoriaProducto).filter(
+            CategoriaProducto.tenant_id == tenant_id,
+            CategoriaProducto.codigo == "FIXT").first()
+        if cat is None:
+            cat = CategoriaProducto(tenant_id=tenant_id, codigo="FIXT",
+                                    nombre="Categoría de prueba")
+            db.add(cat)
+            db.commit()
+        return str(cat.id)
+    finally:
+        db.close()

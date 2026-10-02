@@ -22,6 +22,10 @@ import type {
   OrdenCompra, OrdenCompraDetail, Precio, Producto, Proveedor, Proyecto, Remision,
   RemisionDetail, Role, Serie, Sucursal,
 } from "./types";
+import type {
+  AltaSaePedida, AltaSaeResumen, ArticuloSae, CambioSaePedido, ClaveBuscada, ClaveSaeEstado,
+  EmpresaEnSae, UnidadSae,
+} from "@/components/UnidadesClavesSae";
 
 type S = components["schemas"];
 
@@ -59,5 +63,20 @@ type _LineaOC = Ok<MissingIn<LineaOC, S["LineaOCRecibidaOut"]>>;
 type _ClienteExterno = Ok<MissingIn<ClienteExterno, S["ClienteExternoOut"]>>;
 type _Conexion = Ok<MissingIn<Conexion, S["ConexionOut"]>>;
 type _Role = Ok<MissingIn<Role, S["RoleOut"]>>;
+
+// Unidades y claves SAE del editor de producto (2-oct-2026). Sus tipos viven en
+// el componente, no en `types.ts`, pero leen y MANDAN campos del backend: lo que
+// se manda también se verifica, porque un campo que el backend no conoce se
+// pierde en silencio (pydantic lo ignora) y el alta sale sin él.
+type _ClaveBuscada = Ok<MissingIn<ClaveBuscada, S["ClaveSaeBuscadaOut"]>>;
+type _ArticuloSae = Ok<MissingIn<ArticuloSae, S["ArticuloSaeOut"]>>;
+type _EmpresaEnSae = Ok<MissingIn<EmpresaEnSae, S["ArticuloSaeEmpresaOut"]>>;
+type _ClaveSaeEstado = Ok<MissingIn<ClaveSaeEstado, S["ClaveSaeEstadoOut"]>>;
+type _SolicitudSae = Ok<MissingIn<NonNullable<ClaveSaeEstado["solicitud"]>, S["SolicitudSaeResumenOut"]>>;
+type _AltaSaeResumen = Ok<MissingIn<AltaSaeResumen, S["AltaSaeOut"]>>;
+type _AltaSaePedida = Ok<MissingIn<AltaSaePedida, S["AltaSaeProductoIn"]>>;
+// Una unidad que el backend no acepta en `altas_sae` sería un 422 al guardar.
+type _UnidadSae = Ok<Exclude<UnidadSae, S["AltaSaeProductoIn"]["unidad"]>>;
+type _CambioSaePedido = Ok<MissingIn<CambioSaePedido, S["CambioSaeIn"]>>;
 
 export {};

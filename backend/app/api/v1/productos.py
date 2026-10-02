@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from contextlib import nullcontext
 from typing import Optional
 from uuid import UUID, uuid4
@@ -23,8 +25,8 @@ from sqlalchemy.orm import Session
 from ...core.ratelimit import enforce
 from rapidfuzz import fuzz
 
-from ...core.rbac import (AuthContext, get_auth_context, get_tenant_db, require_duenio_de_sae,
-                          require_permission)
+from ...core.rbac import (AuthContext, es_duenio_de_sae, get_auth_context, get_tenant_db,
+                          require_duenio_de_sae, require_permission)
 from ...models import (
     CategoriaProducto,
     ClaveSae,
@@ -42,6 +44,7 @@ from ...models import (
     SolicitudAltaSae,
     Sucursal,
 )
+from ...models.clave_sae import norm_clave
 from ...schemas.producto import (
     ClaveSaeLineaIn,
     ClaveSaeLineaOut,
@@ -50,6 +53,7 @@ from ...schemas.producto import (
     AliasReapuntarIn,
     AltaSaeIn,
     AltaSaeOut,
+    AltaSaeProductoIn,
     CambioSaeIn,
     AltaSaeReporteIn,
     CandidatoOut,
@@ -81,7 +85,14 @@ from ...schemas.producto import (
     SugerirSatBatchIn,
     VocabularioOut,
 )
-from ...schemas.clave_sae import ClaveSaeBuscadaOut
+from ...schemas.clave_sae import (
+    ArticuloSaeEmpresaOut,
+    ArticuloSaeOut,
+    ClaveSaeBuscadaOut,
+    ClaveSaeEstadoEmpresa,
+    ClaveSaeEstadoOut,
+    SolicitudSaeResumenOut,
+)
 from ...schemas.common import Page
 from ...services.categoria_codigo import slugify_codigo
 from ...services.importar_productos import (
@@ -109,7 +120,7 @@ from ...services.producto_match import (
     productos_activos,
     sugerir_con_ia,
 )
-from ...services.inventario import presentacion_declarada
+from ...services.inventario import claves_sae_por_presentacion, presentacion_declarada
 from ...services.lista_export import clave_sae_de
 from ...services.sucursales import es_sucursal_de
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
@@ -144,6 +155,55 @@ def _clave_sae_limpia(db: Session, ctx: AuthContext, data: dict, obj=None) -> No
         return
     clave = (data.get("clave_sae") or "").strip().upper()
     data["clave_sae"] = clave or None
+
+
+def _unidades_sin_clave_sae(unidad_base, clave_sae, presentaciones) -> list[str]:
+    """Las unidades del producto que se quedarían sin artículo de SAE: la base
+    sin `clave_sae` y cada presentación distinta de la base sin la suya.
+
+    La base sale con la clave del producto y las demás con la de su
+    presentación (`clave_sae_de`): una presentación sin clave propia NO cae a
+    la de la base, porque KILO y PIEZA son dos artículos distintos en SAE.
+    """
+    base = str(unidad_base or "").strip().upper()
+    faltan = [] if str(clave_sae or "").strip() else [base or "la unidad base"]
+    con_clave = claves_sae_por_presentacion(presentaciones)
+    for nombre in (presentaciones or {}):
+        n = str(nombre).strip().upper()
+        if n and n != base and n not in con_clave and n not in faltan:
+            faltan.append(n)
+    return faltan
+
+
+def _exigir_claves_sae(ctx: AuthContext, unidad_base, clave_sae, presentaciones,
+                       toleradas=()) -> None:
+    """Regla del dueño (2-oct-2026): en el tenant dueño de SAE ningún producto
+    ACTIVO se guarda sin la clave SAE de cada una de sus unidades. Un producto
+    sin clave es una partida que no sale en el masivo y que alguien descubre
+    con la factura a medias. Quien llama decide si aplica (activo, y en la
+    edición sólo si se tocó lo que define las claves).
+
+    `toleradas`: las unidades que el producto YA tenía sin clave antes de una
+    edición. No bloquean — si no, llenar un hueco (la base, desde el aviso de
+    Remisiones) se rechazaría por OTRO hueco que nadie tocó —; lo que se
+    prohíbe es perder una clave o sumar una unidad sin ella.
+
+    Los demás tenants no tienen SAE: ahí la clave ni se pide."""
+    if not es_duenio_de_sae(ctx.tenant_id):
+        return
+    faltan = [u for u in _unidades_sin_clave_sae(unidad_base, clave_sae, presentaciones)
+              if u not in set(toleradas)]
+    if faltan:
+        raise HTTPException(status_code=422,
+                            detail=f"Falta la clave SAE de {', '.join(faltan)}")
+
+
+def _sin_sae_no_hay_altas(ctx: AuthContext, altas) -> None:
+    """`altas_sae` sólo existe para el tenant dueño de SAE: el escritor no
+    atiende a otro, y su alta se quedaría en la cola hasta caducar."""
+    if altas and not es_duenio_de_sae(ctx.tenant_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Esta empresa no tiene SAE conectado")
 
 
 _DUP = "Ya existe un producto con ese SKU"
@@ -1816,6 +1876,7 @@ def create_producto(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
+    _sin_sae_no_hay_altas(ctx, payload.altas_sae)
     # Nada nace sin esquema de impuesto: sin él el producto no lleva IVA/IEPS y
     # su CFDI sale mal. Va aquí y no en el schema porque `ProductoBase` lo
     # comparte la SALIDA, y los productos viejos que aún tienen el hueco deben
@@ -1825,6 +1886,12 @@ def create_producto(
             status_code=422,
             detail="Elige el esquema de impuesto: sin él el producto no lleva IVA y su factura saldría mal",
         )
+    # La categoría también se elige (regla del dueño, 2-oct-2026): el alta desde
+    # la pantalla ya no cae sola en «Sin categorizar». Esa caída se queda en las
+    # puertas sin pantalla (importación, alta desde SAE), donde no hay a quién
+    # preguntarle.
+    if payload.categoria_id is None:
+        raise HTTPException(status_code=422, detail="Elige la categoría del producto")
     _validate_fks(
         db,
         categoria_id=payload.categoria_id,
@@ -1832,13 +1899,13 @@ def create_producto(
     )
     data = payload.model_dump()
     forzar = data.pop("forzar", False)
+    data.pop("altas_sae", None)            # no es columna: se encola abajo
     _clave_sae_limpia(db, ctx, data)
-    # Sin categoría elegida cae en la del sistema: así el producto se puede
-    # listar y repartir desde Categorías en vez de quedar en un hueco invisible.
-    if data.get("categoria_id") is None:
-        data["categoria_id"] = categoria_sin_categorizar(db, ctx.tenant_id).id
     if data.get("nombre"):
         data["nombre"] = data["nombre"].strip().upper()   # nombres siempre en mayúsculas
+    if data.get("activo", True):
+        _exigir_claves_sae(ctx, data.get("unidad_base"), data.get("clave_sae"),
+                           data.get("presentaciones"))
 
     # El SKU interno lo genera el servidor. Un SKU con guiones o letras es un
     # código DEL CLIENTE (CILA-FRUT-145) colándose como producto nuevo — la
@@ -1885,7 +1952,11 @@ def create_producto(
     )
     db.add(obj)
     flush_or_conflict(db, detail=_DUP)
+    # Las claves nuevas se piden en la MISMA transacción: si el alta en la
+    # cola no se puede encolar, el producto tampoco se guarda (y al revés).
+    altas = _encolar_altas_del_producto(db, ctx, obj, payload.altas_sae)
     db.refresh(obj)
+    obj.altas_sae = altas
     return obj
 
 
@@ -2027,6 +2098,185 @@ def _expirar_altas_muertas(db: Session, tenant_id) -> None:
         db.flush()
 
 
+# ── El núcleo de un alta: lo comparten «dar de alta» suelto (POST /alta-sae, el
+# bot) y las claves nuevas que viajan con el producto (2-oct-2026). Una sola
+# copia de cada regla: la idempotencia por clave, las empresas válidas y qué
+# cuenta como «ya existe en SAE».
+
+def _empresas_de_la_alta(empresas) -> list[str]:
+    """Las empresas pedidas, validadas. Vacío = las cuatro."""
+    pedidas = [e.strip() for e in (empresas or []) if e.strip()] or list(_EMPRESAS_SAE)
+    fuera = [e for e in pedidas if e not in _EMPRESAS_SAE]
+    if fuera:
+        raise HTTPException(status_code=422,
+                            detail=f"Empresa desconocida: {', '.join(fuera)}")
+    return pedidas
+
+
+def _alta_viva(db: Session, tenant_id, clave: str) -> Optional[SolicitudAltaSae]:
+    """La alta de esa clave que todavía nadie cerró. Dos altas vivas insertarían
+    dos veces el mismo artículo: quien pide otra, recibe ésta."""
+    return (db.query(SolicitudAltaSae)
+            .filter(SolicitudAltaSae.tenant_id == tenant_id,
+                    SolicitudAltaSae.tipo == "ALTA",
+                    func.upper(func.btrim(SolicitudAltaSae.clave)) == clave,
+                    SolicitudAltaSae.estado.in_(("PENDIENTE", "EN_CURSO")))
+            .order_by(SolicitudAltaSae.solicitada_at.asc()).first())
+
+
+def _empresas_donde_existe(db: Session, tenant_id, clave: str, empresas) -> list[str]:
+    """De las empresas pedidas, en cuáles el espejo ya tiene la clave ACTIVA.
+
+    Sólo cuentan las empresas que se piden (30-sep-2026): una clave creada en
+    02 y que falta en 03 se completa pidiendo SÓLO la 03. Y sólo el SAE 10,
+    que es donde se escribe: el catálogo del SAE 9 (91/92/94) vive en el mismo
+    tenant desde el 26-sep-2026 y una clave que sólo existe allá no hace a esta
+    alta repetida."""
+    return sorted({e for (e,) in (db.query(ClaveSae.empresa)
+                                  .filter(ClaveSae.tenant_id == tenant_id,
+                                          ClaveSae.empresa.in_(empresas),
+                                          func.upper(func.btrim(ClaveSae.clave)) == clave,
+                                          ClaveSae.activa.is_(True))
+                                  .all())})
+
+
+def _datos_alta(*, descripcion, unidad, linea, esquema, sat, sat_unidad, nota=None) -> dict:
+    """Lo que el escritor necesita para el INSERT, guardado completo en la
+    solicitud: si el catálogo cambia mañana, el alta que se aplicó es ESTA."""
+    return {
+        "descripcion": (descripcion or "").strip()[:60],
+        "unidad": (unidad or "PIEZA").strip().upper(),
+        "linea": (linea or "").strip().upper() or None,
+        "esquema": esquema,
+        "sat": (sat or "").strip() or None,
+        "sat_unidad": (sat_unidad or "").strip() or None,
+        "nota": (nota or "").strip() or None,
+    }
+
+
+def _solicitud_alta(ctx: AuthContext, *, clave: str, producto_id, datos: dict,
+                    empresas: list[str], origen: Optional[str]) -> SolicitudAltaSae:
+    return SolicitudAltaSae(
+        tenant_id=ctx.tenant_id,
+        origen=(origen or "UI").strip().upper()[:12],
+        producto_id=producto_id,
+        clave=clave,
+        datos=datos,
+        empresas=empresas,
+        solicitada_por=ctx.user_id,
+    )
+
+
+def _encolar_alta_sae(db: Session, ctx: AuthContext, *, clave: str, producto_id,
+                      datos: dict, empresas: list[str],
+                      origen: str = "UI") -> Optional[SolicitudAltaSae]:
+    """Encola el alta de una clave que viaja con su producto, o reusa la viva.
+
+    A diferencia de POST /alta-sae, aquí una empresa que ya tiene la clave NO
+    es un 409: se quita de la lista, porque el producto ya se está guardando
+    con esa clave y en esa empresa basta con ligarla. Si no queda ninguna, no
+    se encola nada (None): es una liga, no un alta.
+
+    El INSERT va en un SAVEPOINT: si otra petición encoló la misma clave entre
+    la lectura y la escritura, el índice único `uq_alta_sae_viva` lo frena y se
+    devuelve la suya, sin tirar el producto que se está guardando.
+    """
+    ya = set(_empresas_donde_existe(db, ctx.tenant_id, clave, empresas))
+    faltan = [e for e in empresas if e not in ya]
+    if not faltan:
+        return None
+    viva = _alta_viva(db, ctx.tenant_id, clave)
+    if viva is not None:
+        return viva
+    sol = _solicitud_alta(ctx, clave=clave, producto_id=producto_id, datos=datos,
+                          empresas=faltan, origen=origen)
+    try:
+        with db.begin_nested():
+            db.add(sol)
+            db.flush()
+    except IntegrityError:
+        viva = _alta_viva(db, ctx.tenant_id, clave)
+        if viva is None:
+            raise HTTPException(status_code=409,
+                                detail=f"Ya hay un alta viva para la clave {clave}") from None
+        return viva
+    db.refresh(sol)
+    return sol
+
+
+def _esquema_sae_del_producto(db: Session, prod: Producto) -> int:
+    """El número de esquema de impuestos de SAE (CVE_ESQIMPU) del producto: en
+    el tenant dueño de SAE los esquemas se catalogaron con ese número como
+    código (1, 2, 4, 5, 7, 8). Sale del PRODUCTO y no de quien pide, para que
+    el alta no diga una cosa y el producto otra."""
+    esq = None
+    if prod.esquema_impuesto_id is not None:
+        esq = (db.query(EsquemaImpuesto)
+               .filter(EsquemaImpuesto.id == prod.esquema_impuesto_id,
+                       EsquemaImpuesto.deleted_at.is_(None))
+               .one_or_none())
+    if esq is None:
+        raise HTTPException(status_code=422,
+                            detail="El producto no tiene esquema de impuesto; elígelo antes de pedir el alta en SAE")
+    codigo = (esq.codigo or "").strip()
+    if not codigo.isdigit() or not 1 <= int(codigo) <= 99:
+        raise HTTPException(
+            status_code=422,
+            detail=(f"El esquema {codigo or esq.nombre} no tiene número de SAE: el alta "
+                    "necesita el esquema como lo numera SAE (1, 2, 4…)"),
+        )
+    return int(codigo)
+
+
+def _encolar_altas_del_producto(db: Session, ctx: AuthContext, prod: Producto,
+                                altas: Optional[list[AltaSaeProductoIn]]) -> list[SolicitudAltaSae]:
+    """«Crear clave nueva en SAE» desde el editor de producto (2-oct-2026).
+
+    Cada clave tiene que ser una de las del producto que se acaba de guardar
+    (la base o la de una presentación): así el producto ya la lleva mientras
+    el alta está pendiente y nunca existe sin clave. Si SAE la rechaza, la
+    pantalla lo ve como «Alta con error» en el estado de la clave.
+
+    La clave nueva tiene que poderse escribir tal cual en SAE (letras, números
+    y guion, hasta 16). Las viejas con punto se pueden LIGAR, no crear.
+    """
+    if not altas:
+        return []
+    from ...services import sae_escritura
+
+    _expirar_altas_muertas(db, ctx.tenant_id)
+    del_producto = {norm_clave(prod.clave_sae)} if (prod.clave_sae or "").strip() else set()
+    del_producto |= set(claves_sae_por_presentacion(prod.presentaciones).values())
+    esquema = _esquema_sae_del_producto(db, prod)
+    salida: list[SolicitudAltaSae] = []
+    for a in altas:
+        clave = sae_escritura.normalizar_clave(a.clave)
+        if not clave:
+            raise HTTPException(
+                status_code=422,
+                detail=(f"La clave {a.clave.strip()!r} no se puede crear en SAE: sólo letras "
+                        "sin acento, números y guion, hasta 16"),
+            )
+        if clave not in del_producto:
+            raise HTTPException(
+                status_code=422,
+                detail=(f"La clave {clave} no es de este producto: ponla en la unidad base "
+                        "o en una presentación antes de pedir su alta"),
+            )
+        if not a.descripcion.strip():
+            raise HTTPException(status_code=422,
+                                detail=f"El alta de {clave} necesita descripción")
+        empresas = sorted(set(_empresas_de_la_alta(a.empresas)))
+        sol = _encolar_alta_sae(
+            db, ctx, clave=clave, producto_id=prod.id, empresas=empresas,
+            datos=_datos_alta(descripcion=a.descripcion, unidad=a.unidad, linea=a.linea,
+                              esquema=esquema, sat=prod.clave_sat, sat_unidad=a.sat_unidad),
+        )
+        if sol is not None and all(s.id != sol.id for s in salida):
+            salida.append(sol)
+    return salida
+
+
 @router.post("/alta-sae", response_model=AltaSaeOut, status_code=status.HTTP_201_CREATED,
              dependencies=[Depends(require_duenio_de_sae)])
 def pedir_alta_sae(
@@ -2048,32 +2298,14 @@ def pedir_alta_sae(
     clave = (payload.clave or "").strip().upper()
     if not clave:
         raise HTTPException(status_code=422, detail="La clave no puede ir vacía")
-    empresas = [e.strip() for e in (payload.empresas or []) if e.strip()] or list(_EMPRESAS_SAE)
-    fuera = [e for e in empresas if e not in _EMPRESAS_SAE]
-    if fuera:
-        raise HTTPException(status_code=422,
-                            detail=f"Empresa desconocida: {', '.join(fuera)}")
+    empresas = _empresas_de_la_alta(payload.empresas)
 
-    viva = (db.query(SolicitudAltaSae)
-            .filter(SolicitudAltaSae.tenant_id == ctx.tenant_id,
-                    SolicitudAltaSae.tipo == "ALTA",
-                    func.upper(func.btrim(SolicitudAltaSae.clave)) == clave,
-                    SolicitudAltaSae.estado.in_(("PENDIENTE", "EN_CURSO")))
-            .order_by(SolicitudAltaSae.solicitada_at.asc()).first())
+    viva = _alta_viva(db, ctx.tenant_id, clave)
     if viva is not None:
         return viva
 
-    # Sólo cuentan las empresas que se piden (30-sep-2026): una clave creada en
-    # 02 y que falta en 03 se completa pidiendo SÓLO la 03. Pedirla también
-    # donde ya existe sigue siendo 409. Y sólo el SAE 10, que es donde se
-    # escribe: el catálogo del SAE 9 (91/92/94) vive en el mismo tenant desde
-    # el 26-sep-2026 y una clave que sólo existe allá no hace a esta alta repetida.
-    ya = sorted({e for (e,) in (db.query(ClaveSae.empresa)
-                                .filter(ClaveSae.tenant_id == ctx.tenant_id,
-                                        ClaveSae.empresa.in_(empresas),
-                                        func.upper(func.btrim(ClaveSae.clave)) == clave,
-                                        ClaveSae.activa.is_(True))
-                                .all())})
+    # Pedirla también donde ya existe es 409 (ver `_empresas_donde_existe`).
+    ya = _empresas_donde_existe(db, ctx.tenant_id, clave, empresas)
     if ya:
         raise HTTPException(
             status_code=409,
@@ -2134,22 +2366,11 @@ def pedir_alta_sae(
             flush_or_conflict(db, detail=f"No pude crear el producto {nombre}")
             producto_id = prod.id
 
-    sol = SolicitudAltaSae(
-        tenant_id=ctx.tenant_id,
-        origen=(payload.origen or "UI").strip().upper()[:12],
-        producto_id=producto_id,
-        clave=clave,
-        datos={
-            "descripcion": payload.descripcion.strip()[:60],
-            "unidad": (payload.unidad or "PIEZA").strip().upper(),
-            "linea": (payload.linea or "").strip().upper() or None,
-            "esquema": payload.esquema,
-            "sat": (payload.sat or "").strip() or None,
-            "sat_unidad": (payload.sat_unidad or "").strip() or None,
-            "nota": (payload.nota or "").strip() or None,
-        },
-        empresas=empresas,
-        solicitada_por=ctx.user_id,
+    sol = _solicitud_alta(
+        ctx, clave=clave, producto_id=producto_id, empresas=empresas, origen=payload.origen,
+        datos=_datos_alta(descripcion=payload.descripcion, unidad=payload.unidad,
+                          linea=payload.linea, esquema=payload.esquema, sat=payload.sat,
+                          sat_unidad=payload.sat_unidad, nota=payload.nota),
     )
     db.add(sol)
     flush_or_conflict(db, detail="Ya hay un alta viva para esa clave")
@@ -2265,6 +2486,193 @@ def buscar_claves_sae(
     return buscar_claves(db, ctx.tenant_id, clave=clave, q=q, empresa=empresa,
                          empresas=None if empresa else _EMPRESAS_SAE,
                          solo_activas=solo_activas, limit=limit)
+
+
+@router.get("/claves-sae/estado", response_model=list[ClaveSaeEstadoOut])
+def estado_claves_sae(
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Cada clave de SAE que usa el catálogo: en qué empresas existe (espejo) y
+    su última solicitud de ALTA. Es lo que pinta el chip de cada clave en
+    Productos —«en SAE», «Alta pendiente», «Alta con error»— sin preguntar
+    clave por clave (2-oct-2026).
+
+    Todas las claves de los productos no borrados, la base y las de cada
+    presentación. Tres consultas en total, no una por clave. Un tenant sin SAE
+    recibe la lista vacía y no un 403: la pantalla es la misma para todos y
+    simplemente no tiene chips que pintar.
+    """
+    if not es_duenio_de_sae(ctx.tenant_id):
+        return []
+    _expirar_altas_muertas(db, ctx.tenant_id)
+    claves: set[str] = set()
+    for base, presentaciones in (db.query(Producto.clave_sae, Producto.presentaciones)
+                                 .filter(Producto.tenant_id == ctx.tenant_id,
+                                         Producto.deleted_at.is_(None))
+                                 .all()):
+        if (base or "").strip():
+            claves.add(norm_clave(base))
+        claves.update(claves_sae_por_presentacion(presentaciones).values())
+    if not claves:
+        return []
+
+    llave = func.upper(func.btrim(ClaveSae.clave))
+    espejo: dict[str, dict[str, ClaveSaeEstadoEmpresa]] = {}
+    for clave, empresa, activa in (db.query(llave, ClaveSae.empresa, ClaveSae.activa)
+                                   .filter(ClaveSae.tenant_id == ctx.tenant_id,
+                                           ClaveSae.empresa.in_(_EMPRESAS_SAE),
+                                           llave.in_(claves))
+                                   .all()):
+        espejo.setdefault(clave, {})[empresa] = ClaveSaeEstadoEmpresa(activa=bool(activa))
+
+    # La ÚLTIMA alta de cada clave (DISTINCT ON): una vieja con error que ya se
+    # volvió a pedir no debe seguir pintando «Alta con error».
+    llave_sol = func.upper(func.btrim(SolicitudAltaSae.clave))
+    ultimas = {
+        norm_clave(sol.clave): sol
+        for sol in (db.query(SolicitudAltaSae)
+                    .filter(SolicitudAltaSae.tenant_id == ctx.tenant_id,
+                            SolicitudAltaSae.tipo == "ALTA",
+                            llave_sol.in_(claves))
+                    .distinct(llave_sol)
+                    .order_by(llave_sol, SolicitudAltaSae.solicitada_at.desc())
+                    .all())
+    }
+    return [
+        ClaveSaeEstadoOut(
+            clave=c,
+            empresas=dict(sorted(espejo.get(c, {}).items())),
+            solicitud=(SolicitudSaeResumenOut.model_validate(ultimas[c])
+                       if c in ultimas else None),
+        )
+        for c in sorted(claves)
+    ]
+
+
+# Las descripciones de los esquemas de SAE (IMPU) cambian casi nunca y «Así
+# está en SAE» se abre en cada liga: quince minutos en memoria, por empresa,
+# igual que /sae/catalogos. Lo que falla no se guarda.
+_ESQUEMAS_SAE_TTL_SEG = 15 * 60
+_esquemas_sae_cache: dict[str, tuple[float, dict[int, str]]] = {}
+_esquemas_sae_lock = threading.Lock()
+
+
+def _esquemas_sae(empresa: str) -> dict[int, str]:
+    """{número de esquema: descripción} de IMPU<empresa>. Vacío si SAE no
+    contesta: la descripción es informativa y no vale tumbar la respuesta."""
+    from ...services import sae_lectura
+
+    ahora = time.monotonic()
+    with _esquemas_sae_lock:
+        guardado = _esquemas_sae_cache.get(empresa)
+    if guardado and ahora - guardado[0] < _ESQUEMAS_SAE_TTL_SEG:
+        return guardado[1]
+    try:
+        mapa = {e["codigo"]: e["descripcion"] for e in sae_lectura.esquemas_de(empresa)}
+    except Exception as e:  # noqa: BLE001 — informativo: sin él la respuesta sigue
+        logger.warning("esquemas de SAE %s: %s: %s", empresa, type(e).__name__, e)
+        return {}
+    with _esquemas_sae_lock:
+        _esquemas_sae_cache[empresa] = (ahora, mapa)
+    return mapa
+
+
+@router.get("/claves-sae/{clave}/en-sae", response_model=ArticuloSaeOut,
+            dependencies=[Depends(require_duenio_de_sae)])
+def articulo_en_sae(
+    clave: str,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """«Así está en SAE»: el artículo leído EN VIVO de INVE en cada empresa
+    donde existe, para compararlo con lo capturado en el producto antes de
+    ligar la clave (2-oct-2026). Descripción, unidad, línea, esquema y claves
+    SAT, con la descripción oficial de cada clave SAT (informativa).
+
+    Se leen las empresas 02-05 donde el espejo tiene la clave; si no la tiene
+    en ninguna, la 02 (el espejo pudo no haberse puesto al día). Las demás
+    salen con `existe=false`.
+
+    NUNCA es un 5xx: con SAE sin configurar o sin contestar, 200 con
+    `disponible=false` y el motivo, y las empresas como las dice el espejo. La
+    pantalla de ligar se degrada; no se cae por una pregunta informativa.
+    """
+    from ...services import sae_escritura, sae_lectura
+
+    # Trim + mayúsculas, como el espejo y el lector (norm_clave): una clave
+    # vieja con un espacio ADENTRO existe así en INVE, y quitárselo la
+    # volvería «no está en SAE». Limpiar más es sólo para claves nuevas.
+    c = norm_clave(clave)
+    if not c:
+        raise HTTPException(status_code=422, detail="La clave no puede ir vacía")
+    if len(c) > 50:
+        raise HTTPException(status_code=422, detail="La clave de SAE es de hasta 50 caracteres")
+
+    # {empresa: (activa, descripción)} según el espejo
+    espejo = {e: (activa, desc) for e, activa, desc in
+              (db.query(ClaveSae.empresa, ClaveSae.activa, ClaveSae.descripcion)
+               .filter(ClaveSae.tenant_id == ctx.tenant_id,
+                       ClaveSae.empresa.in_(_EMPRESAS_SAE),
+                       func.upper(func.btrim(ClaveSae.clave)) == c)
+               .all())}
+
+    def _segun_espejo(motivo: str) -> ArticuloSaeOut:
+        return ArticuloSaeOut(clave=c, disponible=False, motivo=motivo, empresas={
+            e: (ArticuloSaeEmpresaOut(existe=True, activa=bool(espejo[e][0]),
+                                      descripcion=espejo[e][1])
+                if e in espejo else ArticuloSaeEmpresaOut())
+            for e in _EMPRESAS_SAE
+        })
+
+    if not sae_lectura.disponible():
+        return _segun_espejo("el Facturador no tiene configurado el acceso a SAE")
+    leidos: dict[str, Optional[dict]] = {}
+    for emp in sorted(espejo) or ["02"]:
+        try:
+            leidos[emp] = sae_lectura.articulo(emp, c)
+        except Exception as e:  # noqa: BLE001 — se degrada, nunca 5xx
+            if sae_lectura.es_falla_de_red(e):
+                logger.warning("así está en SAE %s (%s): %s: %s", c, emp, type(e).__name__, e)
+            else:
+                # No es la red: la consulta está mal. Se degrada igual, pero
+                # que quede en la bitácora, porque es un bug.
+                logger.exception("así está en SAE %s (%s): la lectura falló", c, emp)
+            return _segun_espejo(f"SAE no contestó (empresa {emp}): {type(e).__name__}: {e}")
+
+    encontrados = [a for a in leidos.values() if a]
+    sats = {a["sat"] for a in encontrados if a.get("sat")}
+    unidades_sat = {a["sat_unidad"] for a in encontrados if a.get("sat_unidad")}
+    desc_sat = dict(db.query(SatClaveProdServ.clave, SatClaveProdServ.descripcion)
+                    .filter(SatClaveProdServ.clave.in_(sats)).all()) if sats else {}
+    desc_unidad = dict(db.query(SatClaveUnidad.clave, SatClaveUnidad.nombre)
+                       .filter(SatClaveUnidad.clave.in_(unidades_sat)).all()) if unidades_sat else {}
+    # UNI_MED de SAE → la unidad del Facturador: el mapa del escritor, al revés.
+    canonica = {sae_escritura.UNIDADES[u][0]: u for u in sae_escritura.UNIDADES_CANONICAS}
+
+    empresas: dict[str, ArticuloSaeEmpresaOut] = {}
+    for emp in _EMPRESAS_SAE:
+        a = leidos.get(emp)
+        if not a:
+            empresas[emp] = ArticuloSaeEmpresaOut()
+            continue
+        esquema = a.get("esquema")
+        empresas[emp] = ArticuloSaeEmpresaOut(
+            existe=True,
+            activa=a.get("activa"),
+            descripcion=a.get("descripcion"),
+            unidad=a.get("unidad"),
+            unidad_canonica=canonica.get((a.get("unidad") or "").upper()),
+            linea=a.get("linea"),
+            esquema=esquema,
+            esquema_descripcion=(_esquemas_sae(emp).get(esquema) or None
+                                 if esquema is not None else None),
+            sat=a.get("sat"),
+            sat_descripcion=desc_sat.get(a.get("sat") or ""),
+            sat_unidad=a.get("sat_unidad"),
+            sat_unidad_descripcion=desc_unidad.get(a.get("sat_unidad") or ""),
+        )
+    return ArticuloSaeOut(clave=c, disponible=True, empresas=empresas)
 
 
 @router.get("/alta-sae", response_model=Page[AltaSaeOut])
@@ -2557,8 +2965,10 @@ def update_producto(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
+    _sin_sae_no_hay_altas(ctx, payload.altas_sae)
     obj = get_or_404(db, Producto, producto_id)
     data = payload.model_dump(exclude_unset=True)
+    data.pop("altas_sae", None)            # no es columna: se encola abajo
     if data.get("nombre"):
         data["nombre"] = data["nombre"].strip().upper()   # nombres siempre en mayúsculas
     _clave_sae_limpia(db, ctx, data, obj)
@@ -2576,6 +2986,9 @@ def update_producto(
             ),
         )
     if "categoria_id" in data:
+        # Igual que el esquema: se puede CAMBIAR, nunca vaciar (2-oct-2026).
+        if data["categoria_id"] is None:
+            raise HTTPException(status_code=422, detail="Elige la categoría del producto")
         ensure_fk(db, CategoriaProducto, data["categoria_id"], "categoria_id")
     if "esquema_impuesto_id" in data:
         # Quitárselo es la otra forma de dejar un producto sin IVA. Se puede
@@ -2586,11 +2999,27 @@ def update_producto(
                 detail="Elige el esquema de impuesto: sin él el producto no lleva IVA y su factura saldría mal",
             )
         ensure_fk(db, EsquemaImpuesto, data["esquema_impuesto_id"], "esquema_impuesto_id")
+    # Los huecos que el producto YA traía (2-oct-2026): siguen naciendo por
+    # rutas sin candado (nueva presentación desde la remisión, importación), y
+    # el aviso de Remisiones los llena de uno en uno con este PATCH. Uno
+    # inactivo no tolera nada: reactivarlo exige todas sus claves.
+    huecos_antes = (_unidades_sin_clave_sae(obj.unidad_base, obj.clave_sae, obj.presentaciones)
+                    if obj.activo else [])
     for key, value in data.items():
         setattr(obj, key, value)
+    # La regla de las claves se mide sobre el producto que QUEDA, y sólo si se
+    # tocó lo que las define: un producto viejo con huecos se sigue pudiendo
+    # renombrar y se le pueden ir llenando; lo que no se puede es quitarle una
+    # clave ni sumarle una unidad sin la suya.
+    if obj.activo and any(k in data for k in ("clave_sae", "presentaciones",
+                                              "unidad_base", "activo")):
+        _exigir_claves_sae(ctx, obj.unidad_base, obj.clave_sae, obj.presentaciones,
+                           toleradas=huecos_antes)
     obj.updated_by = ctx.user_id
     flush_or_conflict(db, detail=_DUP)
+    altas = _encolar_altas_del_producto(db, ctx, obj, payload.altas_sae)
     db.refresh(obj)
+    obj.altas_sae = altas
     return obj
 
 

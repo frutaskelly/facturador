@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
-import { FileUp, PackagePlus, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { FileUp, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 
-import { AltaSaeModal } from "@/components/AltaSaeModal";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -14,12 +13,29 @@ import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { ClaveSaeInline } from "@/components/ClaveSaeInline";
-import { ProductoAliasPanel } from "@/components/ProductoAliasPanel";
+import { DescripcionSat } from "@/components/DescripcionSat";
 import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { SatClaveCombobox } from "@/components/SatClaveCombobox";
+import {
+  UNIDADES_INVENTARIO,
+  UnidadesClavesSae,
+  altasDesdeFilas,
+  armarPresentaciones,
+  cambiarUnidadBase,
+  cambiosSaeDesdeFilas,
+  estadoDeClave,
+  filaBase,
+  filasDesdeProducto,
+  indexarEstados,
+  normalizarClave,
+  problemasClavesSae,
+  validarClavesSae,
+  type AltaSaeResumen,
+  type ClaveSaeEstado,
+  type FilaClave,
+} from "@/components/UnidadesClavesSae";
 import { ApiError, apiFetch } from "@/lib/api";
-import { can, canAny, useAuth } from "@/lib/auth";
+import { can, useAuth } from "@/lib/auth";
 import { useListadoCompleto, useMutation, useResource, type Page } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import type { Categoria, EsquemaImpuesto, Producto } from "@/lib/types";
@@ -27,14 +43,9 @@ import type { Categoria, EsquemaImpuesto, Producto } from "@/lib/types";
 const WRITE = "producto:gestionar";
 // Borrar un producto es un permiso aparte de gestionarlo (producto:eliminar).
 const DELETE = "producto:eliminar";
-// Pedir el alta en SAE: quien gestiona el catálogo o quien sólo puede pedirlas.
-const ALTA_SAE = "producto:alta_sae";
 
 // Unidades base más comunes (unidad interna de inventario).
-const UNIDADES_BASE = [
-  "KILO", "PIEZA", "LITRO", "GRAMO", "MILILITRO", "CAJA", "BULTO", "COSTAL",
-  "PAQUETE", "MANOJO", "MALLA", "REJA", "DOCENA", "ATADO",
-];
+const UNIDADES_BASE = UNIDADES_INVENTARIO;
 
 // Unidades SAT (c_ClaveUnidad) frecuentes, con su nombre.
 const UNIDADES_SAT: { code: string; nombre: string }[] = [
@@ -53,10 +64,10 @@ const UNIDADES_SAT: { code: string; nombre: string }[] = [
 ];
 
 type SatOpcion = { clave_sat: string; descripcion: string };
-// `extra` guarda lo demás de la forma rica ({sat, estimado, …}): el formulario
-// solo edita factor y clave, y reescribir la presentación como número a secas
-// borraba la unidad SAT de la CAJA/PIEZA al guardar cualquier otra cosa.
-type PresRow = { nombre: string; factor: string; clave_sae: string; extra: Record<string, unknown> };
+
+/** Lo que contestan POST/PATCH /productos: el producto y las altas en SAE que
+ *  se encolaron (o se reusaron) en esa misma llamada. */
+type ProductoGuardado = Producto & { altas_sae?: AltaSaeResumen[] };
 
 /** La clave de SAE de cada presentación del producto ({PIEZA: "SANDIAPZ"}). */
 function clavesPorPresentacion(p: Producto): Record<string, string> {
@@ -98,10 +109,13 @@ type FormState = {
   categoria_id: string;
   esquema_impuesto_id: string;
   clave_sat: string;
-  clave_sae: string;
   unidad_sat: string;
   unidad_base: string;
-  presentaciones: PresRow[];
+  // Una fila por unidad: la base (filas[0]) y cada presentación, cada una con
+  // su clave de SAE. Las filas guardan además lo demás de la presentación rica
+  // ({sat, estimado, …}): reescribirla como número a secas borraba la unidad
+  // SAT de la CAJA/PIEZA al guardar cualquier otra cosa.
+  filas: FilaClave[];
   activo: boolean;
   perecedero: boolean;
   requiere_lote: boolean;
@@ -115,10 +129,9 @@ function emptyForm(): FormState {
     categoria_id: "",
     esquema_impuesto_id: "",
     clave_sat: "01010101",
-    clave_sae: "",
     unidad_sat: "KGM",
     unidad_base: "KILO",
-    presentaciones: [],   // adicionales a la base (la base es 1:1 implícita)
+    filas: [filaBase("KILO")],   // la base es 1:1; las demás se agregan
     activo: true,
     perecedero: false,
     requiere_lote: false,
@@ -127,18 +140,6 @@ function emptyForm(): FormState {
 
 function toForm(p: Producto): FormState {
   const base = p.unidad_base ?? "KILO";
-  // Presentaciones adicionales (excluye la base). Soporta forma simple (número)
-  // y rica ({factor, sat, estimado}).
-  const rows: PresRow[] = Object.entries(p.presentaciones ?? {})
-    .filter(([nombre]) => nombre !== base)
-    .map(([nombre, factor]) => {
-      const f = factor as unknown;
-      if (typeof f === "object" && f !== null) {
-        const { factor: num, clave_sae, ...extra } = f as { factor?: number; clave_sae?: string };
-        return { nombre, factor: String(num ?? 1), clave_sae: clave_sae ?? "", extra };
-      }
-      return { nombre, factor: String(f as number), clave_sae: "", extra: {} };
-    });
   return {
     sku: p.sku,
     nombre: p.nombre,
@@ -146,10 +147,9 @@ function toForm(p: Producto): FormState {
     categoria_id: p.categoria_id ?? "",
     esquema_impuesto_id: p.esquema_impuesto_id ?? "",
     clave_sat: p.clave_sat,
-    clave_sae: p.clave_sae ?? "",
     unidad_sat: p.unidad_sat,
     unidad_base: base,
-    presentaciones: rows,
+    filas: filasDesdeProducto(p),
     activo: p.activo,
     perecedero: p.perecedero,
     requiere_lote: p.requiere_lote,
@@ -162,9 +162,16 @@ export default function ProductosPage() {
   const { post, patch, del, loading: saving } = useMutation();
   const canWrite = can(me, WRITE);
   const canDelete = can(me, DELETE);
-  // Sólo el tenant dueño de SAE: a cualquier otro la cola le contesta 403.
-  const canAltaSae = !!me?.active_tenant.sae_conectado && canAny(me, [WRITE, ALTA_SAE]);
-  const [altaSae, setAltaSae] = useState<Producto | null>(null);
+  // Sólo el tenant dueño de SAE exige clave SAE por unidad y pide altas allá
+  // (regla del dueño, 2-oct-2026). Las altas ya no tienen botón propio en la
+  // fila: viven en el editor, junto a la unidad que las necesita.
+  const saeConectado = !!me?.active_tenant.sae_conectado;
+
+  // Cómo va cada clave del catálogo en SAE: ligada, alta pendiente, con error…
+  const estadosRes = useResource<ClaveSaeEstado[]>(
+    saeConectado ? "/api/v1/productos/claves-sae/estado" : null
+  );
+  const estados = useMemo(() => indexarEstados(estadosRes.data), [estadosRes.data]);
 
   const categoriasRes = useResource<Page<Categoria>>("/api/v1/categorias?limit=200");
   const categorias = useMemo(() => categoriasRes.data?.items ?? [], [categoriasRes.data]);
@@ -198,7 +205,7 @@ export default function ProductosPage() {
 
   const [form, setForm] = useState<FormState | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [tab, setTab] = useState<"datos" | "alias">("datos");
+  const [enviando, setEnviando] = useState(false);
   const [toDelete, setToDelete] = useState<Producto | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [satOpciones, setSatOpciones] = useState<SatOpcion[]>([]);
@@ -255,12 +262,50 @@ export default function ProductosPage() {
     setEditingId(p.id);
     setSatOpciones([]);
     setParecidos([]);
-    setTab("datos");        // abrir siempre en Datos, aunque el anterior se cerró en alias
     setForm(toForm(p));
   }, []);
 
+  // El esquema elegido: su `codigo` es el número de esquema de SAE.
+  const esquemaSel = form ? esquemasTodos.find((e) => e.id === form.esquema_impuesto_id) ?? null : null;
+  const esquemaCodigo = esquemaSel?.codigo.trim() || null;
+  const nAltas = saeConectado && form ? form.filas.filter((f) => f.estado === "nueva").length : 0;
+
+  // Lo que impide guardar, en orden: el primero va en rojo al pie del modal y
+  // el botón se apaga. Reglas del dueño (2-oct-2026): categoría obligatoria y,
+  // en el tenant dueño de SAE, ningún producto activo sin clave en CADA unidad.
+  const faltas: string[] = [];
+  if (form) {
+    if (!form.categoria_id) faltas.push("Elige la categoría");
+    const sinClave = form.activo ? validarClavesSae(form.filas, saeConectado) : [];
+    if (sinClave.length) faltas.push(`Falta la clave SAE de ${sinClave.join(", ")}`);
+    faltas.push(...problemasClavesSae(form.filas, form.nombre, saeConectado));
+    if (nAltas) {
+      // El alta lleva el esquema y la clave SAT del producto: sin ellos SAE
+      // la rechaza media hora después, cuando ya nadie está viendo.
+      if (!esquemaCodigo || !/^\d+$/.test(esquemaCodigo)) {
+        faltas.push("Para pedir el alta en SAE, elige un esquema de impuesto con número de SAE");
+      }
+      if (!/^\d{8}$/.test(form.clave_sat.trim())) {
+        faltas.push("Para pedir el alta en SAE, la clave SAT lleva 8 dígitos");
+      }
+    }
+  }
+
+  // «Usar la de SAE» desde «Así está en SAE»: se cambia en Datos.
+  const usarSatDeSae = useCallback((clave: string) => {
+    setForm((f) => (f ? { ...f, clave_sat: clave } : f));
+  }, []);
+  function usarEsquemaDeSae(codigo: number) {
+    const esq = esquemas.find((e) => e.codigo.trim() === String(codigo));
+    if (!esq) {
+      toast.error(`No hay un esquema activo con el número ${codigo} de SAE: créalo en Esquemas de impuesto`);
+      return;
+    }
+    setForm((f) => (f ? { ...f, esquema_impuesto_id: esq.id } : f));
+  }
+
   async function save(forzar = false) {
-    if (!form) return;
+    if (!form || enviando) return;
     if (!form.nombre.trim()) {
       toast.error("El nombre es obligatorio");
       return;
@@ -272,52 +317,75 @@ export default function ProductosPage() {
       toast.error("Elige el esquema de impuesto");
       return;
     }
-    const unidadBase = form.unidad_base.trim() || "KILO";
-    // Build the presentation→base-units map; the base unit is always 1:1.
-    const presentaciones: Record<string, number | Record<string, unknown>> = { [unidadBase]: 1 };
-    for (const r of form.presentaciones) {
-      const nombre = r.nombre.trim();
-      if (!nombre || nombre === unidadBase) continue;
-      const factor = Number(r.factor);
-      if (!Number.isFinite(factor) || factor <= 0) {
-        toast.error(`Factor inválido para "${nombre}" (debe ser mayor a 0)`);
-        return;
-      }
-      const clave = r.clave_sae.trim().toUpperCase();
-      // Número a secas solo si no hay nada más que guardar (la forma de siempre).
-      presentaciones[nombre] =
-        clave || Object.keys(r.extra).length
-          ? { ...r.extra, factor, ...(clave ? { clave_sae: clave } : {}) }
-          : factor;
+    if (faltas.length) {
+      toast.error(faltas[0]);
+      return;
     }
+    // La base es siempre 1:1; cada presentación lleva su factor y su clave.
+    const armado = armarPresentaciones(form.filas);
+    if (armado.error) {
+      toast.error(armado.error);
+      return;
+    }
+    // Las claves nuevas viajan CON el producto: el backend las encola en la
+    // misma transacción, así el producto nunca existe sin su clave.
+    const altas = saeConectado ? altasDesdeFilas(form.filas, form.nombre.trim(), form.unidad_sat) : [];
     const payload = {
       ...(form.sku.trim() ? { sku: form.sku.trim() } : {}),  // vacío → backend autogenera
       nombre: form.nombre.trim(),
       descripcion: form.descripcion.trim() || null,
-      categoria_id: form.categoria_id || null,
+      categoria_id: form.categoria_id,
       esquema_impuesto_id: form.esquema_impuesto_id || null,
       clave_sat: form.clave_sat.trim(),
       // La clave del artículo en SAE: vacía se manda como null (quitarla es
-      // legítimo), y el backend la normaliza a mayúsculas sin espacios.
-      clave_sae: form.clave_sae.trim() || null,
+      // legítimo sin SAE), y el backend la normaliza a mayúsculas sin espacios.
+      clave_sae: armado.claveBase,
       unidad_sat: form.unidad_sat.trim(),
-      unidad_base: unidadBase,
-      presentaciones,
+      unidad_base: armado.unidadBase,
+      presentaciones: armado.presentaciones,
       activo: form.activo,
       perecedero: form.perecedero,
       requiere_lote: form.requiere_lote,
+      ...(altas.length ? { altas_sae: altas } : {}),
     };
+    setEnviando(true);
     try {
-      if (editingId) {
-        await patch(`/api/v1/productos/${editingId}`, payload);
-        toast.success("Producto actualizado");
-      } else {
-        await post("/api/v1/productos", { ...payload, forzar });
-        toast.success("Producto creado");
+      const prod = editingId
+        ? await patch<ProductoGuardado>(`/api/v1/productos/${editingId}`, payload)
+        : await post<ProductoGuardado>("/api/v1/productos", { ...payload, forzar });
+
+      const avisos = [editingId ? "Producto actualizado" : "Producto creado"];
+      const pedidas = prod.altas_sae ?? [];
+      for (const a of pedidas) avisos.push(`Alta de ${a.clave} pedida (${a.empresas.join(", ")})`);
+      // Una clave que se mandó a crear y no volvió como alta ya existía en las
+      // empresas pedidas: el backend la dejó ligada, no la encoló.
+      const ligadas = altas
+        .filter((a) => !pedidas.some((x) => normalizarClave(x.clave) === a.clave))
+        .map((a) => a.clave);
+      if (ligadas.length) avisos.push(`${ligadas.join(", ")} ya existía en SAE: quedó ligada`);
+
+      // «Dejar la mía y pedir cambio en SAE»: va DESPUÉS de guardar, y si
+      // falla el producto ya quedó guardado — se avisa, no se deshace.
+      const cambios = saeConectado
+        ? cambiosSaeDesdeFilas(form.filas, form.clave_sat, esquemaCodigo, prod.id)
+        : [];
+      const fallidos: string[] = [];
+      for (const c of cambios) {
+        try {
+          await apiFetch("/api/v1/productos/cambio-sae", { method: "POST", body: JSON.stringify(c) });
+          avisos.push(`Cambio de ${c.clave} pedido en SAE`);
+        } catch (e) {
+          fallidos.push(`${c.clave}: ${e instanceof ApiError ? e.message : "no se pudo"}`);
+        }
+      }
+      toast.success(avisos.join(" · "));
+      if (fallidos.length) {
+        toast.error(`El producto sí se guardó, pero no pude pedir el cambio en SAE — ${fallidos.join(" · ")}`);
       }
       setForm(null);
       setParecidos([]);
       reload();
+      if (saeConectado) estadosRes.reload();
     } catch (e) {
       // 409 con candidatos: el catálogo ya tiene algo muy parecido. No es un
       // error que se cierre con un toast — hay que decidir entre usar el que
@@ -328,6 +396,8 @@ export default function ProductosPage() {
         return;
       }
       toast.error(e instanceof ApiError ? e.message : "No se pudo guardar");
+    } finally {
+      setEnviando(false);
     }
   }
 
@@ -367,6 +437,27 @@ export default function ProductosPage() {
           </span>
         ),
     },
+    // Cómo va la clave de cada renglón-unidad en SAE (sólo el tenant dueño de
+    // SAE): lo que antes había que abrir producto por producto para saber.
+    ...(saeConectado
+      ? [{
+          header: "SAE",
+          sortValue: (f: FilaUnidad) => estadoDeClave(f.clave, estados).texto,
+          cell: (f: FilaUnidad) => {
+            const v = estadoDeClave(f.clave, estados);
+            if (v.codigo === "desconocido") {
+              return <span className="text-muted">{estadosRes.loading ? "…" : "—"}</span>;
+            }
+            // Un producto inactivo sin clave no rompe nada: se ve, pero gris.
+            const tono = v.codigo === "sin_clave" && !f.p.activo ? "muted" : v.tono;
+            return (
+              <span title={v.detalle ?? undefined}>
+                <Badge tone={tono}>{v.texto}</Badge>
+              </span>
+            );
+          },
+        } satisfies Column<FilaUnidad>]
+      : []),
     {
       header: "Categoría",
       sortValue: ({ p }) => (p.categoria_id ? catName[p.categoria_id] ?? "" : ""),
@@ -401,21 +492,8 @@ export default function ProductosPage() {
       header: "",
       className: "text-right w-1",
       cell: ({ p }) =>
-        canWrite || canDelete || canAltaSae ? (
+        canWrite || canDelete ? (
           <div className="flex justify-end gap-1">
-            {canAltaSae && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setAltaSae(p);
-                }}
-                className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
-                aria-label="Dar de alta en SAE"
-                title="Dar de alta en SAE"
-              >
-                <PackagePlus size={16} />
-              </button>
-            )}
             {canWrite && (
               <button
                 onClick={(e) => {
@@ -443,7 +521,7 @@ export default function ProductosPage() {
           </div>
         ) : null,
     },
-  ], [catName, esqName, canWrite, canDelete, canAltaSae, openEdit]);
+  ], [catName, esqName, canWrite, canDelete, openEdit, saeConectado, estados, estadosRes.loading]);
 
   return (
     <div>
@@ -465,13 +543,6 @@ export default function ProductosPage() {
             </div>
           ) : undefined
         }
-      />
-
-      <AltaSaeModal
-        producto={altaSae}
-        esquemas={esquemasTodos}
-        escritor={me?.active_tenant.sae_escritor}
-        onClose={() => setAltaSae(null)}
       />
 
       <DataTableSmart
@@ -535,21 +606,30 @@ export default function ProductosPage() {
         open={form !== null}
         onClose={() => setForm(null)}
         title={editingId ? "Editar producto" : "Nuevo producto"}
-        // Ancho: el vocabulario de un producto se lee agrupado por cliente y en
-        // el modal angosto el texto se partía en vertical, una letra por renglón.
+        // Ancho: la sección de claves SAE lista candidatas con su descripción y
+        // sus empresas, y en el modal angosto se partía en vertical.
         size="lg"
+        // Lo que falta va a la izquierda del pie: el Modal mete `footer` en un
+        // bloque alineado a la derecha.
+        footerStart={faltas.length ? (
+          <span className="text-sm text-danger">{faltas[0]}</span>
+        ) : undefined}
         footer={
           <>
             <Button variant="secondary" onClick={() => setForm(null)}>
               Cancelar
             </Button>
             {parecidos.length ? (
-              <Button variant="secondary" onClick={() => save(true)} disabled={saving}>
-                {saving ? "Guardando…" : "Es distinto — crearlo igual"}
+              <Button variant="secondary" onClick={() => save(true)} disabled={saving || enviando || faltas.length > 0}>
+                {saving || enviando ? "Guardando…" : "Es distinto — crearlo igual"}
               </Button>
             ) : (
-              <Button onClick={() => save()} disabled={saving}>
-                {saving ? "Guardando…" : "Guardar"}
+              <Button onClick={() => save()} disabled={saving || enviando || faltas.length > 0}>
+                {saving || enviando
+                  ? "Guardando…"
+                  : nAltas
+                    ? `${editingId ? "Guardar" : "Crear"} y pedir ${nAltas} alta${nAltas === 1 ? "" : "s"} en SAE`
+                    : editingId ? "Guardar" : "Crear producto"}
               </Button>
             )}
           </>
@@ -591,38 +671,9 @@ export default function ProductosPage() {
           </Alert>
         ) : null}
 
-        {/* Las pestañas van sueltas y no con <Tabs/>: el pie del modal ("Guardar")
-            tiene que seguir atado al formulario, y meter todo el formulario dentro
-            del prop `content` de Tabs lo desconectaría. Mismas clases, mismo look. */}
-        {form && editingId && (
-          <div className="flex gap-1 border-b border-border">
-            {([
-              ["datos", "Datos"],
-              ["alias", "Así lo escriben"],
-            ] as const).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setTab(id)}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
-                  tab === id
-                    ? "border-accent text-foreground"
-                    : "border-transparent text-muted hover:text-foreground"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {form && editingId && tab === "alias" && (
-          <div className="mt-3">
-            <ProductoAliasPanel productoId={editingId} productoNombre={form.nombre} />
-          </div>
-        )}
-
-        {form && (!editingId || tab === "datos") && (
+        {/* Sin pestañas: «Así lo escriben» se fue a /vocabulario (2-oct-2026),
+            que es donde se administra cómo escribe cada cliente un producto. */}
+        {form && (
           <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
             {/* SKU — automático */}
             <div className="sm:col-span-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -630,48 +681,56 @@ export default function ProductosPage() {
                 <Input value={editingId ? form.sku : ""} placeholder="(automático)" disabled className="max-w-[14rem]" />
               </Field>
             </div>
-            {/* nombre + unidad base */}
-            <Field label="Nombre" required>
-              <Input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} />
-            </Field>
+            {/* nombre + categoría: la categoría es obligatoria en el alta */}
+            <div className="sm:col-span-2 grid grid-cols-1 gap-4 sm:grid-cols-[2fr_1fr]">
+              <Field label="Nombre" required>
+                <Input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} />
+              </Field>
+              <Field label="Categoría" required>
+                <Select value={form.categoria_id} onChange={(e) => setForm({ ...form, categoria_id: e.target.value })}>
+                  <option value="">— Elige la categoría —</option>
+                  {categorias
+                    .filter((c) => c.activo || c.id === form.categoria_id)
+                    .map((c) => (<option key={c.id} value={c.id}>{c.nombre}</option>))}
+                </Select>
+              </Field>
+            </div>
             <Field label="Unidad base" hint="Unidad de inventario (todo el stock se guarda aquí)">
-              <Select value={form.unidad_base} onChange={(e) => setForm({ ...form, unidad_base: e.target.value })}>
+              <Select
+                value={form.unidad_base}
+                onChange={(e) => setForm({
+                  ...form,
+                  unidad_base: e.target.value,
+                  filas: cambiarUnidadBase(form.filas, e.target.value),
+                })}
+              >
                 {(UNIDADES_BASE.includes(form.unidad_base) ? UNIDADES_BASE : [form.unidad_base, ...UNIDADES_BASE]).map((u) => (
                   <option key={u} value={u}>{u}</option>
                 ))}
               </Select>
             </Field>
-            <div className="sm:col-span-2">
-              <Field label="Categoría">
-                <Select value={form.categoria_id} onChange={(e) => setForm({ ...form, categoria_id: e.target.value })}>
-                  <option value="">— Sin categoría —</option>
-                  {categorias.map((c) => (<option key={c.id} value={c.id}>{c.nombre}</option>))}
-                </Select>
-              </Field>
-            </div>
-            <div className="sm:col-span-2">
-              <Field
-                label="Esquema de impuestos"
-                hint={
-                  esquemas.length === 0
-                    ? "No hay esquemas dados de alta — créalos en Ajustes › Esquemas de impuesto"
-                    : "Define IVA/IEPS/retenciones aplicables al producto"
-                }
+            <Field
+              label="Esquema de impuestos"
+              required={!editingId}
+              hint={
+                esquemas.length === 0
+                  ? "No hay esquemas dados de alta — créalos en Ajustes › Esquemas de impuesto"
+                  : "Define IVA/IEPS/retenciones aplicables al producto"
+              }
+            >
+              <Select
+                value={form.esquema_impuesto_id}
+                onChange={(e) => setForm({ ...form, esquema_impuesto_id: e.target.value })}
+                disabled={esquemas.length === 0}
               >
-                <Select
-                  value={form.esquema_impuesto_id}
-                  onChange={(e) => setForm({ ...form, esquema_impuesto_id: e.target.value })}
-                  disabled={esquemas.length === 0}
-                >
-                  <option value="">— Sin esquema —</option>
-                  {esquemas.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.codigo} · {e.nombre} (IVA {Math.round(Number(e.iva_tasa) * 100)}%)
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
+                <option value="">— Sin esquema —</option>
+                {esquemas.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.codigo} · {e.nombre} (IVA {Math.round(Number(e.iva_tasa) * 100)}%)
+                  </option>
+                ))}
+              </Select>
+            </Field>
 
             {/* Clasificación SAT (CFDI) */}
             <div className="sm:col-span-2 rounded-lg border border-border bg-surface-2/40 p-3">
@@ -700,12 +759,17 @@ export default function ProductosPage() {
                 </div>
               )}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Clave SAT (producto/servicio)">
-                  <SatClaveCombobox
-                    value={form.clave_sat}
-                    onChange={(v) => setForm((f) => (f ? { ...f, clave_sat: v } : f))}
-                  />
-                </Field>
+                <div>
+                  <Field label="Clave SAT (producto/servicio)">
+                    <SatClaveCombobox
+                      value={form.clave_sat}
+                      mostrarDescripcion={false}
+                      onChange={(v) => setForm((f) => (f ? { ...f, clave_sat: v } : f))}
+                    />
+                  </Field>
+                  {/* La descripción oficial, y si la clave no está en el catálogo, se dice. */}
+                  <DescripcionSat clave={form.clave_sat} />
+                </div>
                 <Field label="Unidad SAT">
                   <Select value={form.unidad_sat} onChange={(e) => setForm({ ...form, unidad_sat: e.target.value })}>
                     {(UNIDADES_SAT.some((u) => u.code === form.unidad_sat)
@@ -719,97 +783,21 @@ export default function ProductosPage() {
               </div>
             </div>
 
-            <div className="sm:col-span-2 rounded-lg border border-border bg-surface-2/40 p-3">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-sm font-medium">Presentaciones y claves de SAE</span>
-                <span className="text-xs text-muted">Factor = unidades base por presentación</span>
-              </div>
-              <p className="mb-2 text-xs text-muted">
-                SAE tiene un artículo por unidad (SANDIAKG, SANDIAPZ): pon la clave de cada una y la
-                línea sale a SAE con la de SU presentación. Sin clave propia, usa la de la base.
-              </p>
-              <div className="mb-2 grid grid-cols-[1fr_6rem_minmax(0,12rem)_2rem] items-center gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
-                <span>Base: <b>{form.unidad_base}</b> <span className="text-xs text-muted">(inventario)</span></span>
-                <span className="text-muted">= 1</span>
-                <ClaveSaeInline
-                  compacto
-                  productoId={editingId ?? ""}
-                  productoNombre={form.nombre}
-                  value={form.clave_sae}
-                  onChange={(v) => setForm((f) => (f ? { ...f, clave_sae: v.toUpperCase() } : f))}
-                />
-                <span />
-              </div>
-              <div className="space-y-2">
-                {form.presentaciones.map((r, i) => {
-                  // Opciones predefinidas, sin repetir la unidad base; conserva el valor
-                  // actual aunque no esté en la lista (datos previos).
-                  const opts = UNIDADES_BASE.filter((u) => u !== form.unidad_base);
-                  const nombreOpts = r.nombre && !opts.includes(r.nombre) ? [r.nombre, ...opts] : opts;
-                  return (
-                  <div key={i} className="grid grid-cols-[1fr_6rem_minmax(0,12rem)_2rem] items-center gap-2 px-3">
-                    <Select
-                      value={r.nombre}
-                      onChange={(e) => {
-                        const next = [...form.presentaciones];
-                        next[i] = { ...next[i], nombre: e.target.value };
-                        setForm({ ...form, presentaciones: next });
-                      }}
-                    >
-                      <option value="">— Presentación —</option>
-                      {nombreOpts.map((u) => (
-                        <option key={u} value={u}>{u}</option>
-                      ))}
-                    </Select>
-                    <Input
-                      type="number"
-                      step="0.0001"
-                      min="0"
-                      placeholder="Factor"
-                      value={r.factor}
-                      onChange={(e) => {
-                        const next = [...form.presentaciones];
-                        next[i] = { ...next[i], factor: e.target.value };
-                        setForm({ ...form, presentaciones: next });
-                      }}
-                    />
-                    <ClaveSaeInline
-                      compacto
-                      productoId={editingId ?? ""}
-                      productoNombre={form.nombre}
-                      value={r.clave_sae}
-                      onChange={(v) =>
-                        setForm((f) => {
-                          if (!f) return f;
-                          const next = [...f.presentaciones];
-                          next[i] = { ...next[i], clave_sae: v.toUpperCase() };
-                          return { ...f, presentaciones: next };
-                        })
-                      }
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setForm({ ...form, presentaciones: form.presentaciones.filter((_, j) => j !== i) })}
-                      className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
-                      aria-label="Quitar presentación"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                  );
-                })}
-                {form.presentaciones.length === 0 && (
-                  <p className="text-xs text-muted">Solo la unidad base. Agrega CAJA/BULTO si compras o vendes en esas presentaciones.</p>
-                )}
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                className="mt-2"
-                onClick={() => setForm({ ...form, presentaciones: [...form.presentaciones, { nombre: "", factor: "", clave_sae: "", extra: {} }] })}
-              >
-                <Plus size={16} /> Agregar presentación
-              </Button>
+            <div className="sm:col-span-2">
+              <UnidadesClavesSae
+                nombre={form.nombre}
+                filas={form.filas}
+                onChange={(filas) => setForm((f) => (f ? { ...f, filas } : f))}
+                esquemaCodigo={esquemaCodigo}
+                esquemaNombre={esquemaSel?.nombre ?? null}
+                claveSat={form.clave_sat}
+                unidadSat={form.unidad_sat}
+                onUsarSatDeSae={usarSatDeSae}
+                onUsarEsquemaDeSae={usarEsquemaDeSae}
+                productoId={editingId}
+                saeConectado={saeConectado}
+                estados={saeConectado ? (estadosRes.loading && !estadosRes.data ? null : estados) : undefined}
+              />
             </div>
 
             <div className="sm:col-span-2">

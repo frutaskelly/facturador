@@ -19,7 +19,7 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
-from .conftest import crear_sucursal
+from .conftest import categoria_de_prueba, crear_sucursal
 from app.models import (
     Almacen,
     Cliente,
@@ -555,9 +555,9 @@ def _esquema(tenant_id) -> str:
 
 def test_alta_con_candidato_fuerte_exige_decidir(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
-    esq = _esquema(env["tenant"])
+    esq, cat = _esquema(env["tenant"]), categoria_de_prueba(env["tenant"])
     r = client.post("/api/v1/productos", headers=h, json={
-        "nombre": "CILANTRO", "esquema_impuesto_id": esq,
+        "nombre": "CILANTRO", "esquema_impuesto_id": esq, "categoria_id": cat,
         "clave_sat": "50403700", "unidad_sat": "KGM"})
     assert r.status_code == 409
     detalle = r.json()["detail"]
@@ -565,7 +565,7 @@ def test_alta_con_candidato_fuerte_exige_decidir(client, env, auth_as):
     # A sabiendas, con forzar, sí se crea.
     r = client.post("/api/v1/productos", headers=h, json={
         "nombre": "CILANTRO DESHIDRATADO EN FRASCO", "esquema_impuesto_id": esq,
-        "clave_sat": "50403700", "unidad_sat": "KGM", "forzar": True})
+        "categoria_id": cat, "clave_sat": "50403700", "unidad_sat": "KGM", "forzar": True})
     assert r.status_code == 201, r.text
 
 
@@ -651,7 +651,7 @@ def test_dos_productos_con_el_mismo_nombre_no_deciden(client, env, auth_as):
     # ya podría arrastrar: mismo nombre normalizado, otra fila.
     gemelo = client.post("/api/v1/productos", headers=h, json={
         "nombre": "Cilantro", "esquema_impuesto_id": _esquema(env["tenant"]),
-        "clave_sat": "50403700",
+        "categoria_id": categoria_de_prueba(env["tenant"]), "clave_sat": "50403700",
         "unidad_sat": "KGM", "unidad_base": "KILO",
         "presentaciones": {"KILO": 1}, "forzar": True}).json()
     lista = client.get("/api/v1/listas-precios?limit=50", headers=h).json()["items"]
