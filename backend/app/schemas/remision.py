@@ -241,6 +241,13 @@ class LiberarPedidoIn(BaseModel):
     motivo: str = Field(min_length=3, max_length=300)
 
 
+class ReactivarRemisionIn(BaseModel):
+    """Regresar una remisión CANCELADA a borrador. El motivo es opcional; la
+    reactivación queda anotada en las notas con o sin él, igual que la
+    cancelación que deshace."""
+    motivo: Optional[str] = Field(default=None, max_length=300)
+
+
 class ConfirmarRemisionIn(BaseModel):
     """Cuerpo opcional al confirmar: pesos reales por línea (peso variable).
     Si no se envía, se reserva el estimado cantidad×factor."""

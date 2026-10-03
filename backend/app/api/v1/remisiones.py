@@ -53,6 +53,7 @@ from ...models import (
     Tenant,
 )
 from ...services import email as email_service
+from ...services import folio_oc
 from ...services.espejo_cruce import ligar_remision_con_espejo
 from ...services.fiscal import calcular_linea_producto
 from ...services.importar_remisiones import (
@@ -87,6 +88,7 @@ from ...schemas.remision import (
     EnlazarVocabularioIn,
     EnlazarVocabularioOut,
     LiberarPedidoIn,
+    ReactivarRemisionIn,
     RemisionCreate,
     RemisionDetailOut,
     RemisionOut,
@@ -2336,6 +2338,117 @@ def cancelar_remision(
         nota = f"[{sello}] Cancelada: {motivo}"
         rem.notas = f"{rem.notas} · {nota}" if (rem.notas or "").strip() else nota
     rem.estado = "CANCELADA"
+    rem.updated_by = ctx.user_id
+    db.flush()
+    db.refresh(rem)
+    return rem
+
+
+def remision_viva_del_pedido(
+    db: Session, cliente_id: UUID, folio: Optional[str], *, excluir_id: Optional[UUID] = None,
+) -> Optional[Remision]:
+    """La remisión viva de este cliente que ya ampara el pedido `folio`, si la hay.
+
+    Lo comparten generar desde la bandeja y reactivar una cancelada: los dos
+    ponen a vivir una remisión, y cancelar la vieja es justo lo que libera el
+    pedido para otra.
+
+    Solo un folio PURAMENTE numérico identifica un pedido: «OC 25297» y
+    «25297» son el mismo. Los pedidos con formato —«HO-34VIL-MIE» de EHMO,
+    «CEN-35HUA-EMB» de Río Libre— llevan la SEMANA y el punto de entrega, no
+    un folio: se repiten legítimamente entre entregas (RRIO7 y RRIO21, ambas
+    facturadas, comparten «CEN-35HUA-FYV»), así que ahí un duplicado no se
+    puede deducir del texto y no se bloquea nada.
+
+    El formato nuevo del bot (semana 40: «TBVH-ROVIR-20261007») SÍ identifica:
+    lleva la fecha exacta de entrega, así que la misma cadena en el mismo
+    cliente es el mismo pedido. Se compara entero, sin normalizar.
+    """
+    folio = (folio or "").strip()
+    m = re.fullmatch(r"(?:OC[\s.:-]*)?0*(\d+)", folio, re.IGNORECASE)
+    clave = m.group(1) if m else None
+    q = db.query(Remision).filter(
+        Remision.cliente_facturacion_id == cliente_id,
+        Remision.deleted_at.is_(None),
+        Remision.estado != "CANCELADA",
+    )
+    if excluir_id is not None:
+        q = q.filter(Remision.id != excluir_id)
+    if folio_oc.parse_nuevo(folio) is not None:
+        q = q.filter(func.upper(func.trim(Remision.su_pedido)) == folio.upper())
+    elif clave:
+        q = q.filter(
+            Remision.created_at >= func.now() - timedelta(days=90),
+            # El mismo criterio del lado guardado: solo folios numéricos
+            # entran a la comparación, con «OC » y ceros a la izquierda
+            # fuera. El primer filtro garantiza que quitar los no-dígitos
+            # del segundo no pueda juntar dos pedidos distintos.
+            func.coalesce(Remision.su_pedido, "").op("~*")(
+                r"^\s*(OC[\s.:-]*)?[0-9]+\s*$"
+            ),
+            func.ltrim(
+                func.regexp_replace(
+                    func.coalesce(Remision.su_pedido, ""), r"\D", "", "g"
+                ), "0",
+            ) == clave,
+        )
+    else:
+        return None
+    return q.order_by(Remision.created_at).first()
+
+
+@router.post("/{rem_id}/reactivar", response_model=RemisionDetailOut)
+def reactivar_remision(
+    rem_id: UUID,
+    payload: Optional[ReactivarRemisionIn] = Body(default=None),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Deshace una cancelación: la remisión CANCELADA vuelve a BORRADOR.
+
+    No mueve inventario. Si estaba confirmada, la cancelación ya devolvió lo
+    que había salido; para que vuelva a salir se confirma otra vez, y eso
+    descuenta como cualquier otra. Si trae folio de factura de SAE regresa a
+    RESERVADO y no a BORRADOR: la misma regla del PATCH, el folio manda.
+
+    Solo personas, como liberar del pedido: una cancelación se deshace porque
+    alguien sabe que el pedido sí va, y una conexión no tiene cómo saberlo.
+    """
+    rem = get_or_404(db, Remision, rem_id, for_update=True)
+    if ctx.conexion_id is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="Reactivar una remisión cancelada lo hace una persona, no una conexión",
+        )
+    if rem.estado != "CANCELADA":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Solo se reactiva una remisión cancelada (actual: {rem.estado})",
+        )
+    if rem.factura_id is not None:
+        fac = db.query(Factura).filter(Factura.id == rem.factura_id).one_or_none()
+        if fac is not None and fac.estado != "CANCELADA":
+            raise HTTPException(
+                status_code=409,
+                detail="La remisión todavía está detrás de una factura vigente; cancélala primero",
+            )
+    dup = remision_viva_del_pedido(db, rem.cliente_facturacion_id, rem.su_pedido, excluir_id=rem.id)
+    if dup is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"El pedido {rem.su_pedido} ya está en la remisión {dup.folio_interno}, "
+                "que sigue viva; si la buena es ésta, cancela aquélla primero."
+            ),
+        )
+
+    rem.estado = "RESERVADO" if rem.factura_sae else "BORRADOR"
+    motivo = ((payload.motivo if payload else None) or "").strip()
+    sello = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    nota = f"[{sello}] Reactivada: de cancelada a {rem.estado.lower()}"
+    if motivo:
+        nota = f"{nota} ({motivo})"
+    rem.notas = f"{rem.notas} · {nota}" if (rem.notas or "").strip() else nota
     rem.updated_by = ctx.user_id
     db.flush()
     db.refresh(rem)

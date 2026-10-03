@@ -5000,6 +5000,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/remisiones/{rem_id}/reactivar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reactivar Remision
+         * @description Deshace una cancelación: la remisión CANCELADA vuelve a BORRADOR.
+         *
+         *     No mueve inventario. Si estaba confirmada, la cancelación ya devolvió lo
+         *     que había salido; para que vuelva a salir se confirma otra vez, y eso
+         *     descuenta como cualquier otra. Si trae folio de factura de SAE regresa a
+         *     RESERVADO y no a BORRADOR: la misma regla del PATCH, el folio manda.
+         *
+         *     Solo personas, como liberar del pedido: una cancelación se deshace porque
+         *     alguien sabe que el pedido sí va, y una conexión no tiene cómo saberlo.
+         */
+        post: operations["reactivar_remision_api_v1_remisiones__rem_id__reactivar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reportes/cartera": {
         parameters: {
             query?: never;
@@ -13139,6 +13167,16 @@ export interface components {
             permisos?: string[];
             /** Tenant */
             tenant?: string | null;
+        };
+        /**
+         * ReactivarRemisionIn
+         * @description Regresar una remisión CANCELADA a borrador. El motivo es opcional; la
+         *     reactivación queda anotada en las notas con o sin él, igual que la
+         *     cancelación que deshace.
+         */
+        ReactivarRemisionIn: {
+            /** Motivo */
+            motivo?: string | null;
         };
         /** RecepcionLinea */
         RecepcionLinea: {
@@ -24683,6 +24721,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reactivar_remision_api_v1_remisiones__rem_id__reactivar_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                rem_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ReactivarRemisionIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemisionDetailOut"];
                 };
             };
             /** @description Validation Error */

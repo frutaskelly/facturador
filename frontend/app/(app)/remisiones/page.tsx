@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ClipboardPaste, FileText, LockOpen, Mail, Pencil, Plus, Printer, RefreshCw, Sparkles, Trash2, Undo2, Upload, Wand2, X, FileSearch } from "lucide-react";
+import { Check, ClipboardPaste, FileText, LockOpen, Mail, Pencil, Plus, Printer, RefreshCw, RotateCcw, Sparkles, Trash2, Undo2, Upload, Wand2, X, FileSearch } from "lucide-react";
 
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
@@ -1817,6 +1817,28 @@ export default function RemisionesPage() {
     }
   }
 
+  // Deshacer una cancelación (CANCELADA → BORRADOR), con doble verificación:
+  // el paso 1 explica qué implica y pide el motivo (opcional), el 2 es la
+  // confirmación final. No mueve inventario: si estaba confirmada, se vuelve
+  // a confirmar para que descuente.
+  const [toReactivar, setToReactivar] = useState<Remision | null>(null);
+  const [reactivarStep, setReactivarStep] = useState<1 | 2>(1);
+  const [motivoReactivar, setMotivoReactivar] = useState("");
+  async function reactivar() {
+    if (!toReactivar) return;
+    try {
+      const motivo = motivoReactivar.trim();
+      const det = await post<Remision>(`/api/v1/remisiones/${toReactivar.id}/reactivar`,
+                                       motivo ? { motivo } : {});
+      toast.success(`${toReactivar.folio_interno} regresó a ${det.estado === "RESERVADO" ? "reservado" : "borrador"}`);
+      setToReactivar(null);
+      invalidarDetalles([toReactivar.id]);
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo regresar a borrador");
+    }
+  }
+
   async function cancelar() {
     if (!toCancel) return;
     try {
@@ -2876,6 +2898,10 @@ export default function RemisionesPage() {
       disabled: (r) => r.estado === "CANCELADA" ? "Ya está cancelada"
         : r.estado === "FACTURADA" ? "Está facturada — cancela primero la factura"
         : false },
+    { id: "reactivar", label: "Regresar a borrador", icon: <RotateCcw size={15} />,
+      onClick: (r) => { setMotivoReactivar(""); setReactivarStep(1); setToReactivar(r); },
+      hidden: () => !canWrite,
+      disabled: (r) => r.estado === "CANCELADA" ? false : "Solo se regresa a borrador una remisión cancelada" },
     { id: "liberar-pedido", label: "Liberar del pedido", icon: <LockOpen size={15} />,
       onClick: (r) => { setMotivoLiberar(""); setToLiberar(r); },
       hidden: () => !canWrite,
@@ -3602,6 +3628,31 @@ export default function RemisionesPage() {
         message={`¿Cancelar ${toCancel?.folio_interno}? Se liberará el inventario reservado.`}
         confirmLabel="Sí, cancelar la remisión" cancelLabel="Volver" confirmVariant="danger"
         onConfirm={cancelar} onClose={() => setToCancel(null)} loading={saving} />
+      <Modal open={toReactivar !== null && reactivarStep === 1} onClose={() => setToReactivar(null)}
+        title={`Regresar ${toReactivar?.folio_interno ?? ""} a borrador`} size="sm"
+        footer={<>
+          <Button variant="ghost" onClick={() => setToReactivar(null)}>Volver</Button>
+          <Button variant="primary" onClick={() => setReactivarStep(2)}>Continuar</Button>
+        </>}>
+        <p className="text-sm text-muted">
+          La remisión está <b>cancelada</b>. Al regresarla vuelve a contar como pedido vivo:
+          se puede editar, confirmar y facturar, y entra otra vez en los reportes de armado y compras.
+        </p>
+        <p className="mb-3 mt-2 text-sm text-muted">
+          No mueve inventario: si estaba confirmada, hay que confirmarla de nuevo para que descuente.
+          {toReactivar?.factura_sae
+            ? <> Trae el folio de SAE <b>{toReactivar.factura_sae}</b>, así que regresa como <b>reservada</b>.</>
+            : null}
+        </p>
+        <Field label="Motivo (opcional)">
+          <Textarea value={motivoReactivar} onChange={(e) => setMotivoReactivar(e.target.value)}
+            rows={2} placeholder="p. ej. sí era pedido real" />
+        </Field>
+      </Modal>
+      <ConfirmDialog open={toReactivar !== null && reactivarStep === 2} title="Confirmación final"
+        message={`${toReactivar?.folio_interno} dejará de estar cancelada y regresará a ${toReactivar?.factura_sae ? "reservada" : "borrador"}. Queda anotado en sus notas. ¿Confirmas?`}
+        confirmLabel={`Sí, regresar a ${toReactivar?.factura_sae ? "reservada" : "borrador"}`} cancelLabel="Volver" confirmVariant="primary"
+        onConfirm={() => { void reactivar(); }} onClose={() => setToReactivar(null)} loading={saving} />
       <Modal open={toLiberar !== null} onClose={() => setToLiberar(null)}
         title={`Liberar ${toLiberar?.folio_interno ?? ""} del pedido`} size="sm"
         footer={<>

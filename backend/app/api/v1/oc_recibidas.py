@@ -1851,7 +1851,7 @@ def crear_remision(
     """
     # Importado aquí y no arriba: remisiones.py importa este módulo indirectamente
     # a través de la app, y a nivel de módulo sería un ciclo.
-    from .remisiones import create_remision
+    from .remisiones import create_remision, remision_viva_del_pedido
     from ...schemas.remision import LineaRemisionCreate, RemisionCreate
 
     oc = get_or_404(db, OCRecibida, oc_id, soft=False, for_update=True)
@@ -1882,57 +1882,10 @@ def crear_remision(
     folio = (oc.folio_externo or "").strip()
     # El candado por `origen_externo` no ve las remisiones capturadas a mano:
     # la OC 25297 se capturó como «OC 25297» el día que llegó y la bandeja
-    # generó otra remisión al procesarla después.
-    #
-    # Solo un folio PURAMENTE numérico identifica un pedido: «OC 25297» y
-    # «25297» son el mismo. Los pedidos con formato —«HO-34VIL-MIE» de EHMO,
-    # «CEN-35HUA-EMB» de Río Libre— llevan la SEMANA y el punto de entrega, no
-    # un folio: se repiten legítimamente entre entregas (RRIO7 y RRIO21, ambas
-    # facturadas, comparten «CEN-35HUA-FYV»), así que ahí un duplicado no se
-    # puede deducir del texto y no se bloquea nada.
-    #
-    # El formato nuevo del bot (semana 40: «TBVH-ROVIR-20261007») SÍ identifica:
-    # lleva la fecha exacta de entrega, así que la misma cadena en el mismo
-    # cliente es el mismo pedido. Se compara entero, sin normalizar.
-    m = re.fullmatch(r"(?:OC[\s.:-]*)?0*(\d+)", folio, re.IGNORECASE)
-    clave = m.group(1) if m else None
-    dup = None
-    if folio_oc.parse_nuevo(folio) is not None:
-        dup = (
-            db.query(Remision)
-            .filter(
-                Remision.cliente_facturacion_id == oc.cliente_id,
-                Remision.deleted_at.is_(None),
-                Remision.estado != "CANCELADA",
-                func.upper(func.trim(Remision.su_pedido)) == folio.upper(),
-            )
-            .order_by(Remision.created_at)
-            .first()
-        )
-    elif clave:
-        dup = (
-            db.query(Remision)
-            .filter(
-                Remision.cliente_facturacion_id == oc.cliente_id,
-                Remision.deleted_at.is_(None),
-                Remision.estado != "CANCELADA",
-                Remision.created_at >= func.now() - timedelta(days=90),
-                # El mismo criterio del lado guardado: solo folios numéricos
-                # entran a la comparación, con «OC » y ceros a la izquierda
-                # fuera. El primer filtro garantiza que quitar los no-dígitos
-                # del segundo no pueda juntar dos pedidos distintos.
-                func.coalesce(Remision.su_pedido, "").op("~*")(
-                    r"^\s*(OC[\s.:-]*)?[0-9]+\s*$"
-                ),
-                func.ltrim(
-                    func.regexp_replace(
-                        func.coalesce(Remision.su_pedido, ""), r"\D", "", "g"
-                    ), "0",
-                ) == clave,
-            )
-            .order_by(Remision.created_at)
-            .first()
-        )
+    # generó otra remisión al procesarla después. Qué folios identifican un
+    # pedido (y cuáles se repiten legítimamente) vive en
+    # `remision_viva_del_pedido`, que comparte con reactivar una cancelada.
+    dup = remision_viva_del_pedido(db, oc.cliente_id, folio)
     if dup is not None:
         raise HTTPException(
             status_code=409,
