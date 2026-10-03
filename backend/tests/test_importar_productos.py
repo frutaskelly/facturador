@@ -309,11 +309,20 @@ def test_cfdi_usa_nombre_y_codigo_del_cliente(client, env, auth_as):
         assert item["Description"] == "JITOMATE SALADETT"
         assert item["IdentificationNumber"] == "00000010"
 
-        # Con alias del cliente: SU nombre y SU código.
+        # Con alias del cliente pero su lista SIN «Lleva el SKU del cliente»:
+        # el XML lleva el SKU y el nombre internos (RIO y EHMO, 3-oct-2026).
         db.add(ProductoCliente(
             tenant_id=env["tenant_id"], cliente_id=uuid.UUID(env["cli_id"]),
             producto_id=uuid.UUID(env["prod_id"]),
             codigo_cliente="JIT-SAD-001", nombre_cliente="JITOMATE ROMA"))
+        db.flush()
+        item = build_payload(db, f)["Items"][0]
+        assert item["Description"] == "JITOMATE SALADETT"
+        assert item["IdentificationNumber"] == "00000010"
+
+        # Con el interruptor encendido en su lista: SU nombre y SU código.
+        db.query(ListaPrecios).filter(ListaPrecios.id == uuid.UUID(env["lista_id"])).update(
+            {"lleva_sku_cliente": True})
         db.flush()
         payload = build_payload(db, f)
         item = payload["Items"][0]

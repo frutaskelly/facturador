@@ -29,6 +29,22 @@ from ..models import ClaveSae, Cliente, ClienteExterno, ListaAsignacion, ListaPr
 from .inventario import presentacion_declarada
 
 
+def cliente_lleva_sku(db: Session, cliente_id) -> bool:
+    """¿El XML de ESTE cliente lleva su SKU y su nombre? Sí, si alguna lista de
+    precios asignada a él tiene encendido «Lleva el SKU del cliente» (dueño,
+    3-oct-2026). Si no, el XML que timbra el Facturador lleva el SKU y el nombre
+    internos aunque su catálogo tenga códigos (RIO y EHMO: así lo pidió).
+
+    Sólo gobierna el XML del Facturador: el masivo de SAE sigue usando el
+    catálogo, porque ahí el código es el ARTÍCULO de SAE (EHMO por plaza, MAFAN)
+    y quitarlo mandaría la partida a otro artículo o la dejaría sin clave."""
+    if cliente_id is None:
+        return False
+    return db.query(ListaAsignacion.id).join(ListaPrecios, ListaPrecios.id == ListaAsignacion.lista_id).filter(
+        ListaAsignacion.cliente_id == cliente_id, ListaPrecios.lleva_sku_cliente.is_(True),
+        ListaPrecios.deleted_at.is_(None)).first() is not None
+
+
 def _norm(sku: Optional[str]) -> Optional[str]:
     s = " ".join((sku or "").split()).upper()[:50]
     return s or None
