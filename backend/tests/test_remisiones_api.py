@@ -1496,6 +1496,98 @@ def test_cancelar_deja_dicho_por_que(client, env, auth_as):
                        headers=h).status_code == 200
 
 
+
+def test_reactivar_cancelada_vuelve_a_borrador_sin_mover_inventario(client, env, auth_as):
+    """Deshacer una cancelación: la remisión regresa a BORRADOR con nota y sin
+    tocar existencias — la cancelación ya devolvió lo que había salido, así
+    que para volver a descontar hay que confirmarla otra vez."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _load_stock(client, h, env, "100", "4")
+    rem_id = _create_rem(client, h, env, "30", "5").json()["id"]
+    assert client.post(f"/api/v1/remisiones/{rem_id}/confirmar", headers=h).status_code == 200
+    assert client.post(f"/api/v1/remisiones/{rem_id}/cancelar", headers=h,
+                       json={"motivo": "prueba"}).status_code == 200
+    assert float(_disp(client, h, env)["disponible"]) == 100.0
+
+    r = client.post(f"/api/v1/remisiones/{rem_id}/reactivar", headers=h,
+                    json={"motivo": "sí era pedido real"})
+    assert r.status_code == 200, r.text
+    det = r.json()
+    assert det["estado"] == "BORRADOR"
+    assert "Cancelada: prueba" in det["notas"]
+    assert "Reactivada: de cancelada a borrador (sí era pedido real)" in det["notas"]
+    assert all(ln["cantidad_surtida"] is None for ln in det["lineas"])
+    assert float(_disp(client, h, env)["disponible"]) == 100.0
+
+    # Ya no está cancelada: reactivar otra vez no tiene sentido.
+    assert client.post(f"/api/v1/remisiones/{rem_id}/reactivar", headers=h).status_code == 409
+    # Y se confirma como cualquier borrador: ahora sí descuenta.
+    assert client.post(f"/api/v1/remisiones/{rem_id}/confirmar", headers=h).status_code == 200
+    assert float(_disp(client, h, env)["disponible"]) == 70.0
+
+
+def test_reactivar_con_folio_de_sae_vuelve_a_reservado(client, env, auth_as):
+    """El folio de factura de SAE manda sobre el estado (la regla del PATCH):
+    con él, la remisión reactivada regresa a RESERVADO y no a BORRADOR."""
+    from app.models.remision import Remision
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    rem_id = _create_rem(client, h, env, "2", "5").json()["id"]
+    assert client.post(f"/api/v1/remisiones/{rem_id}/cancelar", headers=h).status_code == 200
+    with SessionLocal() as s:
+        s.query(Remision).filter(Remision.id == uuid.UUID(rem_id)).one().factura_sae = "ZHGO 901"
+        s.commit()
+    r = client.post(f"/api/v1/remisiones/{rem_id}/reactivar", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["estado"] == "RESERVADO"
+    assert "Reactivada: de cancelada a reservado" in r.json()["notas"]
+
+
+def test_reactivar_no_revive_un_pedido_que_ya_vive_en_otra(client, env, auth_as):
+    """Cancelar la vieja es lo que libera el pedido para otra remisión; revivirla
+    con la otra viva serían dos remisiones del mismo pedido. Y solo una persona
+    deshace una cancelación."""
+    from app.core.rbac import get_auth_context
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+
+    def _con_pedido(su_pedido):
+        return client.post("/api/v1/remisiones", headers=h, json={
+            "cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+            "su_pedido": su_pedido,
+            "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "1",
+                        "precio_unitario": "5"}]}).json()
+
+    vieja = _con_pedido("25297")
+    assert client.post(f"/api/v1/remisiones/{vieja['id']}/cancelar", headers=h).status_code == 200
+    nueva = _con_pedido("OC 25297")
+
+    app.dependency_overrides[get_auth_context] = (
+        lambda: _ctx_de_conexion(env["admin_a"]["tenant_id"]))
+    try:
+        assert client.post(f"/api/v1/remisiones/{vieja['id']}/reactivar",
+                           headers=h).status_code == 403
+    finally:
+        app.dependency_overrides.pop(get_auth_context, None)
+
+    r = client.post(f"/api/v1/remisiones/{vieja['id']}/reactivar", headers=h)
+    assert r.status_code == 409, r.text
+    assert nueva["folio_interno"] in r.json()["detail"]
+
+    # Cancelada la nueva, la vieja ya puede volver.
+    assert client.post(f"/api/v1/remisiones/{nueva['id']}/cancelar", headers=h).status_code == 200
+    r2 = client.post(f"/api/v1/remisiones/{vieja['id']}/reactivar", headers=h)
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["estado"] == "BORRADOR"
+
+    # Los pedidos con formato (semana · punto · día) se repiten legítimamente:
+    # ahí no se frena nada.
+    a = _con_pedido("VH-39ROV-SAB")
+    _con_pedido("VH-39ROV-SAB")
+    assert client.post(f"/api/v1/remisiones/{a['id']}/cancelar", headers=h).status_code == 200
+    assert client.post(f"/api/v1/remisiones/{a['id']}/reactivar", headers=h).status_code == 200
+
+
 def test_el_aviso_de_sin_fecha_no_incluye_facturadas(client, env, auth_as):
     """El aviso existe para que una entrega no se caiga de una hoja que está
     por armarse. Una remisión ya facturada no se va a armar: con ellas dentro

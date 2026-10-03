@@ -19903,6 +19903,25 @@
     "title": "PruebaOut",
     "type": "object"
    },
+   "ReactivarRemisionIn": {
+    "description": "Regresar una remisión CANCELADA a borrador. El motivo es opcional; la\nreactivación queda anotada en las notas con o sin él, igual que la\ncancelación que deshace.",
+    "properties": {
+     "motivo": {
+      "anyOf": [
+       {
+        "maxLength": 300,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Motivo"
+     }
+    },
+    "title": "ReactivarRemisionIn",
+    "type": "object"
+   },
    "RecepcionLinea": {
     "properties": {
      "cantidad": {
@@ -46308,6 +46327,88 @@
      }
     ],
     "summary": "Remision Pdf",
+    "tags": [
+     "remisiones"
+    ]
+   }
+  },
+  "/api/v1/remisiones/{rem_id}/reactivar": {
+   "post": {
+    "description": "Deshace una cancelación: la remisión CANCELADA vuelve a BORRADOR.\n\nNo mueve inventario. Si estaba confirmada, la cancelación ya devolvió lo\nque había salido; para que vuelva a salir se confirma otra vez, y eso\ndescuenta como cualquier otra. Si trae folio de factura de SAE regresa a\nRESERVADO y no a BORRADOR: la misma regla del PATCH, el folio manda.\n\nSolo personas, como liberar del pedido: una cancelación se deshace porque\nalguien sabe que el pedido sí va, y una conexión no tiene cómo saberlo.",
+    "operationId": "reactivar_remision_api_v1_remisiones__rem_id__reactivar_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "rem_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Rem Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/ReactivarRemisionIn"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Payload"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RemisionDetailOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Reactivar Remision",
     "tags": [
      "remisiones"
     ]
