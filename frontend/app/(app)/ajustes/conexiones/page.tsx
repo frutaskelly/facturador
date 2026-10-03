@@ -810,7 +810,7 @@ export default function Page() {
                                           disabled={!canWrite}
                                           onChange={(e) => {
                                             if (e.target.value === "__crear__") {
-                                              router.push(`/sucursales?cliente=${c.cliente_id}`);
+                                              router.push(`/clientes/sucursales?cliente=${c.cliente_id}`);
                                               return;
                                             }
                                             cambiarDelGrupo(g, c, "sucursal_id", e.target.value);

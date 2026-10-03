@@ -1,7 +1,6 @@
 import {
   BarChart3,
   Boxes,
-  Briefcase,
   Building2,
   Calculator,
   FileText,
@@ -22,7 +21,6 @@ import {
   SlidersHorizontal,
   Store,
   ShoppingCart,
-  Tag,
   Truck,
   UserCog,
   Users,
@@ -98,9 +96,15 @@ export const NAV: NavSection[] = [
         // por kilo), calculados en vivo; reemplaza la hoja de Excel del 30-sep.
         { label: "Revisión del catálogo", href: "/productos/revision", perm: "menu:productos" },
       ] },
-      { label: "Clientes", href: "/clientes", perm: "menu:clientes", icon: Users },
-      { label: "Sucursales y precios", href: "/sucursales", perm: "menu:clientes", icon: Building2 },
-      { label: "Proyectos", href: "/proyectos", perm: "menu:clientes", icon: Briefcase },
+      // A quién se le vende y a qué precio (oct-2026): la lista que cobra a cada
+      // quien se escoge en el proyecto, en el cliente dentro de su plaza o en su
+      // ficha, así que las listas viven junto a esas tres.
+      { label: "Clientes", href: "/clientes", icon: Users, pestanas: [
+        { label: "Clientes", href: "/clientes", perm: "menu:clientes" },
+        { label: "Proyectos", href: "/clientes/proyectos", perm: "menu:clientes", antes: ["/proyectos"] },
+        { label: "Sucursales", href: "/clientes/sucursales", perm: "menu:clientes", antes: ["/sucursales"] },
+        { label: "Listas de precios", href: "/clientes/listas-precios", perm: "menu:listas_precios", antes: ["/listas-precios"] },
+      ] },
       { label: "Almacenes", href: "/almacenes", perm: "menu:inventario", icon: Warehouse },
     ],
   },
@@ -133,7 +137,6 @@ export const NAV: NavSection[] = [
     corto: "Config.",
     icon: SlidersHorizontal,
     items: [
-      { label: "Listas de precios", href: "/listas-precios", perm: "menu:listas_precios", icon: Tag },
       { label: "Series y folios", href: "/ajustes/series", perm: "menu:series", icon: Hash },
       { label: "Punto de venta", href: "/ajustes/pos", perm: "membership:gestionar", icon: Store },
     ],

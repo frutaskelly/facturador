@@ -193,12 +193,12 @@ const config: CrudConfig<Cliente> = {
       name: "lista_id",
       label: "Lista de precios",
       type: "select",
-      hint: "Con la que se le cobra en cualquier plaza. La del cliente en una plaza (Sucursales y precios) y la de un proyecto le ganan.",
+      hint: "Con la que se le cobra en cualquier plaza. La del cliente en una plaza (pestaña Sucursales) y la de un proyecto le ganan.",
     },
   ],
   // Accesos rápidos por fila, como iconos junto a editar/eliminar.
   rowLinks: (c) => [
-    { href: `/sucursales?cliente=${c.id}`, title: "Sucursales", icon: <Store size={16} /> },
+    { href: `/clientes/sucursales?cliente=${c.id}`, title: "Sucursales", icon: <Store size={16} /> },
     { href: `/clientes/${c.id}/catalogo`, title: "Catálogo", icon: <BookOpen size={16} /> },
     { href: `/clientes/${c.id}/estado-cuenta`, title: "Estado de cuenta", icon: <Receipt size={16} /> },
     { href: `/clientes/${c.id}/equivalencias`, title: "Equivalencias", icon: <Link2 size={16} /> },

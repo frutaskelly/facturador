@@ -464,7 +464,7 @@ export default function ListasPreciosPage() {
     <div>
       <PageHeader
         title="Listas de precios"
-        subtitle="Los precios de cada negociación. Qué lista cobra cada quien se escoge en la ficha del proyecto, en el cliente dentro de su plaza (Sucursales y precios) o en la ficha del cliente."
+        subtitle="Los precios de cada negociación. Qué lista cobra cada quien se escoge en la ficha del proyecto, en el cliente dentro de su plaza (pestaña Sucursales) o en la ficha del cliente."
         actions={
           <>
             {/* Sin «Sincronizar SAE» aquí (26-sep-2026): las listas de precios de

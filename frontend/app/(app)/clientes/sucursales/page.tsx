@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -49,13 +50,18 @@ type FormVinculo = {
   lista_id: string;
 };
 
+// useSearchParams pide un <Suspense> en una ruta estática (si no, `next build`
+// no la puede prerenderizar).
 export default function SucursalesPage() {
+  return <Suspense><Sucursales /></Suspense>;
+}
+
+function Sucursales() {
   // ?cliente=<id> — se llega aquí desde la lista de Clientes ("Sucursales"):
-  // se muestran solo las plazas que surten a ese cliente.
-  const clienteParam =
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("cliente")
-      : null;
+  // se muestran solo las plazas que surten a ese cliente. Con useSearchParams
+  // y no window.location: la pestaña Sucursales es la misma ruta sin la query,
+  // y leída una sola vez la pantalla se quedaba filtrada al picarle.
+  const clienteParam = useSearchParams().get("cliente");
 
   const { me } = useAuth();
   const toast = useToast();
@@ -428,8 +434,12 @@ export default function SucursalesPage() {
   return (
     <div>
       <PageHeader
-        title={clienteParam ? `Sucursales de ${cliName[clienteParam] ?? "…"}` : "Sucursales y precios"}
-        subtitle="Las plazas del negocio. Cada una: qué clientes se surten de ella, con qué serie folia cada uno y de qué almacén sale la mercancía."
+        title="Sucursales"
+        // Dentro de Clientes el título es el de la sección: el filtro por
+        // cliente se dice aquí. La pestaña Sucursales lo quita (va sin ?cliente).
+        subtitle={clienteParam
+          ? `Sólo las plazas que surten a ${cliName[clienteParam] ?? "…"}. Para verlas todas, abre la pestaña Sucursales.`
+          : "Las plazas del negocio. Cada una: qué clientes se surten de ella, con qué serie folia cada uno y de qué almacén sale la mercancía."}
         actions={canSuc ? (
           <Button onClick={() => { setNuevaSuc(emptySuc); setSucModal(true); }}><Plus size={15} /> Nueva sucursal</Button>
         ) : undefined}
