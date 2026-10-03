@@ -1022,6 +1022,22 @@ export type OpcionesPanel = {
   series: string[];
   series_remision: string[];
   perfiles: string[];
+  // {serie de FACTURA: [sus series de REMISIÓN]}: marcar una se lleva la otra.
+  pares: Record<string, string[]>;
+};
+
+/** Un renglón de la bitácora de una conexión. Nunca trae la clave: solo su pista. */
+export type ConexionCambio = {
+  id: string;
+  conexion_id: string;
+  accion: "CREADA" | "EDITADA" | "CLAVE_NUEVA" | "DESCONECTADA";
+  created_at: string;
+  hecho_por?: string | null;
+  nombre_antes?: string | null;
+  nombre_despues?: string | null;
+  alcance_antes?: Record<string, unknown> | null;
+  alcance_despues?: Record<string, unknown> | null;
+  clave_pista?: string | null;
 };
 
 export type ConexionEstado = {

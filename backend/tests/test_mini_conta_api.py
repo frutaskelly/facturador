@@ -681,3 +681,97 @@ def test_precios_con_la_cascada_del_facturador(client, env, auth_as):
     assert [(p["sku"], p["cliente"], p["plaza"], p["presentacion"], p["precio"], p["origen"])
             for p in d["precios"]] == [
         ("00000283", "EHMO MC", "Chiapas", "KILO", "95.0000", "override_sucursal")]
+
+
+# ─── fechas que se perdían (auditoría Smart Supply, 3-oct-2026) ─────────────
+
+def _agregar(env, **filas):
+    """Agrega al inquilino A, dentro de un test, lo que la fixture no trae."""
+    db = SessionLocal()
+    try:
+        ta = env["ta"]
+        cli = db.get(Cliente, uuid.UUID(env["cli"]))
+        chis = db.query(Sucursal).filter(Sucursal.tenant_id == ta, Sucursal.nombre == "Chiapas").one()
+        prod = db.query(Producto).filter(Producto.tenant_id == ta).first()
+        out = {}
+        for nombre, (fecha_rem, factura) in filas.get("remisiones", {}).items():
+            f = None
+            if factura is not None:
+                serie, folio, fecha, notas = factura
+                f = Factura(tenant_id=ta, serie=serie, folio=folio, cliente_id=cli.id,
+                            estado="TIMBRADA", tipo_comprobante="I", uuid=str(uuid.uuid4()),
+                            fecha=fecha, notas=notas, origen="ESPEJO_SAE", espejo_empresa="03")
+                db.add(f); db.flush()
+                db.add(LineaFactura(
+                    tenant_id=ta, factura_id=f.id, numero_linea=1, producto_id=prod.id,
+                    clave_prod_serv="01010101", clave_unidad="KGM", descripcion="AGUACATE",
+                    cantidad=Decimal("5"), valor_unitario=Decimal("10"), importe=Decimal("50")))
+            # Captura a mano: sin fecha de entrega (el formulario no la pide).
+            r = Remision(tenant_id=ta, folio_interno=f"{nombre}{uuid.uuid4().hex[:6]}",
+                         cliente_facturacion_id=cli.id, sucursal_id=chis.id,
+                         fecha_remision=fecha_rem, fecha_entrega=None,
+                         estado="FACTURADA" if f else "BORRADOR",
+                         factura_id=f.id if f else None,
+                         subtotal=Decimal("50"), total=Decimal("50"))
+            db.add(r); db.flush()
+            db.add(LineaRemision(tenant_id=ta, remision_id=r.id, numero_linea=1,
+                                 producto_id=prod.id, cantidad_solicitada=Decimal("5"),
+                                 precio_unitario=Decimal("10"), importe=Decimal("50")))
+            out[nombre] = (str(r.id), str(f.id) if f else None)
+        db.commit()
+        return out
+    finally:
+        db.close()
+
+
+def test_remision_sin_fecha_de_entrega_tambien_es_lo_entregado(client, env, auth_as):
+    """122 de 123 remisiones capturadas a mano (25-ago a 3-oct-2026) no traen
+    fecha de entrega y `/remisiones` filtraba SOLO por ella: no llegaban nunca.
+    Ahora salen con la de las notas de su factura o, si no, la de remisión, y
+    dicen de dónde salió. La factura de una así cae el mismo día."""
+    ids = _agregar(env, remisiones={
+        "RSF": (date(2026, 9, 26), None),
+        "RNF": (date(2026, 9, 28), ("ZSUR", 30, _utc(2026, 9, 29),
+                                    "OC HO-39BIE SEMANA 39 ENTREGA 27/09/2026")),
+        "RSN": (date(2026, 9, 22), ("ZSUR", 31, _utc(2026, 9, 29), "OC 624")),
+    })
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"], "MINI_CONTA", remisiones=True)["clave"]
+    _sin_sesion()
+    d = client.get("/api/v1/mini-conta/remisiones", headers=_bearer(clave), params=_SEPT).json()
+    por = {l["remision_id"]: l for l in d["lineas"]}
+    assert (por[ids["RSF"][0]]["fecha_entrega"], por[ids["RSF"][0]]["fecha_entrega_origen"]) == (
+        "2026-09-26", "fecha_remision")
+    assert (por[ids["RNF"][0]]["fecha_entrega"], por[ids["RNF"][0]]["fecha_entrega_origen"]) == (
+        "2026-09-27", "notas")
+    assert (por[ids["RSN"][0]]["fecha_entrega"], por[ids["RSN"][0]]["fecha_entrega_origen"]) == (
+        "2026-09-22", "fecha_remision")
+    # La de siempre (con fecha capturada) sigue igual.
+    assert sum(1 for l in d["lineas"] if l["fecha_entrega_origen"] == "entrega") == 1
+
+    v = client.get("/api/v1/mini-conta/ventas", headers=_bearer(clave), params=_RANGO).json()
+    fac = {l["factura_id"]: l for l in v["lineas"]}
+    assert (fac[ids["RNF"][1]]["fecha_entrega"], fac[ids["RNF"][1]]["fecha_entrega_origen"]) == (
+        "2026-09-27", "notas")
+    # Sin notas con fecha: la de su remisión (antes, la de la factura: 29-sep).
+    assert (fac[ids["RSN"][1]]["fecha_entrega"], fac[ids["RSN"][1]]["fecha_entrega_origen"]) == (
+        "2026-09-22", "remision")
+
+
+def test_la_factura_del_espejo_conserva_el_dia_del_sae(client, env, auth_as):
+    """El SAE da la fecha sin hora y el espejo la guarda como medianoche UTC;
+    pasarla a México la corría al día anterior (ZEHMOVH1542: SAE 2-oct, aquí
+    1-oct). El día del espejo es el de UTC; el de lo nativo, el de México."""
+    ids = _agregar(env, remisiones={
+        "RES": (date(2026, 9, 12), ("ZSUR", 40, datetime(2026, 9, 12, tzinfo=timezone.utc), None)),
+    })
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"], "MINI_CONTA")["clave"]
+    _sin_sesion()
+    solo_el_12 = {**_RANGO, "desde": "2026-09-12", "hasta": "2026-09-12"}
+    v = client.get("/api/v1/mini-conta/ventas", headers=_bearer(clave), params=solo_el_12).json()
+    lineas = [l for l in v["lineas"] if l["factura_id"] == ids["RES"][1]]
+    assert lineas and lineas[0]["fecha_factura"] == "2026-09-12"
+    el_11 = {**_RANGO, "desde": "2026-09-11", "hasta": "2026-09-11"}
+    v = client.get("/api/v1/mini-conta/ventas", headers=_bearer(clave), params=el_11).json()
+    assert not [l for l in v["lineas"] if l["factura_id"] == ids["RES"][1]]

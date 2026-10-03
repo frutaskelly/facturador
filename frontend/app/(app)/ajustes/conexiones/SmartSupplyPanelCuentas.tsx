@@ -5,7 +5,7 @@
 // y lo facturado de esa plaza para medir la merma; no escribe nada. Generar,
 // cambiar o desconectar la de una cuenta no toca a las demás.
 import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, KeyRound, Pencil, Plus, Power, RotateCw, Warehouse, X } from "lucide-react";
+import { Check, Copy, History, KeyRound, Pencil, Plus, Power, RotateCw, Warehouse, X } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -16,7 +16,15 @@ import { Checkbox, Field, Input, Select, Switch } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
-import type { AlcancePanel, ClaveNueva, Conexion, ConexionEstado, OpcionesPanel } from "@/lib/types";
+import { fmtDateTime } from "@/lib/format";
+import type {
+  AlcancePanel,
+  ClaveNueva,
+  Conexion,
+  ConexionCambio,
+  ConexionEstado,
+  OpcionesPanel,
+} from "@/lib/types";
 
 const PUEDE = [
   "Leer las facturas timbradas de las series de factura que le compartes, por día de entrega",
@@ -72,6 +80,65 @@ function haceCuanto(iso?: string | null): string {
 }
 
 const lista = (xs: string[]) => (xs.length ? xs.join(", ") : "—");
+
+/** Las series de remisión pareja de una de factura (ZEHMOVH → RZEHMOVH). Las da
+ *  el backend (`pares`): la de nombre y la de uso, sin adivinar aquí. */
+const parejas = (codigo: string, op: OpcionesPanel): string[] => op.pares?.[codigo] ?? [];
+
+/** Lo de la plaza de la clave que la clave NO comparte. Las series de remisión
+ *  cuentan si comparte remisiones u OC (las que se volvieron remisión), y los
+ *  perfiles si comparte OC. Vacío si la plaza no está en las opciones. */
+function faltantesDePlaza(op: OpcionesPanel | null, a: AlcancePanel): string[] {
+  const p = op?.plazas.find((x) => x.nombre === a.plaza);
+  if (!p) return [];
+  return [
+    ...p.series.filter((c) => !a.series.includes(c)),
+    ...(a.remisiones || a.oc ? p.series_remision.filter((c) => !a.series_remision.includes(c)) : []),
+    ...(a.oc ? p.perfiles.filter((x) => !a.perfiles.includes(x)) : []),
+  ];
+}
+
+const ETIQUETAS: Record<string, string> = {
+  plaza: "Plaza",
+  series: "Facturas",
+  series_remision: "Remisiones",
+  perfiles: "Órdenes",
+  remisiones: "Comparte remisiones",
+  oc: "Comparte órdenes",
+  catalogo: "Comparte catálogo",
+};
+
+/** Qué cambió en un renglón de la bitácora, en frases cortas. */
+function queCambio(c: ConexionCambio): string[] {
+  const pista = c.clave_pista ? ` …${c.clave_pista}` : "";
+  if (c.accion === "CREADA") return [`Generó la clave${pista}`];
+  if (c.accion === "CLAVE_NUEVA") return [`Clave nueva${pista}; la anterior dejó de servir`];
+  if (c.accion === "DESCONECTADA") return [`Desconectó la clave${pista}`];
+  const out: string[] = [];
+  if (c.nombre_antes !== c.nombre_despues) out.push(`Nombre: ${c.nombre_antes ?? "—"} → ${c.nombre_despues ?? "—"}`);
+  const antes = c.alcance_antes ?? {};
+  const despues = c.alcance_despues ?? {};
+  for (const k of Object.keys(ETIQUETAS)) {
+    const a = antes[k];
+    const d = despues[k];
+    if (Array.isArray(a) || Array.isArray(d)) {
+      const va = (Array.isArray(a) ? a : []) as string[];
+      const vd = (Array.isArray(d) ? d : []) as string[];
+      const mas = vd.filter((x) => !va.includes(x));
+      const menos = va.filter((x) => !vd.includes(x));
+      if (mas.length || menos.length) {
+        out.push(
+          `${ETIQUETAS[k]}: ${[...mas.map((x) => `+${x}`), ...menos.map((x) => `−${x}`)].join(", ")}`
+        );
+      }
+    } else if (typeof a === "boolean" || typeof d === "boolean") {
+      if (Boolean(a) !== Boolean(d)) out.push(`${ETIQUETAS[k]}: ${d ? "sí" : "no"}`);
+    } else if ((a ?? null) !== (d ?? null)) {
+      out.push(`${ETIQUETAS[k]}: ${a ?? "—"} → ${d ?? "—"}`);
+    }
+  }
+  return out.length ? out : ["Guardó sin cambios"];
+}
 
 export function SmartSupplyPanelCuentas({
   estado,
@@ -263,6 +330,7 @@ export function SmartSupplyPanelCuentas({
         <ul className="mt-5 divide-y divide-border overflow-hidden rounded-lg border border-border">
           {cuentas.map((c) => {
             const a = c.alcance_panel;
+            const faltan = a ? faltantesDePlaza(opciones, a) : [];
             return (
               <li key={c.id} className="bg-surface px-4 py-3.5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -274,6 +342,12 @@ export function SmartSupplyPanelCuentas({
                       ) : (
                         <Badge tone="warning">Falta pegar la clave</Badge>
                       )}
+                      {faltan.length ? (
+                        <Badge tone="warning">
+                          No comparte {faltan.length === 1 ? "1 cosa" : `${faltan.length} cosas`} de{" "}
+                          {a?.plaza}
+                        </Badge>
+                      ) : null}
                     </div>
                     <p className="mt-0.5 text-xs text-muted">
                       clave …{c.clave_pista} · última lectura {haceCuanto(c.ultimo_uso_at)}
@@ -293,6 +367,17 @@ export function SmartSupplyPanelCuentas({
                           {DATOS.filter((d) => a[d.clave]).map((d) => d.titulo).join(", ") ||
                             "Solo facturado"}
                         </dd>
+                        {faltan.length ? (
+                          <>
+                            <dt className="text-amber-700">No comparte</dt>
+                            <dd className="font-mono text-xs leading-5 text-amber-700">
+                              {lista(faltan)}{" "}
+                              <span className="font-sans text-muted">
+                                (de su plaza; corrígelo en «Qué comparte», sin clave nueva)
+                              </span>
+                            </dd>
+                          </>
+                        ) : null}
                       </dl>
                     ) : (
                       <p className="mt-2 text-sm text-muted">Sin alcance: no lee nada.</p>
@@ -423,12 +508,56 @@ function FormAlcancePanel({
     if (!nombre.trim()) setNombre(`Kelly ${p.nombre}`);
   }
 
+  /** Vuelve a marcar todo lo de la plaza SIN quitar lo que se agregó a mano.
+   *  Sirve al editar una clave ya creada (volver a escoger la misma plaza no
+   *  hace nada) y cuando la plaza estrenó una serie o un perfil después. */
+  function marcarPlaza() {
+    if (!dePlaza) return;
+    setSeries(new Set([...series, ...dePlaza.series]));
+    setRems(new Set([...rems, ...dePlaza.series_remision]));
+    setPerfiles(new Set([...perfiles, ...dePlaza.perfiles]));
+  }
+
   function alternar(set: Set<string>, fijar: (s: Set<string>) => void, codigo: string, prender: boolean) {
     const n = new Set(set);
     if (prender) n.add(codigo);
     else n.delete(codigo);
     fijar(n);
   }
+
+  /** Una serie de factura va con su serie de remisión: marcarla la marca y
+   *  desmarcarla la desmarca, salvo que otra serie marcada la siga usando. */
+  function alternarFactura(codigo: string, prender: boolean) {
+    const nuevas = new Set(series);
+    if (prender) nuevas.add(codigo);
+    else nuevas.delete(codigo);
+    setSeries(nuevas);
+    const pares = parejas(codigo, opciones);
+    if (!pares.length) return;
+    const n = new Set(rems);
+    for (const par of pares) {
+      if (prender) n.add(par);
+      else if (![...nuevas].some((otra) => parejas(otra, opciones).includes(par))) n.delete(par);
+    }
+    setRems(n);
+  }
+
+  const actual: AlcancePanel = {
+    plaza: plaza || null,
+    series: [...series],
+    series_remision: [...rems],
+    perfiles: [...perfiles],
+    ...datos,
+  };
+  // Avisos, no candados: dejar algo fuera puede ser a propósito, pero nunca sin verlo.
+  const fueraDePlaza = faltantesDePlaza(opciones, actual);
+  const sinPareja =
+    datos.remisiones || datos.oc
+      ? [...series]
+          .sort()
+          .map((c) => [c, parejas(c, opciones).filter((par) => !rems.has(par))] as const)
+          .filter(([, faltan]) => faltan.length && !faltan.every((par) => fueraDePlaza.includes(par)))
+      : [];
 
   const perfilNuevo = otroPerfil.trim();
   const perfilNuevoValido = PERFIL_VALIDO.test(perfilNuevo);
@@ -457,7 +586,8 @@ function FormAlcancePanel({
     codigos: string[],
     marcados: Set<string>,
     fijar: (s: Set<string>) => void,
-    propios: string[]
+    propios: string[],
+    alAlternar?: (codigo: string, prender: boolean) => void
   ) {
     return (
       <section>
@@ -472,7 +602,11 @@ function FormAlcancePanel({
               >
                 <Checkbox
                   checked={marcados.has(codigo)}
-                  onChange={(e) => alternar(marcados, fijar, codigo, e.target.checked)}
+                  onChange={(e) =>
+                    alAlternar
+                      ? alAlternar(codigo, e.target.checked)
+                      : alternar(marcados, fijar, codigo, e.target.checked)
+                  }
                 />
                 <span className={`font-mono text-xs ${propios.includes(codigo) ? "font-semibold" : ""}`}>
                   {codigo}
@@ -512,7 +646,10 @@ function FormAlcancePanel({
     >
       <div className="space-y-5">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Plaza" hint="Se lleva sus series y sus perfiles; luego puedes ajustarlos.">
+          <Field
+            label="Plaza"
+            hint="Marca todas sus series de factura, sus series de remisión y sus perfiles; luego puedes ajustarlos."
+          >
             <Select value={plaza} onChange={(e) => escogerPlaza(e.target.value)}>
               <option value="">Escoge la plaza…</option>
               {opciones.plazas.map((p) => (
@@ -535,11 +672,12 @@ function FormAlcancePanel({
 
         {grupo(
           "Series de factura *",
-          "Lo facturado de estas series es la venta de la bodega. En negritas, las de la plaza.",
+          "Lo facturado de estas series es la venta de la bodega. En negritas, las de la plaza. Marcar o desmarcar una hace lo mismo con su serie de remisión.",
           opciones.series,
           series,
           setSeries,
-          dePlaza?.series ?? []
+          dePlaza?.series ?? [],
+          alternarFactura
         )}
         {grupo(
           "Series de remisión",
@@ -620,6 +758,26 @@ function FormAlcancePanel({
           </div>
         </section>
 
+        {fueraDePlaza.length ? (
+          <Alert tone="warning" title={`No compartes todo lo de ${plaza}`}>
+            <p>
+              Fuera: <span className="font-mono text-xs">{lista(fueraDePlaza)}</span>. Lo de ahí no
+              llegará a Smart Supply.
+            </p>
+            <div className="mt-2">
+              <Button variant="secondary" onClick={marcarPlaza}>
+                <Check size={15} /> Marcar todo lo de {plaza}
+              </Button>
+            </div>
+          </Alert>
+        ) : null}
+        {sinPareja.length ? (
+          <Alert tone="warning">
+            Compartes {sinPareja.map(([c]) => c).join(", ")} sin su serie de remisión (
+            {sinPareja.flatMap(([, faltan]) => faltan).join(", ")}): lo remisionado de{" "}
+            {sinPareja.length === 1 ? "esa serie" : "esas series"} no llegará a Smart Supply.
+          </Alert>
+        ) : null}
         {faltaRemision ? (
           <Alert tone="warning">Para compartir remisiones marca al menos una serie de remisión.</Alert>
         ) : null}
@@ -629,7 +787,63 @@ function FormAlcancePanel({
         {faltaPlaza ? (
           <Alert tone="warning">Para abrir órdenes por perfil escoge la plaza: el perfil solo abre las de ella.</Alert>
         ) : null}
+
+        {conexion ? <Bitacora conexionId={conexion.id} /> : null}
       </div>
     </Modal>
+  );
+}
+
+/** Quién le cambió qué a esta clave y cuándo (la bitácora de la conexión). Al
+ *  editar, para que un «¿quién le quitó RRIO?» tenga respuesta. Sin la clave:
+ *  solo su pista. */
+function Bitacora({ conexionId }: { conexionId: string }) {
+  const [cambios, setCambios] = useState<ConexionCambio[] | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    apiFetch<ConexionCambio[]>(`/api/v1/conexiones/${conexionId}/cambios?limit=10`)
+      .then((r) => vivo && setCambios(r))
+      .catch(() => vivo && setError(true));
+    return () => {
+      vivo = false;
+    };
+  }, [conexionId]);
+
+  return (
+    <section>
+      <h3 className="flex items-center gap-2 text-sm font-medium">
+        <History size={15} className="text-muted" /> Cambios
+      </h3>
+      <p className="mb-2 text-xs text-muted">Los últimos, el más nuevo primero.</p>
+      {error ? (
+        <p className="text-sm text-muted">No se pudo leer la bitácora.</p>
+      ) : cambios === null ? (
+        <p className="text-sm text-muted">Cargando…</p>
+      ) : cambios.length === 0 ? (
+        <p className="text-sm text-muted">
+          Sin cambios registrados (la bitácora empezó después de crear esta clave).
+        </p>
+      ) : (
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {cambios.map((c) => (
+            <li key={c.id} className="px-3 py-2 text-sm">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <span className="font-medium">{c.hecho_por || "Sistema"}</span>
+                <span className="text-xs text-muted">{fmtDateTime(c.created_at)}</span>
+              </div>
+              <ul className="mt-0.5 space-y-0.5">
+                {queCambio(c).map((t) => (
+                  <li key={t} className="break-words font-mono text-xs leading-5 text-muted">
+                    {t}
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

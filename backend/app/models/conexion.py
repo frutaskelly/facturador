@@ -85,3 +85,32 @@ class Conexion(Base):
     @property
     def alcance_panel(self):
         return self.alcance if self.tipo == "SMART_SUPPLY_PANEL" else None
+
+
+# Lo que se le hace a una conexión, para la pregunta «¿quién le quitó RRIO a
+# Kelly Hidalgo y cuándo?». Desde oct-2026 el alcance se cambia en su lugar
+# («Qué comparte», sin clave nueva) y Smart Supply lo aplica en su siguiente
+# vuelta: sin bitácora, un cambio así no dejaba rastro.
+CAMBIOS = ("CREADA", "EDITADA", "CLAVE_NUEVA", "DESCONECTADA")
+
+
+class ConexionCambio(Base):
+    """Bitácora append-only de una conexión. NUNCA guarda la clave: solo su
+    pista (los últimos 4), que ya se enseña en la pantalla."""
+    __tablename__ = "conexion_cambios"
+
+    id = uuid_pk()
+    tenant_id = tenant_fk(index=False)
+    conexion_id = Column(UUID(as_uuid=True), ForeignKey("conexiones.id", ondelete="CASCADE"),
+                         nullable=False)
+    accion = Column(String(20), nullable=False)
+    nombre_antes = Column(String(80))
+    nombre_despues = Column(String(80))
+    alcance_antes = Column(JSONB)
+    alcance_despues = Column(JSONB)
+    # CLAVE_NUEVA: la conexión que reemplazó (su historia sigue siendo de esta).
+    reemplaza_a = Column(UUID(as_uuid=True), ForeignKey("conexiones.id", ondelete="SET NULL"))
+    clave_pista = Column(String(8))
+    # NULL si lo hizo una conexión y no una persona.
+    hecho_por = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=False)

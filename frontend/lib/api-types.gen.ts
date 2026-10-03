@@ -1072,6 +1072,30 @@ export interface paths {
         patch: operations["editar_api_v1_conexiones__conexion_id__patch"];
         trace?: never;
     };
+    "/api/v1/conexiones/{conexion_id}/cambios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cambios
+         * @description La bitácora de una conexión, la más nueva primero: quién la creó, qué le
+         *     cambió (nombre y alcance, antes y después), cuándo se rotó su clave y
+         *     cuándo se desconectó. Incluye la de las claves que esta reemplazó («Clave
+         *     nueva» hace otra conexión con el mismo alcance; su historia es la misma
+         *     cuenta). Nunca enseña la clave: solo su pista.
+         */
+        get: operations["cambios_api_v1_conexiones__conexion_id__cambios_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conexiones/{conexion_id}/regenerar": {
         parameters: {
             query?: never;
@@ -2666,8 +2690,11 @@ export interface paths {
         };
         /**
          * Remisiones
-         * @description Lo ENTREGADO: las líneas de las remisiones no canceladas con `fecha_entrega`
-         *     en el rango cuya serie de factura prevista es de las pedidas.
+         * @description Lo ENTREGADO: las líneas de las remisiones no canceladas entregadas en el
+         *     rango cuya serie de factura prevista es de las pedidas. La fecha de entrega
+         *     es la capturada o, si no la traen (la captura manual no la pide), la de las
+         *     notas de su factura o la de la remisión; `fecha_entrega_origen` dice cuál
+         *     (services/mini_conta.remisiones_entregadas, la misma que Smart Supply).
          *
          *     Van todas, facturadas o no (`facturada` lo dice): la factura se hace días
          *     después y muchas remisiones que el SAE ya facturó no quedan ligadas aquí, así
@@ -5834,9 +5861,14 @@ export interface paths {
         /**
          * Remisionado
          * @description Lo ENTREGADO: cada línea de las remisiones no canceladas de sus series de
-         *     remisión con `fecha_entrega` en el rango, por producto y presentación.
-         *     Facturadas o no (`facturada` lo dice): para los días que todavía no se
-         *     facturan, esto es la vista previa. Llave: (`remision_id`, `numero_linea`).
+         *     remisión entregadas en el rango, por producto y presentación. Facturadas o
+         *     no (`facturada` lo dice): para los días que todavía no se facturan, esto es
+         *     la vista previa. Llave: (`remision_id`, `numero_linea`).
+         *
+         *     La fecha de entrega es la capturada; si la remisión no la trae (la captura
+         *     manual no la pide), la de las notas de su factura o la de la remisión, y
+         *     `fecha_entrega_origen` dice cuál (services/mini_conta.remisiones_entregadas,
+         *     la misma regla que Mini Conta).
          */
         get: operations["remisionado_api_v1_smart_supply_remisionado_get"];
         put?: never;
@@ -7787,6 +7819,44 @@ export interface components {
             id: string;
             /** Nombre */
             nombre: string;
+        };
+        /**
+         * ConexionCambioOut
+         * @description Un renglón de la bitácora de una conexión. Sin la clave: solo su pista.
+         */
+        ConexionCambioOut: {
+            /**
+             * Accion
+             * @enum {string}
+             */
+            accion: "CREADA" | "EDITADA" | "CLAVE_NUEVA" | "DESCONECTADA";
+            /** Alcance Antes */
+            alcance_antes?: Record<string, never> | null;
+            /** Alcance Despues */
+            alcance_despues?: Record<string, never> | null;
+            /** Clave Pista */
+            clave_pista?: string | null;
+            /**
+             * Conexion Id
+             * Format: uuid
+             */
+            conexion_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Hecho Por */
+            hecho_por?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre Antes */
+            nombre_antes?: string | null;
+            /** Nombre Despues */
+            nombre_despues?: string | null;
         };
         /**
          * ConexionEstadoOut
@@ -10780,6 +10850,12 @@ export interface components {
              * Format: date
              */
             fecha_entrega: string;
+            /**
+             * Fecha Entrega Origen
+             * @default entrega
+             * @enum {string}
+             */
+            fecha_entrega_origen: "entrega" | "notas" | "fecha_remision";
             /** Folio */
             folio: string;
             /** Importe */
@@ -11567,6 +11643,10 @@ export interface components {
          * @description Todo lo que se puede compartir con una cuenta del panel de Smart Supply.
          */
         OpcionesPanelOut: {
+            /** Pares */
+            pares?: {
+                [key: string]: string[];
+            };
             /** Perfiles */
             perfiles: string[];
             /** Plazas */
@@ -13574,6 +13654,12 @@ export interface components {
              * Format: date
              */
             fecha_entrega: string;
+            /**
+             * Fecha Entrega Origen
+             * @default entrega
+             * @enum {string}
+             */
+            fecha_entrega_origen: "entrega" | "notas" | "fecha_remision";
             /** Folio */
             folio: string;
             /** Importe */
@@ -17200,6 +17286,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConexionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cambios_api_v1_conexiones__conexion_id__cambios_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                conexion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConexionCambioOut"][];
                 };
             };
             /** @description Validation Error */

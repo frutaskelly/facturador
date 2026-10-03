@@ -54,8 +54,11 @@ from ...services.mini_conta import (
     Alcance,
     alcance_de,
     clave_nombre,
+    dia_de_factura,
+    dia_mx,
     fechas_de_entrega as _entregas,
     mapa,
+    remisiones_entregadas,
     series_factura,
     series_por_plaza,
     series_previstas,
@@ -278,7 +281,7 @@ def ventas(
     series_leer, nombre = _resolver_series(db, ctx, a, series, sucursal)
     clientes_leer = _resolver_clientes(a, clientes)
 
-    fecha_mx = sa.cast(sa.func.timezone(_ZONA, Factura.fecha), sa.Date)
+    fecha_mx = dia_de_factura()
     filas = (
         db.query(
             LineaFactura.id.label("linea_id"),
@@ -368,7 +371,7 @@ def productos(
     series_leer, _ = _resolver_series(db, ctx, a, series, None)
     clientes_leer = _resolver_clientes(a, clientes)
 
-    fecha_mx = sa.cast(sa.func.timezone(_ZONA, Factura.fecha), sa.Date)
+    fecha_mx = dia_de_factura()
     q = (
         db.query(
             Producto.sku,
@@ -421,6 +424,9 @@ class MCLineaRemisionOut(BaseModel):
     estado: str
     facturada: bool             # ya tiene factura TIMBRADA ligada
     fecha_entrega: date
+    # entrega = la capturada; sin ella, notas (las de su factura timbrada) o
+    # fecha_remision (el día que se hizo: una aproximación).
+    fecha_entrega_origen: Literal["entrega", "notas", "fecha_remision"] = "entrega"
     serie: str                  # la serie de FACTURA que le toca (prevista)
     plaza: Optional[str] = None
     cliente_id: UUID
@@ -450,8 +456,11 @@ def remisiones(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_LEER)),
 ):
-    """Lo ENTREGADO: las líneas de las remisiones no canceladas con `fecha_entrega`
-    en el rango cuya serie de factura prevista es de las pedidas.
+    """Lo ENTREGADO: las líneas de las remisiones no canceladas entregadas en el
+    rango cuya serie de factura prevista es de las pedidas. La fecha de entrega
+    es la capturada o, si no la traen (la captura manual no la pide), la de las
+    notas de su factura o la de la remisión; `fecha_entrega_origen` dice cuál
+    (services/mini_conta.remisiones_entregadas, la misma que Smart Supply).
 
     Van todas, facturadas o no (`facturada` lo dice): la factura se hace días
     después y muchas remisiones que el SAE ya facturó no quedan ligadas aquí, así
@@ -463,17 +472,12 @@ def remisiones(
     series_leer, _ = _resolver_series(db, ctx, a, series, None)
     clientes_leer = _resolver_clientes(a, clientes)
 
+    entregas = remisiones_entregadas(db, ctx.tenant_id, desde, hasta)
     rems = (
         db.query(Remision)
-        .filter(
-            Remision.tenant_id == ctx.tenant_id,
-            Remision.deleted_at.is_(None),
-            Remision.estado != "CANCELADA",
-            Remision.fecha_entrega >= desde,
-            Remision.fecha_entrega <= hasta,
-        )
+        .filter(Remision.tenant_id == ctx.tenant_id, Remision.id.in_(list(entregas)))
         .all()
-    )
+    ) if entregas else []
     if clientes_leer is not None:
         permitidos = set(clientes_leer)
         rems = [r for r in rems if r.cliente_facturacion_id in permitidos]
@@ -531,7 +535,8 @@ def remisiones(
             folio=r.folio_interno,
             estado=str(r.estado),
             facturada=r.factura_id in timbradas,
-            fecha_entrega=r.fecha_entrega,
+            fecha_entrega=entregas[r.id][0],
+            fecha_entrega_origen=entregas[r.id][1],
             serie=prevista[(r.cliente_facturacion_id, r.sucursal_id)],
             plaza=plazas.get(r.sucursal_id),
             cliente_id=r.cliente_facturacion_id,
@@ -608,7 +613,7 @@ def notas_credito(
     fecha_mx = sa.cast(sa.func.timezone(_ZONA, NotaCredito.fecha), sa.Date)
     q = (
         db.query(NotaCredito, NotaCreditoFactura, Factura, fecha_mx.label("fecha_nota"),
-                 sa.cast(sa.func.timezone(_ZONA, Factura.fecha), sa.Date).label("fecha_factura"))
+                 dia_de_factura().label("fecha_factura"))
         .join(NotaCreditoFactura, NotaCreditoFactura.nota_id == NotaCredito.id)
         .outerjoin(Factura, Factura.id == NotaCreditoFactura.factura_id)
         .filter(
@@ -733,7 +738,7 @@ def cobranza(
     series_leer, _ = _resolver_series(db, ctx, a, series, None)
     clientes_leer = _resolver_clientes(a, clientes)
 
-    fecha_mx = sa.cast(sa.func.timezone(_ZONA, ReciboPago.fecha_pago), sa.Date)
+    fecha_mx = dia_mx(ReciboPago.fecha_pago, ReciboPago.origen)
     q = (
         db.query(ReciboPagoFactura, ReciboPago, Factura, fecha_mx.label("fecha"),
                  Cliente.legal_name.label("cliente"))
@@ -804,7 +809,7 @@ def cartera(
     clientes_leer = _resolver_clientes(a, clientes)
     hoy = datetime.now(ZoneInfo(_ZONA)).date()
 
-    fecha_mx = sa.cast(sa.func.timezone(_ZONA, Factura.fecha), sa.Date)
+    fecha_mx = dia_de_factura()
     q = (
         db.query(Factura, fecha_mx.label("fecha"), Cliente.legal_name, Cliente.dias_credito)
         .join(Cliente, Cliente.id == Factura.cliente_id)
@@ -891,7 +896,7 @@ def precios(
     # Qué se le facturó a cada cliente en su serie el último año: UNA consulta
     # para todos los pares (el backend está lejos de la BD; una por par no cabe
     # en el tiempo que Mini Conta espera).
-    fecha_mx = sa.cast(sa.func.timezone(_ZONA, Factura.fecha), sa.Date)
+    fecha_mx = dia_de_factura()
     vendidos: dict = {}
     for cli, serie, pid in (
         db.query(Factura.cliente_id, Factura.serie, LineaFactura.producto_id)

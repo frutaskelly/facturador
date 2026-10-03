@@ -142,6 +142,11 @@ class RemisionadoOut(BaseModel):
     serie: Optional[str] = None
     estado: str
     fecha_entrega: date
+    # entrega = la capturada en la remisión. Sin ella (captura manual):
+    # notas = la que dicen las notas de su factura timbrada (la misma que toma
+    # esa factura en /facturado); fecha_remision = el día que se hizo la
+    # remisión, una aproximación.
+    fecha_entrega_origen: Literal["entrega", "notas", "fecha_remision"] = "entrega"
     factura_id: Optional[UUID] = None
     facturada: bool                # su factura está TIMBRADA
     su_pedido: Optional[str] = None
