@@ -1,6 +1,6 @@
 "use client";
 
-// Ajustes › Punto de venta — el FLUJO del POS es configuración por cliente:
+// Punto de venta › Configuración — el FLUJO del POS es configuración por cliente:
 // etapas prendibles, EN EL ORDEN que la operación necesite, con etapas PROPIAS
 // ("Empaque", "Verificación"…). El backend deriva la máquina de estados de esto.
 import { useEffect, useState } from "react";

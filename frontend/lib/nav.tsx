@@ -15,9 +15,7 @@ import {
   HandCoins,
   Inbox,
   Receipt,
-  Repeat,
   Shield,
-  ShoppingBag,
   SlidersHorizontal,
   Store,
   ShoppingCart,
@@ -25,8 +23,6 @@ import {
   UserCog,
   Users,
   Settings,
-  Warehouse,
-  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
@@ -78,8 +74,7 @@ export const NAV: NavSection[] = [
     ],
   },
   {
-    // Las listas que se dan de alta y se mantienen. Almacenes está aquí (es un
-    // catálogo) y no en Extras (que es donde se CONSULTA el inventario).
+    // Las listas que se dan de alta y se mantienen: qué se vende y a quién.
     section: "Catálogo",
     corto: "Catálogo",
     icon: Library,
@@ -105,29 +100,35 @@ export const NAV: NavSection[] = [
         { label: "Sucursales", href: "/clientes/sucursales", perm: "menu:clientes", antes: ["/sucursales"] },
         { label: "Listas de precios", href: "/clientes/listas-precios", perm: "menu:listas_precios", antes: ["/listas-precios"] },
       ] },
-      { label: "Almacenes", href: "/almacenes", perm: "menu:inventario", icon: Warehouse },
     ],
   },
   {
-    section: "Compras",
-    corto: "Compras",
-    icon: ShoppingBag,
+    // La mercancía y lo que no es el flujo diario de remisionar y facturar: lo
+    // que entra (compras), lo que hay (inventario), el mostrador y el cotizador.
+    // Antes eran dos secciones, Compras y Extras (oct-2026). Conversiones salió
+    // del menú mientras sea «Próximamente» (decisión del dueño, 2-oct).
+    section: "Operación",
+    corto: "Operación",
+    icon: Truck,
     items: [
-      { label: "Compras", href: "/compras", perm: "menu:compras", icon: ShoppingCart },
-      { label: "Proveedores", href: "/proveedores", perm: "menu:compras", icon: Truck },
-    ],
-  },
-  {
-    // Herramientas que no son el flujo diario de remisionar y facturar.
-    section: "Extras",
-    corto: "Extras",
-    icon: Wrench,
-    items: [
-      { label: "Punto de venta", href: "/pos",
-        anyPerm: ["menu:pos.pedido", "menu:pos.caja", "menu:pos.almacen", "menu:pos.salida"], icon: Store },
-      { label: "Inventario", href: "/inventario", perm: "menu:inventario", icon: Boxes },
+      // Almacenes estaba en Catálogo: es el catálogo de DÓNDE vive el stock, y
+      // se consulta junto con las existencias.
+      { label: "Inventario", href: "/inventario", icon: Boxes, pestanas: [
+        { label: "Existencias", href: "/inventario", perm: "menu:inventario" },
+        { label: "Almacenes", href: "/inventario/almacenes", perm: "menu:inventario", antes: ["/almacenes"] },
+      ] },
+      { label: "Compras", href: "/compras", icon: ShoppingCart, pestanas: [
+        { label: "Órdenes de compra", href: "/compras", perm: "menu:compras" },
+        { label: "Proveedores", href: "/compras/proveedores", perm: "menu:compras", antes: ["/proveedores"] },
+      ] },
+      // Un solo «Punto de venta»: antes el de trabajar vivía en Extras y el de
+      // configurar en Configuraciones, con el mismo nombre.
+      { label: "Punto de venta", href: "/pos", icon: Store, pestanas: [
+        { label: "Estaciones", href: "/pos",
+          anyPerm: ["menu:pos.pedido", "menu:pos.caja", "menu:pos.almacen", "menu:pos.salida"] },
+        { label: "Configuración", href: "/pos/configuracion", perm: "membership:gestionar", antes: ["/ajustes/pos"] },
+      ] },
       { label: "Cotizador", href: "/cotizador", perm: "menu:cotizador", icon: Calculator },
-      { label: "Conversiones", href: "/conversiones", perm: "menu:conversiones", icon: Repeat },
     ],
   },
   {
@@ -138,7 +139,6 @@ export const NAV: NavSection[] = [
     icon: SlidersHorizontal,
     items: [
       { label: "Series y folios", href: "/ajustes/series", perm: "menu:series", icon: Hash },
-      { label: "Punto de venta", href: "/ajustes/pos", perm: "membership:gestionar", icon: Store },
     ],
   },
   {

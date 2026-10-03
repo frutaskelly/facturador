@@ -1,4 +1,4 @@
-// POS — tipos y helpers compartidos por las estaciones y Ajustes › Punto de venta.
+// POS — tipos y helpers compartidos por las estaciones y Punto de venta › Configuración.
 // El flujo es CONFIGURACIÓN por tenant (tenants.config.pos): el ORDEN de
 // `etapas` es el flujo real, "pedido" siempre va primero, y se pueden agregar
 // etapas propias (etapas_custom) que declaran qué rol las trabaja.

@@ -35,6 +35,11 @@ const nextConfig: NextConfig = {
       { source: "/sucursales", destination: "/clientes/sucursales", permanent: false },
       { source: "/listas-precios", destination: "/clientes/listas-precios", permanent: false },
       { source: "/asignaciones-precios", destination: "/clientes/listas-precios", permanent: false },
+      // Almacenes, Proveedores y la configuración del POS, pestañas de
+      // Inventario, Compras y Punto de venta (oct-2026).
+      { source: "/almacenes", destination: "/inventario/almacenes", permanent: false },
+      { source: "/proveedores", destination: "/compras/proveedores", permanent: false },
+      { source: "/ajustes/pos", destination: "/pos/configuracion", permanent: false },
     ];
   },
 

@@ -177,8 +177,8 @@ export default function Page() {
           <div className="flex flex-col items-center gap-3 py-10 text-center">
             <div className="font-medium">El POS está desactivado</div>
             {cfg.puede_configurar && (
-              <Link href="/ajustes/pos" className="inline-flex items-center gap-2 text-sm text-accent">
-                <Settings size={15} /> Activarlo en Ajustes › Punto de venta
+              <Link href="/pos/configuracion" className="inline-flex items-center gap-2 text-sm text-accent">
+                <Settings size={15} /> Activarlo en Punto de venta › Configuración
               </Link>
             )}
           </div>

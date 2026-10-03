@@ -5,7 +5,7 @@
 // las pantallas de cada estación llegan en las Fases 1-3.
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Activity, ClipboardList, Layers, Settings, Store, Truck, Wallet, Warehouse } from "lucide-react";
+import { Activity, ClipboardList, Layers, Store, Truck, Wallet, Warehouse } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -55,11 +55,6 @@ export default function Page() {
       <PageHeader
         title="Punto de venta"
         subtitle={cfg.activo ? "Elige tu estación de trabajo" : "El POS está desactivado"}
-        actions={cfg.puede_configurar ? (
-          <Link href="/ajustes/pos" className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-surface-2">
-            <Settings size={16} /> Configurar flujo
-          </Link>
-        ) : undefined}
       />
       {!cfg.activo ? (
         <Card>
@@ -68,8 +63,8 @@ export default function Page() {
             <div className="font-medium">El POS está desactivado para este negocio</div>
             <p className="max-w-md text-sm text-muted">
               {cfg.puede_configurar
-                ? "Actívalo y arma las etapas del flujo en Ajustes › Punto de venta."
-                : "Pide a un administrador activarlo en Ajustes › Punto de venta."}
+                ? "Actívalo y arma las etapas del flujo en la pestaña Configuración."
+                : "Pide a un administrador activarlo en Punto de venta › Configuración."}
             </p>
           </div>
         </Card>
