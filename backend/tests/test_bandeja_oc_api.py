@@ -27,7 +27,7 @@ _PURGE = (
     "grupos_whatsapp",
     "oc_recibidas", "cliente_externos", "lineas_remision", "remisiones",
     "movimientos_inventario", "lotes_inventario", "producto_alias",
-    "precios", "listas_precios", "productos", "almacenes", "cliente_sucursales", "sucursales", "clientes",
+    "lista_asignaciones", "precios", "listas_precios", "productos", "almacenes", "cliente_sucursales", "sucursales", "clientes",
 )
 
 
@@ -1380,6 +1380,55 @@ def test_sin_revisar_pasa_lo_que_cruza_y_conserva_lo_que_no(client, env, auth_as
     assert "Revisar:" in notas
     # Sin lista de precios, el precio que entra es el del documento (anotado).
     assert float(rem["lineas"][0]["precio_unitario"]) == 18.5
+
+
+def test_sin_revisar_kilo_no_hereda_el_precio_de_la_pieza(client, env, auth_as):
+    """El elote de EHMO Tabasco (3-oct-2026): producto de base PIEZA con un KILO
+    de factor 1 y una lista que sólo trae la pieza a $10.34. La orden pedía
+    kilos a $46.53 y la partida entraba a $10.34 con «la lista dice 10.34» —
+    tres facturas timbradas cobradas de menos. El precio de la pieza ya no se
+    le presta al kilo: entra el del documento y el aviso dice qué le falta a
+    la lista."""
+    from decimal import Decimal
+    from app.models import ListaAsignacion, ListaPrecios, Precio
+
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    db = SessionLocal()
+    try:
+        tid = env["admin_a"]["tenant_id"]
+        elote = Producto(tenant_id=tid, sku="ELO", nombre="ELOTE FRESCO ENTERO",
+                         clave_sat="01010101", unidad_sat="H87", unidad_base="PIEZA",
+                         presentacion_default="PIEZA",
+                         presentaciones={"PIEZA": 1, "KILO": {"sat": "KGM", "factor": 1}})
+        lista = ListaPrecios(tenant_id=tid, codigo="VH", nombre="EHMO Villahermosa")
+        db.add_all([elote, lista]); db.flush()
+        db.add_all([
+            Precio(tenant_id=tid, lista_id=lista.id, producto_id=elote.id,
+                   presentacion="PIEZA", precio_unitario=Decimal("10.34"), cantidad_minima=1),
+            ListaAsignacion(tenant_id=tid, lista_id=lista.id, cliente_id=uuid.UUID(env["ehmo"])),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    oc = client.post("/api/v1/oc-recibidas", headers=h, json=_oc(lineas=[
+        {"descripcion": "ELOTE FRESCO ENTERO", "cantidad": "2", "unidad": "KG", "precio": "46.53"},
+    ])).json()
+    client.patch(f"/api/v1/oc-recibidas/{oc['id']}", headers=h,
+                 json={"cliente_id": env["ehmo"], "sucursal_id": env["suc"]})
+    r = client.post(
+        f"/api/v1/oc-recibidas/{oc['id']}/crear-remision-sin-revisar?almacen_id={env['alm']}",
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    rem = client.get(f"/api/v1/remisiones/{r.json()['remision_id']}", headers=h).json()
+    ln = rem["lineas"][0]
+    notas = ln["notas"] or ""
+    assert ln["presentacion"] == "KILO"
+    assert float(ln["precio_unitario"]) == 46.53
+    assert "sin precio por KILO en ninguna lista (el de PIEZA no aplica" in notas
+    assert "la lista dice" not in notas
 
 
 def test_la_reposicion_entra_en_cero_y_con_su_marca(client, env, auth_as):

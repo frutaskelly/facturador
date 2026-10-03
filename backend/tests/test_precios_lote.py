@@ -312,7 +312,8 @@ def test_dos_precios_por_unidad_del_mismo_producto(env, db_engine):
     precio por KILO y por PIEZA de la sandía cobra cada una con el suyo, aunque
     haya un precio especial más específico que sólo existe por KILO: ese NO se
     traduce a pieza (antes: override KILO $20.68 × factor 1 = pieza a $20.68).
-    Sólo si la PIEZA no tiene precio en ningún escalón se deriva del KILO."""
+    Y sin precio de PIEZA en ningún escalón, tampoco se deriva del KILO: con
+    factor 1 no hay conversión (3-oct-2026, ver el test del elote)."""
     ctx = {"cliente_id": env["cli"], "sucursal_id": env["suc"]}
     items = [
         {"producto_id": env["sand"], "presentacion": "KILO", "cantidad": Decimal("9.3")},
@@ -322,10 +323,39 @@ def test_dos_precios_por_unidad_del_mismo_producto(env, db_engine):
         lote = resolver_precios_lote(db, items=items, **ctx)
         uno = [resolver_precio(db, producto_id=it["producto_id"], presentacion=it["presentacion"],
                                cantidad=it["cantidad"], **ctx) for it in items]
-        # Sin la lista del cliente (sólo la base, que no trae PIEZA): se deriva.
-        derivado = resolver_precio(db, producto_id=env["sand"], presentacion="PIEZA",
-                                   cantidad=Decimal("1"))
+        # Sin la lista del cliente (sólo la base, que no trae PIEZA): antes
+        # salía la pieza al precio del kilo ($22); ahora no hay precio.
+        sin_pieza = resolver_precio(db, producto_id=env["sand"], presentacion="PIEZA",
+                                    cantidad=Decimal("1"))
+        sin_pieza_lote = resolver_precios_lote(db, items=[
+            {"producto_id": env["sand"], "presentacion": "PIEZA", "cantidad": Decimal("1")}])
     assert lote == uno
     assert lote[0]["precio"] == Decimal("20.68") and lote[0]["origen"] == "override_sucursal"
     assert lote[1]["precio"] == Decimal("250") and lote[1]["origen"] == "lista_cliente"
-    assert derivado["precio"] == Decimal("22") and derivado["origen"] == "lista_base"
+    assert sin_pieza is None and sin_pieza_lote == [None]
+
+
+def test_kilo_y_pieza_con_factor_1_no_se_prestan_el_precio():
+    """El elote de EHMO Tabasco (3-oct-2026): base PIEZA, KILO de factor 1 y la
+    lista sólo con la pieza a $10.34 → el kilo salía a $10.34 en vez de $46.53.
+    Entre KILO y PIEZA un factor 1 no es conversión; las reales sí derivan."""
+    from app.models import Producto
+    from app.services.precios import _intento_derivado, base_sin_traduccion
+
+    elote = Producto(unidad_base="PIEZA", presentaciones={
+        "PIEZA": 1, "KILO": {"sat": "KGM", "factor": 1, "clave_sae": "ELOTEENTEROKG"}})
+    sandia = Producto(unidad_base="KILO", presentaciones={
+        "KILO": 1, "PIEZA": {"sat": "H87", "factor": 1}, "CAJA": 30})
+    papa = Producto(unidad_base="KILO", presentaciones={"KILO": 1, "PIEZA": {"factor": "0.25"}})
+    cilantro = Producto(unidad_base="KILO", presentaciones={"KILO": 1, "MANOJO": 1})
+
+    assert base_sin_traduccion(elote, "KILO") == "PIEZA"
+    assert _intento_derivado(elote, "KILO", Decimal("2")) is None
+    assert base_sin_traduccion(sandia, "PIEZA") == "KILO"
+    assert _intento_derivado(sandia, "PIEZA", Decimal("1")) is None
+    # Conversiones reales: siguen derivando.
+    assert _intento_derivado(sandia, "CAJA", Decimal("2")) == ("KILO", Decimal(30), Decimal(60))
+    assert _intento_derivado(papa, "PIEZA", Decimal("4")) == ("KILO", Decimal("0.25"), Decimal("1.00"))
+    # MANOJO DE 1 KG (factor 1 legítimo, regla del 30-sep): no es KILO↔PIEZA.
+    assert base_sin_traduccion(cilantro, "MANOJO") is None
+    assert _intento_derivado(cilantro, "MANOJO", Decimal("3")) == ("KILO", Decimal(1), Decimal(3))
