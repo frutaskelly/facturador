@@ -1537,6 +1537,14 @@ def update_remision(
                 detail="El nuevo cliente no se surte de la sucursal actual; cámbiala o quítala en la misma edición",
             )
 
+    # UNA PARTIDA SIN CRUZAR NUEVA VUELVE A PEDIR REVISIÓN (3-oct-2026). El bot
+    # deja aquí el extra cuyo producto no existe en el catálogo (o el que parece
+    # repetido) en vez de tirarlo; si la remisión ya estaba revisada, sin esto se
+    # confirmaría y exportaría sin él. Quitar partidas (resolverlas) no la marca.
+    if data.get("partidas_por_cruzar"):
+        antes = {p.get("numero") for p in (rem.partidas_por_cruzar or [])}
+        if any(p.get("numero") not in antes for p in data["partidas_por_cruzar"]):
+            rem.revision_pendiente = True
     for key, value in data.items():
         setattr(rem, key, value)
     if sello_version:

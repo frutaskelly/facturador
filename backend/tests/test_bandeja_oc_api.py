@@ -1628,6 +1628,34 @@ def test_no_se_da_por_revisada_con_partidas_sin_cruzar(client, env, auth_as):
     ).status_code != 409
 
 
+def test_partida_por_cruzar_nueva_vuelve_a_pedir_revision(client, env, auth_as):
+    """3-oct-2026: el bot deja el extra que no cruzó como partida por cruzar en una
+    remisión YA revisada. Sin volver a marcarla, se confirmaría sin ese producto."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    _externo(client, h, "RFC", "GOA180712SF5", env["ehmo"])
+    oc = _oc_mixta(client, h, env)
+    rid = client.post(
+        f"/api/v1/oc-recibidas/{oc['id']}/crear-remision-sin-revisar?almacen_id={env['alm']}",
+        headers=h,
+    ).json()["remision_id"]
+    r = client.patch(f"/api/v1/remisiones/{rid}", headers=h,
+                     json={"partidas_por_cruzar": [], "revision_pendiente": False})
+    assert r.json()["revision_pendiente"] is False
+
+    nueva = [{"numero": 1, "descripcion": "CEBOLLA EN POLVO", "cantidad": "2",
+              "notas": "EXTRA · foto.jpg"}]
+    r = client.patch(f"/api/v1/remisiones/{rid}", headers=h, json={"partidas_por_cruzar": nueva})
+    assert r.status_code == 200, r.text
+    assert r.json()["revision_pendiente"] is True
+    assert client.post(f"/api/v1/remisiones/{rid}/confirmar", headers=h, json={}).status_code == 409
+
+    # reenviar la misma lista no es una partida nueva; resolverla sí deja revisarla
+    client.patch(f"/api/v1/remisiones/{rid}", headers=h,
+                 json={"partidas_por_cruzar": [], "revision_pendiente": False})
+    r = client.patch(f"/api/v1/remisiones/{rid}", headers=h, json={"notas": "x"})
+    assert r.json()["revision_pendiente"] is False
+
+
 def test_sin_revisar_no_quema_folio_si_nada_cruza(client, env, auth_as):
     """Una remisión sin líneas no es un documento a medias: es un folio perdido."""
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
