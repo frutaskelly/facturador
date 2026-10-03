@@ -248,6 +248,9 @@ def resolver_precio(
     ningún escalón hay precio para ella, con la base × factor. Antes el derivado
     competía en cada escalón y un override por KILO le ganaba al precio por
     PIEZA de la lista del cliente: la sandía por pieza salía a $20.50.
+
+    Entre KILO y PIEZA con factor 1 NO se deriva (ver `base_sin_traduccion`):
+    sin precio propio de esa unidad, el resultado es None.
     """
     fecha = fecha or date.today()
     cantidad = Decimal(cantidad)
@@ -272,18 +275,45 @@ def resolver_precio(
     return res
 
 
-def _intento_derivado(prod, presentacion: str, cantidad: Decimal):
-    """(base, multiplicador_del_precio, cantidad_en_base) si la presentación se
-    puede traducir a la unidad base del producto; None si no."""
+# Peso y conteo: entre estas dos un factor 1 no es una conversión, es el
+# relleno con el que se dio de alta la unidad («1 kilo = 1 pieza»).
+_PESO_Y_CONTEO = frozenset({"KILO", "PIEZA"})
+
+
+def _ratio_a_base(prod, presentacion: str) -> tuple[Optional[str], Optional[Decimal]]:
+    """(unidad_base, factor de `presentacion` en unidades base), o (base, None)
+    si el producto no la puede traducir."""
     if not prod:
-        return None
+        return None, None
     pres = prod.presentaciones or {}
     base = prod.unidad_base or prod.presentacion_default
     if base and base != presentacion and presentacion in pres and base in pres:
-        ratio = _factor(pres[presentacion]) / _factor(pres[base])
-        if ratio > 0:
-            return (base, ratio, cantidad * ratio)
+        return base, _factor(pres[presentacion]) / _factor(pres[base])
+    return base, None
+
+
+def base_sin_traduccion(prod, presentacion: str) -> Optional[str]:
+    """La unidad base cuyo precio NO se le presta a `presentacion`, o None.
+
+    Pasa entre KILO y PIEZA con factor 1: el elote por KILO (base PIEZA) salía
+    al precio de la pieza — $10.34 en vez de $46.53, 3-oct-2026, tres facturas
+    timbradas cobradas de menos — y la sandía por PIEZA al del kilo. Un precio
+    inventado así no se ve; sin precio, la partida queda marcada y se ve el
+    hueco. Las conversiones reales (CAJA = 12 PIEZA) siguen derivando.
+    """
+    base, ratio = _ratio_a_base(prod, presentacion)
+    if ratio == 1 and {base, presentacion} == _PESO_Y_CONTEO:
+        return base
     return None
+
+
+def _intento_derivado(prod, presentacion: str, cantidad: Decimal):
+    """(base, multiplicador_del_precio, cantidad_en_base) si la presentación se
+    puede traducir a la unidad base del producto; None si no."""
+    base, ratio = _ratio_a_base(prod, presentacion)
+    if ratio is None or ratio <= 0 or base_sin_traduccion(prod, presentacion):
+        return None
+    return (base, ratio, cantidad * ratio)
 
 
 def _cascada_precio(

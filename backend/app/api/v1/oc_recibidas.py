@@ -61,7 +61,7 @@ from ...schemas.oc_recibida import (
 )
 from ...models import ProductoCliente
 from ...services import cliente_match, folio_oc, oc_cambios
-from ...services.precios import resolver_precios_lote
+from ...services.precios import base_sin_traduccion, resolver_precios_lote
 from ...services.proyecto_alcance import proyecto_aplica
 from ...services.sucursales import es_sucursal_de
 from ...services.series import resolver_almacen, resolver_serie
@@ -2206,14 +2206,23 @@ def _sin_revisar_de(db: Session, oc: OCRecibida, lineas: list[dict]) -> tuple[li
                 # precio pactado porque lo dijo una foto de WhatsApp es
                 # exactamente lo que la revisión viene a decidir.
                 motivos.append(f"el documento decía {precio_doc} y la lista dice {precio:.2f}")
-        elif precio_doc is not None:
-            precio = Decimal(str(precio_doc))
-            motivos.append(f"sin precio en ninguna lista: entró con los {precio_doc} del documento")
         else:
-            # Ni lista ni documento. Entra en cero para no perder la partida; el
-            # freno de «por revisar» impide que un cero llegue a facturarse.
-            precio = Decimal("0")
-            motivos.append("sin precio en ninguna lista ni en el documento: entró en cero")
+            # Sin precio de lista. Si es porque el de la base no se presta (KILO
+            # ↔ PIEZA con factor 1), se dice cuál falta: «la lista dice 10.34»
+            # no avisaba que ese era el precio de la pieza.
+            otra = base_sin_traduccion(prod, pres)
+            hueco = (
+                f"sin precio por {pres} en ninguna lista (el de {otra} no aplica: "
+                f"1 {pres} no es 1 {otra})" if otra else "sin precio en ninguna lista"
+            )
+            if precio_doc is not None:
+                precio = Decimal(str(precio_doc))
+                motivos.append(f"{hueco}: entró con los {precio_doc} del documento")
+            else:
+                # Ni lista ni documento. Entra en cero para no perder la partida;
+                # el freno de «por revisar» impide que un cero llegue a facturarse.
+                precio = Decimal("0")
+                motivos.append(f"{hueco} ni en el documento: entró en cero")
 
         venia = (ln.get("descripcion") or "").strip()
         clave = (ln.get("clave") or "").strip()
