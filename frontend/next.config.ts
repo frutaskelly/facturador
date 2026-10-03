@@ -28,6 +28,13 @@ const nextConfig: NextConfig = {
       { source: "/categorias", destination: "/productos/categorias", permanent: false },
       { source: "/esquemas-impuesto", destination: "/productos/impuestos", permanent: false },
       { source: "/vocabulario", destination: "/productos/vocabulario", permanent: false },
+      // Proyectos, Sucursales y Listas de precios, pestañas de Clientes (oct-2026).
+      // «Asignación de precios» se retiró el 1-oct: la lista se escoge donde vive
+      // la negociación, y el simulador «¿qué lista le tocaría?» está en Listas.
+      { source: "/proyectos", destination: "/clientes/proyectos", permanent: false },
+      { source: "/sucursales", destination: "/clientes/sucursales", permanent: false },
+      { source: "/listas-precios", destination: "/clientes/listas-precios", permanent: false },
+      { source: "/asignaciones-precios", destination: "/clientes/listas-precios", permanent: false },
     ];
   },
 

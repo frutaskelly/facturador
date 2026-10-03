@@ -16,7 +16,7 @@ import type { Cliente, ListaAsignacion, ListaPrecios, Proyecto, Sucursal } from 
 function dondeSeEscoge(a: ListaAsignacion): string {
   if (a.proyecto_id) return `la ficha del proyecto ${a.proyecto_nombre ?? ""}`.trim();
   if (a.serie_id) return "una asignación por serie";
-  if (a.sucursal_id) return "el vínculo del cliente con la plaza (Sucursales y precios)";
+  if (a.sucursal_id) return "el vínculo del cliente con la plaza (Clientes → Sucursales)";
   return "la ficha del cliente";
 }
 
