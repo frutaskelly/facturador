@@ -112,7 +112,6 @@ export type FilaCliente = {
   facSinMC: string[];      // series en que factura y ninguna cuenta de Mini Conta le lee
   facSinPn: string[];
   remSinPn: string[];
-  dosPlazas: boolean;
   pendiente: boolean;
 };
 
@@ -127,7 +126,7 @@ export type Auditoria = {
   conteo: {
     pendientes: number;
     series: number; seriesConMov: number; seriesSinCompartir: number; seriesDuplicadas: number;
-    clientes: number; clientesSinCubrir: number; clientesDosPlazas: number;
+    clientes: number; clientesSinCubrir: number;
     perfiles: number; perfilesSinCuenta: number; perfilesDuplicados: number;
   };
 };
@@ -373,7 +372,6 @@ export function auditar({
       return {
         id: c.id, nombre: c.nombre, fac: c.series_factura, rem: c.series_remision,
         plazas: susPlazas, mc: lectores, fueraDe, facSinMC, facSinPn, remSinPn,
-        dosPlazas: susPlazas.length > 1,
         pendiente: facSinMC.length > 0 || facSinPn.length > 0 || remSinPn.length > 0,
       };
     });
@@ -421,21 +419,6 @@ export function auditar({
             {sinPanel.length} {sinPanel.length === 1 ? "cliente tiene" : "clientes tienen"} facturas o remisiones
             en series que no lee ninguna cuenta del panel: {sinPanel.slice(0, 5).map((f) => f.nombre).join(", ")}
             {sinPanel.length > 5 ? ` y ${sinPanel.length - 5} más` : ""}.
-          </>
-        ),
-        acciones: [verClientes],
-      });
-    }
-    const dos = filasClientes.filter((f) => f.dosPlazas);
-    if (dos.length) {
-      out.push({
-        id: "clientes-dos-plazas",
-        tono: "warning",
-        texto: (
-          <>
-            {dos.length} {dos.length === 1 ? "cliente factura" : "clientes facturan"} en series de 2 plazas
-            o más: {dos.slice(0, 5).map((f) => `${f.nombre} (${f.plazas.join(", ")})`).join("; ")}
-            {dos.length > 5 ? ` y ${dos.length - 5} más` : ""}. Revisa que cada cuenta lea solo lo suyo.
           </>
         ),
         acciones: [verClientes],
@@ -571,7 +554,6 @@ export function auditar({
       seriesDuplicadas: series.filter((f) => f.dupMC || f.dupPn).length,
       clientes: filasClientes?.length ?? 0,
       clientesSinCubrir: filasClientes?.filter((f) => f.pendiente).length ?? 0,
-      clientesDosPlazas: filasClientes?.filter((f) => f.dosPlazas).length ?? 0,
       perfiles: perfiles.length,
       perfilesSinCuenta: perfilesSin.length,
       perfilesDuplicados: perfilesDup.length,
@@ -713,7 +695,7 @@ export function ResumenConexiones({
 
   const seriesVisibles = soloSeries ? series.filter((f) => f.pendiente) : series;
   const seriesPend = series.filter((f) => f.pendiente).length;
-  const clientesPend = (clientes ?? []).filter((f) => f.pendiente || f.dosPlazas);
+  const clientesPend = (clientes ?? []).filter((f) => f.pendiente);
   const clientesVisibles = soloClientes ? clientesPend : clientes ?? [];
   const todo = conteo.pendientes === 0;
 
@@ -739,7 +721,6 @@ export function ResumenConexiones({
             {clientes ? (
               <span>
                 <strong>Clientes:</strong> {conteo.clientesSinCubrir} sin cubrir de {conteo.clientes} con movimiento
-                {conteo.clientesDosPlazas ? ` · ${conteo.clientesDosPlazas} en 2 plazas` : ""}
               </span>
             ) : null}
             {panel ? (
@@ -932,6 +913,7 @@ export function ResumenConexiones({
                   <thead className={THEAD}>
                     <tr>
                       <th className={TH}>Cliente</th>
+                      <th className={TH}>Plaza</th>
                       <th className={TH}>Factura en</th>
                       <th className={TH}>Remisiona en</th>
                       {miniConta ? <th className={TH}>Mini Conta</th> : null}
@@ -949,10 +931,10 @@ export function ResumenConexiones({
                       if (f.facSinPn.length || f.remSinPn.length) {
                         problemas.push(<>El panel no lee <Codigos xs={[...f.facSinPn, ...f.remSinPn]} /></>);
                       }
-                      if (f.dosPlazas) problemas.push(<>Factura en {f.plazas.length} plazas: {f.plazas.join(", ")}</>);
                       return (
                         <tr key={f.id} className="border-t border-border">
                           <td className={`${TD} font-medium`}>{f.nombre}</td>
+                          <td className={TD}>{f.plazas.join(", ") || <span className="text-muted">—</span>}</td>
                           <td className={TD}>
                             <CodigosMarcados xs={f.fac} sin={new Set([...f.facSinMC, ...f.facSinPn])} />
                           </td>
