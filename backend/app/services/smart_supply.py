@@ -218,34 +218,21 @@ def perfiles_vistos(db: Session, tenant_id, dias: int = 93) -> dict[str, Optiona
 
 
 def pares_de_remision(db: Session, tenant_id) -> dict[str, list[str]]:
-    """{serie de FACTURA: [sus series de REMISIÓN]}.
+    """{serie de FACTURA: [su serie de REMISIÓN]}: la pareja de NOMBRE.
 
-    La pareja de nombre (`POST /series/par` las crea juntas y en la empresa
-    todas siguen la convención R + factura: ZEHMOVH ↔ RZEHMOVH) y la de uso
-    (remisiones de una serie que se facturaron en otra, sin contar facturas
-    canceladas: una RRIO ligada a una RIO cancelada no hace pareja). Con esto
-    escoger una serie de factura se lleva su remisión aunque el vínculo
-    cliente×plaza no la traiga, que es lo normal (Hidalgo y Chiapas, oct-2026)."""
-    facturas = set(series_factura(db, tenant_id))
+    `POST /series/par` las crea juntas y en la empresa todas siguen la
+    convención R + factura (ZEHMOVH ↔ RZEHMOVH, RIO ↔ RRIO). Con esto escoger
+    una serie de factura se lleva su remisión aunque el vínculo cliente×plaza
+    no la traiga, que es lo normal (Hidalgo y Chiapas, oct-2026).
+
+    Solo la de nombre, a propósito. Una pareja «por uso» (remisiones de la
+    serie X ligadas a facturas de la serie Y) la arma UNA sola factura mal
+    ligada: una remisión de Hidalgo facturada por error en ZEHMOVH hacía que
+    Tabasco «se llevara» RZEHMOHOS, y como el alcance es por serie, su clave
+    leía todas las remisiones de Hidalgo. En prod (3-oct-2026) todas las
+    parejas por uso no canceladas ya eran de nombre: no aportaba nada."""
     remisiones = set(series_de_remision(db, tenant_id))
-    pares: dict[str, set[str]] = {}
-    for f in facturas:
-        if f"R{f}" in remisiones:
-            pares.setdefault(f, set()).add(f"R{f}")
-    uso = (
-        db.query(Factura.serie, Serie.codigo)
-        .join(Remision, Remision.factura_id == Factura.id)
-        .join(Serie, Serie.id == Remision.serie_id)
-        .filter(Factura.tenant_id == tenant_id, Factura.deleted_at.is_(None),
-                Factura.estado != "CANCELADA", Remision.deleted_at.is_(None),
-                Serie.tipo_documento == "REMISION")
-        .distinct()
-        .all()
-    )
-    for f, r in uso:
-        if f in facturas:
-            pares.setdefault(f, set()).add(r)
-    return {f: sorted(rs) for f, rs in sorted(pares.items())}
+    return {f: [f"R{f}"] for f in sorted(series_factura(db, tenant_id)) if f"R{f}" in remisiones}
 
 
 def opciones(db: Session, tenant_id) -> dict:
@@ -254,11 +241,16 @@ def opciones(db: Session, tenant_id) -> dict:
     más todo lo suelto. La pantalla marca la plaza y se lleva TODO lo suyo.
 
     Las series de remisión de una plaza son las de sus vínculos cliente×plaza
-    (la de remisión y las del abanico), las de las remisiones que se le
-    entregaron en los últimos 93 días y la pareja de cada una de sus series de
-    factura (`pares_de_remision`). Sin la pareja, una plaza cuyos vínculos solo
-    traen la serie de factura (Chiapas) salía sin ninguna, y una serie cuyas
-    remisiones no tienen fecha de entrega (RRIO de Hidalgo) no se ofrecía."""
+    (la de remisión y las del abanico), la pareja de cada una de sus series de
+    factura (`pares_de_remision`) y las de las remisiones que se le entregaron
+    en los últimos 93 días. Sin la pareja, una plaza cuyos vínculos solo traen
+    la serie de factura (Chiapas) salía sin ninguna, y una serie cuyas
+    remisiones no tienen fecha de entrega (RRIO de Hidalgo) no se ofrecía.
+
+    Las que salen solo del uso no se ofrecen si son de OTRA plaza (por vínculo
+    o por pareja): el alcance es por serie, así que una remisión de Hidalgo
+    capturada con sucursal Tabasco le daría a la clave de Tabasco todas las de
+    Hidalgo. El uso queda para series que no son de nadie."""
     plazas: dict[str, dict] = {}
     for k, (nombre, codigos) in series_por_plaza(db, tenant_id).items():
         plazas[k] = {"nombre": nombre, "series": set(codigos), "series_remision": set(),
@@ -299,17 +291,30 @@ def opciones(db: Session, tenant_id) -> dict:
         .distinct()
         .all()
     )
-    for nombre, codigo in list(rem_vinculo) + list(rem_abanico) + list(rem_uso):
+
+    def _agrega(nombre: str, codigo: str) -> None:
         k = clave_nombre(nombre)
         if k:
             plazas.setdefault(k, {"nombre": nombre.strip(), "series": set(),
                                   "series_remision": set(), "perfiles": set()})
             plazas[k]["series_remision"].add(codigo)
 
+    for nombre, codigo in list(rem_vinculo) + list(rem_abanico):
+        _agrega(nombre, codigo)
     pares = pares_de_remision(db, tenant_id)
     for v in plazas.values():
         for c in v["series"]:
             v["series_remision"].update(pares.get(c, []))
+
+    # De quién es cada serie de remisión ANTES de mirar el uso.
+    duenas: dict[str, set[str]] = {}
+    for k, v in plazas.items():
+        for c in v["series_remision"]:
+            duenas.setdefault(c, set()).add(k)
+    for nombre, codigo in rem_uso:
+        k = clave_nombre(nombre)
+        if k and not (duenas.get(codigo, set()) - {k}):
+            _agrega(nombre, codigo)
 
     vistos = perfiles_vistos(db, tenant_id)
     for p, nombre in vistos.items():

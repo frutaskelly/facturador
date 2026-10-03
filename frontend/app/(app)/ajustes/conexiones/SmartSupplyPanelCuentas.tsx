@@ -82,7 +82,8 @@ function haceCuanto(iso?: string | null): string {
 const lista = (xs: string[]) => (xs.length ? xs.join(", ") : "—");
 
 /** Las series de remisión pareja de una de factura (ZEHMOVH → RZEHMOVH). Las da
- *  el backend (`pares`): la de nombre y la de uso, sin adivinar aquí. */
+ *  el backend (`pares`), solo la de nombre: una «por uso» la armaba una sola
+ *  factura mal ligada y metía la serie de otra plaza. */
 const parejas = (codigo: string, op: OpcionesPanel): string[] => op.pares?.[codigo] ?? [];
 
 /** Lo de la plaza de la clave que la clave NO comparte. Las series de remisión

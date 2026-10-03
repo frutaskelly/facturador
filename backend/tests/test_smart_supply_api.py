@@ -7,10 +7,12 @@ paginan por llave sin saltarse ni repetir líneas aunque el espejo recree una
 factura entre página y página.
 """
 import base64
+import importlib.util
 import json
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from sqlalchemy import text
@@ -528,6 +530,67 @@ def test_la_plaza_se_lleva_todas_sus_series_de_remision(client, env, auth_as):
     assert "ZSUR" not in o["pares"]
 
 
+def test_una_captura_cruzada_no_le_presta_a_la_plaza_series_ajenas(client, env, auth_as):
+    """Revisión del PR #336. El alcance es por SERIE: ofrecerle a Tabasco una
+    serie de Hidalgo le da a su clave TODAS las remisiones de Hidalgo. Dos
+    puertas por donde se colaba con una sola captura mal hecha:
+    - una remisión de Hidalgo facturada por error en ZEHMOVH (timbrada) hacía
+      la pareja «por uso» ZEHMOVH → RZEHMOHOS;
+    - una remisión RZEHMOHOS capturada con sucursal Tabasco y NO cancelada
+      metía la serie por el uso de la plaza.
+    La pareja es solo la de nombre y el uso no presta series que son de otra
+    plaza; una serie que no es de nadie sí se sigue ofreciendo por uso."""
+    db = SessionLocal()
+    try:
+        ta = env["ta"]
+        cli = db.query(Cliente).filter(Cliente.tenant_id == ta).first()
+        hgo = db.query(Sucursal).filter(Sucursal.tenant_id == ta,
+                                        Sucursal.nombre == "Hidalgo").one()
+        tab = db.query(Sucursal).filter(Sucursal.tenant_id == ta,
+                                        Sucursal.nombre == "Tabasco").one()
+        rhos = db.query(Serie).filter(Serie.tenant_id == ta, Serie.codigo == "RZEHMOHOS").one()
+        huerfana = Serie(tenant_id=ta, codigo="RTABX", tipo_documento="REMISION")
+        db.add(huerfana)
+        f = Factura(tenant_id=ta, serie="ZEHMOVH", folio=9999, cliente_id=cli.id,
+                    estado="TIMBRADA", tipo_comprobante="I", uuid=str(uuid.uuid4()),
+                    fecha=_utc(2026, 9, 10), origen="ESPEJO_SAE", espejo_empresa="03")
+        db.add(f); db.flush()
+        db.add_all([
+            # Puerta 1: de Hidalgo, facturada en la serie de Tabasco.
+            Remision(tenant_id=ta, folio_interno=f"RZHOS-FX-{uuid.uuid4().hex[:6]}",
+                     cliente_facturacion_id=cli.id, sucursal_id=hgo.id, serie_id=rhos.id,
+                     fecha_remision=date.today(), fecha_entrega=date.today(),
+                     estado="FACTURADA", factura_id=f.id),
+            # Puerta 2: serie de Hidalgo con sucursal Tabasco, viva.
+            Remision(tenant_id=ta, folio_interno=f"RZHOS-TX-{uuid.uuid4().hex[:6]}",
+                     cliente_facturacion_id=cli.id, sucursal_id=tab.id, serie_id=rhos.id,
+                     fecha_remision=date.today(), fecha_entrega=None),
+            # Una serie que no es de ninguna plaza: el uso la sigue ofreciendo.
+            Remision(tenant_id=ta, folio_interno=f"RTABX-{uuid.uuid4().hex[:6]}",
+                     cliente_facturacion_id=cli.id, sucursal_id=tab.id, serie_id=huerfana.id,
+                     fecha_remision=date.today(), fecha_entrega=None),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    auth_as(env["dueno_a"])
+    o = client.get("/api/v1/conexiones/SMART_SUPPLY_PANEL/opciones",
+                   headers=_hdr(env["dueno_a"])).json()
+    plazas = {p["nombre"]: p for p in o["plazas"]}
+    assert o["pares"] == {"ZEHMOHOS": ["RZEHMOHOS"], "ZEHMOVH": ["RZEHMOVH"]}
+    assert plazas["Tabasco"]["series_remision"] == ["RTABX", "RZEHMOVH"]
+    assert plazas["Hidalgo"]["series_remision"] == ["RZEHMOHOS"]
+    # «Marcar todo lo de Tabasco» = lo que ofrece su plaza: no lee lo de Hidalgo.
+    tab = plazas["Tabasco"]
+    k = _clave(client, env["dueno_a"], series=tab["series"],
+               series_remision=tab["series_remision"], perfiles=tab["perfiles"])
+    _sin_sesion()
+    rem, _ = _todas(client, _bearer(k["clave"]), "/api/v1/smart-supply/remisionado", _SEP)
+    ids = {i["remision_id"] for i in rem}
+    assert env["rem_vh1"] in ids and env["rem_hgo"] not in ids
+
+
 # ─── la bitácora ─────────────────────────────────────────────────────────────
 
 def test_cada_cambio_de_la_clave_queda_en_su_bitacora(client, env, auth_as):
@@ -565,6 +628,44 @@ def test_cada_cambio_de_la_clave_queda_en_su_bitacora(client, env, auth_as):
     auth_as(env["dueno_b"])
     assert client.get(f"/api/v1/conexiones/{oid}/cambios",
                       headers=_hdr(env["dueno_b"])).status_code == 404
+
+
+class _OpEnConexion:
+    """Lo único de `alembic.op` que usa la 0101, sobre una conexión cualquiera."""
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    def execute(self, sql):
+        self.conn.exec_driver_sql(sql)
+
+
+def test_la_bitacora_es_append_only_para_app_user(db_engine):
+    """El GRANT SELECT, INSERT de la 0101 no bastaba: los privilegios por
+    omisión del esquema ya le daban UPDATE y DELETE a app_user (en prod
+    también: pg_default_acl postgres/public = app_user=arwd). La migración se
+    corre aquí dos veces (es idempotente) dentro de una transacción que se
+    deshace, así que la BD de pruebas compartida no cambia."""
+    ruta = Path(__file__).resolve().parents[1] / "migrations" / "versions" / "0101_conexion_cambios.py"
+    spec = importlib.util.spec_from_file_location("migracion_0101", ruta)
+    mig = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mig)
+    with db_engine.connect() as conn:
+        trans = conn.begin()
+        try:
+            mig.op = _OpEnConexion(conn)
+            mig.upgrade()
+            mig.upgrade()
+            puede = {
+                p: conn.execute(text(
+                    "SELECT has_table_privilege('app_user', 'conexion_cambios', :p)"),
+                    {"p": p}).scalar()
+                for p in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE")
+            }
+        finally:
+            trans.rollback()
+    assert puede == {"SELECT": True, "INSERT": True, "UPDATE": False, "DELETE": False,
+                     "TRUNCATE": False}
 
 
 # ─── lo que lee ──────────────────────────────────────────────────────────────

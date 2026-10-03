@@ -6,11 +6,13 @@ siguiente vuelta. Sin bitácora, quitarle una serie a una plaza no dejaba
 rastro: la pregunta «¿quién le quitó RRIO a Kelly Hidalgo y cuándo?» no tenía
 respuesta.
 
-Append-only y por inquilino (RLS como el resto). Nunca guarda la clave: solo
-su pista (los últimos 4), que ya se enseña en la pantalla.
+Append-only (app_user solo lee e inserta: se le REVOCAN el UPDATE y el DELETE
+que el esquema da por omisión) y por inquilino (RLS como el resto). Nunca
+guarda la clave: solo su pista (los últimos 4), que ya se enseña en la pantalla.
 
 DDL con IF NOT EXISTS: la BD de pruebas (:5434) la comparten varias sesiones y
-la tabla se le puede crear a mano sin mover su `alembic_version`.
+la tabla se le puede crear a mano sin mover su `alembic_version`. Por eso todo
+`upgrade()` se puede correr dos veces.
 
 Revision ID: 0101_conexion_cambios
 Revises: 0100_lista_sku_cliente
@@ -50,6 +52,25 @@ def upgrade() -> None:
         "ON conexion_cambios (conexion_id, created_at DESC)"
     )
     op.execute("GRANT SELECT, INSERT ON conexion_cambios TO app_user")
+    # Append-only de verdad. El GRANT de arriba no quita nada: los privilegios
+    # por omisión del esquema ya le dan UPDATE y DELETE a app_user (prod:
+    # pg_default_acl postgres/public = app_user=arwd) y todo a `anon` y
+    # `authenticated`, los roles de PostgREST que el backend no usa. RLS cuida
+    # el inquilino; esto, que nadie reescriba ni borre la historia.
+    op.execute("REVOKE UPDATE, DELETE, TRUNCATE ON conexion_cambios FROM app_user")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+                REVOKE ALL ON conexion_cambios FROM anon;
+            END IF;
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+                REVOKE ALL ON conexion_cambios FROM authenticated;
+            END IF;
+        END $$;
+        """
+    )
     op.execute("ALTER TABLE conexion_cambios ENABLE ROW LEVEL SECURITY")
     op.execute(
         """
