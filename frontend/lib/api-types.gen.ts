@@ -6313,6 +6313,8 @@ export interface components {
          *     antes de cada sincronización: si el dueño le quita algo, se entera aquí.
          */
         AlcancePanelOut: {
+            /** Almacenes */
+            almacenes?: string[];
             /** Catalogo */
             catalogo: boolean;
             conexion?: components["schemas"]["ConexionPanelBreveOut"] | null;

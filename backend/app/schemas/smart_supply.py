@@ -50,6 +50,10 @@ class AlcancePanelOut(BaseModel):
     conexion: Optional[ConexionPanelBreveOut] = None   # None = una persona (prueba)
     sin_limite: bool = False                           # persona: lee todo
     plaza: Optional[str] = None
+    # Las bodegas que surten a esa plaza (almacén de la plaza y de sus
+    # proyectos vivos): «Hidalgo» se surte de «Pachuca». Vacía si la plaza no
+    # tiene almacén configurado o si es una persona (sin plaza).
+    almacenes: list[str] = Field(default_factory=list)
     series: list[str]
     series_remision: list[str]
     perfiles: list[str]

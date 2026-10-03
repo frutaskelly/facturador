@@ -237,6 +237,7 @@ def alcance(
                   if con else None),
         sin_limite=a.sin_limite,
         plaza=a.plaza,
+        almacenes=panel.almacenes_de_plaza(db, ctx.tenant_id, a.plaza),
         series=series,
         series_remision=rems,
         perfiles=perfiles,

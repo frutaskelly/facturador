@@ -36,6 +36,13 @@ Lo que comparte cada clave (`conexiones.alcance`, lo edita el dueño):
 
 Una clave del panel sin alcance no lee nada.
 
+`/alcance` dice además `almacenes`: los nombres de las bodegas que surten a la
+plaza de la clave, es decir, el almacén de la plaza y el de cada proyecto vivo
+de ella (Hidalgo → `["Pachuca"]`, Tabasco → `["Villa Hermosa"]`). Es la
+configuración de hoy, no de qué almacén salieron las remisiones viejas. Smart
+Supply lo usa para reconocer que la plaza del Facturador y la «sucursal» que
+dice Mini Conta (`facturador_sucursal`, p. ej. «Pachuca») son el mismo lugar.
+
 La plaza de una OC es la suya o, si no la trae, la de su remisión. El perfil no
 alcanza para separar plazas: el mismo grupo de WhatsApp puede pedir para dos, y
 `MANUAL:<uuid>` es el canal de captura a mano de toda la empresa. Por eso un
@@ -64,7 +71,7 @@ plaza sí la ven todas las claves que tienen su perfil.
 
 | Ruta | Parámetros | Llave y orden | Contenido |
 |---|---|---|---|
-| `GET /smart-supply/alcance` | — | — | `empresa{id,nombre}`, `conexion{id,nombre,pista}` (null si es persona), `sin_limite`, `plaza`, `series`, `series_remision`, `perfiles`, `remisiones`, `oc`, `catalogo`, `plazas[{nombre,series,series_remision,perfiles}]`, `zona_horaria`, `max_dias`, `max_limit`. Sirve para probar y guardar la clave. |
+| `GET /smart-supply/alcance` | — | — | `empresa{id,nombre}`, `conexion{id,nombre,pista}` (null si es persona), `sin_limite`, `plaza`, `almacenes`, `series`, `series_remision`, `perfiles`, `remisiones`, `oc`, `catalogo`, `plazas[{nombre,series,series_remision,perfiles}]`, `zona_horaria`, `max_dias`, `max_limit`. Sirve para probar y guardar la clave. |
 | `GET /smart-supply/oc` | `desde`+`hasta` sobre `campo` = `actualizado` (default), `recibida` o `entrega`; y/o `actualizado_desde` (ISO, ≤ 93 días; sin zona se toma UTC); `estado`, `canal` (csv) | (`actualizado_at`, `id`) | Una fila por OC, DESCARTADA incluida: `id, canal, origen_externo, perfil, folio_externo, remitente, archivo_nombre, recibida_at, fecha_entrega, estado, motivo, cliente_id, cliente, plaza, punto_entrega, proyecto, partidas, documento, cambio_abierto, cambio_resumen, remision{id,folio,serie,estado,fecha_entrega,total}, factura{id,serie,folio,uuid,estado,origen}, actualizado_at`. `actualizado_at = greatest(oc, remisión, factura).updated_at`. |
 | `GET /smart-supply/oc-lineas` | `desde`, `hasta` (sobre la entrega) | (`oc_id`, `numero`) | Partidas del documento vigente: `payload_nuevo` si trae partidas, si no `payload`. Excepción: si el cambio se cerró porque el documento volvió a coincidir con la remisión, manda `payload`. Solo PENDIENTE y ASIGNADA. Campos: `oc_id, numero, documento, cambio_abierto, perfil, folio_externo, fecha_entrega, estado, cliente_id, plaza, remision_id, remision_folio, remision_estado, clave_doc, clave (normalizada), descripcion, unidad_doc, cantidad`. Van sin cruzar a producto; el cruce es la remisión. |
 | `GET /smart-supply/remisionado` | `desde`, `hasta` (sobre `fecha_entrega`), `series` | (`remision_id`, `numero_linea`) | Líneas de remisiones no canceladas: `remision_id, numero_linea, folio, serie, estado, fecha_entrega, fecha_entrega_origen (entrega\|notas\|fecha_remision), factura_id, facturada, su_pedido, cliente_id, cliente, plaza, punto_entrega, producto_id, sku, producto, clave (SAE de la presentación), clave_producto, presentacion, cantidad_solicitada, cantidad_surtida, cantidad (el peso real si es de peso variable), unidad, factor_kg, kg, kg_estimado, precio_unitario, importe (con el descuento del encabezado prorrateado)`. |
