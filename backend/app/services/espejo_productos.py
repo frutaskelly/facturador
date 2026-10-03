@@ -16,6 +16,25 @@ gemelos; la 0085 quitó el índice único), así que hace falta desempate.
 EL ORDEN, por clave y una sola vez por factura (todas las partidas con la misma
 clave quedan con el mismo producto). Gana el primer nivel que decida:
 
+  0. EL NOMBRE DEL SAE (decisión del dueño, 2-oct-2026: «gana el SAE»; la
+     factura es la verdad final). Solo en claves gemelas —dos o más productos
+     ACTIVOS la traen—: si la descripción de la partida del SAE se llama como
+     uno o más de ellos (`norm_nombre`: sin acentos ni palabras de unidad),
+     los candidatos se RESTRINGEN a esos gemelos activos nombrados. Si queda
+     uno, gana sin más: TOMATEVERDELIMKG dice «TOMATE VERDE LIMPIO KG» y es
+     el 00010049 TOMATE VERDE LIMPIO, aunque el uso dijera 00010048 TOMATE
+     VERDE GRANDE Y LIMPIO, y aunque la remisión ligada o la decisión previa
+     traigan otro producto — también uno que se llame igual pero no sea
+     gemelo activo de la clave: un gemelo desactivado (00011014 HIERBABUENA)
+     o el que trae OTRA clave (00010058 CALABAZA DE CASTILLA, de
+     CALABAZACASTIKG, en partidas CALABAZACASTILKG; revisión del 2-oct). Si
+     quedan varios (ESPINACAPZA: «ESPINACA PZA» son el 00010761 y el
+     00010965), el resto de la regla —remisión ligada, decisión previa,
+     catálogo, uso, sku— desempata SOLO entre ellos y el MANOJO DE 1 KG ya no
+     compite. Una clave de un solo producto activo no cambia (AJOKG sigue
+     siendo el AJO de la remisión ligada), ni la que manda la tabla de claves
+     distintas por empresa, y un nombre que no casa con ningún gemelo activo
+     no cambia nada.
   1. REMISIÓN LIGADA. La remisión ligada a ESTA factura (`remisiones.factura_id`)
      trae uno de los productos que la clave puede ser: los que la traen (en
      `clave_sae` o en una presentación, activos o no) y el que el catálogo del
@@ -24,9 +43,11 @@ clave quedan con el mismo producto). Gana el primer nivel que decida:
      cuando lo hay (`codigo_cliente_de`), así que la partida AJOKG de una
      remisión con el 00000284 AJO es ese AJO aunque AJOKG sea la clave del
      00010472 AJO KG (revisión del 2-oct: con la clave única primero, lo
-     remisionado y lo facturado quedaban con productos distintos).
+     remisionado y lo facturado quedaban con productos distintos). Si el
+     nivel 0 dejó varios nombrados, solo cuenta si trae a uno de ellos.
   2. LA DECISIÓN PREVIA: el producto que la partida ya tenía en esa clave.
-     Ver «una partida ligada no cambia sola» abajo.
+     Ver «una partida ligada no cambia sola» abajo. Igual que el 1: con
+     varios nombrados, solo si es uno de ellos.
   3. La clave significa OTRA cosa en esa empresa de SAE: manda la tabla
      `CLAVES_DISTINTAS_POR_EMPRESA` (CALABAZACASTILKG en la 03). Solo en el
      inquilino dueño del SAE (`ESPEJO_SAE_TENANT_ID`): los skus son de cada
@@ -59,9 +80,13 @@ SANDIA pasaba al sobreviviente — y Mini Conta, que guarda su copia, no se
 entera. Por eso el nivel 2 conserva el producto que la factura ya tenía en esa
 clave, sea o no de los que hoy traen la clave y aunque hoy esté desactivado o
 borrado (el espejo viejo ligaba borrados por código; eso tampoco se corrige
-con un abono). Solo una remisión ligada, evidencia de ESA factura, lo mueve.
-Las facturas NUEVAS sí van por la clave (SANDIAPZ al sobreviviente de la
-fusión, que «únicamente impacta a nuevas remisiones»). Re-decidir lo ya
+con un abono). Solo lo mueven dos cosas de ESA factura: una remisión ligada y,
+desde «gana el SAE», el nombre del artículo cuando nombra a gemelos activos de
+la clave y la partida no está en uno de ellos (nivel 0) — el reenvío la pasa
+al gemelo que el SAE nombra, y de ahí no se vuelve a mover mientras el SAE lo
+siga llamando igual. Las facturas NUEVAS
+sí van por la clave (SANDIAPZ al sobreviviente de la fusión, que «únicamente
+impacta a nuevas remisiones»). Re-decidir lo ya
 ligado (un cambio en el catálogo, una fila nueva en la tabla de claves) es a
 propósito y con lista: `scripts/backfill_espejo_producto_por_clave.py
 --recalcular-ligadas`, que calcula la regla SIN el nivel 2.
@@ -99,6 +124,7 @@ from .sat_catalogo import UNIDAD_A_SAT
 
 # ─── Reglas (los nombres salen en el reporte del backfill) ──────────────────
 
+NOMBRE_SAE = "0_nombre_sae"
 REMISION = "1_remision_ligada"
 PREVIA = "2_decision_previa"
 OVERRIDE = "3_clave_distinta_en_empresa"
@@ -119,6 +145,36 @@ def norm_clave_sae(v: Optional[str]) -> str:
     acentos (Ñ→N), mayúsculas, solo letras, dígitos y guion."""
     s = unicodedata.normalize("NFKD", v or "").encode("ascii", "ignore").decode("ascii")
     return "".join(ch for ch in s.upper() if ch.isalnum() or ch == "-")
+
+
+# Palabras de unidad que el SAE pega al nombre del artículo («CALABAZA
+# CRIOLLA KG», «ESPINACA PZA»): no cuentan para comparar nombres.
+_UNIDADES_EN_NOMBRE = {"KG", "KGS", "KILO", "KILOS", "PZ", "PZA", "PZAS", "PIEZA", "PIEZAS",
+                       "MJ", "MANOJO", "MAZO", "LT", "LTS", "LITRO", "GR", "GRS", "G"}
+
+
+def _sin_unidad(t: str) -> str:
+    """Una palabra sin su unidad: «KG» → «», «25KG» → «25» (la unidad pegada
+    al número; revisión del 2-oct: «FRIJOL NEGRO 25KG» del SAE y «FRIJOL NEGRO
+    25 KG» del catálogo no casaban). El número se queda: 25 KG no es KILO."""
+    if t in _UNIDADES_EN_NOMBRE:
+        return ""
+    num = t.rstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    if num and num.isdigit() and t[len(num):] in _UNIDADES_EN_NOMBRE:
+        return num
+    return t
+
+
+def norm_nombre(v: Optional[str]) -> str:
+    """El nombre de un artículo para compararlo con el de otro: sin acentos
+    (PIÑA → PINA), mayúsculas, solo palabras y sin las de unidad, sueltas o
+    pegadas a un número. «TOMATE VERDE LIMPIO KG» del SAE y «TOMATE VERDE
+    LIMPIO» del catálogo son lo mismo. Lo usan el nivel 0 de la regla y el ⚠
+    del backfill: una sola copia para que el reporte marque exactamente lo que
+    la regla no resuelve."""
+    s = unicodedata.normalize("NFKD", str(v or "")).encode("ascii", "ignore").decode("ascii")
+    s = "".join(ch if ch.isalnum() else " " for ch in s.upper())
+    return " ".join(t for t in map(_sin_unidad, s.split()) if t)
 
 
 def norm_empresa(v: Optional[str]) -> str:
@@ -282,6 +338,7 @@ class IndiceClaves:
     def __init__(self, productos: Iterable):
         self.sku: dict = {}                 # pid → sku, de todos los sin borrar
         self.nombre: dict = {}
+        self._nombre_norm: dict = {}        # pid → norm_nombre, para el nivel 0
         self.activos: set = set()
         self.por_sku: dict[str, UUID] = {}  # sku → pid, solo activos
         self._base: dict = {}
@@ -291,6 +348,7 @@ class IndiceClaves:
             sku = (p.sku or "").strip()
             self.sku[p.id] = sku
             self.nombre[p.id] = getattr(p, "nombre", None) or ""
+            self._nombre_norm[p.id] = norm_nombre(self.nombre[p.id])
             if getattr(p, "activo", True):
                 self.activos.add(p.id)
                 self.por_sku[sku] = p.id
@@ -325,6 +383,25 @@ class IndiceClaves:
         """Los que traen la clave y están activos: los únicos que pueden
         ganar una partida que no tiene más evidencia."""
         return {pid: pres for pid, pres in self.todos(clave).items() if pid in self.activos}
+
+    def se_llama(self, pid, nombres) -> bool:
+        """¿El producto se llama como alguno de `nombres` (ya normalizados)?
+        Uno borrado no se llama de ninguna forma: no está en el índice."""
+        n = self._nombre_norm.get(pid)
+        return bool(n) and n in nombres
+
+    def nombrados(self, clave: str, nombres) -> dict:
+        """El nivel 0: de los gemelos ACTIVOS de la clave, los que se llaman
+        como el SAE llama a la partida — los únicos candidatos desde ahí.
+        Vacío si la clave no es gemela (uno o ningún activo la trae) o si el
+        nombre no casa con ninguno: entonces la regla sigue como si no hubiera
+        nombre."""
+        if not nombres:
+            return {}
+        cands = self.candidatos(clave)
+        if len(cands) < 2:
+            return {}
+        return {pid: pres for pid, pres in cands.items() if self.se_llama(pid, nombres)}
 
 
 # ─── Evidencia para el desempate ────────────────────────────────────────────
@@ -532,7 +609,9 @@ class Resolucion:
     # El uso decidió por poco (ganador < 5 o < 2× el segundo) o decidió el sku:
     # el backfill las cuenta aparte para que alguien las mire.
     debil: bool = False
-    # Los que competían (gemelos o los de la remisión): el backfill los lista.
+    # Los que competían (gemelos o los de la remisión), el ganador primero, y
+    # al final los gemelos que el nombre del SAE dejó fuera: el backfill los
+    # lista.
     competidores: tuple = ()
 
 
@@ -549,14 +628,17 @@ def _regla(ganador: tuple, segundo: tuple) -> tuple[str, bool]:
 
 
 def _desempatar(fuentes: FuentesBD, *, catalogo: Catalogo, serie, pendientes: dict) -> dict:
-    """`pendientes`: {clave: (candidatos {pid: presentación}, regla fija o None)}.
-    La regla fija es REMISION cuando la remisión ligada trae a más de uno."""
+    """`pendientes`: {clave: (candidatos {pid: presentación}, regla fija o None,
+    gemelos que el nombre del SAE dejó fuera)}. La regla fija es REMISION
+    cuando la remisión ligada trae a más de uno. Los que el nombre dejó fuera
+    no compiten, pero van al final de `competidores` para que el backfill los
+    liste como perdedores."""
     indice = fuentes.indice()
     # Primero el catálogo (ya está en memoria). El uso solo se pregunta para
     # los que siguen empatados: ordenar por niveles es lexicográfico, así que
     # a los demás nunca les llega a importar.
     en_cat = {k: {pid: int(pid in catalogo.productos) for pid in cands}
-              for k, (cands, _) in pendientes.items()}
+              for k, (cands, _, _) in pendientes.items()}
     arriba: dict = {}
     for k, ll in en_cat.items():
         top = max(ll.values())
@@ -567,7 +649,7 @@ def _desempatar(fuentes: FuentesBD, *, catalogo: Catalogo, serie, pendientes: di
     canon = serie_canonica(serie)
 
     out = {}
-    for k, (cands, fija) in pendientes.items():
+    for k, (cands, fija, fuera) in pendientes.items():
         filas = []
         for pid in cands:
             en_juego = pid in arriba.get(k, ())
@@ -581,17 +663,26 @@ def _desempatar(fuentes: FuentesBD, *, catalogo: Catalogo, serie, pendientes: di
         (llave, pid), (segunda, _) = filas[0], filas[1]
         regla, debil = _regla(llave, segunda)
         out[k] = Resolucion(pid, cands[pid], fija or regla, debil,
-                            tuple(p for _, p in filas))
+                            tuple(p for _, p in filas) + fuera)
     return out
 
 
+def _por_sku(indice: IndiceClaves, pids) -> tuple:
+    return tuple(sorted(pids, key=lambda p: (indice.sku.get(p, ""), str(p))))
+
+
 def resolver_claves(fuentes: FuentesBD, *, factura_id, cliente_id, empresa, serie,
-                    claves: Iterable[Optional[str]], con_previa: bool = True,
+                    claves: Iterable[Optional[str]],
+                    descripciones: Iterable[tuple[Optional[str], Optional[str]]] = (),
+                    con_previa: bool = True,
                     ) -> dict[str, Resolucion]:
     """{clave normalizada: Resolucion} para las claves de UNA factura.
 
     `factura_id` es la factura ya creada (sus remisiones ligadas y sus partidas
     actuales son evidencia); `empresa` y `serie` son las de SAE.
+    `descripciones`: (clave, descripción) de cada partida tal como la manda el
+    SAE — el nivel 0. Si dos partidas de la misma clave traen nombres
+    distintos, cuentan los dos (la clave se decide una vez por factura).
     `con_previa=False` decide como si la factura no tuviera partidas: lo usa el
     endpoint con una factura recién creada (se ahorra la consulta) y el
     backfill para comparar contra lo ya ligado (`--recalcular-ligadas`).
@@ -602,6 +693,11 @@ def resolver_claves(fuentes: FuentesBD, *, factura_id, cliente_id, empresa, seri
     indice = fuentes.indice()
     rem = fuentes.remision(factura_id) if factura_id else set()
     prev = fuentes.previas(factura_id) if (factura_id and con_previa) else {}
+    nombres_sae: dict[str, set] = defaultdict(set)
+    for clave, desc in descripciones:
+        kd, nd = norm_clave_sae(clave), norm_nombre(desc)
+        if kd and nd:
+            nombres_sae[kd].add(nd)
     _cat: list = []
 
     def catalogo() -> Catalogo:
@@ -616,16 +712,34 @@ def resolver_claves(fuentes: FuentesBD, *, factura_id, cliente_id, empresa, seri
         # le toca a cada uno (None = por código del cliente: la unidad del
         # producto, como siempre).
         distinta = clave_distinta(fuentes.tenant_id, empresa, k)
+        nombres = nombres_sae.get(k, set())
+        nombrados: dict = {}
+        fuera: tuple = ()
         if distinta is not None:
             pid_d = indice.por_sku.get(distinta.sku.strip())
             posibles = ({pid_d: distinta.presentacion or indice.todos(k).get(pid_d)
                          or indice.base(pid_d)} if pid_d else {})
         else:
-            posibles = dict(indice.todos(k))
-            if rem:
-                cod = catalogo().codigos.get(k)
-                if cod is not None and indice.vivo(cod):
-                    posibles.setdefault(cod, None)
+            # 0. El nombre del SAE: entre gemelos ACTIVOS, los candidatos se
+            # restringen a los que se llaman como dice la factura. Uno solo
+            # gana sin más; con varios, lo que sigue desempata entre ellos.
+            # Un producto que se llama igual pero no es gemelo activo (uno
+            # desactivado, el que trae otra clave) ya no entra ni por la
+            # remisión ligada ni por la decisión previa (revisión del 2-oct).
+            nombrados = indice.nombrados(k, nombres)
+            if nombrados:
+                fuera = _por_sku(indice, set(indice.candidatos(k)) - set(nombrados))
+                if len(nombrados) == 1:
+                    ((pid, pres),) = nombrados.items()
+                    out[k] = Resolucion(pid, pres, NOMBRE_SAE, competidores=(pid,) + fuera)
+                    continue
+                posibles = dict(nombrados)
+            else:
+                posibles = dict(indice.todos(k))
+                if rem:
+                    cod = catalogo().codigos.get(k)
+                    if cod is not None and indice.vivo(cod):
+                        posibles.setdefault(cod, None)
 
         # 1. La remisión ligada a esta factura.
         en_rem = {pid: pres for pid, pres in posibles.items() if pid in rem}
@@ -634,13 +748,15 @@ def resolver_claves(fuentes: FuentesBD, *, factura_id, cliente_id, empresa, seri
             out[k] = Resolucion(pid, pres, REMISION)
             continue
         if en_rem:
-            pendientes[k] = (en_rem, REMISION)
+            pendientes[k] = (en_rem, REMISION, fuera)
             continue
 
         # 2. Lo que la partida ya tenía, sea o no de los posibles y aunque hoy
-        # esté desactivado o borrado: un reenvío no corrige la historia.
+        # esté desactivado o borrado: un reenvío no corrige la historia —
+        # salvo que el SAE nombre a gemelos activos y no sea uno de ellos
+        # (nivel 0).
         pid_p = prev.get(k)
-        if pid_p is not None:
+        if pid_p is not None and (not nombrados or pid_p in nombrados):
             pres_p = posibles[pid_p] if pid_p in posibles else indice.todos(k).get(pid_p)
             out[k] = Resolucion(pid_p, pres_p, PREVIA)
             continue
@@ -651,13 +767,19 @@ def resolver_claves(fuentes: FuentesBD, *, factura_id, cliente_id, empresa, seri
                       else Resolucion(None, None, OVERRIDE_SIN_PRODUCTO))
             continue
 
+        # 0. (sin remisión ni decisión previa entre los nombrados) el
+        # desempate entre los gemelos que el SAE nombra.
+        if nombrados:
+            pendientes[k] = (nombrados, None, fuera)
+            continue
+
         # 4. Un solo activo con la clave; 5. gemelos; 6. código del cliente.
         cands = indice.candidatos(k)
         if len(cands) == 1:
             ((pid, pres),) = cands.items()
             out[k] = Resolucion(pid, pres, UNICA)
         elif cands:
-            pendientes[k] = (cands, None)
+            pendientes[k] = (cands, None, ())
         else:
             pid = catalogo().codigos.get(k)
             out[k] = (Resolucion(pid, None, CODIGO_CLIENTE)

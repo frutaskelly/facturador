@@ -27,8 +27,12 @@ lotes):
      decisión previa (las ligó el código del cliente: AJOKG en 00000284 AJO
      cuando la clave es de 00010472 AJO KG, ~4.9k; o el catálogo cambió
      después). El endpoint NO las cambia: una partida ligada conserva su
-     producto en cada reenvío, salvo que una remisión ligada diga otra cosa.
-     Siempre se listan; solo con --recalcular-ligadas se re-apuntan, y solo
+     producto en cada reenvío, salvo que una remisión ligada diga otra cosa o
+     que el SAE nombre a gemelos activos de la clave y la partida no esté en
+     uno de ellos («gana el SAE», nivel 0_nombre_sae; también si está en un
+     desactivado o en uno de otra clave que se llama igual): esas salen
+     marcadas «solo» y el siguiente reenvío las mueve. Siempre se listan;
+     solo con --recalcular-ligadas se re-apuntan, y solo
      las de decisión fuerte (con producto y no débiles). Es la vía a propósito
      para que una corrección del dueño (dar de alta el gemelo correcto en el
      catálogo del cliente, una fila nueva en la tabla de claves) llegue a lo
@@ -41,8 +45,11 @@ al terminar. Las decisiones por uso que tome quedan guardadas en la partida
 
 El dry-run imprime, además de los conteos, QUIÉN GANA cada clave gemela en cada
 serie (sku, regla, partidas, si fue débil y los que perdieron) y marca ⚠ cuando
-el artículo del SAE se llama como un perdedor y no como el ganador: esa es la
-lista que el dueño revisa antes de --aplicar. --csv la guarda completa.
+el artículo del SAE se llama como otro producto y no como el ganador: esa es la
+lista que el dueño revisa antes de --aplicar. --csv la guarda completa. Desde
+«gana el SAE» (2-oct) el gemelo que el SAE nombra ya gana por la regla
+(0_nombre_sae), así que el ⚠ solo queda en lo que la regla no puede tomar: un
+producto desactivado o uno que no trae la clave.
 
 Idempotente: el paso 1 solo escribe donde producto_id sigue NULL, el 2 solo
 donde el producto no cambió y la unidad difiere, y el 3 solo donde la partida
@@ -72,7 +79,6 @@ import argparse
 import csv
 import os
 import sys
-import unicodedata
 from collections import Counter, defaultdict
 
 ENV = "/Users/michelzarate/Documents/Claude/Facturador/.env.prod"
@@ -94,18 +100,6 @@ def _de_env(env_path: str, llave: str) -> str:
 def _trozos(xs: list, n: int):
     for i in range(0, len(xs), n):
         yield xs[i:i + n]
-
-
-# Palabras de unidad que el SAE pega al nombre del artículo («CALABAZA
-# CRIOLLA KG»): no cuentan para comparar nombres.
-_UNIDADES = {"KG", "KGS", "KILO", "KILOS", "PZ", "PZA", "PZAS", "PIEZA", "PIEZAS",
-             "MJ", "MANOJO", "MAZO", "LT", "LTS", "LITRO", "GR", "GRS", "G"}
-
-
-def _nombre(v) -> str:
-    s = unicodedata.normalize("NFKD", str(v or "")).encode("ascii", "ignore").decode("ascii")
-    s = "".join(ch if ch.isalnum() else " " for ch in s.upper())
-    return " ".join(t for t in s.split() if t not in _UNIDADES)
 
 
 _SQL_PASO_1 = """
@@ -189,6 +183,8 @@ def correr(db, tenant_id, *, aplicar: bool = False, recalcular: bool = False,
         "paso1_escritas": 0,
         # (serie, clave, ganador, regla) → partidas, de las claves que se disputaron
         "gemelos": Counter(), "gemelos_debil": set(), "gemelos_rivales": defaultdict(set),
+        # la descripción del SAE de cada fila (la de su primera partida)
+        "gemelos_sae": {}, "paso3_sae": {},
         "paso2_por_serie": Counter(), "paso2_unidad": Counter(), "paso2_claves": Counter(),
         "paso2_escritas": 0,
         # (serie, clave, viejo, nuevo, regla) → partidas
@@ -196,8 +192,6 @@ def correr(db, tenant_id, *, aplicar: bool = False, recalcular: bool = False,
         "paso3_sin_producto": 0, "paso3_escritas": 0,
         "lotes_saltados": 0,
     }
-    desc_sae: dict = {}                     # (serie, clave) → descripción del SAE
-
     for trozo in _trozos(factura_ids, max(1, lote)):
         facturas = (
             db.query(Factura.id, Factura.cliente_id, Factura.serie, Factura.espejo_empresa)
@@ -222,8 +216,11 @@ def correr(db, tenant_id, *, aplicar: bool = False, recalcular: bool = False,
             suyas = por_factura.get(f.id)
             if not suyas:
                 continue
+            # la descripción guardada es la que mandó el SAE: el nivel 0 de la
+            # regla la lee igual que el endpoint
             kw = dict(factura_id=f.id, cliente_id=f.cliente_id, empresa=f.espejo_empresa,
-                      serie=f.serie, claves=[ln.clave_sae for ln in suyas])
+                      serie=f.serie, claves=[ln.clave_sae for ln in suyas],
+                      descripciones=[(ln.clave_sae, ln.descripcion) for ln in suyas])
             res = resolver_claves(fuentes, **kw)
             # Lo que la regla dice HOY sin lo que la factura ya tenía: solo hace
             # falta si alguna partida ya está ligada.
@@ -244,7 +241,6 @@ def correr(db, tenant_id, *, aplicar: bool = False, recalcular: bool = False,
         paso1, paso2, paso3 = [], [], []
         for ln, r, r0, serie in decididas:
             clave = norm_clave_sae(ln.clave_sae)
-            desc_sae.setdefault((serie, clave), ln.descripcion)
             if ln.producto_id is None:
                 campos = _campos(r)
                 regla = r.regla if r else SIN_PRODUCTO
@@ -258,6 +254,7 @@ def correr(db, tenant_id, *, aplicar: bool = False, recalcular: bool = False,
                 if len(r.competidores) > 1:
                     llave = (serie, clave, r.producto_id, regla)
                     c["gemelos"][llave] += 1
+                    c["gemelos_sae"].setdefault(llave, ln.descripcion)
                     c["gemelos_rivales"][llave].update(r.competidores)
                     if r.debil:
                         c["gemelos_debil"].add(llave)
@@ -286,6 +283,7 @@ def correr(db, tenant_id, *, aplicar: bool = False, recalcular: bool = False,
             solo = campos["producto_id"] != ln.producto_id
             llave = (serie, clave, ln.producto_id, nuevo["producto_id"], regla0)
             c["paso3"][llave] += 1
+            c["paso3_sae"].setdefault(llave, ln.descripcion)
             if solo:
                 c["paso3_solo"].add(llave)
             if nuevo["producto_id"] is None:
@@ -330,8 +328,8 @@ def correr(db, tenant_id, *, aplicar: bool = False, recalcular: bool = False,
         else:
             db.rollback()     # sin transacciones largas abiertas entre lotes
 
-    filas_gemelos = _tabla_gemelos(c, indice, desc_sae)
-    filas_paso3 = _tabla_paso3(c, indice, desc_sae)
+    filas_gemelos = _tabla_gemelos(c, indice)
+    filas_paso3 = _tabla_paso3(c, indice)
     c["tabla_gemelos"], c["tabla_paso3"] = filas_gemelos, filas_paso3
     _reporte(c, aplicar=aplicar, recalcular=recalcular, unidades=unidades, salida=salida)
     if csv_path:
@@ -340,23 +338,41 @@ def correr(db, tenant_id, *, aplicar: bool = False, recalcular: bool = False,
     return c
 
 
-def _marca_nombre(indice, desc, ganador, rivales) -> str:
-    """⚠ cuando el artículo del SAE se llama como un perdedor y no como el
-    ganador (TOMATEVERDELIMKG → 00010048 «TOMATE VERDE GRANDE Y LIMPIO»
-    habiendo un 00010049 «TOMATE VERDE LIMPIO»)."""
-    d = _nombre(desc)
-    if not d or _nombre(indice.nombre.get(ganador)) == d:
+def _marca_nombre(indice, clave, desc, ganador, rivales) -> str:
+    """⚠ cuando el artículo del SAE se llama como otro producto y no como el
+    ganador. Hasta «gana el SAE» marcaba a los gemelos que el uso o el sku
+    escogían mal (TOMATEVERDELIMKG → 00010048 «TOMATE VERDE GRANDE Y LIMPIO»
+    habiendo un 00010049 «TOMATE VERDE LIMPIO»); ahora esos los resuelve el
+    nivel 0 de la regla (0_nombre_sae) y ya no salen. Queda marcado lo que la
+    regla NO puede tomar, y se dice por qué: el que el SAE nombra está
+    desactivado o no trae la clave (el viejo cruce por código del cliente).
+    Misma normalización que la regla (`norm_nombre`)."""
+    from app.services.espejo_productos import norm_nombre   # adentro: ver `correr`
+
+    nombres = {norm_nombre(desc)} - {""}
+    if not nombres or indice.se_llama(ganador, nombres):
         return ""
-    igual = [indice.sku.get(p, "?") for p in rivales
-             if p != ganador and _nombre(indice.nombre.get(p)) == d]
-    return f"⚠ el SAE la llama como {', '.join(sorted(igual))}" if igual else ""
+    # los rivales de la tabla y todos los que traen la clave, activos o no
+    otros = (set(rivales) | set(indice.todos(clave))) - {ganador}
+    igual = sorted((indice.sku.get(p, "?"), p) for p in otros if indice.se_llama(p, nombres))
+    if not igual:
+        return ""
+
+    def _porque(p) -> str:
+        if p not in indice.activos:
+            return " (desactivado)"
+        if p not in indice.todos(clave):
+            return " (no trae la clave)"
+        return ""
+
+    return "⚠ el SAE la llama como " + ", ".join(f"{sku}{_porque(p)}" for sku, p in igual)
 
 
-def _tabla_gemelos(c, indice, desc_sae) -> list[dict]:
+def _tabla_gemelos(c, indice) -> list[dict]:
     filas = []
     for (serie, clave, pid, regla), n in c["gemelos"].items():
         rivales = c["gemelos_rivales"][(serie, clave, pid, regla)] - {pid}
-        desc = desc_sae.get((serie, clave))
+        desc = c["gemelos_sae"].get((serie, clave, pid, regla))
         filas.append({
             "serie": serie, "clave": clave, "sae": desc or "",
             "sku": indice.sku.get(pid, "?"), "nombre": indice.nombre.get(pid, ""),
@@ -364,16 +380,16 @@ def _tabla_gemelos(c, indice, desc_sae) -> list[dict]:
             "debil": (serie, clave, pid, regla) in c["gemelos_debil"],
             "perdedores": " | ".join(sorted(f"{indice.sku.get(p, '?')} {indice.nombre.get(p, '')}"
                                             for p in rivales)),
-            "marca": _marca_nombre(indice, desc, pid, rivales),
+            "marca": _marca_nombre(indice, clave, desc, pid, rivales),
         })
     filas.sort(key=lambda f: (-f["partidas"], f["serie"], f["clave"]))
     return filas
 
 
-def _tabla_paso3(c, indice, desc_sae) -> list[dict]:
+def _tabla_paso3(c, indice) -> list[dict]:
     filas = []
     for (serie, clave, viejo, nuevo, regla), n in c["paso3"].items():
-        desc = desc_sae.get((serie, clave))
+        desc = c["paso3_sae"].get((serie, clave, viejo, nuevo, regla))
         filas.append({
             "serie": serie, "clave": clave, "sae": desc or "",
             "de_sku": indice.sku.get(viejo, "?"), "de_nombre": indice.nombre.get(viejo, ""),
@@ -382,7 +398,7 @@ def _tabla_paso3(c, indice, desc_sae) -> list[dict]:
             "regla": regla, "partidas": n,
             "debil": (serie, clave, viejo, nuevo, regla) in c["paso3_debil"],
             "solo": (serie, clave, viejo, nuevo, regla) in c["paso3_solo"],
-            "marca": _marca_nombre(indice, desc, nuevo, {viejo}) if nuevo else "",
+            "marca": _marca_nombre(indice, clave, desc, nuevo, {viejo}) if nuevo else "",
         })
     filas.sort(key=lambda f: (-f["partidas"], f["serie"], f["clave"]))
     return filas

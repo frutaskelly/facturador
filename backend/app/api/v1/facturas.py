@@ -1297,8 +1297,10 @@ def factura_espejo(
 
     Cada partida se liga a su producto por la CLAVE SAE (la del producto o la
     de una presentación) y lleva la unidad SAT de esa presentación; el código
-    del cliente queda de respaldo. Un reenvío no le cambia el producto a una
-    partida ya ligada, salvo que lo diga la remisión ligada. La regla vive en
+    del cliente queda de respaldo. Si varios productos traen la clave, gana
+    el que se llama como el artículo del SAE. Un reenvío no le cambia el
+    producto a una partida ya ligada, salvo que lo diga la remisión ligada o
+    que el SAE la llame como otro gemelo. La regla vive en
     services/espejo_productos.
 
     Un timbrado FALLIDO en SAE (documento emitido, CFDI02.UUID vacío) llega
@@ -1590,12 +1592,16 @@ def factura_espejo(
         # sin producto. Una sola regla para el endpoint y el backfill:
         # services/espejo_productos.py. Se resuelve ANTES de borrar las
         # partidas viejas: un reenvío (abono, cancelación, cuadre) conserva el
-        # producto que ya tenían; solo una remisión ligada lo mueve. Una
-        # factura nueva no tiene partidas que leer.
+        # producto que ya tenían; solo lo mueven una remisión ligada o el
+        # nombre del artículo en el SAE cuando nombra a otro gemelo de la
+        # clave («gana el SAE», 2-oct). Una factura nueva no tiene partidas
+        # que leer.
         res = _resolver_claves_espejo(
             _FuentesEspejo(db, ctx.tenant_id), factura_id=factura.id,
             cliente_id=cliente.id, empresa=factura.espejo_empresa or payload.empresa,
             serie=serie, claves=[ln.clave for ln in payload.lineas],
+            # el nombre del artículo en el SAE: entre gemelos, «gana el SAE»
+            descripciones=[(ln.clave, ln.descripcion) for ln in payload.lineas],
             con_previa=not es_nueva,
         )
         pids = {r.producto_id for r in res.values() if r.producto_id}
