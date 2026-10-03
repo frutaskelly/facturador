@@ -972,6 +972,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conexiones/cobertura/clientes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cobertura Clientes
+         * @description Los clientes que facturaron o remisionaron en los últimos `dias`, con
+         *     sus series. Solo lectura: el Resumen de Conexiones lo cruza con lo que
+         *     comparte cada cuenta para avisar de los clientes que nadie lee.
+         */
+        get: operations["cobertura_clientes_api_v1_conexiones_cobertura_clientes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conexiones/grupos": {
         parameters: {
             query?: never;
@@ -7540,6 +7562,23 @@ export interface components {
             sistema: string;
             /** Sucursal Id */
             sucursal_id?: string | null;
+        };
+        /**
+         * ClienteMovimientoOut
+         * @description Un cliente con movimiento reciente y las series en que lo tuvo.
+         */
+        ClienteMovimientoOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            nombre: string;
+            /** Series Factura */
+            series_factura: string[];
+            /** Series Remision */
+            series_remision: string[];
         };
         /** ClienteOut */
         ClienteOut: {
@@ -17029,6 +17068,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpcionesPanelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cobertura_clientes_api_v1_conexiones_cobertura_clientes_get: {
+        parameters: {
+            query?: {
+                dias?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClienteMovimientoOut"][];
                 };
             };
             /** @description Validation Error */

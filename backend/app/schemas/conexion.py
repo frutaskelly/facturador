@@ -81,6 +81,14 @@ class ClienteSeriesMC(BaseModel):
     series: list[str]
 
 
+class ClienteMovimientoOut(BaseModel):
+    """Un cliente con movimiento reciente y las series en que lo tuvo."""
+    id: uuid.UUID
+    nombre: str
+    series_factura: list[str]
+    series_remision: list[str]
+
+
 class OpcionesMiniContaOut(BaseModel):
     """Todo lo que se puede compartir con una cuenta de Mini Conta."""
     sucursales: list[SucursalSeriesMC]

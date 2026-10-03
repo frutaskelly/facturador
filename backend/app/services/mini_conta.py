@@ -218,6 +218,48 @@ def clientes_por_serie(db: Session, tenant_id) -> dict[UUID, set[str]]:
     return out
 
 
+def clientes_con_movimiento(db: Session, tenant_id, desde) -> list[dict]:
+    """[{id, nombre, series_factura, series_remision}] de los clientes que desde
+    `desde` tienen una factura timbrada (de ingreso) o una remisión viva, con
+    las series en que las tuvieron. Es para auditar en Conexiones que ningún
+    cliente con movimiento se quede fuera de lo que se comparte: lo USADO, no
+    lo configurado (eso ya lo da `clientes_por_serie`)."""
+    fac: dict[UUID, set[str]] = {}
+    rem: dict[UUID, set[str]] = {}
+    for cid, codigo in (
+        db.query(Factura.cliente_id, Factura.serie)
+        .filter(Factura.tenant_id == tenant_id, Factura.estado == "TIMBRADA",
+                Factura.tipo_comprobante == "I", Factura.deleted_at.is_(None),
+                Factura.fecha >= desde)
+        .distinct()
+        .all()
+    ):
+        if cid is not None and codigo:
+            fac.setdefault(cid, set()).add(codigo)
+    for cid, codigo in (
+        db.query(Remision.cliente_facturacion_id, Serie.codigo)
+        .join(Serie, Serie.id == Remision.serie_id)
+        .filter(Remision.tenant_id == tenant_id, Remision.deleted_at.is_(None),
+                Remision.estado != "CANCELADA", Remision.fecha_remision >= desde)
+        .distinct()
+        .all()
+    ):
+        if cid is not None and codigo:
+            rem.setdefault(cid, set()).add(codigo)
+    ids = set(fac) | set(rem)
+    if not ids:
+        return []
+    out = [
+        {"id": c.id, "nombre": c.legal_name, "series_factura": sorted(fac.get(c.id, ())),
+         "series_remision": sorted(rem.get(c.id, ()))}
+        for c in db.query(Cliente)
+        .filter(Cliente.tenant_id == tenant_id, Cliente.id.in_(ids), Cliente.deleted_at.is_(None))
+        .all()
+    ]
+    out.sort(key=lambda c: c["nombre"].casefold())
+    return out
+
+
 def mapa(db: Session, tenant_id, alcance: Alcance) -> dict:
     """Lo que el alcance deja ver, listo para escoger: plazas con sus series,
     todas las series y los clientes (con las series en que aparecen)."""
