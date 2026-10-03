@@ -31,17 +31,20 @@ from ...models import (
     Cliente,
     ClienteExterno,
     Conexion,
+    ConexionCambio,
     GrupoWhatsapp,
     OCRecibida,
     Serie,
     Sucursal,
     Tenant,
+    User,
 )
 from ...models.conexion import POR_CUENTA, generar_clave, hash_clave, pista_de
 from ...schemas.conexion import (
     ActividadConexionOut,
     ClaveNuevaOut,
     ClienteDelGrupoOut,
+    ConexionCambioOut,
     SucursalBreve,
     ConexionEstadoOut,
     ConexionOut,
@@ -219,6 +222,23 @@ def _revocar(con: Conexion) -> None:
     con.revocada_at = datetime.now(timezone.utc)
 
 
+def _anotar(db: Session, ctx: AuthContext, con: Conexion, accion: str, *,
+            nombre_antes=None, alcance_antes=None, reemplaza_a=None) -> None:
+    """Un renglón en la bitácora de la conexión (`conexion_cambios`). Lo de
+    después es lo que la conexión ya tiene; la clave nunca, solo su pista.
+
+    La hora es la del reloj y no `now()`: «Clave nueva» anota dos renglones en
+    la misma transacción (la que se desconecta y la que nace) y con la hora de
+    la transacción empatarían."""
+    db.add(ConexionCambio(
+        tenant_id=con.tenant_id, conexion_id=con.id, accion=accion,
+        nombre_antes=nombre_antes, nombre_despues=con.nombre,
+        alcance_antes=alcance_antes, alcance_despues=con.alcance,
+        reemplaza_a=reemplaza_a, clave_pista=con.clave_pista, hecho_por=ctx.user_id,
+        created_at=datetime.now(timezone.utc),
+    ))
+
+
 @router.post("/{tipo}/clave", response_model=ClaveNuevaOut, status_code=status.HTTP_201_CREATED)
 def generar(
     tipo: str,
@@ -249,13 +269,21 @@ def generar(
         nombre = payload.nombre.strip()
         _nombre_libre(db, tipo, nombre)
         alcance = _alcance_validado(db, ctx, tipo, payload.alcance, payload.alcance_panel)
-        return _clave_nueva(db, ctx, tipo, nombre, alcance)
+        nueva = _clave_nueva(db, ctx, tipo, nombre, alcance)
+        _anotar(db, ctx, db.get(Conexion, nueva.conexion.id), "CREADA")
+        return nueva
 
     anterior = _viva(db, tipo)
     if anterior is not None:
         _revocar(anterior)
+        _anotar(db, ctx, anterior, "DESCONECTADA", nombre_antes=anterior.nombre,
+                alcance_antes=anterior.alcance)
         db.flush()
-    return _clave_nueva(db, ctx, tipo, CATALOGO[tipo]["nombre"], None)
+    nueva = _clave_nueva(db, ctx, tipo, CATALOGO[tipo]["nombre"], None)
+    _anotar(db, ctx, db.get(Conexion, nueva.conexion.id),
+            "CLAVE_NUEVA" if anterior is not None else "CREADA",
+            reemplaza_a=anterior.id if anterior is not None else None)
+    return nueva
 
 
 @router.post("/{conexion_id}/regenerar", response_model=ClaveNuevaOut,
@@ -271,8 +299,12 @@ def regenerar(
     if con.estado == "REVOCADA":
         raise HTTPException(status_code=409, detail="Esa conexión ya estaba desconectada")
     _revocar(con)
+    _anotar(db, ctx, con, "DESCONECTADA", nombre_antes=con.nombre, alcance_antes=con.alcance)
     db.flush()
-    return _clave_nueva(db, ctx, con.tipo, con.nombre, con.alcance)
+    nueva = _clave_nueva(db, ctx, con.tipo, con.nombre, con.alcance)
+    _anotar(db, ctx, db.get(Conexion, nueva.conexion.id), "CLAVE_NUEVA",
+            nombre_antes=con.nombre, alcance_antes=con.alcance, reemplaza_a=con.id)
+    return nueva
 
 
 @router.patch("/{conexion_id}", response_model=ConexionOut)
@@ -290,15 +322,65 @@ def editar(
         raise HTTPException(status_code=422, detail="Esta conexión no tiene alcance que editar")
     if con.estado == "REVOCADA":
         raise HTTPException(status_code=409, detail="Esa conexión ya estaba desconectada")
+    nombre_antes, alcance_antes = con.nombre, con.alcance
     if payload.nombre is not None:
         _nombre_libre(db, con.tipo, payload.nombre, excepto=con.id)
         con.nombre = payload.nombre.strip()
     nuevo = payload.alcance_panel if con.tipo == "SMART_SUPPLY_PANEL" else payload.alcance
     if nuevo is not None:
         con.alcance = _alcance_validado(db, ctx, con.tipo, payload.alcance, payload.alcance_panel)
+    if con.nombre != nombre_antes or con.alcance != alcance_antes:
+        # Guardar sin cambiar nada no ensucia la bitácora.
+        _anotar(db, ctx, con, "EDITADA", nombre_antes=nombre_antes, alcance_antes=alcance_antes)
     db.flush()
     db.refresh(con)
     return con
+
+
+@router.get("/{conexion_id}/cambios", response_model=list[ConexionCambioOut])
+def cambios(
+    conexion_id: UUID,
+    limit: int = 50,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_GESTIONAR)),
+):
+    """La bitácora de una conexión, la más nueva primero: quién la creó, qué le
+    cambió (nombre y alcance, antes y después), cuándo se rotó su clave y
+    cuándo se desconectó. Incluye la de las claves que esta reemplazó («Clave
+    nueva» hace otra conexión con el mismo alcance; su historia es la misma
+    cuenta). Nunca enseña la clave: solo su pista."""
+    get_or_404(db, Conexion, conexion_id, soft=False)
+    limit = max(1, min(limit, 200))
+    ids, actual = [], conexion_id
+    while actual is not None and actual not in ids and len(ids) < 20:
+        ids.append(actual)
+        actual = (
+            db.query(ConexionCambio.reemplaza_a)
+            .filter(ConexionCambio.conexion_id == actual,
+                    ConexionCambio.accion == "CLAVE_NUEVA",
+                    ConexionCambio.reemplaza_a.isnot(None))
+            .order_by(ConexionCambio.created_at.desc())
+            .limit(1)
+            .scalar()
+        )
+    filas = (
+        db.query(ConexionCambio, User.full_name, User.email)
+        .outerjoin(User, User.id == ConexionCambio.hecho_por)
+        .filter(ConexionCambio.conexion_id.in_(ids))
+        .order_by(ConexionCambio.created_at.desc(), ConexionCambio.id)
+        .limit(limit)
+        .all()
+    )
+    return [
+        ConexionCambioOut(
+            id=c.id, conexion_id=c.conexion_id, accion=c.accion, created_at=c.created_at,
+            hecho_por=(nombre or correo or None),
+            nombre_antes=c.nombre_antes, nombre_despues=c.nombre_despues,
+            alcance_antes=c.alcance_antes, alcance_despues=c.alcance_despues,
+            clave_pista=c.clave_pista,
+        )
+        for c, nombre, correo in filas
+    ]
 
 
 # OJO con el orden: esta ruta va ANTES de /{tipo}/opciones — FastAPI casa en
@@ -340,6 +422,7 @@ def revocar(
     if con.estado == "REVOCADA":
         raise HTTPException(status_code=409, detail="Esa conexión ya estaba desconectada")
     _revocar(con)
+    _anotar(db, ctx, con, "DESCONECTADA", nombre_antes=con.nombre, alcance_antes=con.alcance)
     db.flush()
     db.refresh(con)
     return con

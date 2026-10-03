@@ -70,6 +70,7 @@ from ...schemas.smart_supply import (
 from ...services import smart_supply as panel
 from ...services.espejo_productos import norm_clave_sae
 from ...services.inventario import claves_sae_por_presentacion
+from ...services.mini_conta import remisiones_entregadas
 from ...services.oc_cambios import NOTA_DOCUMENTO_REVERTIDO
 
 router = APIRouter(prefix="/smart-supply", tags=["smart-supply"])
@@ -507,21 +508,33 @@ def remisionado(
     ctx: AuthContext = Depends(require_permission(_LEER)),
 ):
     """Lo ENTREGADO: cada línea de las remisiones no canceladas de sus series de
-    remisión con `fecha_entrega` en el rango, por producto y presentación.
-    Facturadas o no (`facturada` lo dice): para los días que todavía no se
-    facturan, esto es la vista previa. Llave: (`remision_id`, `numero_linea`)."""
+    remisión entregadas en el rango, por producto y presentación. Facturadas o
+    no (`facturada` lo dice): para los días que todavía no se facturan, esto es
+    la vista previa. Llave: (`remision_id`, `numero_linea`).
+
+    La fecha de entrega es la capturada; si la remisión no la trae (la captura
+    manual no la pide), la de las notas de su factura o la de la remisión, y
+    `fecha_entrega_origen` dice cuál (services/mini_conta.remisiones_entregadas,
+    la misma regla que Mini Conta)."""
     a = panel.alcance_panel_de(db, ctx)
     panel.requiere(a.remisiones, "las remisiones")
     _rango(desde, hasta)
     leer = _series(series, a.series_remision)
     tras = _leer_cursor(despues, UUID, int)
 
+    ids_series = None
+    if leer is not None:
+        ids_series = panel.ids_de_series(db, ctx.tenant_id, leer, "REMISION")
+    rango = remisiones_entregadas(db, ctx.tenant_id, desde, hasta, serie_ids=ids_series)
+    if not rango:
+        return Pagina[RemisionadoOut](items=[], limit=limit, siguiente=None)
+
     q = (
         db.query(
             LineaRemision.remision_id, LineaRemision.numero_linea, LineaRemision.presentacion,
             LineaRemision.cantidad_solicitada, LineaRemision.cantidad_surtida,
             LineaRemision.precio_unitario, LineaRemision.importe,
-            Remision.folio_interno, Remision.estado, Remision.fecha_entrega,
+            Remision.folio_interno, Remision.estado,
             Remision.factura_id, Remision.su_pedido, Remision.nota_entrega,
             Remision.subtotal, Remision.descuento, Remision.cliente_facturacion_id,
             Serie.codigo.label("serie"),
@@ -541,17 +554,9 @@ def remisionado(
                                     Factura.deleted_at.is_(None)))
         .filter(
             Remision.tenant_id == ctx.tenant_id,
-            Remision.deleted_at.is_(None),
-            Remision.estado != "CANCELADA",
-            Remision.fecha_entrega >= desde,
-            Remision.fecha_entrega <= hasta,
+            LineaRemision.remision_id.in_(list(rango)),
         )
     )
-    if leer is not None:
-        ids = panel.ids_de_series(db, ctx.tenant_id, leer, "REMISION")
-        if not ids:
-            return Pagina[RemisionadoOut](items=[], limit=limit, siguiente=None)
-        q = q.filter(Remision.serie_id.in_(ids))
     if tras is not None:
         rid, n = tras
         q = q.filter(sa.or_(LineaRemision.remision_id > rid,
@@ -576,9 +581,11 @@ def remisionado(
             importe = importe * (1 - Decimal(f.descuento) / sub)
         propia = claves_sae_por_presentacion(f.presentaciones).get(
             str(f.presentacion or "").strip().upper())
+        entrega, origen = rango[f.remision_id]
         items.append(RemisionadoOut(
             remision_id=f.remision_id, numero_linea=f.numero_linea, folio=f.folio_interno,
-            serie=f.serie, estado=str(f.estado), fecha_entrega=f.fecha_entrega,
+            serie=f.serie, estado=str(f.estado), fecha_entrega=entrega,
+            fecha_entrega_origen=origen,
             factura_id=f.factura_id, facturada=f.factura_estado == "TIMBRADA",
             su_pedido=f.su_pedido, cliente_id=f.cliente_facturacion_id, cliente=f.cliente,
             plaza=f.plaza, punto_entrega=f.nota_entrega,

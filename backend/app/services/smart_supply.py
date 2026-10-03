@@ -48,6 +48,7 @@ from sqlalchemy.orm import Session
 from ..core.rbac import AuthContext
 from ..models import (
     ClienteSucursal,
+    ClienteSucursalSerie,
     Conexion,
     Factura,
     OCRecibida,
@@ -55,7 +56,13 @@ from ..models import (
     Serie,
     Sucursal,
 )
-from .mini_conta import clave_nombre, fechas_de_entrega, series_factura, series_por_plaza
+from .mini_conta import (
+    clave_nombre,
+    dia_de_factura,
+    fechas_de_entrega,
+    series_factura,
+    series_por_plaza,
+)
 
 TIPO = "SMART_SUPPLY_PANEL"
 ZONA = "America/Mexico_City"
@@ -210,10 +217,40 @@ def perfiles_vistos(db: Session, tenant_id, dias: int = 93) -> dict[str, Optiona
     return out
 
 
+def pares_de_remision(db: Session, tenant_id) -> dict[str, list[str]]:
+    """{serie de FACTURA: [su serie de REMISIÓN]}: la pareja de NOMBRE.
+
+    `POST /series/par` las crea juntas y en la empresa todas siguen la
+    convención R + factura (ZEHMOVH ↔ RZEHMOVH, RIO ↔ RRIO). Con esto escoger
+    una serie de factura se lleva su remisión aunque el vínculo cliente×plaza
+    no la traiga, que es lo normal (Hidalgo y Chiapas, oct-2026).
+
+    Solo la de nombre, a propósito. Una pareja «por uso» (remisiones de la
+    serie X ligadas a facturas de la serie Y) la arma UNA sola factura mal
+    ligada: una remisión de Hidalgo facturada por error en ZEHMOVH hacía que
+    Tabasco «se llevara» RZEHMOHOS, y como el alcance es por serie, su clave
+    leía todas las remisiones de Hidalgo. En prod (3-oct-2026) todas las
+    parejas por uso no canceladas ya eran de nombre: no aportaba nada."""
+    remisiones = set(series_de_remision(db, tenant_id))
+    return {f: [f"R{f}"] for f in sorted(series_factura(db, tenant_id)) if f"R{f}" in remisiones}
+
+
 def opciones(db: Session, tenant_id) -> dict:
     """Lo que se le puede compartir a una cuenta: cada plaza con sus series de
     factura, sus series de remisión y los perfiles por los que entran sus OC,
-    más todo lo suelto. La pantalla marca la plaza y se lleva lo suyo."""
+    más todo lo suelto. La pantalla marca la plaza y se lleva TODO lo suyo.
+
+    Las series de remisión de una plaza son las de sus vínculos cliente×plaza
+    (la de remisión y las del abanico), la pareja de cada una de sus series de
+    factura (`pares_de_remision`) y las de las remisiones que se le entregaron
+    en los últimos 93 días. Sin la pareja, una plaza cuyos vínculos solo traen
+    la serie de factura (Chiapas) salía sin ninguna, y una serie cuyas
+    remisiones no tienen fecha de entrega (RRIO de Hidalgo) no se ofrecía.
+
+    Las que salen solo del uso no se ofrecen si son de OTRA plaza (por vínculo
+    o por pareja): el alcance es por serie, así que una remisión de Hidalgo
+    capturada con sucursal Tabasco le daría a la clave de Tabasco todas las de
+    Hidalgo. El uso queda para series que no son de nadie."""
     plazas: dict[str, dict] = {}
     for k, (nombre, codigos) in series_por_plaza(db, tenant_id).items():
         plazas[k] = {"nombre": nombre, "series": set(codigos), "series_remision": set(),
@@ -228,22 +265,56 @@ def opciones(db: Session, tenant_id) -> dict:
                 Serie.tipo_documento == "REMISION")
         .all()
     )
+    rem_abanico = (
+        db.query(Sucursal.nombre, Serie.codigo)
+        .join(ClienteSucursal, ClienteSucursal.sucursal_id == Sucursal.id)
+        .join(ClienteSucursalSerie, ClienteSucursalSerie.cliente_sucursal_id == ClienteSucursal.id)
+        .join(Serie, Serie.id == ClienteSucursalSerie.serie_id)
+        .filter(ClienteSucursal.tenant_id == tenant_id, vivas,
+                Serie.tipo_documento == "REMISION")
+        .all()
+    )
     desde = date.today() - timedelta(days=93)
+    # La misma fecha con la que se leen (remisiones_entregadas): la capturada o
+    # la de remisión. Con solo la capturada, una serie cuyas remisiones se
+    # capturan a mano no se ofrecía nunca. Las canceladas no cuentan: una
+    # RZEHMOHOS capturada en Tabasco por error y cancelada («NO TOMAR EN
+    # CUENTA») metía la serie de Hidalgo en Tabasco.
+    entregada = sa.func.coalesce(Remision.fecha_entrega, Remision.fecha_remision)
     rem_uso = (
         db.query(Sucursal.nombre, Serie.codigo)
         .join(Remision, Remision.sucursal_id == Sucursal.id)
         .join(Serie, Serie.id == Remision.serie_id)
         .filter(Remision.tenant_id == tenant_id, vivas, Remision.deleted_at.is_(None),
-                Remision.fecha_entrega >= desde, Serie.tipo_documento == "REMISION")
+                Remision.estado != "CANCELADA",
+                entregada >= desde, Serie.tipo_documento == "REMISION")
         .distinct()
         .all()
     )
-    for nombre, codigo in list(rem_vinculo) + list(rem_uso):
+
+    def _agrega(nombre: str, codigo: str) -> None:
         k = clave_nombre(nombre)
         if k:
             plazas.setdefault(k, {"nombre": nombre.strip(), "series": set(),
                                   "series_remision": set(), "perfiles": set()})
             plazas[k]["series_remision"].add(codigo)
+
+    for nombre, codigo in list(rem_vinculo) + list(rem_abanico):
+        _agrega(nombre, codigo)
+    pares = pares_de_remision(db, tenant_id)
+    for v in plazas.values():
+        for c in v["series"]:
+            v["series_remision"].update(pares.get(c, []))
+
+    # De quién es cada serie de remisión ANTES de mirar el uso.
+    duenas: dict[str, set[str]] = {}
+    for k, v in plazas.items():
+        for c in v["series_remision"]:
+            duenas.setdefault(c, set()).add(k)
+    for nombre, codigo in rem_uso:
+        k = clave_nombre(nombre)
+        if k and not (duenas.get(codigo, set()) - {k}):
+            _agrega(nombre, codigo)
 
     vistos = perfiles_vistos(db, tenant_id)
     for p, nombre in vistos.items():
@@ -260,6 +331,7 @@ def opciones(db: Session, tenant_id) -> dict:
         "series": series_factura(db, tenant_id),
         "series_remision": series_de_remision(db, tenant_id),
         "perfiles": sorted(vistos),
+        "pares": pares,
     }
 
 
@@ -369,7 +441,7 @@ def facturas_del_rango(db: Session, tenant_id, series: Optional[frozenset[str]],
     """{factura_id: (fecha de la factura, fecha de entrega, de dónde salió)} de
     las facturas timbradas de ingreso de esas series cuya fecha `por`
     («entrega» o «factura») cae en [desde, hasta]."""
-    fecha_mx = sa.cast(sa.func.timezone(ZONA, Factura.fecha), sa.Date)
+    fecha_mx = dia_de_factura()
     base = [
         Factura.tenant_id == tenant_id,
         Factura.estado == "TIMBRADA",
@@ -385,11 +457,15 @@ def facturas_del_rango(db: Session, tenant_id, series: Optional[frozenset[str]],
         filas = (db.query(Factura.id, Factura.notas, fecha_mx)
                  .filter(*base, fecha_mx >= desde, fecha_mx <= hasta).all())
     else:
+        # La de la remisión: la capturada o, sin ella, la de remisión
+        # (fechas_de_entrega). Las que salen de las notas ya caen en el rango
+        # ensanchado de abajo.
+        entrega_rem = sa.func.coalesce(Remision.fecha_entrega, Remision.fecha_remision)
         con_remision = (
             db.query(Remision.factura_id)
             .filter(Remision.tenant_id == tenant_id, Remision.deleted_at.is_(None),
                     Remision.factura_id.isnot(None),
-                    Remision.fecha_entrega >= desde, Remision.fecha_entrega <= hasta)
+                    entrega_rem >= desde, entrega_rem <= hasta)
         )
         filas = (
             db.query(Factura.id, Factura.notas, fecha_mx)

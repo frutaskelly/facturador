@@ -67,7 +67,7 @@ plaza sí la ven todas las claves que tienen su perfil.
 | `GET /smart-supply/alcance` | — | — | `empresa{id,nombre}`, `conexion{id,nombre,pista}` (null si es persona), `sin_limite`, `plaza`, `series`, `series_remision`, `perfiles`, `remisiones`, `oc`, `catalogo`, `plazas[{nombre,series,series_remision,perfiles}]`, `zona_horaria`, `max_dias`, `max_limit`. Sirve para probar y guardar la clave. |
 | `GET /smart-supply/oc` | `desde`+`hasta` sobre `campo` = `actualizado` (default), `recibida` o `entrega`; y/o `actualizado_desde` (ISO, ≤ 93 días; sin zona se toma UTC); `estado`, `canal` (csv) | (`actualizado_at`, `id`) | Una fila por OC, DESCARTADA incluida: `id, canal, origen_externo, perfil, folio_externo, remitente, archivo_nombre, recibida_at, fecha_entrega, estado, motivo, cliente_id, cliente, plaza, punto_entrega, proyecto, partidas, documento, cambio_abierto, cambio_resumen, remision{id,folio,serie,estado,fecha_entrega,total}, factura{id,serie,folio,uuid,estado,origen}, actualizado_at`. `actualizado_at = greatest(oc, remisión, factura).updated_at`. |
 | `GET /smart-supply/oc-lineas` | `desde`, `hasta` (sobre la entrega) | (`oc_id`, `numero`) | Partidas del documento vigente: `payload_nuevo` si trae partidas, si no `payload`. Excepción: si el cambio se cerró porque el documento volvió a coincidir con la remisión, manda `payload`. Solo PENDIENTE y ASIGNADA. Campos: `oc_id, numero, documento, cambio_abierto, perfil, folio_externo, fecha_entrega, estado, cliente_id, plaza, remision_id, remision_folio, remision_estado, clave_doc, clave (normalizada), descripcion, unidad_doc, cantidad`. Van sin cruzar a producto; el cruce es la remisión. |
-| `GET /smart-supply/remisionado` | `desde`, `hasta` (sobre `fecha_entrega`), `series` | (`remision_id`, `numero_linea`) | Líneas de remisiones no canceladas: `remision_id, numero_linea, folio, serie, estado, fecha_entrega, factura_id, facturada, su_pedido, cliente_id, cliente, plaza, punto_entrega, producto_id, sku, producto, clave (SAE de la presentación), clave_producto, presentacion, cantidad_solicitada, cantidad_surtida, cantidad (el peso real si es de peso variable), unidad, factor_kg, kg, kg_estimado, precio_unitario, importe (con el descuento del encabezado prorrateado)`. |
+| `GET /smart-supply/remisionado` | `desde`, `hasta` (sobre `fecha_entrega`), `series` | (`remision_id`, `numero_linea`) | Líneas de remisiones no canceladas: `remision_id, numero_linea, folio, serie, estado, fecha_entrega, fecha_entrega_origen (entrega\|notas\|fecha_remision), factura_id, facturada, su_pedido, cliente_id, cliente, plaza, punto_entrega, producto_id, sku, producto, clave (SAE de la presentación), clave_producto, presentacion, cantidad_solicitada, cantidad_surtida, cantidad (el peso real si es de peso variable), unidad, factor_kg, kg, kg_estimado, precio_unitario, importe (con el descuento del encabezado prorrateado)`. |
 | `GET /smart-supply/facturado` | `desde`, `hasta`, `fecha` = `entrega` (default) o `factura`, `series` | (`factura_id`, `numero_linea`) | Líneas de facturas TIMBRADA tipo I, nativas y espejo: `factura_id, numero_linea, origen, espejo_empresa, serie, folio, uuid, fecha_factura, fecha_entrega, fecha_entrega_origen (remision\|notas\|factura), cliente_id, cliente, su_pedido, remision_ids[], producto_id, sku, producto, clave_sae, descripcion, presentacion, clave_unidad, unidad, cantidad, factor_kg, kg, kg_estimado, importe`. |
 | `GET /smart-supply/catalogo` | — | `id` | Productos no borrados (activos y desactivados): `id, sku, nombre, categoria, unidad_base, unidad_sat, peso_variable, activo, clave_sae, presentaciones{PRES:{factor,clave_sae,sat,estimado}}`. No lleva precios ni costos. |
 
@@ -123,9 +123,26 @@ Notas de datos:
   (`services/espejo_productos.py`). Aquí no se recalculan, porque dos copias de
   la regla darían dos respuestas distintas. Una partida que no cruzó sale con
   `producto_id: null` y su `clave_sae`.
-- La fecha de entrega del facturado sale de la remisión ligada (la primera), si
-  no de las notas de la factura y, si tampoco, de la fecha de la factura. Es la
-  misma regla que usa Mini Conta (`services/mini_conta.fechas_de_entrega`).
+- La fecha de entrega del **remisionado** es la capturada en la remisión
+  (`fecha_entrega_origen: entrega`). La captura manual no la pide: el 3-oct-2026,
+  122 de las 123 remisiones MANUAL desde el 25-ago no la traían y esta ruta
+  filtraba solo por ella, así que nunca llegaban (98 remisiones de Hidalgo,
+  $1.07 M, y 4 de Tabasco). Sin ella, la remisión sale con la fecha que dicen
+  las notas de su factura timbrada (`notas`) o, si no, con su fecha de remisión
+  (`fecha_remision`, el día que se hizo: una aproximación). Es
+  `services/mini_conta.remisiones_entregadas`, la misma que lee Mini Conta.
+- La fecha de entrega del **facturado** sale de la remisión ligada (la primera
+  capturada), si no de las notas de la factura, si no de la fecha de remisión
+  de su remisión (sale como `remision`) y, si tampoco, de la fecha de la
+  factura. Una remisión sin fecha de entrega y su factura caen así el mismo
+  día. Es la misma regla que usa Mini Conta
+  (`services/mini_conta.fechas_de_entrega`).
+- `fecha_factura` es el día de México del timbre. Las del espejo del SAE traen
+  solo la fecha (sin hora) y se guardan como medianoche UTC: su día es el de
+  UTC. Hasta el 3-oct-2026 salían con el día anterior (ZEHMOVH1542, del 2-oct,
+  decía 1-oct) y la ventana por fecha de factura dejaba fuera la del borde.
+  Al desplegar el arreglo, la siguiente vuelta nocturna (93 días) las pone en su
+  día; la copia se reemplaza por `factura_id`, así que no se duplican.
 - La llave del facturado es `(factura_id, numero_linea)`. El espejo borra y
   recrea las líneas en cada reenvío, así que el `id` de línea no sirve de
   llave.

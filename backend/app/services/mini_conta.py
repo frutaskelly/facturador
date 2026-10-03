@@ -21,6 +21,7 @@ clientes, solo ventas, hasta que el dueño le ponga un límite. Una PERSONA con
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Optional
 from uuid import UUID
 
@@ -259,33 +260,135 @@ def mapa(db: Session, tenant_id, alcance: Alcance) -> dict:
     }
 
 
+ZONA = "America/Mexico_City"
+
+
+def dia_mx(columna, origen):
+    """El día de México de un documento, como expresión SQL.
+
+    Lo nativo es un instante (la hora del timbre) y se pasa a la hora de México.
+    Lo que trae el espejo del SAE no lo es: `FECHA_DOC` es una fecha sin hora,
+    llega como «2026-10-02 00:00:00» y se guarda como medianoche UTC. Pasarla a
+    México la corría al día ANTERIOR (ZEHMOVH1542: SAE 2-oct, Mini Conta y Smart
+    Supply leían 1-oct; pasaba con todas las facturas y REP del espejo). Para
+    esas, el día es el de UTC, el mismo que ya usan Reportes y el Master.
+
+    `origen` es la columna `origen` de la misma tabla (facturas, recibos_pago)."""
+    return sa.case(
+        (origen == "ESPEJO_SAE", sa.cast(sa.func.timezone("UTC", columna), sa.Date)),
+        else_=sa.cast(sa.func.timezone(ZONA, columna), sa.Date),
+    )
+
+
+def dia_de_factura():
+    """El día de la factura (de México; el del SAE si es espejo)."""
+    return dia_mx(Factura.fecha, Factura.origen)
+
+
 def fechas_de_entrega(db: Session, facturas: dict) -> dict:
     """{factura_id: (fecha de entrega, de dónde salió)} para {factura_id: (notas,
-    fecha de la factura)}: la primera entrega de sus remisiones, si no la que
-    dicen sus notas, si no la de la factura. Una consulta para todas.
+    fecha de la factura)}. Una consulta para todas. En orden:
+
+    1. `remision`: la primera fecha de entrega CAPTURADA de sus remisiones.
+    2. `notas`: la que dicen sus notas.
+    3. `remision`: la primera fecha de REMISIÓN de sus remisiones, si ninguna
+       trae la de entrega (la captura manual no la pide). Es la misma fecha con
+       la que esa remisión sale en lo remisionado (`remisiones_entregadas`), así
+       que factura y remisión caen el mismo día. Sale como `remision` porque de
+       ahí viene: Mini Conta solo acepta remision/notas/factura.
+    4. `factura`: la de la factura.
 
     Vive aquí y no en el router porque la usan Mini Conta y el panel de Smart
     Supply (services/smart_supply.py): dos copias darían dos fechas distintas
     para la misma factura."""
-    por_remision: dict = {}
+    capturada: dict = {}
+    de_remision: dict = {}
     if facturas:
-        por_remision = dict(
-            db.query(Remision.factura_id, sa.func.min(Remision.fecha_entrega))
+        for fid, entrega, fecha_rem in (
+            db.query(Remision.factura_id, sa.func.min(Remision.fecha_entrega),
+                     sa.func.min(Remision.fecha_remision))
             .filter(
                 Remision.factura_id.in_(list(facturas)),
                 Remision.deleted_at.is_(None),
-                Remision.fecha_entrega.isnot(None),
             )
             .group_by(Remision.factura_id)
             .all()
-        )
+        ):
+            if entrega is not None:
+                capturada[fid] = entrega
+            if fecha_rem is not None:
+                de_remision[fid] = fecha_rem
     out = {}
     for fid, (notas, fecha_factura) in facturas.items():
-        if por_remision.get(fid) is not None:
-            out[fid] = (por_remision[fid], "remision")
+        if capturada.get(fid) is not None:
+            out[fid] = (capturada[fid], "remision")
+            continue
+        de_notas = fecha_entrega_de_notas(notas, fecha_factura)
+        if de_notas is not None:
+            out[fid] = (de_notas, "notas")
+        elif de_remision.get(fid) is not None:
+            out[fid] = (de_remision[fid], "remision")
         else:
-            de_notas = fecha_entrega_de_notas(notas, fecha_factura)
-            out[fid] = (de_notas, "notas") if de_notas is not None else (fecha_factura, "factura")
+            out[fid] = (fecha_factura, "factura")
+    return out
+
+
+# Una remisión sin fecha de entrega se busca por su fecha de remisión con este
+# margen: la de las notas de su factura vale entre factura−120 y factura+7 días
+# (services/fecha_entrega.py) y la factura va después de la remisión.
+_SIN_ENTREGA_MARGEN = 130
+
+
+def remisiones_entregadas(db: Session, tenant_id, desde, hasta, *,
+                          serie_ids=None) -> dict:
+    """{remision_id: (fecha de entrega, de dónde salió)} de las remisiones no
+    canceladas (de esas series de REMISIÓN, si se dicen) que se entregaron
+    entre `desde` y `hasta`. Es lo que leen Mini Conta y Smart Supply como
+    «lo remisionado».
+
+    La fecha es la capturada (`entrega`). La captura manual no la pide —122 de
+    las 123 remisiones MANUAL desde el 25-ago-2026 no la traen— y filtrar solo
+    por ella las dejaba fuera de los dos sistemas sin decir nada (98 remisiones
+    de Hidalgo, $1.07 M). Sin ella:
+
+    - `notas`: la que dicen las notas de su factura timbrada, la misma que toma
+      esa factura (`fechas_de_entrega`): remisión y factura caen el mismo día.
+    - `fecha_remision`: el día que se hizo la remisión, a uno o dos días de la
+      entrega. Es una aproximación y por eso se dice.
+    """
+    base = [
+        Remision.tenant_id == tenant_id,
+        Remision.deleted_at.is_(None),
+        Remision.estado != "CANCELADA",
+    ]
+    if serie_ids is not None:
+        if not serie_ids:
+            return {}
+        base.append(Remision.serie_id.in_(list(serie_ids)))
+
+    out = {
+        rid: (entrega, "entrega")
+        for rid, entrega in db.query(Remision.id, Remision.fecha_entrega)
+        .filter(*base, Remision.fecha_entrega >= desde, Remision.fecha_entrega <= hasta)
+        .all()
+    }
+    margen = timedelta(days=_SIN_ENTREGA_MARGEN)
+    sin_fecha = (
+        db.query(Remision.id, Remision.fecha_remision, Factura.notas,
+                 dia_de_factura().label("dia_factura"))
+        .outerjoin(Factura, sa.and_(Factura.id == Remision.factura_id,
+                                    Factura.deleted_at.is_(None),
+                                    Factura.estado == "TIMBRADA"))
+        .filter(*base, Remision.fecha_entrega.is_(None),
+                Remision.fecha_remision >= desde - margen,
+                Remision.fecha_remision <= hasta + margen)
+        .all()
+    )
+    for rid, fecha_rem, notas, dia_factura in sin_fecha:
+        de_notas = fecha_entrega_de_notas(notas, dia_factura) if dia_factura else None
+        entrega, origen = (de_notas, "notas") if de_notas is not None else (fecha_rem, "fecha_remision")
+        if desde <= entrega <= hasta:
+            out[rid] = (entrega, origen)
     return out
 
 

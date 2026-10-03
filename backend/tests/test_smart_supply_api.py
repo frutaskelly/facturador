@@ -7,10 +7,12 @@ paginan por llave sin saltarse ni repetir líneas aunque el espejo recree una
 factura entre página y página.
 """
 import base64
+import importlib.util
 import json
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from sqlalchemy import text
@@ -21,13 +23,15 @@ from app.core.db import SessionLocal
 from app.core.rbac import AuthContext
 from app.main import app
 from app.models import (
-    Cliente, ClienteSucursal, Conexion, Factura, LineaFactura, LineaRemision, Membership,
-    OCRecibida, Producto, Remision, Role, Serie, Sucursal, Tenant, User,
+    Cliente, ClienteSucursal, ClienteSucursalSerie, Conexion, Factura, LineaFactura,
+    LineaRemision, Membership, OCRecibida, Producto, Remision, Role, Serie, Sucursal, Tenant,
+    User,
 )
 
 _PURGE = (
     "lineas_remision", "lineas_factura", "oc_recibidas", "remisiones", "facturas",
-    "cliente_sucursales", "sucursales", "series", "conexiones", "productos", "clientes",
+    "cliente_sucursal_series", "cliente_sucursales", "sucursales", "series", "conexiones",
+    "productos", "clientes",
 )
 
 _SANDIA_PRES = {
@@ -460,6 +464,210 @@ def test_opciones_por_plaza(client, env, auth_as):
     assert "EHMO:villahermosa" in o["perfiles"] and "EHMO:ehmo" in o["perfiles"]
 
 
+def test_la_plaza_se_lleva_todas_sus_series_de_remision(client, env, auth_as):
+    """Lo que el dueño reportó el 3-oct-2026: al escoger la plaza no se marcaban
+    las series de remisión. Chiapas: sus vínculos solo traen la serie de
+    FACTURA y no tiene remisiones recientes, así que salía sin ninguna y había
+    que marcar las 8 a mano. Hidalgo: RRIO no salía porque sus remisiones no
+    tienen fecha de entrega. Ahora la plaza se lleva la pareja R{factura} de
+    cada una de sus series, las del abanico y las de remisiones sin fecha de
+    entrega; una pareja que no existe no se inventa y una ajena no se cuela."""
+    db = SessionLocal()
+    try:
+        ta = env["ta"]
+        chis = Sucursal(tenant_id=ta, nombre="Chiapas")
+        tg = Serie(tenant_id=ta, codigo="ZEHMOTG", tipo_documento="FACTURA")
+        sur = Serie(tenant_id=ta, codigo="ZSUR", tipo_documento="FACTURA")  # sin pareja
+        rio = Serie(tenant_id=ta, codigo="RIO", tipo_documento="FACTURA")
+        rrio = Serie(tenant_id=ta, codigo="RRIO", tipo_documento="REMISION")
+        rabanico = Serie(tenant_id=ta, codigo="RCHISX", tipo_documento="REMISION")
+        db.add_all([chis, tg, sur, rio, rrio, rabanico,
+                    Serie(tenant_id=ta, codigo="RZEHMOTG", tipo_documento="REMISION"),
+                    Serie(tenant_id=ta, codigo="RZOTRA", tipo_documento="REMISION")])
+        db.flush()
+        cli = db.query(Cliente).filter(Cliente.tenant_id == ta).first()
+        otro = Cliente(tenant_id=ta, codigo="SUR", legal_name="SUREÑA SS", rfc="XAXX010101000")
+        db.add(otro); db.flush()
+        v_tg = ClienteSucursal(tenant_id=ta, cliente_id=cli.id, sucursal_id=chis.id,
+                               serie_factura_id=tg.id)
+        db.add_all([
+            v_tg,
+            ClienteSucursal(tenant_id=ta, cliente_id=otro.id, sucursal_id=chis.id,
+                            serie_factura_id=sur.id),
+        ])
+        db.flush()
+        db.add(ClienteSucursalSerie(tenant_id=ta, cliente_sucursal_id=v_tg.id,
+                                    serie_id=rabanico.id))
+        hgo = db.query(Sucursal).filter(Sucursal.tenant_id == ta,
+                                        Sucursal.nombre == "Hidalgo").one()
+        # RRIO en Hidalgo: capturada a mano, sin fecha de entrega.
+        db.add(Remision(tenant_id=ta, folio_interno=f"RRIO-{uuid.uuid4().hex[:6]}",
+                        cliente_facturacion_id=cli.id, sucursal_id=hgo.id, serie_id=rrio.id,
+                        fecha_remision=date.today(), fecha_entrega=None))
+        # Una de Hidalgo capturada en Tabasco por error y cancelada: no cuenta.
+        rhos = db.query(Serie).filter(Serie.tenant_id == ta, Serie.codigo == "RZEHMOHOS").one()
+        tab = db.query(Sucursal).filter(Sucursal.tenant_id == ta,
+                                        Sucursal.nombre == "Tabasco").one()
+        db.add(Remision(tenant_id=ta, folio_interno=f"RZHOS-X-{uuid.uuid4().hex[:6]}",
+                        cliente_facturacion_id=cli.id, sucursal_id=tab.id, serie_id=rhos.id,
+                        fecha_remision=date.today(), fecha_entrega=None, estado="CANCELADA",
+                        su_pedido="NO TOMAR EN CUENTA"))
+        db.commit()
+    finally:
+        db.close()
+
+    auth_as(env["dueno_a"])
+    o = client.get("/api/v1/conexiones/SMART_SUPPLY_PANEL/opciones",
+                   headers=_hdr(env["dueno_a"])).json()
+    plazas = {p["nombre"]: p for p in o["plazas"]}
+    assert plazas["Chiapas"]["series"] == ["ZEHMOTG", "ZSUR"]
+    assert plazas["Chiapas"]["series_remision"] == ["RCHISX", "RZEHMOTG"]
+    assert "RRIO" in plazas["Hidalgo"]["series_remision"]
+    # Las de antes siguen igual: el vínculo ya las traía.
+    assert plazas["Tabasco"]["series_remision"] == ["RZEHMOVH"]
+    # La pantalla marca la pareja al marcar la factura sin adivinar el nombre.
+    assert o["pares"]["ZEHMOTG"] == ["RZEHMOTG"] and o["pares"]["RIO"] == ["RRIO"]
+    assert "ZSUR" not in o["pares"]
+
+
+def test_una_captura_cruzada_no_le_presta_a_la_plaza_series_ajenas(client, env, auth_as):
+    """Revisión del PR #336. El alcance es por SERIE: ofrecerle a Tabasco una
+    serie de Hidalgo le da a su clave TODAS las remisiones de Hidalgo. Dos
+    puertas por donde se colaba con una sola captura mal hecha:
+    - una remisión de Hidalgo facturada por error en ZEHMOVH (timbrada) hacía
+      la pareja «por uso» ZEHMOVH → RZEHMOHOS;
+    - una remisión RZEHMOHOS capturada con sucursal Tabasco y NO cancelada
+      metía la serie por el uso de la plaza.
+    La pareja es solo la de nombre y el uso no presta series que son de otra
+    plaza; una serie que no es de nadie sí se sigue ofreciendo por uso."""
+    db = SessionLocal()
+    try:
+        ta = env["ta"]
+        cli = db.query(Cliente).filter(Cliente.tenant_id == ta).first()
+        hgo = db.query(Sucursal).filter(Sucursal.tenant_id == ta,
+                                        Sucursal.nombre == "Hidalgo").one()
+        tab = db.query(Sucursal).filter(Sucursal.tenant_id == ta,
+                                        Sucursal.nombre == "Tabasco").one()
+        rhos = db.query(Serie).filter(Serie.tenant_id == ta, Serie.codigo == "RZEHMOHOS").one()
+        huerfana = Serie(tenant_id=ta, codigo="RTABX", tipo_documento="REMISION")
+        db.add(huerfana)
+        f = Factura(tenant_id=ta, serie="ZEHMOVH", folio=9999, cliente_id=cli.id,
+                    estado="TIMBRADA", tipo_comprobante="I", uuid=str(uuid.uuid4()),
+                    fecha=_utc(2026, 9, 10), origen="ESPEJO_SAE", espejo_empresa="03")
+        db.add(f); db.flush()
+        db.add_all([
+            # Puerta 1: de Hidalgo, facturada en la serie de Tabasco.
+            Remision(tenant_id=ta, folio_interno=f"RZHOS-FX-{uuid.uuid4().hex[:6]}",
+                     cliente_facturacion_id=cli.id, sucursal_id=hgo.id, serie_id=rhos.id,
+                     fecha_remision=date.today(), fecha_entrega=date.today(),
+                     estado="FACTURADA", factura_id=f.id),
+            # Puerta 2: serie de Hidalgo con sucursal Tabasco, viva.
+            Remision(tenant_id=ta, folio_interno=f"RZHOS-TX-{uuid.uuid4().hex[:6]}",
+                     cliente_facturacion_id=cli.id, sucursal_id=tab.id, serie_id=rhos.id,
+                     fecha_remision=date.today(), fecha_entrega=None),
+            # Una serie que no es de ninguna plaza: el uso la sigue ofreciendo.
+            Remision(tenant_id=ta, folio_interno=f"RTABX-{uuid.uuid4().hex[:6]}",
+                     cliente_facturacion_id=cli.id, sucursal_id=tab.id, serie_id=huerfana.id,
+                     fecha_remision=date.today(), fecha_entrega=None),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    auth_as(env["dueno_a"])
+    o = client.get("/api/v1/conexiones/SMART_SUPPLY_PANEL/opciones",
+                   headers=_hdr(env["dueno_a"])).json()
+    plazas = {p["nombre"]: p for p in o["plazas"]}
+    assert o["pares"] == {"ZEHMOHOS": ["RZEHMOHOS"], "ZEHMOVH": ["RZEHMOVH"]}
+    assert plazas["Tabasco"]["series_remision"] == ["RTABX", "RZEHMOVH"]
+    assert plazas["Hidalgo"]["series_remision"] == ["RZEHMOHOS"]
+    # «Marcar todo lo de Tabasco» = lo que ofrece su plaza: no lee lo de Hidalgo.
+    tab = plazas["Tabasco"]
+    k = _clave(client, env["dueno_a"], series=tab["series"],
+               series_remision=tab["series_remision"], perfiles=tab["perfiles"])
+    _sin_sesion()
+    rem, _ = _todas(client, _bearer(k["clave"]), "/api/v1/smart-supply/remisionado", _SEP)
+    ids = {i["remision_id"] for i in rem}
+    assert env["rem_vh1"] in ids and env["rem_hgo"] not in ids
+
+
+# ─── la bitácora ─────────────────────────────────────────────────────────────
+
+def test_cada_cambio_de_la_clave_queda_en_su_bitacora(client, env, auth_as):
+    """Lo que comparte una cuenta se corrige en su lugar (sin clave nueva) y
+    Smart Supply lo aplica en su siguiente vuelta: cada cambio deja quién,
+    cuándo, el antes y el después. Guardar sin cambiar nada no ensucia, la
+    clave nueva conserva la historia y la clave NUNCA aparece."""
+    auth_as(env["dueno_a"])
+    h = _hdr(env["dueno_a"])
+    nueva = _clave(client, env["dueno_a"])
+    cid = nueva["conexion"]["id"]
+    sin_rem = {**_TABASCO, "series_remision": [], "remisiones": False}
+    assert client.patch(f"/api/v1/conexiones/{cid}", headers=h,
+                        json={"alcance_panel": sin_rem}).status_code == 200
+    assert client.patch(f"/api/v1/conexiones/{cid}", headers=h,
+                        json={"alcance_panel": sin_rem}).status_code == 200   # igual: no anota
+    r = client.post(f"/api/v1/conexiones/{cid}/regenerar", headers=h)
+    otra = r.json()
+    oid = otra["conexion"]["id"]
+    assert client.post(f"/api/v1/conexiones/{oid}/revocar", headers=h).status_code == 200
+
+    r = client.get(f"/api/v1/conexiones/{oid}/cambios", headers=h)
+    assert r.status_code == 200, r.text
+    cambios = r.json()
+    assert [c["accion"] for c in cambios] == [
+        "DESCONECTADA", "CLAVE_NUEVA", "DESCONECTADA", "EDITADA", "CREADA"]
+    editada = cambios[3]
+    assert editada["alcance_antes"]["series_remision"] == ["RZEHMOVH"]
+    assert editada["alcance_despues"]["series_remision"] == []
+    assert editada["hecho_por"] == "ss-owner-a"
+    assert cambios[1]["clave_pista"] == otra["conexion"]["clave_pista"]
+    texto = r.text
+    assert nueva["clave"] not in texto and otra["clave"] not in texto
+    # Otro inquilino no la ve.
+    auth_as(env["dueno_b"])
+    assert client.get(f"/api/v1/conexiones/{oid}/cambios",
+                      headers=_hdr(env["dueno_b"])).status_code == 404
+
+
+class _OpEnConexion:
+    """Lo único de `alembic.op` que usa la 0101, sobre una conexión cualquiera."""
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    def execute(self, sql):
+        self.conn.exec_driver_sql(sql)
+
+
+def test_la_bitacora_es_append_only_para_app_user(db_engine):
+    """El GRANT SELECT, INSERT de la 0101 no bastaba: los privilegios por
+    omisión del esquema ya le daban UPDATE y DELETE a app_user (en prod
+    también: pg_default_acl postgres/public = app_user=arwd). La migración se
+    corre aquí dos veces (es idempotente) dentro de una transacción que se
+    deshace, así que la BD de pruebas compartida no cambia."""
+    ruta = Path(__file__).resolve().parents[1] / "migrations" / "versions" / "0101_conexion_cambios.py"
+    spec = importlib.util.spec_from_file_location("migracion_0101", ruta)
+    mig = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mig)
+    with db_engine.connect() as conn:
+        trans = conn.begin()
+        try:
+            mig.op = _OpEnConexion(conn)
+            mig.upgrade()
+            mig.upgrade()
+            puede = {
+                p: conn.execute(text(
+                    "SELECT has_table_privilege('app_user', 'conexion_cambios', :p)"),
+                    {"p": p}).scalar()
+                for p in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE")
+            }
+        finally:
+            trans.rollback()
+    assert puede == {"SELECT": True, "INSERT": True, "UPDATE": False, "DELETE": False,
+                     "TRUNCATE": False}
+
+
 # ─── lo que lee ──────────────────────────────────────────────────────────────
 
 def test_alcance(client, env, auth_as):
@@ -643,6 +851,129 @@ def test_remisionado(client, env, auth_as):
     assert s["importe"] == "450.00"
     j = por[(env["rem_vh2"], 1)]
     assert j["clave"] == "JITOMATEKG" and j["kg"] == "12" and j["facturada"] is False
+
+
+def test_remisionado_sin_fecha_de_entrega(client, env, auth_as):
+    """Hidalgo perdía 98 remisiones ($1.07 M) y Tabasco 4: capturadas a mano, sin
+    fecha de entrega, y `/remisionado` filtraba solo por ella. Ahora salen con la
+    de las notas de su factura o, si no, con la de remisión, y lo dicen; la
+    factura de una así cae el mismo día en `/facturado`."""
+    db = SessionLocal()
+    try:
+        ta = env["ta"]
+        cli = db.query(Cliente).filter(Cliente.tenant_id == ta).first()
+        tab = db.query(Sucursal).filter(Sucursal.tenant_id == ta,
+                                        Sucursal.nombre == "Tabasco").one()
+        rvh = db.query(Serie).filter(Serie.tenant_id == ta, Serie.codigo == "RZEHMOVH").one()
+        jitomate = db.get(Producto, uuid.UUID(env["jitomate"]))
+        fac = Factura(tenant_id=ta, serie="ZEHMOVH", folio=1354, cliente_id=cli.id,
+                      estado="TIMBRADA", tipo_comprobante="I", uuid=str(uuid.uuid4()),
+                      fecha=datetime(2026, 9, 6, tzinfo=timezone.utc), origen="ESPEJO_SAE",
+                      espejo_empresa="03",
+                      notas="OC VH-36JUA-VIE SEM 36 HOSPITAL JUAN GRAHAM 04 SEPTIEMBRE 2026")
+        fac_sin = Factura(tenant_id=ta, serie="ZEHMOVH", folio=1356, cliente_id=cli.id,
+                          estado="TIMBRADA", tipo_comprobante="I", uuid=str(uuid.uuid4()),
+                          fecha=datetime(2026, 9, 14, tzinfo=timezone.utc), origen="ESPEJO_SAE",
+                          espejo_empresa="03", notas="OC 624")
+        db.add_all([fac, fac_sin]); db.flush()
+        ids = {}
+        for nombre, fecha_rem, f in (("RZEHMOVH53", date(2026, 9, 3), fac),
+                                     ("RZEHMOVH55", date(2026, 9, 5), fac_sin),
+                                     ("RZEHMOVH60", date(2026, 9, 24), None)):
+            r = Remision(tenant_id=ta, folio_interno=f"{nombre}-{uuid.uuid4().hex[:6]}",
+                         cliente_facturacion_id=cli.id, sucursal_id=tab.id, serie_id=rvh.id,
+                         fecha_remision=fecha_rem, fecha_entrega=None,
+                         estado="FACTURADA" if f else "BORRADOR",
+                         factura_id=f.id if f else None, canal="MANUAL",
+                         subtotal=Decimal("100"), total=Decimal("100"))
+            db.add(r); db.flush()
+            db.add(LineaRemision(tenant_id=ta, remision_id=r.id, numero_linea=1,
+                                 producto_id=jitomate.id, presentacion="KILO",
+                                 cantidad_solicitada=Decimal("5"),
+                                 precio_unitario=Decimal("20"), importe=Decimal("100")))
+            if f is not None:
+                db.add(LineaFactura(
+                    tenant_id=ta, factura_id=f.id, numero_linea=1, producto_id=jitomate.id,
+                    clave_sae="JITOMATEKG", clave_prod_serv="01010101", clave_unidad="KGM",
+                    descripcion="JITOMATE", cantidad=Decimal("5"), valor_unitario=Decimal("20"),
+                    importe=Decimal("100"), descuento=Decimal("0")))
+            ids[nombre] = str(r.id)
+        db.commit()
+        ids["fac"], ids["fac_sin"] = str(fac.id), str(fac_sin.id)
+    finally:
+        db.close()
+
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"])["clave"]
+    _sin_sesion()
+    h = _bearer(clave)
+    items, _ = _todas(client, h, "/api/v1/smart-supply/remisionado", _SEP)
+    por = {i["remision_id"]: i for i in items}
+    assert (por[ids["RZEHMOVH53"]]["fecha_entrega"],
+            por[ids["RZEHMOVH53"]]["fecha_entrega_origen"]) == ("2026-09-04", "notas")
+    assert (por[ids["RZEHMOVH55"]]["fecha_entrega"],
+            por[ids["RZEHMOVH55"]]["fecha_entrega_origen"]) == ("2026-09-05", "fecha_remision")
+    assert (por[ids["RZEHMOVH60"]]["fecha_entrega"],
+            por[ids["RZEHMOVH60"]]["fecha_entrega_origen"]) == ("2026-09-24", "fecha_remision")
+    assert por[ids["RZEHMOVH60"]]["facturada"] is False
+    assert por[env["rem_vh1"]]["fecha_entrega_origen"] == "entrega"
+    # El rango manda sobre la fecha que salió: el 4 solo trae la de las notas.
+    solo_el_4, _ = _todas(client, h, "/api/v1/smart-supply/remisionado",
+                          {"desde": "2026-09-04", "hasta": "2026-09-04"})
+    assert {i["remision_id"] for i in solo_el_4} == {ids["RZEHMOVH53"]}
+
+    # La factura y su remisión, el mismo día.
+    facs, _ = _todas(client, h, "/api/v1/smart-supply/facturado",
+                     {"desde": "2026-09-01", "hasta": "2026-09-14", "fecha": "factura"})
+    f = {i["factura_id"]: i for i in facs}
+    assert (f[ids["fac"]]["fecha_entrega"], f[ids["fac"]]["fecha_entrega_origen"]) == (
+        "2026-09-04", "notas")
+    assert (f[ids["fac_sin"]]["fecha_entrega"], f[ids["fac_sin"]]["fecha_entrega_origen"]) == (
+        "2026-09-05", "remision")
+    # Y el día de la factura del espejo es el del SAE (medianoche UTC), no el anterior.
+    assert f[ids["fac"]]["fecha_factura"] == "2026-09-06"
+    assert f[ids["fac_sin"]]["fecha_factura"] == "2026-09-14"
+
+
+def test_facturado_del_espejo_por_fecha_de_factura_no_se_corre_un_dia(client, env, auth_as):
+    """3,718 de 3,718 facturas del espejo (jul-oct 2026) salían con el día
+    anterior: ZEHMOVH1542 (SAE 2-oct) decía 1-oct. Con la ventana por fecha de
+    factura, la del borde quedaba fuera. Lo nativo sigue en hora de México."""
+    db = SessionLocal()
+    try:
+        ta = env["ta"]
+        cli = db.query(Cliente).filter(Cliente.tenant_id == ta).first()
+        espejo = Factura(tenant_id=ta, serie="ZEHMOVH", folio=1542, cliente_id=cli.id,
+                         estado="TIMBRADA", tipo_comprobante="I", uuid=str(uuid.uuid4()),
+                         fecha=datetime(2026, 10, 2, tzinfo=timezone.utc), origen="ESPEJO_SAE",
+                         espejo_empresa="03")
+        # Timbrada el 1-oct a las 21:00 de México = 2-oct 03:00 UTC.
+        nativa = Factura(tenant_id=ta, serie="ZEHMOVH", folio=1543, cliente_id=cli.id,
+                         estado="TIMBRADA", tipo_comprobante="I", uuid=str(uuid.uuid4()),
+                         fecha=datetime(2026, 10, 2, 3, tzinfo=timezone.utc), origen="NATIVA")
+        db.add_all([espejo, nativa]); db.flush()
+        for f in (espejo, nativa):
+            db.add(LineaFactura(
+                tenant_id=ta, factura_id=f.id, numero_linea=1, clave_sae="JITOMATEKG",
+                clave_prod_serv="01010101", clave_unidad="KGM", descripcion="JITOMATE",
+                cantidad=Decimal("1"), valor_unitario=Decimal("1"), importe=Decimal("1"),
+                descuento=Decimal("0")))
+        db.commit()
+        e_id, n_id = str(espejo.id), str(nativa.id)
+    finally:
+        db.close()
+
+    auth_as(env["dueno_a"])
+    clave = _clave(client, env["dueno_a"])["clave"]
+    _sin_sesion()
+    h = _bearer(clave)
+    el_2, _ = _todas(client, h, "/api/v1/smart-supply/facturado",
+                     {"desde": "2026-10-02", "hasta": "2026-10-02", "fecha": "factura"})
+    assert {i["factura_id"] for i in el_2} == {e_id}
+    assert el_2[0]["fecha_factura"] == "2026-10-02"
+    el_1, _ = _todas(client, h, "/api/v1/smart-supply/facturado",
+                     {"desde": "2026-10-01", "hasta": "2026-10-01", "fecha": "factura"})
+    assert {i["factura_id"] for i in el_1} == {n_id}
 
 
 def test_oc_con_su_cadena(client, env, auth_as):

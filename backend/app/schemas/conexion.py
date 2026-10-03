@@ -1,7 +1,7 @@
 """Conexiones — schemas."""
 import uuid
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -55,6 +55,20 @@ class ConexionOut(ORMModel):
     alcance_panel: Optional[AlcancePanel] = None
 
 
+class ConexionCambioOut(BaseModel):
+    """Un renglón de la bitácora de una conexión. Sin la clave: solo su pista."""
+    id: uuid.UUID
+    conexion_id: uuid.UUID
+    accion: Literal["CREADA", "EDITADA", "CLAVE_NUEVA", "DESCONECTADA"]
+    created_at: datetime
+    hecho_por: Optional[str] = None      # nombre (o correo) de quien lo hizo
+    nombre_antes: Optional[str] = None
+    nombre_despues: Optional[str] = None
+    alcance_antes: Optional[dict[str, Any]] = None
+    alcance_despues: Optional[dict[str, Any]] = None
+    clave_pista: Optional[str] = None
+
+
 class NuevaConexionIn(BaseModel):
     """Una clave por cuenta, con nombre y alcance desde el inicio: `alcance`
     para Mini Conta, `alcance_panel` para el panel de Smart Supply."""
@@ -101,6 +115,8 @@ class OpcionesPanelOut(BaseModel):
     series: list[str]
     series_remision: list[str]
     perfiles: list[str]
+    # {serie de FACTURA: [sus series de REMISIÓN]}: marcar una se lleva la otra.
+    pares: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class ConexionEstadoOut(BaseModel):

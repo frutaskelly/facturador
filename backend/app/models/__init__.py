@@ -6,7 +6,7 @@ from .categoria import CategoriaProducto
 from .cliente import Cliente
 from .cliente_externo import ClienteExterno
 from .clave_sae import ClaveSae
-from .conexion import Conexion
+from .conexion import Conexion, ConexionCambio
 from .grupo_whatsapp import GrupoWhatsapp
 from .import_productos_log import ImportProductosLog
 from .conversion import ConversionProducto
@@ -74,6 +74,7 @@ __all__ = [
     "ClienteExterno",
     "ClaveSae",
     "Conexion",
+    "ConexionCambio",
     "GrupoWhatsapp",
     # ── Phase 4: operaciones ──
     "Proveedor",

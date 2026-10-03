@@ -4648,6 +4648,110 @@
     "title": "ConexionBreveOut",
     "type": "object"
    },
+   "ConexionCambioOut": {
+    "description": "Un renglón de la bitácora de una conexión. Sin la clave: solo su pista.",
+    "properties": {
+     "accion": {
+      "enum": [
+       "CREADA",
+       "EDITADA",
+       "CLAVE_NUEVA",
+       "DESCONECTADA"
+      ],
+      "title": "Accion",
+      "type": "string"
+     },
+     "alcance_antes": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Alcance Antes"
+     },
+     "alcance_despues": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Alcance Despues"
+     },
+     "clave_pista": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clave Pista"
+     },
+     "conexion_id": {
+      "format": "uuid",
+      "title": "Conexion Id",
+      "type": "string"
+     },
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "hecho_por": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Hecho Por"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre_antes": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre Antes"
+     },
+     "nombre_despues": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nombre Despues"
+     }
+    },
+    "required": [
+     "id",
+     "conexion_id",
+     "accion",
+     "created_at"
+    ],
+    "title": "ConexionCambioOut",
+    "type": "object"
+   },
    "ConexionEstadoOut": {
     "description": "Lo que la pantalla necesita para responder «¿está entrando lo que debe?».",
     "properties": {
@@ -12670,6 +12774,16 @@
       "title": "Fecha Entrega",
       "type": "string"
      },
+     "fecha_entrega_origen": {
+      "default": "entrega",
+      "enum": [
+       "entrega",
+       "notas",
+       "fecha_remision"
+      ],
+      "title": "Fecha Entrega Origen",
+      "type": "string"
+     },
      "folio": {
       "title": "Folio",
       "type": "string"
@@ -15235,6 +15349,16 @@
    "OpcionesPanelOut": {
     "description": "Todo lo que se puede compartir con una cuenta del panel de Smart Supply.",
     "properties": {
+     "pares": {
+      "additionalProperties": {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      "title": "Pares",
+      "type": "object"
+     },
      "perfiles": {
       "items": {
        "type": "string"
@@ -21520,6 +21644,16 @@
      "fecha_entrega": {
       "format": "date",
       "title": "Fecha Entrega",
+      "type": "string"
+     },
+     "fecha_entrega_origen": {
+      "default": "entrega",
+      "enum": [
+       "entrega",
+       "notas",
+       "fecha_remision"
+      ],
+      "title": "Fecha Entrega Origen",
       "type": "string"
      },
      "folio": {
@@ -30183,6 +30317,85 @@
     ]
    }
   },
+  "/api/v1/conexiones/{conexion_id}/cambios": {
+   "get": {
+    "description": "La bitácora de una conexión, la más nueva primero: quién la creó, qué le\ncambió (nombre y alcance, antes y después), cuándo se rotó su clave y\ncuándo se desconectó. Incluye la de las claves que esta reemplazó («Clave\nnueva» hace otra conexión con el mismo alcance; su historia es la misma\ncuenta). Nunca enseña la clave: solo su pista.",
+    "operationId": "cambios_api_v1_conexiones__conexion_id__cambios_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "conexion_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Conexion Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ConexionCambioOut"
+         },
+         "title": "Response Cambios Api V1 Conexiones  Conexion Id  Cambios Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cambios",
+    "tags": [
+     "conexiones"
+    ]
+   }
+  },
   "/api/v1/conexiones/{conexion_id}/regenerar": {
    "post": {
     "description": "Clave nueva para ESA conexión: la anterior deja de servir en el acto y la\nnueva hereda su nombre y su alcance. Las demás cuentas no se enteran.",
@@ -37281,7 +37494,7 @@
   },
   "/api/v1/mini-conta/remisiones": {
    "get": {
-    "description": "Lo ENTREGADO: las líneas de las remisiones no canceladas con `fecha_entrega`\nen el rango cuya serie de factura prevista es de las pedidas.\n\nVan todas, facturadas o no (`facturada` lo dice): la factura se hace días\ndespués y muchas remisiones que el SAE ya facturó no quedan ligadas aquí, así\nque «sin factura» no es confiable. Quien las lea las usa EN LUGAR de las\nfacturas para los días que todavía no se facturan, nunca además de ellas.",
+    "description": "Lo ENTREGADO: las líneas de las remisiones no canceladas entregadas en el\nrango cuya serie de factura prevista es de las pedidas. La fecha de entrega\nes la capturada o, si no la traen (la captura manual no la pide), la de las\nnotas de su factura o la de la remisión; `fecha_entrega_origen` dice cuál\n(services/mini_conta.remisiones_entregadas, la misma que Smart Supply).\n\nVan todas, facturadas o no (`facturada` lo dice): la factura se hace días\ndespués y muchas remisiones que el SAE ya facturó no quedan ligadas aquí, así\nque «sin factura» no es confiable. Quien las lea las usa EN LUGAR de las\nfacturas para los días que todavía no se facturan, nunca además de ellas.",
     "operationId": "remisiones_api_v1_mini_conta_remisiones_get",
     "parameters": [
      {
@@ -49990,7 +50203,7 @@
   },
   "/api/v1/smart-supply/remisionado": {
    "get": {
-    "description": "Lo ENTREGADO: cada línea de las remisiones no canceladas de sus series de\nremisión con `fecha_entrega` en el rango, por producto y presentación.\nFacturadas o no (`facturada` lo dice): para los días que todavía no se\nfacturan, esto es la vista previa. Llave: (`remision_id`, `numero_linea`).",
+    "description": "Lo ENTREGADO: cada línea de las remisiones no canceladas de sus series de\nremisión entregadas en el rango, por producto y presentación. Facturadas o\nno (`facturada` lo dice): para los días que todavía no se facturan, esto es\nla vista previa. Llave: (`remision_id`, `numero_linea`).\n\nLa fecha de entrega es la capturada; si la remisión no la trae (la captura\nmanual no la pide), la de las notas de su factura o la de la remisión, y\n`fecha_entrega_origen` dice cuál (services/mini_conta.remisiones_entregadas,\nla misma regla que Mini Conta).",
     "operationId": "remisionado_api_v1_smart_supply_remisionado_get",
     "parameters": [
      {
