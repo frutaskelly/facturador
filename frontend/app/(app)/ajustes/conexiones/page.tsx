@@ -8,9 +8,14 @@
 // botón. Después de conectar deja de ser configuración y pasa a responder una
 // sola pregunta —¿está entrando lo que debe?—, que es lo único que alguien
 // viene a mirar aquí una vez que funciona.
+//
+// Va en pestañas (?tab= para poder ligarlas): Resumen —la auditoría de qué se
+// comparte y qué falta, en ResumenConexiones.tsx—, Smart Supply (órdenes),
+// Mini Conta y el panel. Las pestañas no se desmontan al cambiar: una clave
+// recién generada se muestra UNA vez y no debe perderse por mirar otra.
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -39,15 +44,25 @@ import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { MiniContaCuentas } from "./MiniContaCuentas";
 import { SmartSupplyPanelCuentas } from "./SmartSupplyPanelCuentas";
+import {
+  DIAS_MOVIMIENTO,
+  ResumenConexiones,
+  auditar,
+  type Destino,
+  type TabConexiones,
+} from "./ResumenConexiones";
 import { can, useAuth } from "@/lib/auth";
 import type {
   ActividadConexion,
   ClienteDelGrupo,
+  ClienteMovimiento,
   Almacen,
   ClaveNueva,
   Cliente,
   ConexionEstado,
   GrupoWhatsapp,
+  OpcionesMiniConta,
+  OpcionesPanel,
   Serie,
 } from "@/lib/types";
 
@@ -112,7 +127,24 @@ function haceCuanto(iso?: string | null): string {
   return `hace ${Math.round(h / 24)} d`;
 }
 
+const TABS: { id: TabConexiones; label: string }[] = [
+  { id: "resumen", label: "Resumen" },
+  { id: "smart-supply", label: "Smart Supply" },
+  { id: "mini-conta", label: "Mini Conta" },
+  { id: "panel", label: "Smart Supply · panel" },
+];
+
+// useSearchParams en una página que se prerenderiza pide un <Suspense> encima
+// (si no, `next build` falla). El fallback es el mismo spinner de la carga.
 export default function Page() {
+  return (
+    <Suspense fallback={<div className="flex justify-center py-16"><Spinner /></div>}>
+      <Conexiones />
+    </Suspense>
+  );
+}
+
+function Conexiones() {
   const { me } = useAuth();
   const router = useRouter();
   const toast = useToast();
@@ -137,6 +169,45 @@ export default function Page() {
   const [refrescando, setRefrescando] = useState(false);
   // Para saber si la conexión acaba de ponerse en verde mientras mirabas.
   const eraPendiente = useRef<Set<string>>(new Set());
+  // Lo que se le puede compartir a cada sistema (todas las plazas, series y
+  // perfiles) y los clientes con movimiento: con eso el Resumen audita qué
+  // falta. Solo quien administra puede leerlos.
+  const [opMC, setOpMC] = useState<OpcionesMiniConta | null>(null);
+  const [opPanel, setOpPanel] = useState<OpcionesPanel | null>(null);
+  const [clientesMov, setClientesMov] = useState<ClienteMovimiento[] | null>(null);
+  // El Resumen pide abrir «Qué comparte» de una cuenta en su pestaña.
+  const [pedirMC, setPedirMC] = useState<{ id: string; n: number } | null>(null);
+  const [pedirPanel, setPedirPanel] = useState<{ id: string; n: number } | null>(null);
+
+  // La pestaña vive en la URL (?tab=) para poder ligarla; sin ella, Resumen.
+  const sp = useSearchParams();
+  const tabUrl = sp.get("tab");
+  const tab: TabConexiones = TABS.some((t) => t.id === tabUrl) ? (tabUrl as TabConexiones) : "resumen";
+  const irATab = useCallback((t: TabConexiones) => {
+    const qs = new URLSearchParams(window.location.search);
+    if (t === "resumen") qs.delete("tab");
+    else qs.set("tab", t);
+    const s = qs.toString();
+    // replaceState se integra con el router de Next: useSearchParams se entera.
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${s ? `?${s}` : ""}`);
+  }, []);
+  const ir = useCallback(
+    (d: Destino) => {
+      irATab(d.tab);
+      if (d.conexionId) {
+        const pedido = { id: d.conexionId, n: Date.now() };
+        if (d.tab === "mini-conta") setPedirMC(pedido);
+        if (d.tab === "panel") setPedirPanel(pedido);
+      }
+      if (d.ancla) {
+        const id = d.ancla;
+        setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+      } else {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    },
+    [irATab]
+  );
 
   const reload = useCallback(() => {
     setError(false);
@@ -188,6 +259,16 @@ export default function Page() {
     apiFetch<{ items: Almacen[] }>("/api/v1/almacenes?limit=200")
       .then((p) => setAlmacenes(p.items)).catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (!canWrite) return;
+    apiFetch<OpcionesMiniConta>("/api/v1/conexiones/MINI_CONTA/opciones")
+      .then(setOpMC).catch(() => setOpMC(null));
+    apiFetch<OpcionesPanel>("/api/v1/conexiones/SMART_SUPPLY_PANEL/opciones")
+      .then(setOpPanel).catch(() => setOpPanel(null));
+    apiFetch<ClienteMovimiento[]>(`/api/v1/conexiones/cobertura/clientes?dias=${DIAS_MOVIMIENTO}`)
+      .then(setClientesMov).catch(() => setClientesMov(null));
+  }, [canWrite]);
 
   /** Prender/apagar un grupo. Apagarlo no toca a Smart Supply. */
   async function togglear(g: GrupoWhatsapp, activo: boolean) {
@@ -286,6 +367,17 @@ export default function Page() {
     return () => clearInterval(id);
   }, [esperandoClave, hayConexion, reload]);
 
+  const smartEstado = estados?.find((e) => e.tipo === "SMART_SUPPLY");
+  const mcEstado = estados?.find((e) => e.tipo === "MINI_CONTA");
+  const panelEstado = estados?.find((e) => e.tipo === "SMART_SUPPLY_PANEL");
+  const auditoria = useMemo(
+    () => auditar({
+      smart: smartEstado, miniConta: mcEstado, panel: panelEstado,
+      opMC, opPanel, clientes: clientesMov,
+    }),
+    [smartEstado, mcEstado, panelEstado, opMC, opPanel, clientesMov]
+  );
+
   async function refrescar() {
     setRefrescando(true);
     await reload();
@@ -359,15 +451,74 @@ export default function Page() {
         }
       />
 
+      <div role="tablist" aria-label="Conexiones" className="mb-4 flex gap-1 overflow-x-auto border-b border-border">
+        {TABS.filter((t) =>
+          t.id === "resumen" ||
+          (t.id === "smart-supply" && smartEstado) ||
+          (t.id === "mini-conta" && mcEstado) ||
+          (t.id === "panel" && panelEstado)
+        ).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            id={`tab-${t.id}`}
+            aria-selected={tab === t.id}
+            aria-controls={`panel-${t.id}`}
+            onClick={() => irATab(t.id)}
+            className={`-mb-px inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm transition ${
+              tab === t.id
+                ? "border-accent font-medium text-foreground"
+                : "border-transparent text-muted hover:text-foreground"
+            }`}
+          >
+            {t.label}
+            {t.id === "resumen" && auditoria.conteo.pendientes ? (
+              <Badge tone="warning">{auditoria.conteo.pendientes}</Badge>
+            ) : null}
+          </button>
+        ))}
+      </div>
+
+      <div role="tabpanel" id="panel-resumen" aria-labelledby="tab-resumen" hidden={tab !== "resumen"}>
+        <ResumenConexiones
+          smart={smartEstado}
+          miniConta={mcEstado}
+          panel={panelEstado}
+          opMC={opMC}
+          canWrite={canWrite}
+          auditoria={auditoria}
+          onIr={ir}
+        />
+      </div>
+
+      <div role="tabpanel" id="panel-mini-conta" aria-labelledby="tab-mini-conta" hidden={tab !== "mini-conta"}>
+        {mcEstado ? (
+          <MiniContaCuentas
+            estado={mcEstado}
+            canWrite={canWrite}
+            onCambio={reload}
+            opciones={opMC}
+            pedirEditar={pedirMC}
+          />
+        ) : null}
+      </div>
+
+      <div role="tabpanel" id="panel-panel" aria-labelledby="tab-panel" hidden={tab !== "panel"}>
+        {panelEstado ? (
+          <SmartSupplyPanelCuentas
+            estado={panelEstado}
+            canWrite={canWrite}
+            onCambio={reload}
+            opciones={opPanel}
+            pedirEditar={pedirPanel}
+          />
+        ) : null}
+      </div>
+
+      <div role="tabpanel" id="panel-smart-supply" aria-labelledby="tab-smart-supply" hidden={tab !== "smart-supply"}>
       {estados.map((e) => {
-        if (e.tipo === "MINI_CONTA") {
-          return <MiniContaCuentas key={e.tipo} estado={e} canWrite={canWrite} onCambio={reload} />;
-        }
-        if (e.tipo === "SMART_SUPPLY_PANEL") {
-          return (
-            <SmartSupplyPanelCuentas key={e.tipo} estado={e} canWrite={canWrite} onCambio={reload} />
-          );
-        }
+        if (e.tipo === "MINI_CONTA" || e.tipo === "SMART_SUPPLY_PANEL") return null;
         const con = e.conexion;
         const conectado = !!con && con.estado !== "REVOCADA";
         const mostrandoClave = nueva !== null && nueva.conexion.tipo === e.tipo;
@@ -902,6 +1053,7 @@ export default function Page() {
           </p>
         </Card>
       ) : null}
+      </div>
 
       <ConfirmDialog
         open={aDesconectar !== null}

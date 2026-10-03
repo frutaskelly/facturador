@@ -42,7 +42,7 @@ const PUEDE = [
 ];
 
 // Lo que una cuenta puede leer además de las ventas, en el orden de la pantalla.
-const DATOS: { clave: keyof Omit<AlcanceMiniConta, "series" | "clientes">; titulo: string; texto: string }[] = [
+export const DATOS_MINI_CONTA: { clave: keyof Omit<AlcanceMiniConta, "series" | "clientes">; titulo: string; texto: string }[] = [
   {
     clave: "catalogo",
     titulo: "Catálogo",
@@ -86,7 +86,7 @@ function haceCuanto(iso?: string | null): string {
 }
 
 /** «Tabasco · ZMAFAN», con las plazas completas por nombre y lo suelto por código. */
-function resumenSeries(series: string[], op: OpcionesMiniConta | null): string {
+export function resumenSeries(series: string[], op: OpcionesMiniConta | null): string {
   if (!op) return series.join(", ");
   const quedan = new Set(series);
   const partes: string[] = [];
@@ -99,7 +99,7 @@ function resumenSeries(series: string[], op: OpcionesMiniConta | null): string {
   return [...partes, ...[...quedan].sort()].join(" · ");
 }
 
-function resumenClientes(ids: string[] | null | undefined, op: OpcionesMiniConta | null): string {
+export function resumenClientes(ids: string[] | null | undefined, op: OpcionesMiniConta | null): string {
   if (!ids) return "Todos los clientes de esas series";
   const nombres = ids.map((id) => op?.clientes.find((c) => c.id === id)?.nombre ?? "cliente borrado");
   return nombres.length <= 3
@@ -111,14 +111,19 @@ export function MiniContaCuentas({
   estado,
   canWrite,
   onCambio,
+  opciones,
+  pedirEditar,
 }: {
   estado: ConexionEstado;
   canWrite: boolean;
   onCambio: () => void;
+  // Lo carga la página: el Resumen también lo usa para ver qué falta compartir.
+  opciones: OpcionesMiniConta | null;
+  // El Resumen pide abrir «Qué comparte» de una cuenta; `n` cambia en cada clic.
+  pedirEditar?: { id: string; n: number } | null;
 }) {
   const toast = useToast();
   const cuentas = estado.conexiones ?? [];
-  const [opciones, setOpciones] = useState<OpcionesMiniConta | null>(null);
   // undefined = cerrado; null = cuenta nueva; Conexion = editar esa.
   const [editando, setEditando] = useState<Conexion | null | undefined>(undefined);
   // La clave en claro solo vive aquí, en memoria, hasta que Mini Conta la usa.
@@ -128,12 +133,13 @@ export function MiniContaCuentas({
   const [aDesconectar, setADesconectar] = useState<Conexion | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
+  // Abrir el diálogo de una cuenta a pedido del Resumen. Solo depende del clic
+  // (`pedirEditar`): un refresco de `cuentas` no debe reabrirlo.
   useEffect(() => {
-    if (!canWrite) return;
-    apiFetch<OpcionesMiniConta>("/api/v1/conexiones/MINI_CONTA/opciones")
-      .then(setOpciones)
-      .catch(() => setOpciones(null));
-  }, [canWrite]);
+    if (!pedirEditar || !canWrite) return;
+    const c = cuentas.find((x) => x.id === pedirEditar.id);
+    if (c) setEditando(c);
+  }, [pedirEditar]);
 
   // Cuando Mini Conta usa la clave por primera vez, la pantalla se pone en
   // verde sola y la clave se quita de en medio.
@@ -319,7 +325,7 @@ export function MiniContaCuentas({
                         <dd>{resumenClientes(a.clientes, opciones)}</dd>
                         <dt className="text-muted">Además</dt>
                         <dd>
-                          {DATOS.filter((d) => a[d.clave]).map((d) => d.titulo).join(", ") ||
+                          {DATOS_MINI_CONTA.filter((d) => a[d.clave]).map((d) => d.titulo).join(", ") ||
                             "Solo ventas"}
                         </dd>
                       </dl>
@@ -430,8 +436,8 @@ function FormAlcance({
   const [todos, setTodos] = useState(!inicial?.clientes);
   const [clientes, setClientes] = useState<Set<string>>(new Set(inicial?.clientes ?? []));
   const [datos, setDatos] = useState(() =>
-    Object.fromEntries(DATOS.map((d) => [d.clave, inicial?.[d.clave] ?? false])) as Record<
-      (typeof DATOS)[number]["clave"],
+    Object.fromEntries(DATOS_MINI_CONTA.map((d) => [d.clave, inicial?.[d.clave] ?? false])) as Record<
+      (typeof DATOS_MINI_CONTA)[number]["clave"],
       boolean
     >
   );
@@ -604,7 +610,7 @@ function FormAlcance({
           <h3 className="text-sm font-medium">Además de las ventas</h3>
           <p className="mb-2 text-xs text-muted">Siempre de las mismas series y clientes de arriba.</p>
           <div className="divide-y divide-border rounded-lg border border-border">
-            {DATOS.map((d) => (
+            {DATOS_MINI_CONTA.map((d) => (
               <div key={d.clave} className="flex items-start justify-between gap-4 p-3">
                 <div>
                   <p className="text-sm font-medium">{d.titulo}</p>

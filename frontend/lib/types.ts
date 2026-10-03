@@ -1024,6 +1024,15 @@ export type OpcionesPanel = {
   perfiles: string[];
 };
 
+/** Un cliente con facturas o remisiones recientes y las series en que las tuvo
+ *  (GET /conexiones/cobertura/clientes): el Resumen audita que nadie lo deje fuera. */
+export type ClienteMovimiento = {
+  id: string;
+  nombre: string;
+  series_factura: string[];
+  series_remision: string[];
+};
+
 export type ConexionEstado = {
   tipo: string;
   nombre: string;

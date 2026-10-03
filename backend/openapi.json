@@ -3770,6 +3770,42 @@
     "title": "ClienteExternoOut",
     "type": "object"
    },
+   "ClienteMovimientoOut": {
+    "description": "Un cliente con movimiento reciente y las series en que lo tuvo.",
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "nombre": {
+      "title": "Nombre",
+      "type": "string"
+     },
+     "series_factura": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series Factura",
+      "type": "array"
+     },
+     "series_remision": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Series Remision",
+      "type": "array"
+     }
+    },
+    "required": [
+     "id",
+     "nombre",
+     "series_factura",
+     "series_remision"
+    ],
+    "title": "ClienteMovimientoOut",
+    "type": "object"
+   },
    "ClienteOut": {
     "properties": {
      "almacen_id": {
@@ -29851,6 +29887,77 @@
      }
     ],
     "summary": "Opciones Panel",
+    "tags": [
+     "conexiones"
+    ]
+   }
+  },
+  "/api/v1/conexiones/cobertura/clientes": {
+   "get": {
+    "description": "Los clientes que facturaron o remisionaron en los últimos `dias`, con\nsus series. Solo lectura: el Resumen de Conexiones lo cruza con lo que\ncomparte cada cuenta para avisar de los clientes que nadie lee.",
+    "operationId": "cobertura_clientes_api_v1_conexiones_cobertura_clientes_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "dias",
+      "required": false,
+      "schema": {
+       "default": 180,
+       "maximum": 3650,
+       "minimum": 1,
+       "title": "Dias",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Tenant-Id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Tenant-Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ClienteMovimientoOut"
+         },
+         "title": "Response Cobertura Clientes Api V1 Conexiones Cobertura Clientes Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Cobertura Clientes",
     "tags": [
      "conexiones"
     ]

@@ -460,6 +460,25 @@ def test_opciones_por_plaza(client, env, auth_as):
     assert "EHMO:villahermosa" in o["perfiles"] and "EHMO:ehmo" in o["perfiles"]
 
 
+def test_cobertura_de_clientes(client, env, auth_as):
+    """El Resumen de Conexiones: qué clientes facturaron o remisionaron y en qué
+    series. Lo usado (timbrado, remisión viva), nunca lo cancelado ni lo de otro
+    inquilino; y solo el dueño lo ve, no una clave."""
+    auth_as(env["dueno_a"])
+    r = client.get("/api/v1/conexiones/cobertura/clientes", headers=_hdr(env["dueno_a"]),
+                   params={"dias": 3650})
+    assert r.status_code == 200, r.text
+    assert [(c["nombre"], c["series_factura"], c["series_remision"]) for c in r.json()] == [
+        ("EHMO SS", ["ZEHMOHOS", "ZEHMOVH"], ["RZEHMOHOS", "RZEHMOVH"]),
+    ]
+    assert client.get("/api/v1/conexiones/cobertura/clientes", headers=_hdr(env["dueno_a"]),
+                      params={"dias": 0}).status_code == 422
+    clave = _clave(client, env["dueno_a"])["clave"]
+    _sin_sesion()
+    assert client.get("/api/v1/conexiones/cobertura/clientes",
+                      headers=_bearer(clave)).status_code == 403
+
+
 # ─── lo que lee ──────────────────────────────────────────────────────────────
 
 def test_alcance(client, env, auth_as):

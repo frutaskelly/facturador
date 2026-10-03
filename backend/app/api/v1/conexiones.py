@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -42,6 +42,7 @@ from ...schemas.conexion import (
     ActividadConexionOut,
     ClaveNuevaOut,
     ClienteDelGrupoOut,
+    ClienteMovimientoOut,
     SucursalBreve,
     ConexionEstadoOut,
     ConexionOut,
@@ -56,7 +57,7 @@ from ...schemas.conexion import (
 )
 from ...services import cliente_match
 from ...services import smart_supply as panel
-from ...services.mini_conta import Alcance, mapa, validar_alcance
+from ...services.mini_conta import Alcance, clientes_con_movimiento, mapa, validar_alcance
 from ._helpers import get_or_404
 
 router = APIRouter(prefix="/conexiones", tags=["conexiones"])
@@ -299,6 +300,19 @@ def editar(
     db.flush()
     db.refresh(con)
     return con
+
+
+@router.get("/cobertura/clientes", response_model=list[ClienteMovimientoOut])
+def cobertura_clientes(
+    dias: int = Query(default=180, ge=1, le=3650),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_GESTIONAR)),
+):
+    """Los clientes que facturaron o remisionaron en los últimos `dias`, con
+    sus series. Solo lectura: el Resumen de Conexiones lo cruza con lo que
+    comparte cada cuenta para avisar de los clientes que nadie lee."""
+    desde = datetime.now(timezone.utc).date() - timedelta(days=dias)
+    return clientes_con_movimiento(db, ctx.tenant_id, desde)
 
 
 # OJO con el orden: esta ruta va ANTES de /{tipo}/opciones — FastAPI casa en

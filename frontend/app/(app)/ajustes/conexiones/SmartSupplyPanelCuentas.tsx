@@ -29,7 +29,7 @@ const NO_PUEDE = [
 ];
 
 // Lo que una cuenta puede leer además del facturado, en el orden de la pantalla.
-const DATOS: { clave: "remisiones" | "oc" | "catalogo"; titulo: string; texto: string }[] = [
+export const DATOS_PANEL: { clave: "remisiones" | "oc" | "catalogo"; titulo: string; texto: string }[] = [
   {
     clave: "remisiones",
     titulo: "Remisiones",
@@ -77,14 +77,19 @@ export function SmartSupplyPanelCuentas({
   estado,
   canWrite,
   onCambio,
+  opciones,
+  pedirEditar,
 }: {
   estado: ConexionEstado;
   canWrite: boolean;
   onCambio: () => void;
+  // Lo carga la página: el Resumen también lo usa para ver qué falta compartir.
+  opciones: OpcionesPanel | null;
+  // El Resumen pide abrir «Qué comparte» de una cuenta; `n` cambia en cada clic.
+  pedirEditar?: { id: string; n: number } | null;
 }) {
   const toast = useToast();
   const cuentas = estado.conexiones ?? [];
-  const [opciones, setOpciones] = useState<OpcionesPanel | null>(null);
   // undefined = cerrado; null = cuenta nueva; Conexion = editar esa.
   const [editando, setEditando] = useState<Conexion | null | undefined>(undefined);
   // La clave en claro solo vive aquí, en memoria, hasta que Smart Supply la usa.
@@ -94,12 +99,13 @@ export function SmartSupplyPanelCuentas({
   const [aDesconectar, setADesconectar] = useState<Conexion | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
+  // Abrir el diálogo de una cuenta a pedido del Resumen. Solo depende del clic
+  // (`pedirEditar`): un refresco de `cuentas` no debe reabrirlo.
   useEffect(() => {
-    if (!canWrite) return;
-    apiFetch<OpcionesPanel>("/api/v1/conexiones/SMART_SUPPLY_PANEL/opciones")
-      .then(setOpciones)
-      .catch(() => setOpciones(null));
-  }, [canWrite]);
+    if (!pedirEditar || !canWrite) return;
+    const c = cuentas.find((x) => x.id === pedirEditar.id);
+    if (c) setEditando(c);
+  }, [pedirEditar]);
 
   // Cuando Smart Supply usa la clave por primera vez, la pantalla se pone en
   // verde sola y la clave se quita de en medio.
@@ -290,7 +296,7 @@ export function SmartSupplyPanelCuentas({
                         <dd className="font-mono text-xs leading-5">{lista(a.perfiles)}</dd>
                         <dt className="text-muted">Además</dt>
                         <dd>
-                          {DATOS.filter((d) => a[d.clave]).map((d) => d.titulo).join(", ") ||
+                          {DATOS_PANEL.filter((d) => a[d.clave]).map((d) => d.titulo).join(", ") ||
                             "Solo facturado"}
                         </dd>
                       </dl>
@@ -605,7 +611,7 @@ function FormAlcancePanel({
           <h3 className="text-sm font-medium">Además del facturado</h3>
           <p className="mb-2 text-xs text-muted">Siempre de la misma plaza de arriba.</p>
           <div className="divide-y divide-border rounded-lg border border-border">
-            {DATOS.map((d) => (
+            {DATOS_PANEL.map((d) => (
               <div key={d.clave} className="flex items-start justify-between gap-4 p-3">
                 <div>
                   <p className="text-sm font-medium">{d.titulo}</p>
