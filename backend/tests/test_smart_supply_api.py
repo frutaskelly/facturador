@@ -460,6 +460,46 @@ def test_opciones_por_plaza(client, env, auth_as):
     assert "EHMO:villahermosa" in o["perfiles"] and "EHMO:ehmo" in o["perfiles"]
 
 
+def test_la_plaza_se_lleva_la_pareja_de_remision_de_sus_series(client, env, auth_as):
+    """Chiapas en prod: sus vínculos solo traen serie de FACTURA y no hay
+    remisiones recientes, así que al escoger la plaza no se marcaba ninguna
+    serie de remisión y había que marcar las 8 a mano. La pareja R{factura}
+    (la que crea `POST /series/par`) va con la plaza; una que no existe no se
+    inventa, y una de remisión ajena a sus series no se cuela."""
+    db = SessionLocal()
+    try:
+        ta = env["ta"]
+        chis = Sucursal(tenant_id=ta, nombre="Chiapas")
+        tg = Serie(tenant_id=ta, codigo="ZEHMOTG", tipo_documento="FACTURA")
+        sur = Serie(tenant_id=ta, codigo="ZSUR", tipo_documento="FACTURA")  # sin pareja
+        db.add_all([chis, tg, sur,
+                    Serie(tenant_id=ta, codigo="RZEHMOTG", tipo_documento="REMISION"),
+                    Serie(tenant_id=ta, codigo="RZOTRA", tipo_documento="REMISION")])
+        db.flush()
+        cli = db.query(Cliente).filter(Cliente.tenant_id == ta).first()
+        otro = Cliente(tenant_id=ta, codigo="SUR", legal_name="SUREÑA SS", rfc="XAXX010101000")
+        db.add(otro); db.flush()
+        db.add_all([
+            ClienteSucursal(tenant_id=ta, cliente_id=cli.id, sucursal_id=chis.id,
+                            serie_factura_id=tg.id),
+            ClienteSucursal(tenant_id=ta, cliente_id=otro.id, sucursal_id=chis.id,
+                            serie_factura_id=sur.id),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    auth_as(env["dueno_a"])
+    o = client.get("/api/v1/conexiones/SMART_SUPPLY_PANEL/opciones",
+                   headers=_hdr(env["dueno_a"])).json()
+    plazas = {p["nombre"]: p for p in o["plazas"]}
+    assert plazas["Chiapas"]["series"] == ["ZEHMOTG", "ZSUR"]
+    assert plazas["Chiapas"]["series_remision"] == ["RZEHMOTG"]
+    # Las de antes siguen igual: el vínculo ya las traía.
+    assert plazas["Tabasco"]["series_remision"] == ["RZEHMOVH"]
+    assert plazas["Hidalgo"]["series_remision"] == ["RZEHMOHOS"]
+
+
 # ─── lo que lee ──────────────────────────────────────────────────────────────
 
 def test_alcance(client, env, auth_as):

@@ -245,6 +245,16 @@ def opciones(db: Session, tenant_id) -> dict:
                                   "series_remision": set(), "perfiles": set()})
             plazas[k]["series_remision"].add(codigo)
 
+    # La pareja de cada serie de factura de la plaza: `POST /series/par` crea la
+    # de remisión como R{factura} (ZEHMOVH ↔ RZEHMOVH). Los vínculos casi nunca
+    # traen serie de remisión y el uso solo ve remisiones con fecha de entrega
+    # de los últimos 93 días, así que sin esto una plaza sin remisiones recientes
+    # (Chiapas; RIO en Hidalgo, con sus remisiones sin fecha de entrega) se
+    # escogía sin ninguna y había que marcarlas a mano.
+    remision = set(series_de_remision(db, tenant_id))
+    for v in plazas.values():
+        v["series_remision"].update(par for c in v["series"] if (par := f"R{c}") in remision)
+
     vistos = perfiles_vistos(db, tenant_id)
     for p, nombre in vistos.items():
         k = clave_nombre(nombre) if nombre else ""
@@ -258,7 +268,7 @@ def opciones(db: Session, tenant_id) -> dict:
             for v in sorted(plazas.values(), key=lambda v: v["nombre"].casefold())
         ],
         "series": series_factura(db, tenant_id),
-        "series_remision": series_de_remision(db, tenant_id),
+        "series_remision": sorted(remision),
         "perfiles": sorted(vistos),
     }
 

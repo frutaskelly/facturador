@@ -73,6 +73,26 @@ function haceCuanto(iso?: string | null): string {
 
 const lista = (xs: string[]) => (xs.length ? xs.join(", ") : "—");
 
+/** La serie de remisión pareja de una de factura: `POST /series/par` la crea
+ *  como R{factura} (ZEHMOVH ↔ RZEHMOVH). null si esa pareja no existe. */
+function parDe(codigo: string, op: OpcionesPanel): string | null {
+  const par = `R${codigo}`;
+  return op.series_remision.includes(par) ? par : null;
+}
+
+/** Lo de la plaza de la clave que la clave NO comparte. Las series de remisión
+ *  cuentan si comparte remisiones u OC (las que se volvieron remisión), y los
+ *  perfiles si comparte OC. Vacío si la plaza no está en las opciones. */
+function faltantesDePlaza(op: OpcionesPanel | null, a: AlcancePanel): string[] {
+  const p = op?.plazas.find((x) => x.nombre === a.plaza);
+  if (!p) return [];
+  return [
+    ...p.series.filter((c) => !a.series.includes(c)),
+    ...(a.remisiones || a.oc ? p.series_remision.filter((c) => !a.series_remision.includes(c)) : []),
+    ...(a.oc ? p.perfiles.filter((x) => !a.perfiles.includes(x)) : []),
+  ];
+}
+
 export function SmartSupplyPanelCuentas({
   estado,
   canWrite,
@@ -263,6 +283,7 @@ export function SmartSupplyPanelCuentas({
         <ul className="mt-5 divide-y divide-border overflow-hidden rounded-lg border border-border">
           {cuentas.map((c) => {
             const a = c.alcance_panel;
+            const faltan = a ? faltantesDePlaza(opciones, a) : [];
             return (
               <li key={c.id} className="bg-surface px-4 py-3.5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -274,6 +295,11 @@ export function SmartSupplyPanelCuentas({
                       ) : (
                         <Badge tone="warning">Falta pegar la clave</Badge>
                       )}
+                      {faltan.length ? (
+                        <Badge tone="warning">
+                          No comparte {faltan.length === 1 ? "1 cosa" : `${faltan.length} cosas`} de {a?.plaza}
+                        </Badge>
+                      ) : null}
                     </div>
                     <p className="mt-0.5 text-xs text-muted">
                       clave …{c.clave_pista} · última lectura {haceCuanto(c.ultimo_uso_at)}
@@ -293,6 +319,17 @@ export function SmartSupplyPanelCuentas({
                           {DATOS.filter((d) => a[d.clave]).map((d) => d.titulo).join(", ") ||
                             "Solo facturado"}
                         </dd>
+                        {faltan.length ? (
+                          <>
+                            <dt className="text-amber-700">No comparte</dt>
+                            <dd className="font-mono text-xs leading-5 text-amber-700">
+                              {lista(faltan)}{" "}
+                              <span className="font-sans text-muted">
+                                (de su plaza; corrígelo en «Qué comparte», sin clave nueva)
+                              </span>
+                            </dd>
+                          </>
+                        ) : null}
                       </dl>
                     ) : (
                       <p className="mt-2 text-sm text-muted">Sin alcance: no lee nada.</p>
@@ -423,12 +460,45 @@ function FormAlcancePanel({
     if (!nombre.trim()) setNombre(`Kelly ${p.nombre}`);
   }
 
+  /** Vuelve a marcar todo lo de la plaza SIN quitar lo que se agregó a mano.
+   *  Para una clave ya creada (re-escoger la misma plaza no dispara nada) o
+   *  cuando la plaza estrenó una serie o un perfil después de crear la clave. */
+  function marcarPlaza() {
+    if (!dePlaza) return;
+    setSeries(new Set([...series, ...dePlaza.series]));
+    setRems(new Set([...rems, ...dePlaza.series_remision]));
+    setPerfiles(new Set([...perfiles, ...dePlaza.perfiles]));
+  }
+
   function alternar(set: Set<string>, fijar: (s: Set<string>) => void, codigo: string, prender: boolean) {
     const n = new Set(set);
     if (prender) n.add(codigo);
     else n.delete(codigo);
     fijar(n);
   }
+
+  /** Marcar una serie de factura se lleva su pareja de remisión (si existe). */
+  function alternarFactura(codigo: string, prender: boolean) {
+    alternar(series, setSeries, codigo, prender);
+    const par = parDe(codigo, opciones);
+    if (prender && par) setRems(new Set([...rems, par]));
+  }
+
+  const actual: AlcancePanel = {
+    plaza: plaza || null,
+    series: [...series],
+    series_remision: [...rems],
+    perfiles: [...perfiles],
+    ...datos,
+  };
+  // Avisos, no candados: dejar algo fuera puede ser a propósito, pero nunca sin verlo.
+  const fueraDePlaza = faltantesDePlaza(opciones, actual);
+  const sinPareja = datos.remisiones
+    ? [...series]
+        .sort()
+        .map((c) => [c, parDe(c, opciones)] as const)
+        .filter(([, par]) => par && !rems.has(par) && !fueraDePlaza.includes(par))
+    : [];
 
   const perfilNuevo = otroPerfil.trim();
   const perfilNuevoValido = PERFIL_VALIDO.test(perfilNuevo);
@@ -457,7 +527,8 @@ function FormAlcancePanel({
     codigos: string[],
     marcados: Set<string>,
     fijar: (s: Set<string>) => void,
-    propios: string[]
+    propios: string[],
+    alAlternar?: (codigo: string, prender: boolean) => void
   ) {
     return (
       <section>
@@ -472,7 +543,11 @@ function FormAlcancePanel({
               >
                 <Checkbox
                   checked={marcados.has(codigo)}
-                  onChange={(e) => alternar(marcados, fijar, codigo, e.target.checked)}
+                  onChange={(e) =>
+                    alAlternar
+                      ? alAlternar(codigo, e.target.checked)
+                      : alternar(marcados, fijar, codigo, e.target.checked)
+                  }
                 />
                 <span className={`font-mono text-xs ${propios.includes(codigo) ? "font-semibold" : ""}`}>
                   {codigo}
@@ -512,7 +587,10 @@ function FormAlcancePanel({
     >
       <div className="space-y-5">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Plaza" hint="Se lleva sus series y sus perfiles; luego puedes ajustarlos.">
+          <Field
+            label="Plaza"
+            hint="Marca todas sus series de factura y de remisión y sus perfiles; luego puedes ajustarlos."
+          >
             <Select value={plaza} onChange={(e) => escogerPlaza(e.target.value)}>
               <option value="">Escoge la plaza…</option>
               {opciones.plazas.map((p) => (
@@ -535,11 +613,12 @@ function FormAlcancePanel({
 
         {grupo(
           "Series de factura *",
-          "Lo facturado de estas series es la venta de la bodega. En negritas, las de la plaza.",
+          "Lo facturado de estas series es la venta de la bodega. En negritas, las de la plaza. Marcar una marca también su serie de remisión.",
           opciones.series,
           series,
           setSeries,
-          dePlaza?.series ?? []
+          dePlaza?.series ?? [],
+          alternarFactura
         )}
         {grupo(
           "Series de remisión",
@@ -620,6 +699,24 @@ function FormAlcancePanel({
           </div>
         </section>
 
+        {fueraDePlaza.length ? (
+          <Alert tone="warning">
+            <p>
+              No compartes esto de {plaza}: <span className="font-mono text-xs">{lista(fueraDePlaza)}</span>.
+              Lo de ahí no llegará a Smart Supply.
+            </p>
+            <Button variant="secondary" className="mt-2" onClick={marcarPlaza}>
+              <Check size={15} /> Marcar todo lo de {plaza}
+            </Button>
+          </Alert>
+        ) : null}
+        {sinPareja.length ? (
+          <Alert tone="warning">
+            Compartes {sinPareja.map(([c]) => c).join(", ")} sin su serie de remisión (
+            {sinPareja.map(([, par]) => par).join(", ")}): lo remisionado de ellas no llegará a Smart
+            Supply.
+          </Alert>
+        ) : null}
         {faltaRemision ? (
           <Alert tone="warning">Para compartir remisiones marca al menos una serie de remisión.</Alert>
         ) : null}
