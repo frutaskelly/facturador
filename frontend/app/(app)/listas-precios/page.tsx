@@ -524,7 +524,7 @@ export default function ListasPreciosPage() {
                 adivinaba con la lista más vieja y cobraba con la de otro. */}
             <Field
               label="Lleva el SKU del cliente"
-              hint="Enseña la columna «SKU del cliente» y el Excel la trae. Se guarda en el catálogo de cada cliente asignado a la lista y sale en su factura (NoIdentificacion); sin SKU sale el interno."
+              hint="Encendido: la factura que timbra el Facturador para los clientes de esta lista lleva SU SKU (NoIdentificacion) y SU nombre; sin SKU en un renglón, el interno. Apagado: SKU y nombre internos. El SKU se guarda en el catálogo de cada cliente y se edita aquí y en el Excel."
             >
               <Switch
                 checked={listaForm.lleva_sku_cliente}

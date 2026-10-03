@@ -89,10 +89,13 @@ def build_payload(db: Session, factura: Factura) -> dict:
     # IdentificationNumber (NoIdentificacion) = SKU del cliente o el SKU interno —
     # siempre viaja, así todos los CFDI llevan una clave rastreable sin duplicar
     # productos por cliente.
+    # Sólo si el cliente LLEVA SKU (una lista suya con el interruptor encendido,
+    # 3-oct-2026); si no, SKU y nombre internos aunque su catálogo tenga códigos.
     # Con claves por plaza (producto_clientes.sucursal_id), la GENÉRICA manda
     # en el CFDI nativo: se ordena para que pise a las scoped en el dict. Las
     # claves por plaza existen para el masivo de SAE (cada plaza exporta a su
     # empresa); la factura nativa no carga plaza por línea hoy.
+    from .sku_cliente import cliente_lleva_sku
     alias_cliente = {
         pc.producto_id: pc
         for pc in db.query(ProductoCliente)
@@ -107,7 +110,7 @@ def build_payload(db: Session, factura: Factura) -> dict:
             ProductoCliente.sucursal_id.asc(),
         )
         .all()
-    } if prod_ids else {}
+    } if prod_ids and cliente_lleva_sku(db, factura.cliente_id) else {}
 
     items = []
     for ln in sorted(factura.lineas, key=lambda x: x.numero_linea):
