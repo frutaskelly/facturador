@@ -23,15 +23,15 @@ from app.core.db import SessionLocal
 from app.core.rbac import AuthContext
 from app.main import app
 from app.models import (
-    Cliente, ClienteSucursal, ClienteSucursalSerie, Conexion, Factura, LineaFactura,
-    LineaRemision, Membership, OCRecibida, Producto, Remision, Role, Serie, Sucursal, Tenant,
-    User,
+    Almacen, Cliente, ClienteSucursal, ClienteSucursalSerie, Conexion, Factura, LineaFactura,
+    LineaRemision, Membership, OCRecibida, Producto, Proyecto, Remision, Role, Serie, Sucursal,
+    Tenant, User,
 )
 
 _PURGE = (
-    "lineas_remision", "lineas_factura", "oc_recibidas", "remisiones", "facturas",
-    "cliente_sucursal_series", "cliente_sucursales", "sucursales", "series", "conexiones",
-    "productos", "clientes",
+    "lineas_remision", "lineas_factura", "oc_recibidas", "remisiones", "facturas", "proyectos",
+    "cliente_sucursal_series", "cliente_sucursales", "sucursales", "almacenes", "series",
+    "conexiones", "productos", "clientes",
 )
 
 _SANDIA_PRES = {
@@ -682,6 +682,61 @@ def test_alcance(client, env, auth_as):
     assert [p["nombre"] for p in a["plazas"]] == ["Tabasco"]
     assert a["conexion"]["nombre"] == "Kelly Tabasco" and len(a["conexion"]["pista"]) == 4
     assert a["max_dias"] == 93
+    assert a["almacenes"] == [], "la plaza de la fixture no tiene almacén"
+
+
+def test_alcance_dice_las_bodegas_de_su_plaza(client, env, auth_as):
+    """La plaza del Facturador (Hidalgo) y su bodega (Pachuca) son el mismo
+    lugar: Smart Supply compara con eso la plaza que dice Mini Conta. Entran el
+    almacén de la plaza y el de sus proyectos vivos; no los de otra plaza, ni
+    los de un proyecto inactivo o borrado, ni un almacén borrado."""
+    db = SessionLocal()
+    try:
+        ta = env["ta"]
+        tab = db.query(Sucursal).filter(Sucursal.tenant_id == ta, Sucursal.nombre == "Tabasco").one()
+        hgo = db.query(Sucursal).filter(Sucursal.tenant_id == ta, Sucursal.nombre == "Hidalgo").one()
+
+        def _alm(codigo, nombre, **kw):
+            a = Almacen(tenant_id=ta, codigo=codigo, nombre=nombre, **kw)
+            db.add(a); db.flush(); return a
+
+        vh, tux = _alm("ALM-03", "Villa  Hermosa"), _alm("ALM-04", "Tuxtla Gutierrez")
+        pach, viejo = _alm("ALM-01", "Pachuca"), _alm("ALM-09", "Bodega vieja")
+        viejo.deleted_at = _utc(2026, 9, 1)
+        tab.almacen_id = vh.id
+
+        def _proy(codigo, plaza, almacen, **kw):
+            db.add(Proyecto(tenant_id=ta, codigo=codigo, nombre=codigo, sucursal_id=plaza.id,
+                            almacen_id=almacen.id, **kw))
+
+        _proy("HOSPVH", tab, vh)
+        _proy("COMEDORES", tab, tux)
+        _proy("INACTIVO", tab, pach, activo=False)
+        _proy("BORRADO", tab, pach, deleted_at=_utc(2026, 9, 1))
+        _proy("VIEJO", tab, viejo)
+        _proy("HOSPHGO", hgo, pach)
+        db.commit()
+    finally:
+        db.close()
+
+    auth_as(env["dueno_a"])
+    tabasco = _clave(client, env["dueno_a"])["clave"]
+    hidalgo = _clave(client, env["dueno_a"], nombre="Kelly Hidalgo", plaza="Hidalgo",
+                     series=["ZEHMOHOS"], series_remision=["RZEHMOHOS"], perfiles=[])["clave"]
+    sin_plaza = _clave(client, env["dueno_a"], nombre="Sin plaza", plaza=None,
+                       perfiles=[])["clave"]
+    _sin_sesion()
+    a = client.get("/api/v1/smart-supply/alcance", headers=_bearer(tabasco)).json()
+    assert a["plaza"] == "Tabasco"
+    assert a["almacenes"] == ["Tuxtla Gutierrez", "Villa Hermosa"]
+    b = client.get("/api/v1/smart-supply/alcance", headers=_bearer(hidalgo)).json()
+    assert (b["plaza"], b["almacenes"]) == ("Hidalgo", ["Pachuca"])
+    c = client.get("/api/v1/smart-supply/alcance", headers=_bearer(sin_plaza)).json()
+    assert (c["plaza"], c["almacenes"]) == (None, [])
+    # El dueño (persona) lee todo y no tiene plaza: sin bodegas.
+    auth_as(env["dueno_a"])
+    d = client.get("/api/v1/smart-supply/alcance", headers=_hdr(env["dueno_a"])).json()
+    assert d["sin_limite"] is True and d["almacenes"] == []
 
 
 def test_facturado_por_fecha_de_entrega(client, env, auth_as):

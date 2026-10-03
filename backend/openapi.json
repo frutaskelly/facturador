@@ -370,6 +370,13 @@
    "AlcancePanelOut": {
     "description": "Lo que comparte esta clave. Smart Supply lo pide al guardar la clave y\nantes de cada sincronización: si el dueño le quita algo, se entera aquí.",
     "properties": {
+     "almacenes": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Almacenes",
+      "type": "array"
+     },
      "catalogo": {
       "title": "Catalogo",
       "type": "boolean"

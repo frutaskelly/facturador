@@ -47,11 +47,13 @@ from sqlalchemy.orm import Session
 
 from ..core.rbac import AuthContext
 from ..models import (
+    Almacen,
     ClienteSucursal,
     ClienteSucursalSerie,
     Conexion,
     Factura,
     OCRecibida,
+    Proyecto,
     Remision,
     Serie,
     Sucursal,
@@ -182,6 +184,38 @@ def sucursales_de_plaza(db: Session, tenant_id, plaza: Optional[str]) -> list[UU
     return [i for i, nombre in db.query(Sucursal.id, Sucursal.nombre)
             .filter(Sucursal.tenant_id == tenant_id).all()
             if clave_nombre(nombre) == k]
+
+
+def almacenes_de_plaza(db: Session, tenant_id, plaza: Optional[str]) -> list[str]:
+    """Los nombres de las bodegas que surten a la plaza: el almacén de la plaza
+    (`sucursales.almacen_id`) y el de cada proyecto vivo de ella
+    (`proyectos.almacen_id`), los dos primeros escalones de la cascada de
+    surtido que no son de una sola remisión (services/series.resolver_almacen).
+
+    Smart Supply lo usa para saber que la cuenta «Hidalgo · Pachuca» es UN
+    lugar: la plaza del Facturador se llama Hidalgo y su bodega Pachuca (así
+    la nombra Mini Conta en `facturador_sucursal`). No entran el almacén del
+    cliente (EHMO se surte en varias plazas) ni el predeterminado (no es de
+    ninguna plaza), ni de qué almacén salieron remisiones viejas (en septiembre
+    Tabasco salió de Pachuca): es la configuración de hoy, no la historia."""
+    ids = sucursales_de_plaza(db, tenant_id, plaza)
+    if not ids:
+        return []
+    vivo = Almacen.deleted_at.is_(None)
+    de_plaza = (
+        db.query(Almacen.nombre)
+        .join(Sucursal, Sucursal.almacen_id == Almacen.id)
+        .filter(Sucursal.id.in_(ids), Sucursal.deleted_at.is_(None), vivo,
+                Almacen.tenant_id == tenant_id)
+    )
+    de_proyectos = (
+        db.query(Almacen.nombre)
+        .join(Proyecto, Proyecto.almacen_id == Almacen.id)
+        .filter(Proyecto.sucursal_id.in_(ids), Proyecto.deleted_at.is_(None),
+                Proyecto.activo.is_(True), vivo, Almacen.tenant_id == tenant_id)
+    )
+    nombres = {" ".join(n.split()) for (n,) in de_plaza.union(de_proyectos).all() if n and n.strip()}
+    return sorted(nombres, key=str.casefold)
 
 
 def perfiles_vistos(db: Session, tenant_id, dias: int = 93) -> dict[str, Optional[str]]:
