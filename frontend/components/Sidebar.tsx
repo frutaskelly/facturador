@@ -6,23 +6,36 @@ import { usePathname } from "next/navigation";
 import { PanelLeftClose, PanelLeftOpen, Star } from "lucide-react";
 
 import { Logo, LogoMark } from "@/components/Logo";
-import { can, canAny, type Me } from "@/lib/auth";
+import type { Me } from "@/lib/auth";
 import { useFavorites } from "@/lib/favorites";
 import { useSidebarColapsado } from "@/lib/sidebar";
-import { NAV, type NavItem } from "@/lib/nav";
+import { NAV, puedeVer, type NavItem } from "@/lib/nav";
 
 const TODOS_HREF: string[] = NAV.flatMap((sec) => sec.items.map((i) => i.href));
 
 /** ¿La ruta actual es este item? Un `startsWith` pelado marcaría `/pos` como
  *  activo estando en `/pos-algo`; hoy ninguna ruta colisiona, pero es la
  *  trampa que espera a la primera que sí. */
-function esActivo(pathname: string, href: string) {
+function coincide(pathname: string, href: string) {
   if (pathname === href) return true;
   if (!pathname.startsWith(`${href}/`)) return false;
   // Si una sub-ruta tiene su propio item en el menú, el padre no se marca
   // también (así estuvo /cobranza/automatica bajo /cobranza).
   return !TODOS_HREF.some((h) => h !== href && h.startsWith(`${href}/`)
     && (pathname === h || pathname.startsWith(`${h}/`)));
+}
+
+/** A dónde lleva la entrada. Con pestañas (ya filtradas por permiso), a la
+ *  primera que el usuario ve: a quien sólo tiene Impuestos no lo manda a
+ *  Productos. `href` no cambia: es la llave de los favoritos, y si dependiera
+ *  de los permisos el mismo favorito valdría distinto en cada empresa. */
+function destino(item: NavItem) {
+  return item.pestanas?.[0]?.href ?? item.href;
+}
+
+/** Una entrada con pestañas (Productos) está activa en cualquiera de ellas. */
+function esActivo(pathname: string, item: NavItem) {
+  return [item.href, ...(item.pestanas ?? []).map((p) => p.href)].some((h) => coincide(pathname, h));
 }
 
 /** `forzarExpandido`: el cajón móvil siempre enseña el menú completo — el
@@ -33,15 +46,22 @@ export function Sidebar({ me, forzarExpandido = false }: { me: Me; forzarExpandi
   const pathname = usePathname();
   const { colapsado: colapsadoGuardado, alternar } = useSidebarColapsado(me.user_id);
   const colapsado = forzarExpandido ? false : colapsadoGuardado;
-  const { favorites, hydrated, toggle, isFavorite } = useFavorites(me.user_id);
+  const { favorites, hydrated, toggle, isFavorite, persist } = useFavorites(me.user_id);
 
   /** El menú que ESTE usuario puede ver. Todo lo demás (riel, panel, favoritos,
    *  sección activa) se deriva de aquí: leer NAV crudo en cualquier punto le
    *  enseñaría a un capturista pantallas que no le tocan. */
   const navVisible = useMemo(
     () =>
-      NAV.map((s) => ({ ...s, items: s.items.filter((i) => can(me, i.perm) && canAny(me, i.anyPerm)) }))
-        .filter((s) => s.items.length > 0),
+      NAV.map((s) => ({
+        ...s,
+        items: s.items.flatMap((i): NavItem[] => {
+          if (!i.pestanas) return puedeVer(me, i) ? [i] : [];
+          // Una entrada con pestañas se ve si alguna se ve (ver `destino`).
+          const pestanas = i.pestanas.filter((p) => puedeVer(me, p));
+          return pestanas.length ? [{ ...i, pestanas }] : [];
+        }),
+      })).filter((s) => s.items.length > 0),
     [me],
   );
 
@@ -51,7 +71,15 @@ export function Sidebar({ me, forzarExpandido = false }: { me: Me; forzarExpandi
    *  así un favorito de otra empresa o de un rol recortado no sobrevive. */
   const indice = useMemo(() => {
     const m = new Map<string, { item: NavItem; seccion: string }>();
-    for (const s of navVisible) for (const it of s.items) m.set(it.href, { item: it, seccion: s.section });
+    for (const s of navVisible) {
+      for (const it of s.items) {
+        const hit = { item: it, seccion: s.section };
+        // Las rutas de sus pestañas y las que tuvieron como entradas sueltas
+        // (/categorias) también llevan a la entrada: así se mudan los favoritos.
+        for (const p of it.pestanas ?? []) for (const h of [p.href, ...(p.antes ?? [])]) m.set(h, hit);
+        m.set(it.href, hit);
+      }
+    }
     return m;
   }, [navVisible]);
 
@@ -62,12 +90,21 @@ export function Sidebar({ me, forzarExpandido = false }: { me: Me; forzarExpandi
     for (const href of favorites) {
       if (vistos.has(href)) continue;
       const hit = indice.get(href);
-      if (hit) { out.push(hit); vistos.add(href); }
+      if (hit && !vistos.has(hit.item.href)) { out.push(hit); vistos.add(hit.item.href); }
     }
     return out;
   }, [hydrated, favorites, indice]);
 
-  const seccionActual = navVisible.find((s) => s.items.some((i) => esActivo(pathname, i.href)))?.section;
+  // Un favorito guardado con la ruta de una pantalla que se volvió pestaña
+  // (/categorias → Productos) se muda una vez a la entrada que la contiene; si
+  // no, su estrella no se podría quitar y la entrada saldría dos veces.
+  useEffect(() => {
+    if (!hydrated) return;
+    const mudados = [...new Set(favorites.map((h) => indice.get(h)?.item.href ?? h))];
+    if (mudados.length !== favorites.length || mudados.some((h, i) => h !== favorites[i])) persist(mudados);
+  }, [hydrated, favorites, indice, persist]);
+
+  const seccionActual = navVisible.find((s) => s.items.some((i) => esActivo(pathname, i)))?.section;
 
   // ── panel flotante de sección (sólo en modo colapsado) ──
   const [abierta, setAbierta] = useState<string | null>(null);
@@ -213,11 +250,11 @@ export function Sidebar({ me, forzarExpandido = false }: { me: Me; forzarExpandi
             <div className="min-h-0 space-y-1 overflow-y-auto">
               {favItems.map(({ item, seccion }) => {
                 const Icon = item.icon;
-                const activo = esActivo(pathname, item.href);
+                const activo = esActivo(pathname, item);
                 return (
                   <Link
                     key={item.href}
-                    href={item.href}
+                    href={destino(item)}
                     title={`${seccion} · ${item.label}`}
                     aria-label={`${seccion} · ${item.label} (favorito)`}
                     aria-current={activo ? "page" : undefined}
@@ -292,12 +329,12 @@ export function Sidebar({ me, forzarExpandido = false }: { me: Me; forzarExpandi
           <div className="overflow-y-auto">
             {itemsPanel.map((it) => {
               const Icon = it.icon;
-              const activo = esActivo(pathname, it.href);
+              const activo = esActivo(pathname, it);
               const fav = hydrated && isFavorite(it.href);
               return (
                 <div key={it.href} className="group relative flex items-center">
                   <Link
-                    href={it.href}
+                    href={destino(it)}
                     onClick={() => setAbierta(null)}
                     aria-current={activo ? "page" : undefined}
                     className={`flex flex-1 items-center gap-3 py-2 pl-3 pr-9 text-sm transition ${
@@ -339,12 +376,12 @@ function NavRow({
   favorite: boolean;
   onToggle: () => void;
 }) {
-  const active = esActivo(pathname, item.href);
+  const active = esActivo(pathname, item);
   const Icon = item.icon;
   return (
     <div className="group relative flex items-center">
       <Link
-        href={item.href}
+        href={destino(item)}
         aria-current={active ? "page" : undefined}
         className={`flex flex-1 items-center gap-3 rounded-lg py-2 pl-2 pr-9 text-sm transition ${
           active

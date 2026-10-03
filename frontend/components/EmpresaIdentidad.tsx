@@ -20,11 +20,12 @@ import { NAV } from "@/lib/nav";
 const TITULO_BASE = "Facturador Inteligente";
 
 /** El nombre de la sección actual según el menú: gana el href más específico
- *  (`/ajustes/empresa/configuracion` no debe quedarse en "Dashboard"). */
+ *  (`/ajustes/empresa/configuracion` no debe quedarse en "Dashboard"). Las
+ *  pestañas cuentan: /productos/categorias se titula "Categorías". */
 function seccionDe(pathname: string): string | null {
   let mejor: { label: string; largo: number } | null = null;
   for (const seccion of NAV) {
-    for (const item of seccion.items) {
+    for (const item of [...seccion.items, ...seccion.items.flatMap((i) => i.pestanas ?? [])]) {
       const calza = pathname === item.href || pathname.startsWith(`${item.href}/`);
       if (calza && (!mejor || item.href.length > mejor.largo)) {
         mejor = { label: item.label, largo: item.href.length };

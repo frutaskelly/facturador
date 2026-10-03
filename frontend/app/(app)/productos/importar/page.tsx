@@ -141,7 +141,7 @@ export default function ImportarProductosPage() {
     [esquemasRes.data]
   );
   // limit=200 es el tope del endpoint (con 500 respondía 422 y la lista salía
-  // vacía). Solo las ACTIVAS: son las que el usuario ve en /categorias.
+  // vacía). Solo las ACTIVAS: son las que el usuario ve en Productos → Categorías.
   const categoriasRes = useResource<Page<Categoria>>(
     "/api/v1/categorias?limit=200&activo=true"
   );
@@ -564,7 +564,7 @@ export default function ImportarProductosPage() {
   }
 
   /** Categoría para los productos NUEVOS que no traen ninguna: la IA elige
-   *  entre las categorías que el negocio ya tiene (las de /categorias). */
+   *  entre las categorías que el negocio ya tiene (las de Productos → Categorías). */
   async function sugerirCategorias() {
     const faltantes = filas.filter((f) => seImporta(f) && f.accion === "crear" && !f.cat_id);
     if (faltantes.length === 0) {
@@ -1420,7 +1420,7 @@ export default function ImportarProductosPage() {
                 {categorias.length === 0 ? (
                   <>
                     No tienes categorías dadas de alta.{" "}
-                    <Link href="/categorias" className="text-accent hover:underline">
+                    <Link href="/productos/categorias" className="text-accent hover:underline">
                       Créalas primero
                     </Link>{" "}
                     para poder asignarlas aquí.
@@ -1452,7 +1452,7 @@ export default function ImportarProductosPage() {
               <div className="rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm">
                 No tienes esquemas de impuesto dados de alta. Sin esquema, las facturas
                 de estos productos saldrían sin IVA.{" "}
-                <Link href="/esquemas-impuesto" className="text-accent hover:underline">
+                <Link href="/productos/impuestos" className="text-accent hover:underline">
                   Crear esquemas
                 </Link>
               </div>
